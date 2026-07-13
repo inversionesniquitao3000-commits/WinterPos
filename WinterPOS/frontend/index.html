@@ -1,0 +1,2484 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Sistema de Control de Ventas e Inventario de Inversiones Niquitao.">
+  <title>WinterPOS - Inversiones Niquitao</title>
+  <link rel="stylesheet" href="style.css?v=2">
+</head>
+<body>
+
+  <!-- VIEW 1: LOGIN -->
+  <main class="app-container" id="login-view">
+    <!-- Left Login Panel -->
+    <section class="login-panel">
+      <div class="logo-container">
+        <!-- Recreated Star Logo as vector SVG -->
+        <svg class="logo-svg" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+          <path d="M 15,110 C 15,65 75,45 175,80 C 135,90 55,80 15,110 Z" fill="#00a8cc" opacity="0.6"/>
+          <path d="M 25,120 C 125,160 165,125 175,95 C 145,115 75,140 25,120 Z" fill="#2d1350" opacity="0.7"/>
+          <polygon points="100,105 100,35 115,85" fill="#e1e8eb" />
+          <polygon points="100,105 100,35 85,85" fill="#b2c5cc" />
+          <polygon points="100,105 165,105 115,120" fill="#e1e8eb" />
+          <polygon points="100,105 165,105 115,90" fill="#b2c5cc" />
+          <polygon points="100,105 100,170 85,120" fill="#e1e8eb" />
+          <polygon points="100,105 100,170 115,120" fill="#b2c5cc" />
+          <polygon points="100,105 35,105 85,90" fill="#e1e8eb" />
+          <polygon points="100,105 35,105 85,120" fill="#b2c5cc" />
+          <polygon points="100,105 146,59 121,94" fill="#f4f7f8" />
+          <polygon points="100,105 146,59 109,82" fill="#9db0b8" />
+          <polygon points="100,105 146,151 121,116" fill="#9db0b8" />
+          <polygon points="100,105 146,151 109,128" fill="#f4f7f8" />
+          <polygon points="100,105 54,151 79,116" fill="#f4f7f8" />
+          <polygon points="100,105 54,151 91,128" fill="#9db0b8" />
+          <polygon points="100,105 54,59 79,94" fill="#9db0b8" />
+          <polygon points="100,105 54,59 91,82" fill="#f4f7f8" />
+          <g stroke="#091d36" stroke-width="1.5" stroke-linejoin="round">
+            <polygon points="100,105 100,50 80,93" fill="#112d4e" />
+            <polygon points="100,105 100,50 120,93" fill="#1b416e" />
+            <polygon points="100,105 152,88 120,93" fill="#0f2541" />
+            <polygon points="100,105 152,88 112,126" fill="#173862" />
+            <polygon points="100,105 132,150 112,126" fill="#112d4e" />
+            <polygon points="100,105 132,150 100,132" fill="#1b416e" />
+            <polygon points="100,105 68,150 100,132" fill="#0f2541" />
+            <polygon points="100,105 68,150 88,126" fill="#173862" />
+            <polygon points="100,105 48,88 88,126" fill="#112d4e" />
+            <polygon points="100,105 48,88 80,93" fill="#1b416e" />
+          </g>
+        </svg>
+      </div>
+
+      <div class="title-container">
+        <h1 class="brand-title" id="login-brand-title">Inversiones Niquitao</h1>
+        <p class="welcome-subtitle">Bienvenido</p>
+      </div>
+
+      <!-- Error Notification Area -->
+      <div id="error-box" class="error-message" role="alert">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+        <span id="error-text">Usuario o contraseña incorrectos</span>
+      </div>
+
+      <!-- Login Form -->
+      <form class="login-form" id="login-form" novalidate>
+        <div class="input-group">
+          <input type="text" id="username" class="input-field" placeholder="Usuario" required autocomplete="username">
+          <span class="triangle-indicator"></span>
+        </div>
+
+        <div class="input-group">
+          <input type="password" id="password" class="input-field" placeholder="Contraseña" required autocomplete="current-password">
+          <button type="button" id="toggle-password" class="password-toggle-btn" aria-label="Mostrar contraseña">
+            <svg id="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+          </button>
+          <span class="triangle-indicator"></span>
+        </div>
+
+        <button type="submit" class="submit-btn" id="submit-btn">
+          <span id="btn-text">Iniciar sesión</span>
+          <div class="spinner" id="btn-spinner"></div>
+        </button>
+      </form>
+
+      <footer class="footer-info">
+        <p>Módulo Punto de Venta</p>
+        <p class="version">Pos Venta Version : 3.7</p>
+        <p>Derechos Reservados : 2021</p>
+      </footer>
+
+      <button type="button" class="close-btn" id="close-btn" aria-label="Cerrar aplicación">
+        <svg viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none"/>
+          <path d="M8,8 L16,16 M16,8 L8,16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </section>
+
+    <!-- Right Background Panel -->
+    <section class="bg-panel">
+      <div class="bg-overlay"></div>
+    </section>
+  </main>
+
+
+  <!-- VIEW 2: POS DASHBOARD (Hidden initially) -->
+  <div id="dashboard-view" class="dashboard-container" style="display: none;">
+    <!-- Top System Header Bar -->
+    <header class="dashboard-header">
+      <div class="header-left">
+        <div class="user-avatar-circle">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/>
+          </svg>
+        </div>
+        <div class="user-meta-info">
+          <span class="user-name" id="user-display-name">ANDERSON - Anderson Laguna</span>
+          <span class="user-role" id="user-display-role">ADMINISTRADOR</span>
+        </div>
+      </div>
+      
+      <div class="header-center">
+        <h2 class="header-brand-title" id="header-biz-name">Inversiones Niquitao</h2>
+        <span class="header-subtext" id="header-biz-address">23 de Enero</span>
+        <span class="header-contact" id="header-biz-contact">Rif: J-411332631 | Telf: 0424-2042877 | Email: inversiones.niquitao3000@gmail.com</span>
+      </div>
+
+      <div class="header-right">
+        <!-- OS-like Controls -->
+        <button class="window-control-btn" aria-label="Minimizar">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 13H5v-2h14v2z"/></svg>
+        </button>
+        <button class="window-control-btn" aria-label="Maximizar">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M18 4H6c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H6V6h12v12z"/></svg>
+        </button>
+        <button class="window-control-btn close-app" id="logout-btn" title="Cerrar sesión / Salir">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="dashboard-tabs">
+      <button class="tab-item active" data-tab="caja">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M20 4H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4V8h16v10z M6 12h2v2H6zm0-3h2v1H6zm4 3h8v2H10zm0-3h8v1H10z"/></svg>
+        <span>F1 CAJA</span>
+      </button>
+      <button class="tab-item" data-tab="inventario">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-5 14H4v-4h11v4zm0-5H4V9h11v4zm5 5h-4V9h4v9z"/></svg>
+        <span>F2 Inventario</span>
+      </button>
+      <button class="tab-item" data-tab="ventas">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M20 7h-4V5c0-1.1-.9-2-2-2h-4c-1.1 0-2 .9-2 2v2H4c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2zM10 5h4v2h-4V5zm10 15H4V9h16v11z M9 12c.55 0 1-.45 1-1V10c0-.55-.45-1-1-1s-1 .45-1 1v1c0 .55.45 1 1 1zm6 0c.55 0 1-.45 1-1V10c0-.55-.45-1-1-1s-1 .45-1 1v1c0 .55.45 1 1 1z"/></svg>
+        <span>F3 Ventas</span>
+      </button>
+      <button class="tab-item" data-tab="clientes">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.45 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+        <span>F4 Clientes</span>
+      </button>
+      <button class="tab-item" data-tab="tasa">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z"/></svg>
+        <span>F9 Tasa</span>
+      </button>
+      <button class="tab-item" data-tab="config">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+        <span>F10 Config.</span>
+      </button>
+    </nav>
+
+    <!-- Main Workspace Content Panels -->
+    <main class="dashboard-main">
+      
+      <!-- TAB CONTENT: CAJA -->
+      <div id="tab-caja" class="tab-panel active-panel">
+        
+        <!-- Left Sales Terminal -->
+        <section class="terminal-left">
+          
+          <!-- Query Search fields block with side Camera View -->
+          <div class="terminal-top-section">
+            
+            <!-- Left Side: Stacked Inputs -->
+            <div class="terminal-inputs-stack">
+              
+              <!-- Producto -->
+              <div class="terminal-input-group">
+                <div class="input-label-container">
+                  <!-- Barcode icon -->
+                  <svg viewBox="0 0 24 24" width="20" height="20" class="label-icon-svg" fill="#333333">
+                    <path d="M3 4h2v16H3V4zm4 0h1v16H7V4zm3 0h3v16h-3V4zm4 0h1v16h-1V4zm3 0h2v16h-2V4zm3 0h1v16h-1V4z"/>
+                  </svg>
+                  <label for="pos-product-input">Producto :</label>
+                </div>
+                <div class="search-input-wrapper">
+                  <input type="text" id="pos-product-input" list="inventory-suggestions" placeholder="Buscar por nombre o código de barra (Enter para agregar)">
+                  <datalist id="inventory-suggestions"></datalist>
+                  <button class="search-action-btn" id="search-product-btn" title="Buscar producto">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Cliente -->
+              <div class="terminal-input-group">
+                <div class="input-label-container">
+                  <!-- User/Client icon (Blue) -->
+                  <svg viewBox="0 0 24 24" width="20" height="20" class="label-icon-svg" fill="#0b5fa5">
+                    <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                  </svg>
+                  <label for="pos-client-input">Cliente :</label>
+                </div>
+                <div class="search-input-wrapper">
+                  <input type="text" id="pos-client-input" value="Publico General">
+                  <button class="search-action-btn" id="pos-client-search-btn" title="Buscar cliente">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                  </button>
+                  <button class="add-action-btn" id="pos-client-add-btn" title="Agregar nuevo cliente" style="background-color: #0b5fa5; color: white;">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Vendedor -->
+              <div class="terminal-input-group">
+                <div class="input-label-container">
+                  <!-- Seller icon with yellow cap and green vest -->
+                  <svg viewBox="0 0 24 24" width="20" height="20" class="label-icon-svg" style="margin-right: 0.1rem;">
+                    <path d="M12 4c-2.5 0-4 1-4 2.5h8C16 5 14.5 4 12 4z" fill="#ffd369"/>
+                    <path d="M14.5 5.5h3v1h-3z" fill="#ffd369"/>
+                    <circle cx="12" cy="8.5" r="2.5" fill="#fbc5b0"/>
+                    <path d="M7 16v3h10v-3c0-2-3-2.5-5-2.5s-5 .5-5 2.5z" fill="#1b8589"/>
+                    <path d="M9 13.5h6v2.5H9z" fill="#10624d"/>
+                  </svg>
+                  <label for="pos-seller-input">Vendedor :</label>
+                </div>
+                <div class="search-input-wrapper">
+                  <input type="text" id="pos-seller-input" value="Anderson Laguna" disabled>
+                  <button class="search-action-btn" title="Cambiar vendedor">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                  </button>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- Right Side: Camera Image -->
+            <div class="product-image-aside">
+              <div class="camera-placeholder" id="camera-box">
+                <svg viewBox="0 0 24 24" width="70" height="70" fill="#a0aec0" style="opacity: 0.85;">
+                  <circle cx="12" cy="12" r="10" stroke="#a0aec0" stroke-width="1.8" fill="none"/>
+                  <path d="M9 3L7.17 5H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2h-3.17L15 3H9zm3 13c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4z"/>
+                  <line x1="4" y1="4" x2="20" y2="20" stroke="#a0aec0" stroke-width="2.5" />
+                </svg>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Sales Table -->
+          <div class="table-container">
+            <table class="pos-sales-table" id="sales-table">
+              <thead>
+                <tr>
+                  <th style="width: 15%">CLAVE</th>
+                  <th style="width: 45%">DESCRIPCIÓN</th>
+                  <th style="width: 10%">U. M.</th>
+                  <th style="width: 10%">CANTIDAD</th>
+                  <th style="width: 10%">PRECIO U.</th>
+                  <th style="width: 10%">TOTAL</th>
+                </tr>
+              </thead>
+              <tbody id="sales-table-body">
+                <!-- Dynamic Items will be appended here -->
+                <tr class="empty-row" id="empty-table-message">
+                  <td colspan="6" style="text-align: center; color: #888888; padding: 2rem;">No hay productos cargados en esta venta. Presione enter en el buscador de arriba para agregar un ítem de prueba.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Bottom controls bar -->
+          <div class="terminal-bottom-bar">
+            <div class="action-btn-row">
+              <button class="action-bar-btn delete-row-btn" id="delete-row-btn" disabled>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                <span>Borrar Item</span>
+              </button>
+              <button class="action-bar-btn" onclick="alert('Detalle de artículo (simulado)')">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.89-1.99 1.99L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+                <span>Detalle</span>
+              </button>
+              <button class="action-bar-btn" id="edit-qty-btn" disabled>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                <span>Cantidad</span>
+              </button>
+              <button class="action-bar-btn" onclick="alert('Lista de Precios 1, 2, 3 (simulado)')">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z"/></svg>
+                <span>Precio 1,2,3</span>
+              </button>
+              <button class="action-bar-btn" onclick="alert('Oferta de Precio aplicada (simulado)')">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M21.41 11.58l-9-9C12.05 2.22 11.55 2 11 2H4c-1.1 0-2 .9-2 2v7c0 .55.22 1.05.59 1.42l9 9c.36.36.86.58 1.41.58.55 0 1.05-.22 1.41-.59l7-7c.37-.36.59-.86.59-1.41 0-.55-.23-1.06-.59-1.42zM5.5 7C4.67 7 4 6.33 4 5.5S4.67 4 5.5 4 7 4.67 7 5.5 6.33 7 5.5 7z"/></svg>
+                <span>Ofer. Precio</span>
+              </button>
+            </div>
+            
+            <button class="cancel-sale-btn" id="cancel-sale-btn" disabled>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+              <span>Cancelar</span>
+            </button>
+          </div>
+
+        </section>
+
+        <!-- Right Side Financials and Quick Buttons -->
+        <aside class="terminal-right">
+          
+          <!-- Ticket Header card -->
+          <div class="ticket-header-card">
+            <span>TICKET N° : </span>
+            <span class="ticket-number" id="ticket-number-id">0144985</span>
+          </div>
+
+          <!-- Financial amounts column -->
+          <div class="financials-card">
+            <div class="financial-row">
+              <span class="label">Sub Total</span>
+              <span class="amount" id="subtotal-amount">0.00</span>
+            </div>
+            <div class="financial-row">
+              <span class="label">Impuesto (IVA 16%)</span>
+              <span class="amount" id="tax-amount">0.00</span>
+            </div>
+            <div class="financial-row total-row">
+              <span class="label">Total ($)</span>
+              <span class="amount total" id="total-usd-amount">0.00</span>
+            </div>
+            <div class="financial-row total-usd-row">
+              <span class="label">Total (Bs)</span>
+              <span class="amount total-usd" id="total-bs-amount">0.00</span>
+            </div>
+            <div class="financial-row records-row">
+              <span class="label">N° Registros</span>
+              <span class="amount" id="records-count">0</span>
+            </div>
+          </div>
+
+          <!-- Quick Action Utility Grid -->
+          <div class="quick-utilities-grid">
+            <button class="util-btn" onclick="alert('Flujo de Entrada de Efectivo (simulado)')">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+              <span>Entradas</span>
+            </button>
+            <button class="util-btn" onclick="alert('Flujo de Salida de Efectivo (simulado)')">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M19 13H5v-2h14v2z"/></svg>
+              <span>Salidas</span>
+            </button>
+            
+            <button class="util-btn" id="hold-ticket-btn" disabled>
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm3.3 14.79L11 14V7h2v5.2l3.3 1.99-1.01 1.6z"/></svg>
+              <span>Ticket Espera</span>
+            </button>
+            <button class="util-btn" onclick="alert('Creación de Cotización (simulado)')">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.89-1.99 1.99L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+              <span>Cotización</span>
+            </button>
+
+            <button class="util-btn" id="reprint-btn">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>
+              <span>Re Imprimir</span>
+            </button>
+            <button class="util-btn" id="devolucion-btn">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C20.08 11.53 16.62 8 12.5 8z"/></svg>
+              <span>Devolución</span>
+            </button>
+
+            <button class="util-btn" onclick="alert('Entrada rápida de producto (simulado)')">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
+              <span>Entrada Rap.</span>
+            </button>
+            <button class="util-btn" onclick="alert('Servicios e Intangibles (simulado)')">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+              <span>Servicios</span>
+            </button>
+
+            <button class="util-btn" onclick="alert('Monto Pago Temporal guardado (simulado)')">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm3.3 14.79L11 14V7h2v5.2l3.3 1.99-1.01 1.6z"/></svg>
+              <span>P. Temporal</span>
+            </button>
+            <button class="util-btn" onclick="alert('Abonos a saldo de clientes (simulado)')">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
+              <span>Abonos</span>
+            </button>
+
+            <button class="util-btn" onclick="alert('Agregar notas al ticket (simulado)')">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M21.99 4c0-1.1-.89-2-1.99-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14l4 4-.01-18zM18 14H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/></svg>
+              <span>Notas</span>
+            </button>
+            <button class="util-btn close-register-btn" id="close-register-btn">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M18 18H6V6h12v12zm0-14H6c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zM8 8h8v2H8zm0 3h8v2H8z"/></svg>
+              <span>Cierre Caja</span>
+            </button>
+          </div>
+
+          <!-- Large Pay button -->
+          <button class="checkout-pay-btn" id="checkout-pay-btn" disabled>
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" style="margin-right: 0.5rem;"><path d="M21 18v1c0 1.1-.9 2-2 2H5c-1.11 0-2-.9-2-2V5c0-1.1.89-2 2-2h14c1.1 0 2 .9 2 2v1h-9c-1.11 0-2 .9-2 2v8c0 1.1.89 2 2 2h9zm-9-2h10V8H12v8zm4-2.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
+            <span>COBRAR</span>
+          </button>
+
+        </aside>
+
+      </div>
+
+      <!-- TAB PANEL: INVENTARIO (Real implementation) -->
+      <div id="tab-inventario" class="tab-panel">
+        
+        <!-- Inventory Main Content (Left side, takes 1fr) -->
+        <div class="inventory-main-content">
+          
+          <!-- Sub-menu Navigation bar -->
+          <nav class="inventory-sub-tabs">
+            <div class="sub-tabs-left">
+              <button class="sub-tab-item active" data-subtab="catalogo">Catálogo</button>
+              <button class="sub-tab-item" data-subtab="movimientos">Movimientos I.</button>
+              <button class="sub-tab-item" data-subtab="minimo">I. Minimo</button>
+              <button class="sub-tab-item" data-subtab="maximo">I. Maximo</button>
+              <button class="sub-tab-item" data-subtab="kardex">Kardex</button>
+              <button class="sub-tab-item" data-subtab="caducidad">I. Caducidad</button>
+              <button class="sub-tab-item" data-subtab="estadisticas">Estadísticas</button>
+            </div>
+            <div class="sub-tabs-right">
+              <span>Controla tu Inventario</span>
+            </div>
+          </nav>
+
+          <!-- inv-panel-catalogo: existing catalog table -->
+          <div id="inv-panel-catalogo" style="display: flex; flex-direction: column; flex-grow: 1; overflow: hidden;">
+
+          <!-- Search and statistics header row -->
+          <div class="inventory-filter-bar">
+            <div class="inventory-search-box">
+              <label for="inv-search-input">Producto :</label>
+              <div class="inv-search-input-wrapper">
+                <input type="text" id="inv-search-input" placeholder="Buscar por código de barra o descripción...">
+                <button class="inv-search-btn" id="inv-search-btn" title="Buscar en catálogo">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="inventory-stats-group">
+              <div class="inv-stat-item">
+                <span class="label">Precio 1 del Inventario :</span>
+                <span class="value" id="inv-stat-price1">0.00</span>
+              </div>
+              <div class="inv-stat-item">
+                <span class="label">Costo del Inventario :</span>
+                <span class="value" id="inv-stat-cost">0.00</span>
+              </div>
+              <div class="inv-stat-item">
+                <span class="label">Total Productos :</span>
+                <span class="value" id="inv-stat-total">0</span>
+              </div>
+            </div>
+
+            <div class="inventory-report-icon-wrapper" id="inv-report-btn" title="Informe de Inventario">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="#0c55a5" style="cursor: pointer;">
+                <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
+              </svg>
+            </div>
+          </div>
+
+          <!-- Inventory Table Panel -->
+          <div class="inventory-table-container">
+            <table class="inventory-data-table" id="inventory-table">
+              <thead>
+                <tr>
+                  <th style="width: 12%">CLAVE</th>
+                  <th style="width: 32%">DESCRIPCIÓN</th>
+                  <th style="width: 12%">CATEGORÍA</th>
+                  <th style="width: 12%">DEPARTAMENTO</th>
+                  <th style="width: 12%">ALMACÉN / GIRO</th>
+                  <th style="width: 6%; text-align: center;">U. M.</th>
+                  <th style="width: 6%; text-align: center;">EXISTEN</th>
+                  <th style="width: 8%; text-align: right;">COSTO</th>
+                  <th style="width: 8%; text-align: right;">PRECIO 1</th>
+                  <th style="width: 8%; text-align: right;">PRECIO 2</th>
+                </tr>
+              </thead>
+              <tbody id="inventory-table-body">
+                <!-- Javascript will load the 5 test items here -->
+              </tbody>
+            </table>
+          </div>
+          
+          </div><!-- /inv-panel-catalogo -->
+
+          <!-- ============================================================ -->
+          <!-- inv-panel-movimientos: Movimientos de Inventario             -->
+          <!-- ============================================================ -->
+          <div id="inv-panel-movimientos" style="display: none; flex-direction: column; flex-grow: 1; overflow: hidden;">
+
+            <!-- Movimientos filter bar -->
+            <div style="display: flex; align-items: center; gap: 1rem; padding: 0.5rem 0.75rem; background: #f8fafc; border-bottom: 1px solid #cbd5e0; flex-shrink: 0; flex-wrap: wrap;">
+              <div style="display: flex; align-items: center; gap: 0.4rem; font-family: var(--font-family); font-size: 0.8rem; font-weight: 600; color: #475569;">
+                <label>Desde:</label>
+                <input type="date" id="mov-date-from" style="height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem; font-family: var(--font-family); outline: none;">
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.4rem; font-family: var(--font-family); font-size: 0.8rem; font-weight: 600; color: #475569;">
+                <label>Hasta:</label>
+                <input type="date" id="mov-date-to" style="height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem; font-family: var(--font-family); outline: none;">
+              </div>
+              <button id="mov-filter-btn" style="height: 26px; padding: 0 0.75rem; background: #7c1232; color: white; border: none; border-radius: 4px; font-size: 0.8rem; font-weight: 600; font-family: var(--font-family); cursor: pointer; display: flex; align-items: center; gap: 0.3rem;">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z"/></svg>
+                Filtrar
+              </button>
+              <div style="margin-left: auto; display: flex; gap: 1.5rem; font-family: var(--font-family); font-size: 0.8rem; color: #475569; align-items: center;">
+                <span>Total Precios: <strong id="mov-stat-prices" style="color: #7c1232;">0.00</strong></span>
+                <span>Total Costos: <strong id="mov-stat-costs" style="color: #7c1232;">0.00</strong></span>
+                <span>Total Cantidades: <strong id="mov-stat-qty" style="color: #7c1232;">0</strong></span>
+                <button id="mov-report-btn" class="util-btn" style="height: 26px; width: 30px; padding: 0; background-color: #7c1232; color: white; display: flex; align-items: center; justify-content: center; border-radius: 4px; border: none; cursor: pointer;" title="Reporte de Movimientos">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Movimientos main content: table + sidebar -->
+            <div style="display: flex; flex-grow: 1; overflow: hidden;">
+
+              <!-- Movements table -->
+              <div style="flex-grow: 1; overflow-y: auto; background: white; border-right: 1px solid #cbd5e0;">
+                <table class="inventory-data-table" id="mov-table" style="font-size: 0.77rem;">
+                  <thead>
+                    <tr>
+                      <th style="width: 14%; text-align: left;">FECHA REGISTRO</th>
+                      <th style="width: 10%; text-align: left;">TIPO</th>
+                      <th style="width: 10%; text-align: left;">CLAVE</th>
+                      <th style="width: 24%; text-align: left;">DESCRIPCION</th>
+                      <th style="width: 5%; text-align: center;">U.M.</th>
+                      <th style="width: 9%; text-align: left;">ALMACEN</th>
+                      <th style="width: 7%; text-align: right;">PRECIO $</th>
+                      <th style="width: 7%; text-align: right;">COSTO $</th>
+                      <th style="width: 6%; text-align: right;">CANTIDAD</th>
+                    </tr>
+                  </thead>
+                  <tbody id="mov-table-body">
+                    <tr><td colspan="9" style="text-align: center; color: #a0aec0; padding: 2rem; font-family: var(--font-family);">Seleccione un rango de fechas y presione Filtrar</td></tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Movements sidebar buttons -->
+              <aside style="width: 115px; flex-shrink: 0; background: #ffffff; display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem 0.45rem; border-left: 1px solid #cbd5e0;">
+                <!-- Entrada Inventario -->
+                <button id="mov-btn-entrada" class="inv-btn" style="height: 52px; flex-direction: column; font-size: 0.7rem; gap: 0.2rem; padding: 0.3rem 0.4rem;">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" style="flex-shrink: 0;"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                  <span style="font-size: 0.68rem; line-height: 1.1; text-align: center;">Entrada<br>Inventario</span>
+                </button>
+                <!-- Salida Inventario -->
+                <button id="mov-btn-salida" class="inv-btn" style="height: 52px; flex-direction: column; font-size: 0.7rem; gap: 0.2rem; padding: 0.3rem 0.4rem;">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" style="flex-shrink: 0;"><path d="M19 13H5v-2h14v2z"/></svg>
+                  <span style="font-size: 0.68rem; line-height: 1.1; text-align: center;">Salida<br>Inventario</span>
+                </button>
+                <!-- Ajuste Inventario -->
+                <button id="mov-btn-ajuste" class="inv-btn" style="height: 52px; flex-direction: column; font-size: 0.7rem; gap: 0.2rem; padding: 0.3rem 0.4rem;">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" style="flex-shrink: 0;"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+                  <span style="font-size: 0.68rem; line-height: 1.1; text-align: center;">Ajuste<br>Inventario</span>
+                </button>
+                <!-- Merma Inventario -->
+                <button id="mov-btn-merma" class="inv-btn" style="height: 52px; flex-direction: column; font-size: 0.7rem; gap: 0.2rem; padding: 0.3rem 0.4rem;">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" style="flex-shrink: 0;"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                  <span style="font-size: 0.68rem; line-height: 1.1; text-align: center;">Merma<br>Inventario</span>
+                </button>
+                <div style="flex-grow: 1;"></div>
+                <!-- Pedido Proveedor -->
+                <button id="mov-btn-pedido" class="inv-btn" style="height: 52px; flex-direction: column; font-size: 0.7rem; gap: 0.2rem; padding: 0.3rem 0.4rem;">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" style="flex-shrink: 0;"><path d="M20 8h-3V4H3c-1.1 0-2 .9-2 2v11h2c0 1.66 1.34 3 3 3s3-1.34 3-3h6c0 1.66 1.34 3 3 3s3-1.34 3-3h2v-5l-3-4zM6 18.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm13.5-9l1.96 2.5H17V9.5h2.5zm-1.5 9c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
+                  <span style="font-size: 0.68rem; line-height: 1.1; text-align: center;">Pedido<br>Proveedor</span>
+                </button>
+              </aside>
+
+            </div><!-- /movements main content -->
+          </div><!-- /inv-panel-movimientos -->
+
+        </div><!-- /inventory-main-content -->
+
+        <!-- Inventory Sidebar Buttons (Far Right, takes 180px) -->
+        <aside class="inventory-sidebar" id="inv-catalog-sidebar">
+          <!-- Top buttons group (transparent background) -->
+          <div class="inv-action-group top-group">
+            <button class="inv-btn" id="inv-add-btn" title="Agregar producto">
+              <span>Agregar</span>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
+            </button>
+            <button class="inv-btn" id="inv-edit-btn" disabled title="Modificar existencias">
+              <span>Modificar</span>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M19 8l-4 4h3c0 3.31-2.69 6-6 6-1.01 0-1.97-.25-2.8-.7l-1.46 1.46C8.97 19.54 10.43 20 12 20c4.42 0 8-3.58 8-8h3l-4-4zM6 12c0-3.31 2.69-6 6-6 1.01 0 1.97.25 2.8.7l1.46-1.46C15.03 4.46 13.57 4 12 4c-4.42 0-8 3.58-8 8H1l4 4 4-4H6z"/></svg>
+            </button>
+            <button class="inv-btn" id="inv-delete-btn" disabled title="Eliminar producto">
+              <span>Eliminar</span>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11H7v-2h10v2z"/></svg>
+            </button>
+            <button class="inv-btn" id="inv-detail-btn" disabled title="Detalle completo de producto">
+              <span>Detalle</span>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.89-1.99 1.99L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+            </button>
+          </div>
+
+          <!-- Bottom utilities group (dark burgundy card background) -->
+          <div class="inventory-bottom-card" style="background-color: #3b0816; padding: 0.5rem; border-radius: 4px; display: flex; flex-direction: column; gap: 0.35rem;">
+            <button class="inv-btn-small" onclick="alert('Ajuste de Precio (simulado)')">
+              <span>Ajuste Precio</span>
+            </button>
+            <button class="inv-btn-small" onclick="alert('Crear Promoción (simulado)')">
+              <span>Promocion</span>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="opacity: 0.9;"><path d="M21.41 11.58l-9-9C12.05 2.22 11.55 2 11 2H4c-1.1 0-2 .9-2 2v7c0 .55.22 1.05.59 1.42l9 9c.36.36.86.58 1.41.58.55 0 1.05-.22 1.41-.59l7-7c.37-.36.59-.86.59-1.41 0-.55-.23-1.06-.59-1.42zM5.5 8.25c-.97 0-1.75-.78-1.75-1.75s.78-1.75 1.75-1.75 1.75.78 1.75 1.75-.78 1.75-1.75 1.75z"/></svg>
+            </button>
+            <button class="inv-btn-small" onclick="alert('Configurar Categorías (simulado)')">
+              <span>Categoría</span>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="opacity: 0.9;"><path d="M22 11V3h-7v3H9V3H2v8h7V8h2v10h4v3h7v-8h-7v3h-2V8h2v3h7zM7 9H4V5h3v4zm15 10h-3v-4h3v4z"/></svg>
+            </button>
+            <button class="inv-btn-small" onclick="alert('Configurar Almacenes / Giros (simulado)')">
+              <span>Alm./Giro</span>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="opacity: 0.9;"><path d="M12 3L2 12h3v8h14v-8h3L12 3zm1 11h-2v-2h2v2zm0-4h-2V8h2v2z"/></svg>
+            </button>
+            <button class="inv-btn-small" onclick="alert('Configurar Impuestos (simulado)')">
+              <span>Impuestos</span>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="opacity: 0.9;"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+            </button>
+            <button class="inv-btn-small" onclick="alert('Configurar Departamentos (simulado)')">
+              <span>Depto.</span>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="opacity: 0.9;"><path d="M4 11h5V5H4v6zm0 7h5v-6H4v6zm6 0h10v-6H10v6zm0-7h10V5H10v6z"/></svg>
+            </button>
+            <button class="inv-btn-small" onclick="alert('Configurar Proveedores (simulado)')">
+              <span>Proveedor</span>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="opacity: 0.9;"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+            </button>
+          </div>
+        </aside>
+
+      </div><!-- /tab-inventario -->
+
+      <!-- ============================================================ -->
+      <!-- ENTRADA DE INVENTARIO MODAL                                   -->
+      <!-- ============================================================ -->
+      <div id="entrada-modal" class="modal-overlay" style="display: none; z-index: 250; align-items: flex-start; padding: 0;">
+        <div style="width: 100%; height: 100%; background: #f0f4f8; display: flex; flex-direction: column;">
+
+          <!-- Header -->
+          <div style="background: linear-gradient(90deg, #20589d 0%, #1b8589 100%); color: white; padding: 0.75rem 1.25rem; display: flex; align-items: center; gap: 0.75rem; flex-shrink: 0; box-shadow: 0 2px 6px rgba(0,0,0,0.2);">
+            <button id="entrada-back-btn" style="background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: white; flex-shrink: 0;">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+            </button>
+            <span style="font-size: 1.15rem; font-weight: 700; font-family: var(--font-family);">Entrada de Inventario</span>
+            <span style="margin-left: auto; font-family: var(--font-family); font-size: 0.85rem; font-weight: 600; background: rgba(255,255,255,0.15); padding: 0.2rem 0.75rem; border-radius: 20px;">Entrada N°: <strong id="entrada-numero">0000001</strong></span>
+          </div>
+
+          <!-- Toolbar: Alm/Giro, Product search, Summary -->
+          <div style="display: flex; align-items: flex-start; gap: 1rem; padding: 0.75rem 1rem; background: #f8fafc; border-bottom: 1px solid #cbd5e0; flex-shrink: 0; flex-wrap: wrap;">
+
+            <!-- Left fields -->
+            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <label style="font-size: 0.82rem; font-weight: 600; color: #4a5568; font-family: var(--font-family); width: 70px;">Alm/Giro:</label>
+                <div style="display: flex; align-items: center; border: 1px solid #cbd5e0; border-radius: 4px; overflow: hidden; background: white;">
+                  <input type="text" id="entrada-alm-input" placeholder="Almacén..." style="width: 160px; height: 28px; border: none; outline: none; padding: 0 0.5rem; font-size: 0.82rem; font-family: var(--font-family);">
+                  <button style="width: 28px; height: 28px; border: none; background: #e2e8f0; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="#4a5568"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                  </button>
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <label style="font-size: 0.82rem; font-weight: 600; color: #4a5568; font-family: var(--font-family); width: 70px;">Producto:</label>
+                <div style="display: flex; align-items: center; border: 1px solid #cbd5e0; border-radius: 4px; overflow: hidden; background: white;">
+                  <input type="text" id="entrada-product-input" placeholder="Código o descripción..." style="width: 220px; height: 28px; border: none; outline: none; padding: 0 0.5rem; font-size: 0.82rem; font-family: var(--font-family);">
+                  <button id="entrada-product-search-btn" style="width: 28px; height: 28px; border: none; background: #e2e8f0; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="#4a5568"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                  </button>
+                </div>
+                <button id="entrada-nuevo-prod-btn" style="height: 28px; padding: 0 0.6rem; background: #7c1232; color: white; border: none; border-radius: 4px; font-size: 0.75rem; font-weight: 600; font-family: var(--font-family); cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 0.3rem;">
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
+                  Nuevo Producto
+                </button>
+              </div>
+            </div>
+
+            <!-- Right summary -->
+            <div style="margin-left: auto; display: flex; flex-direction: column; gap: 0.3rem; font-family: var(--font-family); font-size: 0.82rem; text-align: right; color: #4a5568;">
+              <div>Total Costos: <strong id="entrada-total-cost" style="color: #20589d; font-size: 1rem;">0</strong></div>
+              <div>Total Cantidad: <strong id="entrada-total-qty" style="color: #20589d; font-size: 1rem;">0</strong></div>
+              <div>Total Productos: <strong id="entrada-total-prods" style="color: #20589d; font-size: 1rem;">0</strong></div>
+            </div>
+          </div>
+
+          <!-- Entry table -->
+          <div style="flex-grow: 1; overflow-y: auto; background: white;">
+            <table class="inventory-data-table" id="entrada-table" style="font-size: 0.8rem;">
+              <thead>
+                <tr>
+                  <th style="width: 11%; text-align: left;">CLAVE</th>
+                  <th style="width: 28%; text-align: left;">DESCRIPCION</th>
+                  <th style="width: 12%; text-align: left;">CATEGORIA</th>
+                  <th style="width: 7%; text-align: center;">UNIDAD</th>
+                  <th style="width: 8%; text-align: right;">EXISTENCIA</th>
+                  <th style="width: 8%; text-align: right;">CANTIDAD</th>
+                  <th style="width: 8%; text-align: right;">COSTO</th>
+                  <th style="width: 9%; text-align: right;">TOTAL</th>
+                  <th style="width: 4%; text-align: center;"></th>
+                </tr>
+              </thead>
+              <tbody id="entrada-table-body">
+                <tr id="entrada-empty-row">
+                  <td colspan="9" style="text-align: center; color: #a0aec0; padding: 2.5rem; font-family: var(--font-family);">Busque y agregue productos a la entrada de inventario</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Bottom action bar -->
+          <div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 1rem; background: #1e3a5f; flex-shrink: 0; flex-wrap: wrap;">
+            <!-- Action buttons -->
+            <button id="entrada-btn-borrar" style="height: 34px; padding: 0 0.75rem; background: #c53030; color: white; border: none; border-radius: 4px; font-size: 0.8rem; font-weight: 700; font-family: var(--font-family); cursor: pointer; display: flex; align-items: center; gap: 0.35rem;">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+              Borrar
+            </button>
+            <button id="entrada-btn-cantidad" style="height: 34px; padding: 0 0.75rem; background: #2b6cb0; color: white; border: none; border-radius: 4px; font-size: 0.8rem; font-weight: 700; font-family: var(--font-family); cursor: pointer; display: flex; align-items: center; gap: 0.35rem;">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M19 13H5v-2h14v2z M19 8l-4 4h3v9h-6V12h-3l-4-4 4-4h3V3h6v9h3l-4 4z"/></svg>
+              Cantidad
+            </button>
+            <button id="entrada-btn-detalle" style="height: 34px; padding: 0 0.75rem; background: #276749; color: white; border: none; border-radius: 4px; font-size: 0.8rem; font-weight: 700; font-family: var(--font-family); cursor: pointer; display: flex; align-items: center; gap: 0.35rem;">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.89-1.99 1.99L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+              Detalle
+            </button>
+            <button id="entrada-btn-prodpor" style="height: 34px; padding: 0 0.75rem; background: #5a2d82; color: white; border: none; border-radius: 4px; font-size: 0.8rem; font-weight: 700; font-family: var(--font-family); cursor: pointer; display: flex; align-items: center; gap: 0.35rem;">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>
+              Prod. Por
+            </button>
+            <!-- Motivo -->
+            <div style="display: flex; align-items: center; gap: 0.4rem; margin-left: 0.5rem;">
+              <label style="font-size: 0.8rem; font-weight: 600; color: white; font-family: var(--font-family); white-space: nowrap;">Motivo:</label>
+              <input type="text" id="entrada-motivo" placeholder="Razón de la entrada..." style="width: 200px; height: 28px; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; padding: 0 0.5rem; font-size: 0.8rem; font-family: var(--font-family); background: rgba(255,255,255,0.1); color: white; outline: none;">
+            </div>
+            <!-- Spacer -->
+            <div style="flex-grow: 1;"></div>
+            <!-- Save button -->
+            <button id="entrada-btn-guardar" style="height: 36px; padding: 0 1.25rem; background: linear-gradient(135deg, #116265, #1b8589); color: white; border: none; border-radius: 4px; font-size: 0.9rem; font-weight: 700; font-family: var(--font-family); cursor: pointer; display: flex; align-items: center; gap: 0.4rem; box-shadow: 0 2px 6px rgba(27,133,137,0.4);">
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>
+              Guardar
+            </button>
+          </div>
+        </div>
+      </div>
+      <!-- /ENTRADA DE INVENTARIO MODAL -->
+
+      <!-- ============================================================ -->
+      <!-- ENTRADA: PRODUCT PICKER MODAL (z-index 310)                  -->
+      <!-- ============================================================ -->
+      <div id="entrada-picker-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); backdrop-filter: blur(3px); z-index: 310; align-items: center; justify-content: center;">
+        <div style="width: 680px; max-width: 95vw; max-height: 80vh; background: white; border-radius: 10px; box-shadow: 0 20px 50px rgba(0,0,0,0.3); display: flex; flex-direction: column; overflow: hidden; font-family: var(--font-family);">
+
+          <!-- Picker header -->
+          <div style="background: linear-gradient(90deg, #20589d 0%, #1b8589 100%); color: white; padding: 0.7rem 1rem; display: flex; align-items: center; gap: 0.75rem; flex-shrink: 0;">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+            <span style="font-size: 1rem; font-weight: 700;">Seleccionar Producto para Entrada</span>
+            <button id="entrada-picker-close" style="margin-left: auto; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: white;">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+            </button>
+          </div>
+
+          <!-- Search bar -->
+          <div style="padding: 0.6rem 1rem; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; background: #f8fafc; display: flex; gap: 0.5rem; align-items: center;">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="#718096"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+            <input type="text" id="entrada-picker-search" placeholder="Buscar por clave o descripción..." style="flex-grow: 1; height: 30px; border: 1px solid #cbd5e0; border-radius: 6px; padding: 0 0.65rem; font-size: 0.85rem; font-family: var(--font-family); outline: none;">
+            <span id="entrada-picker-count" style="font-size: 0.75rem; color: #718096; white-space: nowrap;"></span>
+          </div>
+
+          <!-- Product list -->
+          <div style="flex-grow: 1; overflow-y: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem;">
+              <thead style="position: sticky; top: 0; z-index: 1;">
+                <tr style="background: #edf2f7;">
+                  <th style="text-align: left; padding: 0.4rem 0.75rem; color: #4a5568; font-weight: 700; border-bottom: 2px solid #cbd5e0; white-space: nowrap;">CLAVE</th>
+                  <th style="text-align: left; padding: 0.4rem 0.75rem; color: #4a5568; font-weight: 700; border-bottom: 2px solid #cbd5e0;">DESCRIPCIÓN</th>
+                  <th style="text-align: left; padding: 0.4rem 0.75rem; color: #4a5568; font-weight: 700; border-bottom: 2px solid #cbd5e0;">CATEGORÍA</th>
+                  <th style="text-align: center; padding: 0.4rem 0.75rem; color: #4a5568; font-weight: 700; border-bottom: 2px solid #cbd5e0;">U.M.</th>
+                  <th style="text-align: right; padding: 0.4rem 0.75rem; color: #4a5568; font-weight: 700; border-bottom: 2px solid #cbd5e0; white-space: nowrap;">EXIST.</th>
+                  <th style="text-align: right; padding: 0.4rem 0.75rem; color: #4a5568; font-weight: 700; border-bottom: 2px solid #cbd5e0;">COSTO</th>
+                </tr>
+              </thead>
+              <tbody id="entrada-picker-tbody">
+                <tr><td colspan="6" style="text-align:center;color:#a0aec0;padding:2rem;">Cargando productos...</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Footer hint -->
+          <div style="padding: 0.5rem 1rem; background: #f8fafc; border-top: 1px solid #e2e8f0; flex-shrink: 0; font-size: 0.75rem; color: #718096; display: flex; align-items: center; justify-content: space-between;">
+            <span>Haga doble clic o presione <kbd style="background:#e2e8f0;border-radius:3px;padding:0.1rem 0.3rem;font-size:0.72rem;">Enter</kbd> para agregar el producto seleccionado</span>
+            <button id="entrada-nuevo-desde-picker" style="height: 28px; padding: 0 0.75rem; background: #7c1232; color: white; border: none; border-radius: 5px; font-size: 0.78rem; font-weight: 600; font-family: var(--font-family); cursor: pointer; display: flex; align-items: center; gap: 0.3rem;">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
+              Crear Nuevo Producto
+            </button>
+          </div>
+        </div>
+      </div>
+      <!-- /ENTRADA PRODUCT PICKER -->
+
+      <!-- TAB PANEL: VENTAS (Placeholder) -->
+
+      <div id="tab-ventas" class="tab-panel">
+        <div class="tab-placeholder-card">
+          <svg viewBox="0 0 24 24" width="60" height="60" fill="#20589d"><path d="M20 7h-4V5c0-1.1-.9-2-2-2h-4c-1.1 0-2 .9-2 2v2H4c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2z"/></svg>
+          <h3>Historial de Ventas</h3>
+          <p>Consulte facturas emitidas, reportes Z, reportes X y cierres fiscales.</p>
+        </div>
+      </div>
+
+      <!-- TAB PANEL: CLIENTES (Real implementation) -->
+      <div id="tab-clientes" class="tab-panel">
+        <div style="display: flex; flex-direction: column; height: 100%; width: 100%;">
+          
+          <!-- Sub-menu Navigation bar -->
+          <nav class="config-sub-tabs" style="border-bottom-color: #20589d;">
+            <div class="sub-tabs-left">
+              <button class="clientes-sub-tab-item active" data-subtab="catalogo" style="background-color: #20589d;">Catálogo</button>
+              <button class="clientes-sub-tab-item" data-subtab="historial" style="background-color: #20589d;">Historial Detalle</button>
+              <button class="clientes-sub-tab-item" data-subtab="ranking" style="background-color: #20589d;">Movimientos por Ranking</button>
+              <button class="clientes-sub-tab-item" data-subtab="creditos" style="background-color: #20589d;">Creditos / Abonos</button>
+            </div>
+            <div class="sub-tabs-right">
+              <span>Administra tus Clientes</span>
+            </div>
+          </nav>
+
+          <!-- Sub-panel: Catálogo -->
+          <div id="clientes-panel-catalogo" class="config-sub-panel active-sub-panel" style="padding: 0.75rem; gap: 1rem; overflow: hidden; flex-grow: 1; height: 100%;">
+            <!-- Left Side: Table & Search -->
+            <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 0.5rem; height: 100%;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; gap: 0.5rem; align-items: center; font-family: var(--font-family);">
+                  <label style="font-size: 0.8rem; font-weight: 600; color: #475569; white-space: nowrap;">Buscar Cliente :</label>
+                  <input type="text" id="clientes-search-input" placeholder="Buscar por nombre..." style="width: 220px; height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem; outline: none; font-family: var(--font-family);">
+                </div>
+                <div style="display: flex; align-items: center; gap: 1.5rem; font-family: var(--font-family); font-size: 0.8rem; color: #475569;">
+                  <span>Total Saldo Pendiente: <strong id="cli-stat-pending" style="color: #c53030;">204.09</strong></span>
+                  <span>Total Clientes: <strong id="cli-stat-total">91</strong></span>
+                  <button id="clientes-report-btn" class="util-btn" style="height: 26px; width: 30px; padding: 0; background-color: #20589d; color: white; display: flex; align-items: center; justify-content: center; border-radius: 4px; border: none; cursor: pointer;" title="Reporte de Clientes">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>
+                  </button>
+                </div>
+              </div>
+              
+              <!-- Clients table -->
+              <div style="flex-grow: 1; border: 1px solid #cbd5e0; border-radius: 4px; overflow-y: auto; background-color: white;">
+                <table class="search-modal-table" style="width: 100%; font-size: 0.75rem; border-collapse: collapse;">
+                  <thead>
+                    <tr style="position: sticky; top: 0; background-color: #20589d; color: white;">
+                      <th style="text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">NOMBRE</th>
+                      <th style="text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">RFC</th>
+                      <th style="text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">TELEFONO</th>
+                      <th style="text-align: right; padding: 0.35rem 0.5rem; font-family: var(--font-family);">LIMITE CREDITO</th>
+                      <th style="text-align: right; padding: 0.35rem 0.5rem; font-family: var(--font-family);">CREDITO DISPONIBLE</th>
+                      <th style="text-align: right; padding: 0.35rem 0.5rem; font-family: var(--font-family);">SALDO PENDIENTE</th>
+                      <th style="text-align: right; padding: 0.35rem 0.5rem; font-family: var(--font-family);">PUNTOS A.</th>
+                      <th style="text-align: right; padding: 0.35rem 0.5rem; font-family: var(--font-family);">SALDO PUNTOS</th>
+                    </tr>
+                  </thead>
+                  <tbody id="clientes-catalogo-table-body">
+                    <!-- Dynamic clients list -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            
+            <!-- Right Side Actions Sidebar -->
+            <div class="inventory-sidebar" style="width: 170px; padding: 1.25rem 0.5rem; flex-shrink: 0; border-left: 1px solid #cbd5e0; gap: 0.6rem; display: flex; flex-direction: column;">
+              <button class="cli-btn" id="clientes-btn-add" title="Agregar cliente">
+                <span>Agregar</span>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+              </button>
+              <button class="cli-btn" id="clientes-btn-modify" disabled title="Modificar cliente">
+                <span>Modificar</span>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M19 8l-4 4h3c0 3.31-2.69 6-6 6-1.01 0-1.97-.25-2.8-.7l-1.46 1.46C8.97 19.54 10.43 20 12 20c4.42 0 8-3.58 8-8h3l-4-4zM6 12c0-3.31 2.69-6 6-6 1.01 0 1.97.25 2.8.7l1.46-1.46C15.03 4.46 13.57 4 12 4c-4.42 0-8 3.58-8 8H1l4 4 4-4H6z"/></svg>
+              </button>
+              <button class="cli-btn" id="clientes-btn-delete" disabled title="Eliminar cliente">
+                <span>Eliminar</span>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11H7v-2h10v2z"/></svg>
+              </button>
+              <button class="cli-btn" id="clientes-btn-detail" disabled title="Detalle cliente">
+                <span>Detalle</span>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.89-1.99 1.99L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Sub-panel: Historial Detalle -->
+          <div id="clientes-panel-historial" class="config-sub-panel" style="padding: 0.75rem; flex-direction: column; gap: 0.75rem; overflow: hidden; flex-grow: 1; height: 100%;">
+            <!-- Filter Bar -->
+            <div style="display: flex; justify-content: space-between; align-items: center; background-color: #f1f5f9; padding: 0.5rem; border-radius: 4px; border: 1px solid #cbd5e0; font-family: var(--font-family);">
+              <div style="display: flex; gap: 1rem; align-items: center; font-size: 0.8rem;">
+                <label style="font-weight: 600; color: #475569;">Desde:</label>
+                <input type="date" id="clientes-hist-start" style="height: 24px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.25rem; font-size: 0.8rem;">
+                
+                <label style="font-weight: 600; color: #475569;">Hasta:</label>
+                <input type="date" id="clientes-hist-end" style="height: 24px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.25rem; font-size: 0.8rem;">
+                
+                <label style="font-weight: 600; color: #475569;">Cliente:</label>
+                <div style="display: flex; align-items: center; gap: 0.25rem;">
+                  <input type="text" id="clientes-hist-user" placeholder="Buscar..." style="height: 24px; width: 140px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem;">
+                  <button id="clientes-hist-search-btn" style="height: 24px; width: 24px; background-color: #20589d; border: none; border-radius: 4px; color: white; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                  </button>
+                </div>
+                
+                <span style="margin-left: 1rem;">Descripción: <strong id="cli-hist-desc">-</strong></span>
+                <span>Monto Total: <strong id="cli-hist-total" style="color: #20589d;">$ 0.00</strong></span>
+              </div>
+              <button class="util-btn" style="height: 26px; width: 30px; padding: 0; background-color: #20589d; color: white; display: flex; align-items: center; justify-content: center; border-radius: 4px; border: none; cursor: pointer;">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>
+              </button>
+            </div>
+            
+            <!-- Table container -->
+            <div style="flex-grow: 1; border: 1px solid #cbd5e0; border-radius: 4px; overflow-y: auto; background-color: white;">
+              <table class="search-modal-table" style="width: 100%; font-size: 0.75rem; border-collapse: collapse;">
+                <thead>
+                  <tr style="position: sticky; top: 0; background-color: #20589d; color: white;">
+                    <th style="text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">FECHA</th>
+                    <th style="text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">TIPO</th>
+                    <th style="text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">DOCUMENTO</th>
+                    <th style="text-align: right; padding: 0.35rem 0.5rem; font-family: var(--font-family);">VENTA ($)</th>
+                    <th style="text-align: right; padding: 0.35rem 0.5rem; font-family: var(--font-family);">ABONO ($)</th>
+                    <th style="text-align: right; padding: 0.35rem 0.5rem; font-family: var(--font-family);">SALDO ACTUAL ($)</th>
+                  </tr>
+                </thead>
+                <tbody id="clientes-historial-table-body">
+                  <tr>
+                    <td colspan="6" style="text-align: center; color: #888888; padding: 2rem;">Seleccione un cliente para ver su historial.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Sub-panel: Movimientos por Ranking -->
+          <div id="clientes-panel-ranking" class="config-sub-panel" style="padding: 0.75rem; flex-direction: column; gap: 0.75rem; overflow: hidden; flex-grow: 1; height: 100%;">
+            <!-- Filter Bar -->
+            <div style="display: flex; justify-content: space-between; align-items: center; background-color: #f1f5f9; padding: 0.5rem; border-radius: 4px; border: 1px solid #cbd5e0; font-family: var(--font-family);">
+              <div style="display: flex; gap: 1rem; align-items: center; font-size: 0.8rem;">
+                <label style="font-weight: 600; color: #475569;">Desde:</label>
+                <input type="date" id="clientes-rank-start" style="height: 24px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.25rem; font-size: 0.8rem;">
+                
+                <label style="font-weight: 600; color: #475569;">Hasta:</label>
+                <input type="date" id="clientes-rank-end" style="height: 24px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.25rem; font-size: 0.8rem;">
+                
+                <div style="margin-left: 2rem; display: flex; gap: 1.25rem;">
+                  <span>Monto Total: <strong id="cli-rank-total" style="color: #20589d;">$ 0.35</strong></span>
+                  <span>Efectivo: <strong>$ 0.00</strong></span>
+                  <span>Tarjeta: <strong>$ 0.00</strong></span>
+                  <span>Crédito: <strong style="color: #c53030;">$ 0.35</strong></span>
+                  <span>Puntos: <strong>$ 0.00</strong></span>
+                </div>
+              </div>
+              <button class="util-btn" style="height: 26px; width: 30px; padding: 0; background-color: #20589d; color: white; display: flex; align-items: center; justify-content: center; border-radius: 4px; border: none; cursor: pointer;">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>
+              </button>
+            </div>
+            
+            <!-- Ranking Split Panel -->
+            <div style="display: flex; gap: 1rem; flex-grow: 1; height: 100%; overflow: hidden;">
+              <!-- Left: Ranking Client list -->
+              <div style="width: 320px; border: 1px solid #cbd5e0; border-radius: 4px; overflow-y: auto; background-color: white;">
+                <table class="search-modal-table" style="width: 100%; font-size: 0.75rem; border-collapse: collapse;">
+                  <thead>
+                    <tr style="position: sticky; top: 0; background-color: #20589d; color: white;">
+                      <th style="text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">CLIENTE</th>
+                      <th style="text-align: center; padding: 0.35rem 0.5rem; font-family: var(--font-family);">N. VENTAS</th>
+                      <th style="text-align: center; padding: 0.35rem 0.5rem; font-family: var(--font-family);">N. DEVOL</th>
+                      <th style="text-align: right; padding: 0.35rem 0.5rem; font-family: var(--font-family);">TOTAL MONTO</th>
+                    </tr>
+                  </thead>
+                  <tbody id="clientes-rank-list-body">
+                    <!-- Dynamic client rankings -->
+                  </tbody>
+                </table>
+              </div>
+              
+              <!-- Right: Detailed movements -->
+              <div style="flex-grow: 1; border: 1px solid #cbd5e0; border-radius: 4px; overflow-y: auto; background-color: white;">
+                <table class="search-modal-table" style="width: 100%; font-size: 0.75rem; border-collapse: collapse;">
+                  <thead>
+                    <tr style="position: sticky; top: 0; background-color: #20589d; color: white;">
+                      <th style="text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">FECHA REGISTRO</th>
+                      <th style="text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">TIPO</th>
+                      <th style="text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">NUMERO</th>
+                      <th style="text-align: right; padding: 0.35rem 0.5rem; font-family: var(--font-family);">M. TOTAL</th>
+                      <th style="text-align: right; padding: 0.35rem 0.5rem; font-family: var(--font-family);">DESCUENTO</th>
+                      <th style="text-align: right; padding: 0.35rem 0.5rem; font-family: var(--font-family);">EFECTIVO</th>
+                      <th style="text-align: right; padding: 0.35rem 0.5rem; font-family: var(--font-family);">TAJETA</th>
+                      <th style="text-align: right; padding: 0.35rem 0.5rem; font-family: var(--font-family);">CREDITO</th>
+                      <th style="text-align: right; padding: 0.35rem 0.5rem; font-family: var(--font-family);">PUNTOS</th>
+                    </tr>
+                  </thead>
+                  <tbody id="clientes-rank-detail-body">
+                    <!-- Dynamic client details -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sub-panel: Créditos / Abonos -->
+          <div id="clientes-panel-creditos" class="config-sub-panel" style="padding: 0.75rem; gap: 1rem; overflow: hidden; flex-grow: 1; height: 100%;">
+            <!-- Left Side: Table & Search -->
+            <div style="width: 320px; display: flex; flex-direction: column; gap: 0.5rem; height: 100%; border-right: 1px solid #cbd5e0; padding-right: 0.75rem; flex-shrink: 0;">
+              <div style="display: flex; gap: 0.5rem; align-items: center; font-family: var(--font-family);">
+                <label style="font-size: 0.8rem; font-weight: 600; color: #475569; white-space: nowrap;">Buscar Cliente :</label>
+                <input type="text" id="clientes-cred-search" placeholder="Buscar..." style="width: 100%; height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem; outline: none; font-family: var(--font-family);">
+              </div>
+              <div style="flex-grow: 1; border: 1px solid #cbd5e0; border-radius: 4px; overflow-y: auto; background-color: white;">
+                <table class="search-modal-table" style="width: 100%; font-size: 0.75rem; border-collapse: collapse;">
+                  <thead>
+                    <tr style="position: sticky; top: 0; background-color: #20589d; color: white;">
+                      <th style="text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">CLIENTE</th>
+                      <th style="text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">RFC</th>
+                      <th style="text-align: right; padding: 0.35rem 0.5rem; font-family: var(--font-family);">SALDO PENDIEN.</th>
+                    </tr>
+                  </thead>
+                  <tbody id="clientes-cred-table-body">
+                    <!-- Dynamic credit clients -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            
+            <!-- Right Side: Details and Abonos Forms -->
+            <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 0.75rem; height: 100%;">
+              <!-- Client Credit stats top row -->
+              <div style="display: flex; justify-content: space-between; align-items: center; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 0.5rem 0.75rem; font-family: var(--font-family);">
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                  <svg viewBox="0 0 24 24" width="20" height="20" fill="#20589d"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                  <strong id="cli-cred-name" style="font-size: 0.9rem; color: #20589d;">SELECCIONE UN CLIENTE</strong>
+                </div>
+                <div style="display: flex; align-items: center; gap: 1.25rem; font-size: 0.8rem; color: #475569;">
+                  <span>Límite Crédito: <strong id="cli-cred-limit">0.00</strong></span>
+                  <span>Crédito Disponible: <strong id="cli-cred-avail">0.00</strong></span>
+                  <span>Saldo Pendiente: <strong id="cli-cred-pending" style="color: #c53030;">0.00</strong></span>
+                  <button class="util-btn" style="height: 26px; width: 30px; padding: 0; background-color: #20589d; color: white; display: flex; align-items: center; justify-content: center; border-radius: 4px; border: none; cursor: pointer;">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Inner tabs -->
+              <div style="display: flex; gap: 0.5rem; border-bottom: 2px solid #cbd5e0; font-family: var(--font-family);">
+                <button id="cli-tab-btn-abonos" class="config-sub-tab-item active" style="background-color: #20589d; padding: 0.35rem 0.75rem; font-size: 0.8rem; border-radius: 4px 4px 0 0;">Abonos</button>
+                <button id="cli-tab-btn-estado" class="config-sub-tab-item" style="background-color: #cbd5e0; color: #475569; padding: 0.35rem 0.75rem; font-size: 0.8rem; border-radius: 4px 4px 0 0;">Estado de Cuenta</button>
+              </div>
+
+              <!-- Inner subpanel: Abonos Form -->
+              <div id="cli-inner-panel-abonos" style="flex-grow: 1; display: flex; flex-direction: column; gap: 1rem; padding: 1rem; background-color: white; border: 1px solid #e2e8f0; border-radius: 4px; font-family: var(--font-family);">
+                <h4 style="margin: 0; font-size: 0.85rem; color: #20589d; border-bottom: 1px solid #cbd5e0; padding-bottom: 0.25rem;">Registrar Pago / Abono de Crédito</h4>
+                
+                <div style="display: grid; grid-template-columns: 140px 220px; gap: 1rem; align-items: center; font-size: 0.85rem; color: #334155;">
+                  <label style="font-weight: 600; color: #475569;">Monto del Abono ($) :</label>
+                  <input type="number" id="cli-abono-amount" step="0.01" min="0.01" style="height: 28px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.85rem; outline: none; font-weight: bold;">
+                  
+                  <label style="font-weight: 600; color: #475569; align-self: start; margin-top: 0.25rem;">Referencia / Comentarios :</label>
+                  <textarea id="cli-abono-notes" placeholder="Ej: Pago en efectivo divisa..." style="height: 60px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0.4rem; font-size: 0.85rem; outline: none; resize: none; font-family: var(--font-family);"></textarea>
+                </div>
+                
+                <button id="cli-abono-submit-btn" style="height: 32px; width: 140px; margin-top: 0.5rem; background-color: #20589d; color: white; border: none; border-radius: 4px; font-weight: bold; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; gap: 0.25rem; cursor: pointer; transition: background-color 0.2s; outline: none;">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                  Aplicar Abono
+                </button>
+              </div>
+
+              <!-- Inner subpanel: Estado de Cuenta Table -->
+              <div id="cli-inner-panel-estado" style="flex-grow: 1; display: none; flex-direction: column; gap: 0.5rem; background-color: white; border: 1px solid #e2e8f0; border-radius: 4px; overflow: hidden; height: 100%;">
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.5rem; background-color: #f8fafc; border-bottom: 1px solid #e2e8f0; font-family: var(--font-family); font-size: 0.75rem; color: #475569;">
+                  <strong>Resumen de Cuenta</strong>
+                  <div style="display: flex; gap: 1rem;">
+                    <span>Monto Ventas: <strong id="cli-est-ventas">0.00</strong></span>
+                    <span>Monto Abonos: <strong id="cli-est-abonos">0.00</strong></span>
+                  </div>
+                </div>
+                
+                <div style="flex-grow: 1; overflow-y: auto;">
+                  <table class="search-modal-table" style="width: 100%; font-size: 0.7rem; border-collapse: collapse;">
+                    <thead>
+                      <tr style="position: sticky; top: 0; background-color: #cbd5e1; color: #334155;">
+                        <th style="text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">TIPO</th>
+                        <th style="text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">FECHA REGISTRO</th>
+                        <th style="text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">USUARIO</th>
+                        <th style="text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">ESTACION</th>
+                        <th style="text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">DOCUMENTO NUMERO</th>
+                        <th style="text-align: right; padding: 0.35rem 0.5rem; font-family: var(--font-family);">MONTO VENTA</th>
+                        <th style="text-align: right; padding: 0.35rem 0.5rem; font-family: var(--font-family);">MONTO ABONO</th>
+                        <th style="text-align: right; padding: 0.35rem 0.5rem; font-family: var(--font-family);">SALDO ACTUAL</th>
+                      </tr>
+                    </thead>
+                    <tbody id="cli-estado-table-body">
+                      <!-- Dynamic client transactions history statements -->
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- TAB PANEL: TASA (Exchange Rate configuration) -->
+      <div id="tab-tasa" class="tab-panel">
+        <div style="display: flex; flex-direction: column; height: 100%; width: 100%; background: #f0f4f8;">
+
+          <!-- Tasa Header -->
+          <div style="background: linear-gradient(180deg, #116265 0%, #1b8589 100%); color: white; padding: 0.75rem 1.25rem; display: flex; align-items: center; gap: 0.75rem; box-shadow: 0 2px 6px rgba(0,0,0,0.15); flex-shrink: 0;">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z"/></svg>
+            <span style="font-size: 1.1rem; font-weight: 700; font-family: var(--font-family);">Configuración de Tasa de Cambio</span>
+          </div>
+
+          <!-- Alert banner shown if no rate is configured -->
+          <div id="tasa-alert-banner" style="display: none; background: #fef3c7; border-left: 4px solid #f59e0b; padding: 0.6rem 1rem; font-size: 0.85rem; font-weight: 600; color: #92400e; font-family: var(--font-family); flex-shrink: 0;">
+            ⚠️ No hay ninguna tasa del día configurada. Por favor registre la tasa actual para poder realizar ventas con conversión de moneda.
+          </div>
+
+          <!-- Two-column content -->
+          <div style="display: flex; flex: 1; overflow: hidden; gap: 0;">
+
+            <!-- LEFT: Form column -->
+            <div style="flex: 0 0 480px; min-width: 340px; display: flex; flex-direction: column; gap: 1.25rem; padding: 1.25rem 1.5rem; overflow-y: auto; border-right: 1px solid #d1dde8;">
+
+              <!-- Current rate display card -->
+              <div id="tasa-current-card" style="background: white; border-radius: 8px; padding: 1.25rem; box-shadow: 0 2px 8px rgba(0,0,0,0.07); border: 1px solid #e2e8f0;">
+                <div style="font-size: 0.73rem; font-weight: 700; color: #718096; font-family: var(--font-family); letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 0.85rem;">Tasas Activas Hoy</div>
+                <div style="display: flex; gap: 2.5rem; flex-wrap: wrap;">
+                  <div style="display: flex; flex-direction: column; gap: 0.2rem;">
+                    <span style="font-size: 0.73rem; color: #718096; font-family: var(--font-family);">Tasa del Día (Bs/$)</span>
+                    <span id="tasa-display-dia" style="font-size: 2rem; font-weight: 800; color: #1b8589; font-family: var(--font-family); line-height: 1.1;">— </span>
+                    <span id="tasa-display-dia-label" style="font-size: 0.7rem; color: #a0aec0; font-family: var(--font-family);">No configurada</span>
+                  </div>
+                  <div style="display: flex; flex-direction: column; gap: 0.2rem;">
+                    <span style="font-size: 0.73rem; color: #718096; font-family: var(--font-family);">Tasa de Vuelto (Bs/$)</span>
+                    <span id="tasa-display-vuelto" style="font-size: 2rem; font-weight: 800; color: #20589d; font-family: var(--font-family); line-height: 1.1;">— </span>
+                    <span id="tasa-display-vuelto-label" style="font-size: 0.7rem; color: #a0aec0; font-family: var(--font-family);">Usa tasa del día si vacío</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Input form card -->
+              <div style="background: white; border-radius: 8px; padding: 1.25rem; box-shadow: 0 2px 8px rgba(0,0,0,0.07); border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 1rem;">
+                <div style="font-size: 0.73rem; font-weight: 700; color: #718096; font-family: var(--font-family); letter-spacing: 0.06em; text-transform: uppercase;">Registrar / Actualizar Tasa</div>
+
+                <!-- Tasa del Día -->
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                  <label style="font-size: 0.85rem; font-weight: 600; color: #4a5568; font-family: var(--font-family); width: 155px; flex-shrink: 0;">Tasa del Día (Bs/$)</label>
+                  <div style="display: flex; align-items: center; flex-grow: 1; border: 1px solid #cbd5e0; border-radius: 6px; overflow: hidden; background: white;">
+                    <span style="background: #f0f9ff; padding: 0 0.65rem; height: 36px; display: flex; align-items: center; border-right: 1px solid #cbd5e0; font-size: 0.85rem; font-weight: 700; color: #1b8589; font-family: var(--font-family);">Bs</span>
+                    <input type="number" id="tasa-input-dia" placeholder="Ej: 40.50" step="0.01" min="0" style="border: none; outline: none; flex-grow: 1; height: 36px; padding: 0 0.75rem; font-size: 0.95rem; font-weight: 600; font-family: var(--font-family); color: #2d3748;">
+                    <span style="padding: 0 0.65rem; height: 36px; display: flex; align-items: center; font-size: 0.8rem; color: #718096; font-family: var(--font-family); border-left: 1px solid #e2e8f0;">/$</span>
+                  </div>
+                </div>
+                <div style="font-size: 0.73rem; color: #718096; font-family: var(--font-family); padding-left: 155px; margin-top: -0.6rem;">* Obligatorio. Tasa BCV o tasa preferencial del establecimiento.</div>
+
+                <!-- Tasa de Vuelto -->
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                  <label style="font-size: 0.85rem; font-weight: 600; color: #4a5568; font-family: var(--font-family); width: 155px; flex-shrink: 0;">Tasa de Vuelto (Bs/$)</label>
+                  <div style="display: flex; align-items: center; flex-grow: 1; border: 1px solid #cbd5e0; border-radius: 6px; overflow: hidden; background: white;">
+                    <span style="background: #f0f9ff; padding: 0 0.65rem; height: 36px; display: flex; align-items: center; border-right: 1px solid #cbd5e0; font-size: 0.85rem; font-weight: 700; color: #20589d; font-family: var(--font-family);">Bs</span>
+                    <input type="number" id="tasa-input-vuelto" placeholder="Opcional (usa tasa del día si vacío)" step="0.01" min="0" style="border: none; outline: none; flex-grow: 1; height: 36px; padding: 0 0.75rem; font-size: 0.95rem; font-weight: 600; font-family: var(--font-family); color: #2d3748;">
+                    <span style="padding: 0 0.65rem; height: 36px; display: flex; align-items: center; font-size: 0.8rem; color: #718096; font-family: var(--font-family); border-left: 1px solid #e2e8f0;">/$</span>
+                  </div>
+                </div>
+                <div style="font-size: 0.73rem; color: #718096; font-family: var(--font-family); padding-left: 155px; margin-top: -0.6rem;">* Opcional. Si se deja vacío se usará la Tasa del Día para calcular el vuelto.</div>
+
+                <!-- Buttons -->
+                <div style="display: flex; justify-content: flex-end; gap: 0.65rem; padding-top: 0.25rem;">
+                  <button id="tasa-clear-btn" type="button" style="background: #f1f5f9; color: #4a5568; border: 1px solid #cbd5e0; border-radius: 6px; padding: 0.5rem 1.25rem; font-size: 0.85rem; font-weight: 600; font-family: var(--font-family); cursor: pointer;">
+                    Limpiar
+                  </button>
+                  <button id="tasa-save-btn" type="button" style="background: linear-gradient(135deg, #116265, #1b8589); color: white; border: none; border-radius: 6px; padding: 0.5rem 1.5rem; font-size: 0.9rem; font-weight: 700; font-family: var(--font-family); cursor: pointer; display: flex; align-items: center; gap: 0.5rem; box-shadow: 0 2px 6px rgba(27,133,137,0.35);">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>
+                    Guardar Tasa
+                  </button>
+                </div>
+              </div>
+
+            </div><!-- /LEFT -->
+
+            <!-- RIGHT: History panel -->
+            <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden; background: white;">
+              <!-- History header -->
+              <div style="background: #f7fafc; border-bottom: 1px solid #e2e8f0; padding: 0.85rem 1.25rem; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;">
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="#718096"><path d="M13 3a9 9 0 1 0 .001 18.001A9 9 0 0 0 13 3zm0 16c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7zm.5-11H12v6l5.25 3.15.75-1.23-4.5-2.67V8z"/></svg>
+                  <span style="font-size: 0.78rem; font-weight: 700; color: #4a5568; font-family: var(--font-family); letter-spacing: 0.05em; text-transform: uppercase;">Historial de Tasas Registradas</span>
+                </div>
+                <span id="tasa-history-count" style="background: #e2e8f0; color: #4a5568; font-size: 0.72rem; font-weight: 700; font-family: var(--font-family); padding: 0.15rem 0.5rem; border-radius: 99px;">0 registros</span>
+              </div>
+              <!-- History table -->
+              <div style="flex: 1; overflow-y: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem; font-family: var(--font-family);">
+                  <thead style="position: sticky; top: 0; z-index: 1;">
+                    <tr style="background: #edf2f7;">
+                      <th style="text-align: left; padding: 0.45rem 0.85rem; color: #4a5568; font-weight: 700; white-space: nowrap; border-bottom: 2px solid #cbd5e0;">Fecha</th>
+                      <th style="text-align: left; padding: 0.45rem 0.6rem; color: #4a5568; font-weight: 700; white-space: nowrap; border-bottom: 2px solid #cbd5e0;">Hora</th>
+                      <th style="text-align: right; padding: 0.45rem 0.85rem; color: #1b8589; font-weight: 700; white-space: nowrap; border-bottom: 2px solid #cbd5e0;">Tasa Día</th>
+                      <th style="text-align: right; padding: 0.45rem 0.85rem; color: #20589d; font-weight: 700; white-space: nowrap; border-bottom: 2px solid #cbd5e0;">Tasa Vuelto</th>
+                      <th style="text-align: left; padding: 0.45rem 0.85rem; color: #4a5568; font-weight: 700; white-space: nowrap; border-bottom: 2px solid #cbd5e0;">Usuario</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tasa-history-tbody">
+                    <tr>
+                      <td colspan="5" style="text-align: center; color: #a0aec0; padding: 2rem; font-family: var(--font-family);">Sin historial registrado</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div><!-- /RIGHT -->
+
+          </div><!-- /two-column -->
+        </div>
+      </div>
+
+      <!-- TAB PANEL: CONFIG (Real implementation) -->
+      <div id="tab-config" class="tab-panel">
+        <div style="display: flex; flex-direction: column; height: 100%; width: 100%;">
+          
+          <!-- Sub-menu Navigation bar -->
+          <nav class="config-sub-tabs">
+            <div class="sub-tabs-left">
+              <button class="config-sub-tab-item active" data-subtab="general">General</button>
+              <button class="config-sub-tab-item" data-subtab="permisos">Permisos</button>
+              <button class="config-sub-tab-item" data-subtab="usuarios">Usuarios</button>
+              <button class="config-sub-tab-item" data-subtab="vendedores">Vendedores</button>
+            </div>
+            <div class="sub-tabs-right">
+              <span>Configuración del Sistema</span>
+            </div>
+          </nav>
+
+          <!-- Sub-panel: General -->
+          <div id="config-panel-general" class="config-sub-panel active-sub-panel" style="padding: 1rem; gap: 2rem; overflow-y: auto; flex-grow: 1;">
+             <!-- Left Column: Business Info -->
+             <div style="flex: 1; min-width: 300px; display: flex; flex-direction: column; gap: 0.75rem;">
+               <h4 style="margin: 0; font-size: 0.9rem; font-weight: 700; background-color: #26a69a; color: white; padding: 0.4rem 0.75rem; border-radius: 4px; font-family: var(--font-family);">Datos del Negocio <span style="font-size: 0.75rem; font-weight: 400; opacity: 0.9; margin-left: 0.5rem;">Personaliza el programa con los datos de tu negocio y logo</span></h4>
+               <div style="display: grid; grid-template-columns: 80px 1fr; gap: 0.75rem; align-items: center;">
+                 <label style="font-size: 0.85rem; font-weight: 600; color: #475569; font-family: var(--font-family);">Nombre:</label>
+                 <input type="text" id="config-biz-name" value="INVERSIONES NIQUITAO" style="height: 30px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0.4rem; font-size: 0.85rem; font-family: var(--font-family); outline: none;">
+                 
+                 <label style="font-size: 0.85rem; font-weight: 600; color: #475569; font-family: var(--font-family);">R.U.C:</label>
+                 <input type="text" id="config-biz-ruc" value="J-41132631" style="height: 30px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0.4rem; font-size: 0.85rem; font-family: var(--font-family); outline: none;">
+                 
+                 <label style="font-size: 0.85rem; font-weight: 600; color: #475569; font-family: var(--font-family);">Teléfono:</label>
+                 <input type="text" id="config-biz-phone" value="0424-2042877" style="height: 30px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0.4rem; font-size: 0.85rem; font-family: var(--font-family); outline: none;">
+                 
+                 <label style="font-size: 0.85rem; font-weight: 600; color: #475569; font-family: var(--font-family);">Email:</label>
+                 <input type="text" id="config-biz-email" value="inversiones.niquitao3000@gmail.com" style="height: 30px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0.4rem; font-size: 0.85rem; font-family: var(--font-family); outline: none;">
+                 
+                 <label style="font-size: 0.85rem; font-weight: 600; color: #475569; font-family: var(--font-family); align-self: start; margin-top: 0.25rem;">Dirección:</label>
+                 <textarea id="config-biz-address" style="height: 60px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0.4rem; font-size: 0.85rem; font-family: var(--font-family); outline: none; resize: none;">23 de Enero</textarea>
+               </div>
+               
+               <!-- Logo placeholder -->
+               <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem;">
+                 <div style="display: flex; align-items: center; gap: 0.75rem;">
+                   <span style="font-size: 0.85rem; font-weight: 600; color: #475569; font-family: var(--font-family);">Logo :</span>
+                   <button style="width: 24px; height: 24px; border: 1px solid #cbd5e0; border-radius: 50%; background-color: #f1f5f9; cursor: pointer; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1rem; outline: none;">+</button>
+                   <button style="width: 24px; height: 24px; border: 1px solid #cbd5e0; border-radius: 50%; background-color: #f1f5f9; cursor: pointer; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1rem; outline: none;">-</button>
+                 </div>
+                 <div style="width: 140px; height: 140px; border: 1px solid #cbd5e0; border-radius: 4px; overflow: hidden; background-color: #f8fafc; display: flex; align-items: center; justify-content: center; color: #94a3b8; font-size: 0.75rem; font-family: var(--font-family);">
+                   <span style="padding: 0.5rem; text-align: center;">* Se recomienda cuadrangular 200 x 200</span>
+                 </div>
+               </div>
+               
+               <button id="config-save-biz-btn" style="height: 32px; width: 100px; margin-top: 0.5rem; background-color: #26a69a; color: white; border: none; border-radius: 4px; font-weight: bold; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; gap: 0.25rem; cursor: pointer; transition: background-color 0.2s; font-family: var(--font-family); outline: none;">
+                 <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>
+                 Guardar
+               </button>
+             </div>
+
+             <!-- Right Column: System Options -->
+             <div style="flex: 1.5; min-width: 350px; display: flex; flex-direction: column; gap: 0.75rem;">
+               <h4 style="margin: 0; font-size: 0.9rem; font-weight: 700; background-color: #26a69a; color: white; padding: 0.4rem 0.75rem; border-radius: 4px; font-family: var(--font-family);">Opciones del Sistema</h4>
+               
+               <div style="display: flex; flex-direction: column; gap: 0.6rem; font-size: 0.85rem; color: #334155;">
+                 <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: 600; font-family: var(--font-family);">
+                   <input type="checkbox" checked style="transform: scale(1.1);"> Impresora Ticket :
+                   <select style="height: 28px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.25rem; font-size: 0.8rem; font-family: var(--font-family); outline: none;">
+                     <option>MF260 II Series</option>
+                   </select>
+                 </label>
+                 
+                 <label style="display: flex; align-items: center; gap: 0.5rem; color: #94a3b8; font-family: var(--font-family);">
+                   <input type="checkbox" disabled style="transform: scale(1.1);"> Impresora A4 :
+                   <select disabled style="height: 28px; border: 1px solid #e2e8f0; border-radius: 4px; padding: 0 0.25rem; font-size: 0.8rem; font-family: var(--font-family); outline: none;">
+                     <option>Seleccione impresora...</option>
+                   </select>
+                 </label>
+                 
+                 <div style="display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-family);">
+                   <span style="font-weight: 600;">Formato Cotización :</span>
+                   <select style="height: 28px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.25rem; font-size: 0.8rem; font-family: var(--font-family); outline: none; font-weight: bold; background-color: #f8fafc;">
+                     <option>IMPRIME EN TICKET</option>
+                   </select>
+                 </div>
+                 
+                 <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: 600; font-family: var(--font-family);">
+                   <input type="checkbox" checked style="transform: scale(1.1);"> Mostrar Logo en Ticket
+                 </label>
+                 
+                 <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: 600; font-family: var(--font-family);">
+                   <input type="checkbox" style="transform: scale(1.1);"> Permitir Ingresar Cantidad
+                 </label>
+                 
+                 <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: 600; font-family: var(--font-family);">
+                   <input type="checkbox" style="transform: scale(1.1);"> Báscula Config. COM
+                   <input type="number" value="1" style="width: 45px; height: 24px; text-align: center; border: 1px solid #cbd5e0; border-radius: 4px; font-family: var(--font-family);">
+                 </label>
+                 
+                 <div style="display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-family);">
+                   <span style="font-weight: 600;">Valor de Puntos :</span>
+                   <input type="number" step="0.01" value="0.00" style="width: 60px; height: 24px; text-align: center; border: 1px solid #cbd5e0; border-radius: 4px; font-family: var(--font-family);">
+                 </div>
+                 
+                 <div style="display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-family);">
+                   <span style="font-weight: 600;">Notas Ticket Caja :</span>
+                   <button style="width: 24px; height: 24px; border: none; border-radius: 4px; background-color: #26a69a; color: white; cursor: pointer; font-weight: bold; font-size: 1rem; display: inline-flex; align-items: center; justify-content: center; outline: none;">+</button>
+                   <span style="font-size: 0.75rem; color: #64748b;">Personalizar notas al ingresar en CAJA</span>
+                 </div>
+                 
+                 <div style="display: flex; flex-direction: column; gap: 0.25rem; font-family: var(--font-family);">
+                   <span style="font-weight: 600;">Texto Final Ticket :</span>
+                   <textarea style="height: 45px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0.4rem; font-size: 0.85rem; font-family: var(--font-family); outline: none; resize: none;">** Gracias por su Compra **</textarea>
+                 </div>
+                 
+                 <div style="display: grid; grid-template-columns: 120px 1fr; gap: 0.5rem; align-items: center; font-family: var(--font-family);">
+                   <span style="font-weight: 600;">Símbolo Moneda :</span>
+                   <input type="text" value="$" style="width: 60px; height: 24px; text-align: center; border: 1px solid #cbd5e0; border-radius: 4px; font-family: var(--font-family);">
+                   
+                   <span style="font-weight: 600;">Nombre Moneda :</span>
+                   <input type="text" value="DOLARES" style="width: 150px; height: 24px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.85rem; font-family: var(--font-family); outline: none;">
+                 </div>
+               </div>
+               
+               <button style="height: 32px; width: 100px; margin-top: 0.5rem; background-color: #26a69a; color: white; border: none; border-radius: 4px; font-weight: bold; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; gap: 0.25rem; cursor: pointer; transition: background-color 0.2s; font-family: var(--font-family); outline: none;">
+                 <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>
+                 Guardar
+               </button>
+             </div>
+          </div>
+
+          <!-- Sub-panel: Permisos -->
+          <div id="config-panel-permisos" class="config-sub-panel" style="padding: 1rem; gap: 1.5rem; overflow-y: auto; flex-grow: 1; height: 100%;">
+             <!-- Left Column: Access Level selection -->
+             <div style="width: 160px; border-right: 1px solid #e2e8f0; padding-right: 1rem; display: flex; flex-direction: column; gap: 0.25rem; flex-shrink: 0;">
+               <div style="font-size: 0.75rem; font-weight: 700; background-color: #26a69a; color: white; padding: 0.25rem 0.5rem; border-radius: 2px; text-align: center; font-family: var(--font-family);">NIVEL</div>
+               <button class="config-level-item active" style="text-align: left; background-color: #26a69a; color: white; border: none; padding: 0.4rem 0.5rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600; cursor: pointer; font-family: var(--font-family); outline: none;">ADMINISTRADOR</button>
+               <button class="config-level-item" style="text-align: left; background-color: transparent; color: #475569; border: none; padding: 0.4rem 0.5rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600; cursor: pointer; font-family: var(--font-family); outline: none;">VENDEDOR</button>
+             </div>
+             
+             <!-- Right Column: Checkbox columns -->
+             <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 1rem;">
+               <div style="display: flex; gap: 0.5rem; align-items: center; font-family: var(--font-family);">
+                 <span style="font-size: 0.85rem; font-weight: 600; color: #475569;">Nivel Acceso :</span>
+                 <input type="text" value="ADMINISTRADOR" style="height: 28px; width: 180px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.85rem; font-family: var(--font-family); outline: none;">
+               </div>
+               
+               <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; font-size: 0.8rem; color: #334155; font-family: var(--font-family);">
+                 <!-- CAJA -->
+                 <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+                   <label style="font-weight: 700; display: flex; align-items: center; gap: 0.4rem; border-bottom: 2px solid #cbd5e0; padding-bottom: 0.25rem; margin-bottom: 0.25rem;"><input type="checkbox" checked style="transform: scale(1.05);"> CAJA</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Entrada Efectivo</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Salida Efectivo</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Devoluciones</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Producto Temporal</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Abonos Clientes</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Cierre de Caja</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Descuentos</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Precios 1, 2, 3</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Cobrar con Tarjeta</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Cobrar a Credito</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Cobrar con Puntos</label>
+                 </div>
+                 <!-- INVENTARIO -->
+                 <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+                   <label style="font-weight: 700; display: flex; align-items: center; gap: 0.4rem; border-bottom: 2px solid #cbd5e0; padding-bottom: 0.25rem; margin-bottom: 0.25rem;"><input type="checkbox" checked style="transform: scale(1.05);"> INVENTARIO</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Catálogo</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Movimientos Inventario</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Inventario Minimo</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Inventario Maximo</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Kardex</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Inventario Caducidad</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Estadísticas</label>
+                 </div>
+                 <!-- VENTAS -->
+                 <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+                   <label style="font-weight: 700; display: flex; align-items: center; gap: 0.4rem; border-bottom: 2px solid #cbd5e0; padding-bottom: 0.25rem; margin-bottom: 0.25rem;"><input type="checkbox" checked style="transform: scale(1.05);"> VENTAS</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Transacciones</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Histórico</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Utilidad</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Utilidad Periodo Producto</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Cierre de Caja</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Tickets</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Dashboard</label>
+                 </div>
+                 <!-- CLIENTES -->
+                 <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+                   <label style="font-weight: 700; display: flex; align-items: center; gap: 0.4rem; border-bottom: 2px solid #cbd5e0; padding-bottom: 0.25rem; margin-bottom: 0.25rem;"><input type="checkbox" checked style="transform: scale(1.05);"> CLIENTES</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Catálogo</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Historial Detalle</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Movimientos por Ranking</label>
+                   <label style="display: flex; align-items: center; gap: 0.4rem;"><input type="checkbox" checked> Creditos / Abonos</label>
+                 </div>
+               </div>
+
+               <!-- Bottom Action buttons -->
+               <div style="display: flex; gap: 0.5rem; margin-top: 1rem; font-family: var(--font-family);">
+                 <button style="height: 32px; padding: 0 0.75rem; border: none; border-radius: 4px; background-color: #26a69a; color: white; font-weight: bold; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 0.25rem; outline: none;">
+                   Nuevo
+                 </button>
+                 <button style="height: 32px; padding: 0 0.75rem; border: none; border-radius: 4px; background-color: #26a69a; color: white; font-weight: bold; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 0.25rem; outline: none;">
+                   Modificar
+                 </button>
+                 <button style="height: 32px; padding: 0 0.75rem; border: none; border-radius: 4px; background-color: #26a69a; color: white; font-weight: bold; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 0.25rem; outline: none;">
+                   Eliminar
+                 </button>
+                 <button style="height: 32px; padding: 0 0.75rem; border: none; border-radius: 4px; background-color: #26a69a; color: white; font-weight: bold; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 0.25rem; outline: none;">
+                   Guardar
+                 </button>
+               </div>
+             </div>
+          </div>
+
+          <!-- Sub-panel: Usuarios -->
+          <div id="config-panel-usuarios" class="config-sub-panel" style="padding: 1rem; gap: 1.5rem; overflow: hidden; flex-grow: 1; height: 100%;">
+             <!-- Left Column: Search & Users list -->
+             <div style="width: 330px; display: flex; flex-direction: column; gap: 0.5rem; border-right: 1px solid #cbd5e0; padding-right: 1rem; height: 100%; flex-shrink: 0;">
+               <!-- User Search -->
+               <div style="display: flex; gap: 0.5rem; align-items: center; font-family: var(--font-family);">
+                 <label style="font-size: 0.8rem; font-weight: 600; color: #475569; white-space: nowrap;">Buscar Usuario :</label>
+                 <div style="position: relative; flex-grow: 1;">
+                   <input type="text" id="config-user-search" placeholder="Buscar..." style="width: 100%; height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 1.5rem 0 0.4rem; font-size: 0.8rem; outline: none; font-family: var(--font-family);">
+                   <svg viewBox="0 0 24 24" width="14" height="14" fill="#64748b" style="position: absolute; right: 6px; top: 6px;"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                 </div>
+               </div>
+
+               <!-- Users Table container -->
+               <div style="flex-grow: 1; border: 1px solid #cbd5e0; border-radius: 4px; overflow-y: auto; background-color: white;">
+                 <table class="search-modal-table" style="width: 100%; font-size: 0.75rem; border-collapse: collapse;">
+                   <thead>
+                     <tr style="position: sticky; top: 0; background-color: #26a69a; color: white;">
+                       <th style="width: 30%; text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">USUARIO</th>
+                       <th style="width: 40%; text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">DESCRIPCION</th>
+                       <th style="width: 30%; text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">NIVEL</th>
+                     </tr>
+                   </thead>
+                   <tbody id="config-users-table-body">
+                     <!-- Dynamic users from systemUsers -->
+                   </tbody>
+                 </table>
+               </div>
+             </div>
+
+             <!-- Right Column: User details form -->
+             <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 0.75rem; height: 100%; overflow-y: auto;">
+               <div style="display: grid; grid-template-columns: 120px 220px; gap: 0.75rem; align-items: center; font-size: 0.85rem; color: #334155; font-family: var(--font-family);">
+                 <label style="font-weight: 600; color: #475569;">Usuario :</label>
+                 <input type="text" id="config-user-key" style="height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.85rem; outline: none; font-family: var(--font-family);">
+                 
+                 <label style="font-weight: 600; color: #475569;">Nombres :</label>
+                 <input type="text" id="config-user-names" style="height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.85rem; outline: none; font-family: var(--font-family);">
+                 
+                 <label style="font-weight: 600; color: #475569;">Clave :</label>
+                 <input type="password" id="config-user-pass" style="height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.85rem; outline: none; font-family: var(--font-family);">
+                 
+                 <label style="font-weight: 600; color: #475569;">Confirmar Clave :</label>
+                 <input type="password" id="config-user-confirm" style="height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.85rem; outline: none; font-family: var(--font-family);">
+                 
+                 <label style="font-weight: 600; color: #475569;">Nivel :</label>
+                 <select id="config-user-level" style="height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.25rem; font-size: 0.85rem; outline: none; font-family: var(--font-family);">
+                   <option value="ADMINISTRADOR">ADMINISTRADOR</option>
+                   <option value="VENDEDOR">VENDEDOR</option>
+                 </select>
+                 
+                 <label style="font-weight: 600; color: #475569;">Teléfono :</label>
+                 <input type="text" id="config-user-phone" style="height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.85rem; outline: none; font-family: var(--font-family);">
+                 
+                 <label style="font-weight: 600; color: #475569;">Email :</label>
+                 <input type="text" id="config-user-email" style="height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.85rem; outline: none; font-family: var(--font-family);">
+                 
+                 <label style="font-weight: 600; color: #475569;">Activo :</label>
+                 <label style="display: flex; align-items: center; gap: 0.4rem; font-weight: 600;"><input type="checkbox" id="config-user-active" checked> Si</label>
+               </div>
+
+               <!-- Bottom Action buttons -->
+               <div style="display: flex; gap: 0.5rem; margin-top: 1rem; font-family: var(--font-family);">
+                 <button id="config-user-btn-new" style="height: 32px; padding: 0 0.75rem; border: none; border-radius: 4px; background-color: #26a69a; color: white; font-weight: bold; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 0.25rem; outline: none;">
+                   <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                   Nuevo
+                 </button>
+                 <button id="config-user-btn-modify" style="height: 32px; padding: 0 0.75rem; border: none; border-radius: 4px; background-color: #26a69a; color: white; font-weight: bold; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 0.25rem; outline: none;">
+                   <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 8l-4 4h3c0 3.31-2.69 6-6 6-1.01 0-1.97-.25-2.8-.7l-1.46 1.46C8.97 19.54 10.43 20 12 20c4.42 0 8-3.58 8-8h3l-4-4zM6 12c0-3.31 2.69-6 6-6 1.01 0 1.97.25 2.8.7l1.46-1.46C15.03 4.46 13.57 4 12 4c-4.42 0-8 3.58-8 8H1l4 4 4-4H6z"/></svg>
+                   Modificar
+                 </button>
+                 <button id="config-user-btn-delete" style="height: 32px; padding: 0 0.75rem; border: none; border-radius: 4px; background-color: #26a69a; color: white; font-weight: bold; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 0.25rem; outline: none;">
+                   <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11H7v-2h10v2z"/></svg>
+                   Eliminar
+                 </button>
+                 <button id="config-user-btn-save" style="height: 32px; padding: 0 0.75rem; border: none; border-radius: 4px; background-color: #26a69a; color: white; font-weight: bold; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 0.25rem; outline: none;">
+                   <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>
+                   Guardar
+                 </button>
+               </div>
+             </div>
+          </div>
+
+          <!-- Sub-panel: Vendedores -->
+          <div id="config-panel-vendedores" class="config-sub-panel" style="padding: 1rem; overflow-y: auto; flex-grow: 1; height: 100%;">
+             <div class="tab-placeholder-card">
+               <svg viewBox="0 0 24 24" width="50" height="50" fill="#20589d"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+               <h3>Registro de Vendedores</h3>
+               <p>Módulo de registro y personalización de vendedores y comisiones (Simulado).</p>
+             </div>
+          </div>
+
+        </div>
+      </div>
+
+    </main>
+
+    <!-- Bottom Status bar -->
+    <footer class="dashboard-footer">
+      <div class="footer-left">
+        <span>Punto de Venta Activo | Versión 3.7</span>
+      </div>
+      <div class="footer-center">
+        <span id="header-rate-display">Tasa del día: 1.00 USD = 36.45 Bs (Simulado)</span>
+      </div>
+      <div class="footer-right">
+        <span id="footer-time-display">viernes, 10 de julio de 2026 - 08:50:31 p.m.</span>
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-left: 0.5rem;"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2zm-2 1H8v-6c0-2.48 1.51-4.5 4-4.5s4 2.02 4 4.5v6z"/></svg>
+      </div>
+    </footer>
+  </div>
+
+
+  <!-- MODAL: APERTURA DE CAJA (Initially Visible overlay when dashboard loads) -->
+  <div class="modal-overlay" id="apertura-modal" style="display: none;">
+    <div class="modal-container">
+      
+      <!-- Modal Title bar -->
+      <header class="modal-header">
+        <button class="modal-back-btn" id="apertura-cancel-arrow" title="Regresar al login">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+        </button>
+        <h3>Apertura Caja</h3>
+      </header>
+
+      <!-- Modal Body Form -->
+      <form class="modal-body-form" id="apertura-form">
+        <!-- Notification inside modal if fields error -->
+        <div id="apertura-error-box" class="apertura-error-alert" style="display: none;">
+          <span>Por favor ingrese un monto inicial válido (puede ser 0 o superior).</span>
+        </div>
+
+        <div class="modal-form-group">
+          <label for="apertura-cajero">Usuario / Cajero :</label>
+          <input type="text" id="apertura-cajero" value="ANDERSON - Anderson Laguna" disabled>
+        </div>
+
+        <div class="modal-form-group">
+          <label for="apertura-monto-usd">Monto Inicial en Dólares ($ USD) :</label>
+          <div class="modal-input-wrapper">
+            <span class="currency-symbol">$</span>
+            <input type="number" id="apertura-monto-usd" placeholder="0.00" min="0" step="0.01" required>
+          </div>
+        </div>
+
+        <div class="modal-form-group">
+          <label for="apertura-monto-ves">Monto Inicial en Bolívares (Bs VES) :</label>
+          <div class="modal-input-wrapper">
+            <span class="currency-symbol">Bs</span>
+            <input type="number" id="apertura-monto-ves" placeholder="0.00" min="0" step="0.01" required>
+          </div>
+        </div>
+
+        <!-- Confirm Accept button -->
+        <div class="modal-actions-row">
+          <button type="submit" class="modal-accept-btn" id="apertura-accept-btn">
+            <span>Aceptar</span>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+          </button>
+        </div>
+      </form>
+
+    </div>
+  </div>
+
+  <!-- SEARCH PRODUCT MODAL -->
+  <div id="search-product-modal" class="modal-overlay" style="display: none;">
+    <div class="search-modal-content">
+      <div class="search-modal-header">
+        <button id="close-search-modal-btn" class="back-circle-btn" title="Regresar/Cerrar">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+          </svg>
+        </button>
+        <span style="font-size: 1.1rem; font-weight: 700; font-family: var(--font-family); margin-left: 0.5rem;">Buscar Productos</span>
+      </div>
+      
+      <div class="search-modal-body">
+        <div class="search-modal-table-container">
+          <table class="search-modal-table">
+            <thead>
+              <tr>
+                <th style="width: 20%">CLAVE</th>
+                <th style="width: 50%">DESCRIPCIÓN</th>
+                <th style="width: 10%; text-align: center;">U. M.</th>
+                <th style="width: 10%; text-align: right;">PRECIO</th>
+                <th style="width: 10%; text-align: center;">EXISTEN</th>
+              </tr>
+            </thead>
+            <tbody id="search-modal-table-body">
+              <!-- Dynamic items loaded from inventoryCatalog -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="search-modal-footer">
+        <div class="modal-search-row">
+          <div class="modal-search-input-wrapper">
+            <input type="text" id="modal-search-input" list="inventory-suggestions" placeholder="Buscar...">
+            <button id="modal-search-btn" class="modal-search-action-btn">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+              </svg>
+            </button>
+            <button id="modal-search-list-btn" class="modal-search-action-btn" onclick="alert('Modo lista de búsqueda de productos activado (simulado)')">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                <path d="M4 14h4v-4H4v4zm0 5h4v-4H4v4zM4 9h4V5H4v4zm5 5h12v-4H9v4zm0 5h12v-4H9v4zM9 5v4h12V5H9z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SEARCH CLIENT MODAL -->
+  <div id="search-client-modal" class="modal-overlay" style="display: none;">
+    <div class="search-modal-content" style="max-width: 650px;">
+      <div class="search-modal-header" style="background-color: #0b5fa5; color: white;">
+        <button id="close-search-client-modal-btn" class="back-circle-btn" title="Regresar/Cerrar" style="color: white; border-color: rgba(255,255,255,0.3);">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+          </svg>
+        </button>
+        <span style="font-size: 1.1rem; font-weight: 700; font-family: var(--font-family); margin-left: 0.5rem;">Buscar Cliente</span>
+      </div>
+      
+      <div class="search-modal-body">
+        <div class="search-modal-table-container" style="height: 300px; overflow-y: auto;">
+          <table class="search-modal-table">
+            <thead>
+              <tr style="position: sticky; top: 0; background-color: #cbd5e1; color: #334155;">
+                <th style="width: 50%; text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">CLIENTE</th>
+                <th style="width: 20%; text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">RFC / CÉDULA</th>
+                <th style="width: 15%; text-align: left; padding: 0.35rem 0.5rem; font-family: var(--font-family);">TELÉFONO</th>
+                <th style="width: 15%; text-align: right; padding: 0.35rem 0.5rem; font-family: var(--font-family);">PENDIENTE</th>
+              </tr>
+            </thead>
+            <tbody id="search-client-modal-table-body">
+              <!-- Dynamic clients list -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="search-modal-footer">
+        <div class="modal-search-row">
+          <div class="modal-search-input-wrapper">
+            <input type="text" id="modal-client-search-input" placeholder="Buscar por nombre o RFC...">
+            <button id="modal-client-search-btn" class="modal-search-action-btn" style="background-color: #0b5fa5; color: white;">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PRODUCT ADD/MODIFY MODAL -->
+  <div id="product-modal" class="modal-overlay" style="display: none; z-index: 350;">
+    <div class="product-modal-content" style="max-width: 650px; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.25); display: flex; flex-direction: column; font-family: var(--font-family);">
+      <!-- Modal Header -->
+      <div class="product-modal-header" style="background-color: #20589d; color: white; display: flex; align-items: center; padding: 0.5rem 1rem; gap: 0.5rem;">
+        <button id="close-product-modal-btn" class="back-circle-btn" type="button" title="Regresar/Cerrar" style="color: white; border-color: rgba(255,255,255,0.3); background: none; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; cursor: pointer;">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+          </svg>
+        </button>
+        <span id="product-modal-title" style="font-size: 1.25rem; font-weight: 600;">Agregar Producto</span>
+      </div>
+
+      <!-- Modal Body Form -->
+      <form id="product-modal-form" style="padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem; background: white;">
+        
+        <!-- Header inputs row -->
+        <div style="display: flex; gap: 1rem; align-items: center;">
+          <div style="flex-grow: 1; display: flex; align-items: center; gap: 0.5rem;">
+            <label style="font-size: 0.85rem; font-weight: 600; color: #475569; width: 85px;">Clave</label>
+            <input type="text" id="prod-form-code" placeholder="Ingrese clave..." style="flex-grow: 1; height: 28px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.5rem; font-size: 0.85rem; outline: none; font-family: var(--font-family);" required>
+          </div>
+          <!-- Product/Service selector -->
+          <div style="display: flex; gap: 1rem; font-size: 0.85rem; font-weight: 600; padding: 0 0.5rem;">
+            <span id="prod-type-product" style="cursor: pointer; border-bottom: 2px solid #20589d; color: #20589d; padding-bottom: 2px;">Producto</span>
+            <span id="prod-type-service" style="cursor: pointer; color: #718096; padding-bottom: 2px;">Servicio</span>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <label style="font-size: 0.85rem; font-weight: 600; color: #475569; width: 85px;">Descripción</label>
+          <input type="text" id="prod-form-name" placeholder="Ingrese descripción..." style="flex-grow: 1; height: 28px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.5rem; font-size: 0.85rem; outline: none; font-family: var(--font-family);" required>
+        </div>
+
+        <!-- Submenus Navigation Tabs -->
+        <div style="display: flex; border-bottom: 1px solid #e2e8f0; font-size: 0.82rem; font-weight: 700; background-color: #f8fafc; border-top: 1px solid #e2e8f0; margin-top: 0.25rem;">
+          <div class="prod-modal-tab active" data-tab="general" style="padding: 0.5rem 1rem; cursor: pointer; border-bottom: 2px solid #20589d; color: #20589d; border-right: 1px solid #e2e8f0;">General</div>
+          <div class="prod-modal-tab" data-tab="precios" style="padding: 0.5rem 1rem; cursor: pointer; color: #4a5568; border-right: 1px solid #e2e8f0;">Precios</div>
+          <div class="prod-modal-tab" data-tab="existencias" style="padding: 0.5rem 1rem; cursor: pointer; color: #4a5568; border-right: 1px solid #e2e8f0;">Existencias</div>
+          <div class="prod-modal-tab" data-tab="imagen" style="padding: 0.5rem 1rem; cursor: pointer; color: #4a5568; border-right: 1px solid #e2e8f0;">Imagen</div>
+          <div class="prod-modal-tab" data-tab="codbarra" style="padding: 0.5rem 1rem; cursor: pointer; color: #4a5568;">Cod Barra</div>
+        </div>
+
+        <!-- Tab Panels Container -->
+        <div style="min-height: 280px; position: relative;">
+          
+          <!-- PANEL 1: GENERAL -->
+          <div class="prod-modal-panel" id="prod-panel-general" style="display: flex; gap: 1.5rem; padding-top: 0.5rem;">
+            <!-- Left inputs side -->
+            <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 0.5rem;">
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <label style="font-size: 0.8rem; font-weight: 600; color: #4a5568; width: 100px;">Categoría</label>
+                <div style="display: flex; flex-grow: 1; border: 1px solid #cbd5e0; border-radius: 4px; overflow: hidden; height: 26px; align-items: center; background: white;">
+                  <input type="text" id="prod-form-category" value="ALIMENTOS" style="flex-grow: 1; border: none; outline: none; padding: 0 0.4rem; font-size: 0.8rem; font-family: var(--font-family);">
+                  <button type="button" style="border: none; background: #e2e8f0; width: 26px; height: 26px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #4a5568;" onclick="alert('Buscador de categorías (simulado)')">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                  </button>
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <label style="font-size: 0.8rem; font-weight: 600; color: #4a5568; width: 100px;">Departamento</label>
+                <div style="display: flex; flex-grow: 1; border: 1px solid #cbd5e0; border-radius: 4px; overflow: hidden; height: 26px; align-items: center; background: white;">
+                  <input type="text" id="prod-form-dept" value="LADO A" style="flex-grow: 1; border: none; outline: none; padding: 0 0.4rem; font-size: 0.8rem; font-family: var(--font-family);">
+                  <button type="button" style="border: none; background: #e2e8f0; width: 26px; height: 26px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #4a5568;" onclick="alert('Buscador de departamentos (simulado)')">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                  </button>
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <label style="font-size: 0.8rem; font-weight: 600; color: #4a5568; width: 100px;">Proveedor</label>
+                <div style="display: flex; flex-grow: 1; border: 1px solid #cbd5e0; border-radius: 4px; overflow: hidden; height: 26px; align-items: center; background: white;">
+                  <input type="text" id="prod-form-provider" value="DISTRIBUIDORA ALIMENTOS" style="flex-grow: 1; border: none; outline: none; padding: 0 0.4rem; font-size: 0.8rem; font-family: var(--font-family);">
+                  <button type="button" style="border: none; background: #e2e8f0; width: 26px; height: 26px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #4a5568;" onclick="alert('Buscador de proveedores (simulado)')">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                  </button>
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <label style="font-size: 0.8rem; font-weight: 600; color: #4a5568; width: 100px;">Cod Proveedor</label>
+                <input type="text" id="prod-form-provider-code" placeholder="Código prov..." style="flex-grow: 1; height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem; outline: none; font-family: var(--font-family);">
+              </div>
+              <div style="display: flex; gap: 0.5rem; align-items: flex-start;">
+                <label style="font-size: 0.8rem; font-weight: 600; color: #4a5568; width: 100px; padding-top: 0.2rem;">Referencia</label>
+                <textarea id="prod-form-ref" placeholder="Notas/Referencia..." style="flex-grow: 1; height: 60px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0.3rem 0.4rem; font-size: 0.8rem; outline: none; font-family: var(--font-family); resize: none;"></textarea>
+              </div>
+            </div>
+            <!-- Right toggles side -->
+            <div style="width: 170px; flex-shrink: 0; display: flex; flex-direction: column; gap: 0.75rem; font-size: 0.82rem; font-weight: 600; color: #4a5568; padding-top: 0.25rem;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span>A Granel</span>
+                <span id="toggle-granel" style="cursor: pointer; text-decoration: underline; text-decoration-color: #ff4d4f; text-decoration-thickness: 2px; font-weight: 700; color: #e53e3e;">No</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span>Bloqueo</span>
+                <span id="toggle-bloqueo" style="cursor: pointer; text-decoration: underline; text-decoration-color: #ff4d4f; text-decoration-thickness: 2px; font-weight: 700; color: #e53e3e;">No</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span>Vencimiento</span>
+                <span id="toggle-vencimiento" style="cursor: pointer; text-decoration: underline; text-decoration-color: #ff4d4f; text-decoration-thickness: 2px; font-weight: 700; color: #e53e3e;">No</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span>2 x 1</span>
+                <span id="toggle-2x1" style="cursor: pointer; text-decoration: underline; text-decoration-color: #ff4d4f; text-decoration-thickness: 2px; font-weight: 700; color: #e53e3e;">No</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span>Activo</span>
+                <span id="toggle-activo" style="cursor: pointer; text-decoration: underline; text-decoration-color: #20589d; text-decoration-thickness: 2px; font-weight: 700; color: #20589d;">Si</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- PANEL 2: PRECIOS -->
+          <div class="prod-modal-panel" id="prod-panel-precios" style="display: none; flex-direction: column; gap: 0.5rem; padding-top: 0.5rem;">
+            <!-- Row 1: Impuesto -->
+            <div style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; font-weight: 600; color: #4a5568;">
+              <span style="width: 100px;">Impuesto</span>
+              <label style="display: flex; align-items: center; gap: 0.2rem; cursor: pointer;">
+                <input type="checkbox" id="prod-form-tax-chk" checked style="transform: scale(1.1); cursor: pointer;">
+                Si
+              </label>
+              <input type="text" id="prod-form-tax-name" value="IVA" style="width: 100px; height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem; outline: none; font-family: var(--font-family);">
+              <span>%</span>
+              <input type="number" id="prod-form-tax-pct" value="16" style="width: 60px; height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem; outline: none; text-align: center; font-family: var(--font-family);">
+              <button type="button" style="border: none; background: #e2e8f0; width: 26px; height: 26px; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 4px;" onclick="alert('Buscador de impuestos (simulado)')">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+              </button>
+            </div>
+            <!-- Row 2: Costo y Unidad -->
+            <div style="display: flex; align-items: center; gap: 1.5rem; font-size: 0.8rem; font-weight: 600; color: #4a5568;">
+              <div style="display: flex; align-items: center; gap: 0.5rem; flex-grow: 1;">
+                <label style="width: 100px;">Costo Compra</label>
+                <input type="number" id="prod-form-cost" value="0.00" step="0.01" style="width: 120px; height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem; outline: none; font-family: var(--font-family);">
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <label>Unidad Compra</label>
+                <select id="prod-form-unit" style="height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.25rem; font-size: 0.8rem; font-family: var(--font-family); font-weight: 600; background-color: white;">
+                  <option value="UND">UND</option>
+                  <option value="LTR">LTR</option>
+                  <option value="PZA">PZA</option>
+                  <option value="KGS">KGS</option>
+                </select>
+                <button type="button" style="border: none; background: #20589d; color: white; width: 26px; height: 26px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-weight: bold;" onclick="alert('Configurar unidades (simulado)')">+</button>
+              </div>
+            </div>
+            <!-- Row 3: Precio 1 -->
+            <div style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; font-weight: 600; color: #4a5568;">
+              <label style="width: 100px;">Precio 1</label>
+              <input type="number" id="prod-form-price1" value="0.00" step="0.01" style="width: 120px; height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem; outline: none; font-family: var(--font-family);">
+            </div>
+            <!-- Row 4: Precio 2 -->
+            <div style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; font-weight: 600; color: #4a5568;">
+              <label style="width: 100px;">Precio 2</label>
+              <input type="number" id="prod-form-price2" value="0.00" step="0.01" style="width: 120px; height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem; outline: none; font-family: var(--font-family);">
+            </div>
+            <!-- Row 5: Precio 3 -->
+            <div style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; font-weight: 600; color: #4a5568;">
+              <label style="width: 100px;">Precio 3</label>
+              <input type="number" id="prod-form-price3" value="0.00" step="0.01" style="width: 120px; height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem; outline: none; font-family: var(--font-family);">
+            </div>
+            <!-- Row 6: Precio Medio Mayoreo y Cantidad -->
+            <div style="display: flex; align-items: center; gap: 1.5rem; font-size: 0.8rem; font-weight: 600; color: #4a5568;">
+              <div style="display: flex; align-items: center; gap: 0.5rem; flex-grow: 1;">
+                <label style="width: 100px;">P. Med. Mayoreo</label>
+                <input type="number" id="prod-form-price-med" value="0.00" step="0.01" style="width: 120px; height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem; outline: none; font-family: var(--font-family);">
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <label>Cant. Med Mayoreo</label>
+                <input type="number" id="prod-form-qty-med" value="0" style="width: 80px; height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem; outline: none; text-align: center; font-family: var(--font-family);">
+              </div>
+            </div>
+            <!-- Row 7: Precio Mayoreo y Cantidad -->
+            <div style="display: flex; align-items: center; gap: 1.5rem; font-size: 0.8rem; font-weight: 600; color: #4a5568;">
+              <div style="display: flex; align-items: center; gap: 0.5rem; flex-grow: 1;">
+                <label style="width: 100px;">P. Mayoreo</label>
+                <input type="number" id="prod-form-price-may" value="0.00" step="0.01" style="width: 120px; height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem; outline: none; font-family: var(--font-family);">
+              </div>
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <label>Cant. Mayoreo</label>
+                <input type="number" id="prod-form-qty-may" value="0" style="width: 80px; height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem; outline: none; text-align: center; font-family: var(--font-family);">
+              </div>
+            </div>
+          </div>
+
+          <!-- PANEL 3: EXISTENCIAS -->
+          <div class="prod-modal-panel" id="prod-panel-existencias" style="display: none; flex-direction: column; gap: 0.5rem; padding-top: 0.5rem;">
+            <!-- Min/Max rows -->
+            <div style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; font-weight: 600; color: #4a5568;">
+              <label style="width: 120px;">Existencia Mínima</label>
+              <input type="number" id="prod-form-min-stock" value="0" style="width: 90px; height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem; outline: none; text-align: center; font-family: var(--font-family);">
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; font-weight: 600; color: #4a5568;">
+              <label style="width: 120px;">Existencia Máxima</label>
+              <input type="number" id="prod-form-max-stock" value="0" style="width: 90px; height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem; outline: none; text-align: center; font-family: var(--font-family);">
+            </div>
+            <!-- Warehouse Table -->
+            <div style="flex-grow: 1; border: 1px solid #cbd5e0; border-radius: 4px; margin-top: 0.25rem; overflow-y: auto; max-height: 120px; background-color: white;">
+              <table class="search-modal-table" style="width: 100%; font-size: 0.75rem; border-collapse: collapse;">
+                <thead>
+                  <tr style="background-color: #20589d; color: white;">
+                    <th style="text-align: left; padding: 0.25rem 0.5rem; font-family: var(--font-family);">ALMACEN / GIRO</th>
+                    <th style="text-align: left; padding: 0.25rem 0.5rem; font-family: var(--font-family);">REPRESENTANTE</th>
+                    <th style="text-align: right; padding: 0.25rem 0.5rem; font-family: var(--font-family);">EXISTENCIA</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style="background-color: #e6f7ff; font-weight: bold; border-bottom: 1px solid #cbd5e0;">
+                    <td style="padding: 0.25rem 0.5rem; text-align: left;">ALMACEN 1</td>
+                    <td style="padding: 0.25rem 0.5rem; text-align: left;">DAVID</td>
+                    <td style="padding: 0.25rem 0.5rem; text-align: right;" id="prod-form-exist-cell">0.00</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <!-- Table actions -->
+            <div style="display: flex; gap: 0.5rem; margin-top: 0.25rem;">
+              <button type="button" style="border: none; background: #20589d; color: white; width: 24px; height: 24px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-weight: bold;" onclick="const val = parseFloat(prompt('Agregar existencias a Almacén 1:', '0')) || 0; const input = document.getElementById('prod-form-stock'); input.value = parseFloat(input.value || 0) + val; document.getElementById('prod-form-exist-cell').textContent = parseFloat(input.value).toFixed(2);">+</button>
+              <button type="button" style="border: none; background: #20589d; color: white; width: 24px; height: 24px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-weight: bold;" onclick="const val = parseFloat(prompt('Restar existencias a Almacén 1:', '0')) || 0; const input = document.getElementById('prod-form-stock'); input.value = Math.max(0, parseFloat(input.value || 0) - val); document.getElementById('prod-form-exist-cell').textContent = parseFloat(input.value).toFixed(2);">-</button>
+              <!-- Hidden input to store stock value -->
+              <input type="hidden" id="prod-form-stock" value="0">
+            </div>
+          </div>
+
+          <!-- PANEL 4: IMAGEN -->
+          <div class="prod-modal-panel" id="prod-panel-imagen" style="display: none; padding-top: 0.5rem; gap: 1.5rem;">
+            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+              <button type="button" style="border: none; background: #20589d; color: white; width: 26px; height: 26px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-weight: bold;" onclick="alert('Seleccionar imagen (simulado)')">+</button>
+              <button type="button" style="border: none; background: #20589d; color: white; width: 26px; height: 26px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-weight: bold;" onclick="alert('Eliminar imagen (simulado)')">-</button>
+            </div>
+            <div style="flex-grow: 1; display: flex; align-items: center; justify-content: center;">
+              <!-- Circle camera placeholder icon -->
+              <div style="border: 2px dashed #cbd5e0; border-radius: 50%; width: 140px; height: 140px; display: flex; align-items: center; justify-content: center;">
+                <svg viewBox="0 0 24 24" width="50" height="50" fill="#a0aec0"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+              </div>
+            </div>
+          </div>
+
+          <!-- PANEL 5: COD BARRA -->
+          <div class="prod-modal-panel" id="prod-panel-codbarra" style="display: none; flex-direction: column; gap: 0.5rem; padding-top: 0.5rem;">
+            <!-- Copies input row -->
+            <div style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; font-weight: 600; color: #4a5568;">
+              <input type="number" id="prod-form-barcode-copies" value="8" style="width: 50px; height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; text-align: center; outline: none; font-family: var(--font-family);">
+              <span>* Cantidad de copias</span>
+            </div>
+            
+            <div style="display: flex; gap: 1.5rem; align-items: center; flex-grow: 1; margin-top: 0.5rem; background-color: #f8fafc; padding: 0.75rem; border-radius: 6px; border: 1px solid #e2e8f0; min-height: 180px;">
+              <!-- Sidebar actions -->
+              <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                <!-- Save barcode icon button -->
+                <button type="button" id="prod-barcode-download-btn" title="Descargar código de barra" style="border: none; background: #20589d; color: white; width: 32px; height: 32px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
+                </button>
+                <!-- Print barcode icon button -->
+                <button type="button" id="prod-barcode-print-btn" title="Imprimir etiquetas" style="border: none; background: #20589d; color: white; width: 32px; height: 32px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>
+                </button>
+              </div>
+              
+              <!-- Barcode render container -->
+              <div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; background: white; padding: 1rem; border-radius: 4px; border: 1px solid #cbd5e0; box-shadow: inset 0 1px 3px rgba(0,0,0,0.05);">
+                <div id="barcode-display-name" style="font-size: 0.8rem; font-weight: 700; color: #333333; margin-bottom: 0.25rem; text-align: center; text-transform: uppercase; font-family: var(--font-family);">PRODUCTO DE PRUEBA</div>
+                <div id="barcode-display-price" style="font-size: 0.8rem; font-weight: 700; color: #333333; margin-bottom: 0.5rem; text-align: center; font-family: var(--font-family);">$ 0.00</div>
+                
+                <!-- Canvas Barcode lines representation -->
+                <canvas id="barcode-canvas" width="200" height="50" style="background-color: white;"></canvas>
+                
+                <div id="barcode-display-code" style="font-family: monospace; font-size: 0.85rem; font-weight: bold; margin-top: 0.25rem; letter-spacing: 2px;">0000000</div>
+              </div>
+            </div>
+            <!-- Warning text -->
+            <div id="prod-barcode-warning" style="font-size: 0.72rem; color: #2b6cb0; font-weight: 600; padding: 0.25rem 0.5rem; margin-top: 0.25rem;">
+              * No puede imprimir etiquetas del producto que aún no está registrado
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Footer actions bar -->
+        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 0.75rem; margin-top: 0.25rem;">
+          <label style="display: flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; font-weight: 600; color: #718096; cursor: pointer;">
+            <input type="checkbox" id="prod-form-keep-open" style="transform: scale(1.1); cursor: pointer;">
+            NO CERRAR - Continuar guardando productos
+          </label>
+          <button type="submit" class="modal-accept-btn" style="background-color: #20589d; border-radius: 4px; box-shadow: 0 4px 10px rgba(32, 88, 157, 0.2); padding: 0.5rem 1.25rem; font-size: 0.9rem;">
+            <span>Guardar</span>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>
+          </button>
+        </div>
+
+      </form>
+    </div>
+  </div>
+
+  <!-- CHECKOUT / COBRAR MODAL -->
+  <div id="checkout-modal" class="modal-overlay" style="display: none;">
+    <div class="checkout-modal-content">
+      <div class="search-modal-header">
+        <button id="close-checkout-modal-btn" class="back-circle-btn" title="Regresar/Cerrar">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+          </svg>
+        </button>
+        <span style="font-size: 1.1rem; font-weight: 700; font-family: var(--font-family); margin-left: 0.5rem;">Cobrar</span>
+      </div>
+
+      <div class="checkout-modal-body-grid">
+        <!-- Left Side: Inputs -->
+        <div class="checkout-inputs-column">
+          <div class="checkout-input-row">
+            <label>Total Operación ($) :</label>
+            <input type="text" id="chk-total-op" value="0.00" disabled>
+          </div>
+          <div class="checkout-input-row">
+            <label>Descuento % :</label>
+            <input type="number" id="chk-discount" value="0" min="0" max="100" step="1">
+          </div>
+          <div class="checkout-input-row">
+            <label style="font-weight: 700; color: #0c55a5;">Total Neto ($) :</label>
+            <input type="text" id="chk-total-net" value="0.00" disabled style="font-weight: 700; color: #0c55a5; background-color: #e6fffa;">
+          </div>
+          <div class="checkout-input-row">
+            <label>Crédito Disp. ($) :</label>
+            <input type="text" id="chk-credit" value="0.00" disabled>
+          </div>
+          
+          <hr class="chk-divider">
+          
+          <div class="checkout-payment-methods">
+            <div class="checkout-input-row">
+              <label>Efectivo ($) :</label>
+              <input type="number" id="chk-pay-cash" placeholder="0.00" min="0" step="0.01">
+            </div>
+            <div class="checkout-input-row">
+              <label>Efectivo (Bs) :</label>
+              <input type="number" id="chk-pay-cash-ves" placeholder="0.00" min="0" step="0.01">
+            </div>
+            <div class="checkout-input-row">
+              <label>Tarjeta ($) :</label>
+              <input type="number" id="chk-pay-card" placeholder="0.00" min="0" step="0.01">
+            </div>
+            <div class="checkout-input-row">
+              <label style="font-weight: 700; color: #1b8589;">Biopago (Bs) :</label>
+              <input type="number" id="chk-pay-biopago" placeholder="0.00" min="0" step="0.01" style="border-color: #1b8589;">
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Side: Totals and Buttons -->
+        <div class="checkout-totals-column">
+          <!-- Total to Pay display -->
+          <div class="checkout-total-due-card">
+            <span class="chk-card-label">Total a Pagar</span>
+            <span class="chk-card-val-usd" id="chk-display-total-usd">$ 0.00</span>
+            <span class="chk-card-val-ves" id="chk-display-total-ves">Bs 0.00</span>
+            <span class="chk-card-fraction" id="chk-display-fraction">CON 00/100 DOLARES</span>
+          </div>
+
+          <!-- Change display -->
+          <div class="checkout-change-card">
+            <span class="chk-card-label">Cambio (Vuelto)</span>
+            <span class="chk-card-change-usd" id="chk-change-usd">$ 0.00</span>
+            <span class="chk-card-change-ves" id="chk-change-ves">Bs 0.00</span>
+            
+            <!-- Vuelto distribution helper -->
+            <div id="vuelto-distribucion-container" style="display: none; margin-top: 0.5rem; border-top: 1px dashed #cbd5e0; padding-top: 0.5rem; width: 100%; text-align: left; font-size: 0.8rem;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.35rem;">
+                <label for="chk-vuelto-usd" style="font-weight: 600; color: #475569;">Entregar en $ :</label>
+                <input type="number" id="chk-vuelto-usd" min="0" step="1" style="width: 70px; text-align: right; height: 26px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0.2rem; font-family: var(--font-family); font-weight: 600;">
+              </div>
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <span style="font-weight: 600; color: #475569;">Diferencia en Bs :</span>
+                <strong id="chk-vuelto-bs" style="color: #0b5fa5; font-size: 0.85rem; font-family: var(--font-family);">Bs 0.00</strong>
+              </div>
+            </div>
+
+            <span class="chk-card-change-status" id="chk-change-status" style="color: #ff4d4f; font-weight: 700; margin-top: 0.4rem;">INGRESE PAGO</span>
+          </div>
+
+          <!-- Print buttons grid -->
+          <div class="checkout-actions-grid">
+            <button id="chk-btn-ticket" class="checkout-confirm-btn" disabled>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>
+              <span>Cobrar con Ticket</span>
+            </button>
+            <button id="chk-btn-a4" class="checkout-confirm-btn" disabled>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+              <span>Cobrar con A4</span>
+            </button>
+            <button id="chk-btn-noprint" class="checkout-confirm-btn full-width-btn" disabled>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
+              <span>Cobrar Sin Imprimir</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TICKET IMPRESO MODAL -->
+  <div id="ticket-modal" class="modal-overlay" style="display: none;">
+    <div class="ticket-modal-content">
+      <div class="ticket-paper">
+        <!-- Header -->
+        <div class="ticket-header">
+          <h2 class="ticket-store-title" id="tkt-store-title">WINTER POS, C.A.</h2>
+          <p class="ticket-store-rif" id="tkt-store-rif">RIF: J-40892019-9</p>
+          <p class="ticket-store-dir" id="tkt-store-dir">AV. PRINCIPAL S/N, LOCAL 12</p>
+          <p class="ticket-store-phone" id="tkt-store-phone">TLF: 0212-5555555</p>
+        </div>
+
+        <div class="ticket-dashed-line"></div>
+
+        <!-- Meta info -->
+        <div class="ticket-meta-info">
+          <div><span>TICKET N°:</span> <span id="tkt-number" style="font-weight: 700;">000000</span></div>
+          <div><span>FECHA:</span> <span id="tkt-date">12/07/2026</span></div>
+          <div><span>HORA:</span> <span id="tkt-time">10:26 AM</span></div>
+          <div><span>CAJERO:</span> <span id="tkt-cashier">ANDERSON LAGUNA</span></div>
+          <div><span>CLIENTE:</span> <span id="tkt-client">PUBLICO GENERAL</span></div>
+        </div>
+
+        <div class="ticket-dashed-line"></div>
+
+        <!-- Items Table Header -->
+        <div class="ticket-items-header">
+          <span class="col-item">DESCRIPCIÓN</span>
+          <span class="col-qty">CANT</span>
+          <span class="col-price">P.UNIT</span>
+          <span class="col-total">TOTAL</span>
+        </div>
+
+        <div class="ticket-dashed-line"></div>
+
+        <!-- Items list -->
+        <div id="ticket-items-body">
+          <!-- Dynamic items added here -->
+        </div>
+
+        <div class="ticket-dashed-line"></div>
+
+        <!-- Totals -->
+        <div class="ticket-totals">
+          <div class="ticket-total-row">
+            <span>SUBTOTAL:</span>
+            <span id="tkt-subtotal">$ 0.00</span>
+          </div>
+          <div class="ticket-total-row">
+            <span>IVA (16%):</span>
+            <span id="tkt-iva">$ 0.00</span>
+          </div>
+          <div class="ticket-total-row main-total">
+            <span>TOTAL ($):</span>
+            <span id="tkt-total-usd">$ 0.00</span>
+          </div>
+          <div class="ticket-total-row main-total">
+            <span>TOTAL (Bs):</span>
+            <span id="tkt-total-bs">Bs 0.00</span>
+          </div>
+        </div>
+
+        <div class="ticket-dashed-line"></div>
+
+        <!-- Payment and change -->
+        <div class="ticket-payments" id="tkt-payments-body">
+          <!-- Paid and change breakdown -->
+        </div>
+
+        <div class="ticket-dashed-line"></div>
+
+        <!-- Footer -->
+        <div class="ticket-footer">
+          <p>*** GRACIAS POR SU COMPRA ***</p>
+          <p>SISTEMA WINTER POS</p>
+          <p style="font-size: 0.65rem; margin-top: 0.5rem; letter-spacing: 1px;">MODO DEMOSTRACIÓN / FISCAL SIMULADO</p>
+        </div>
+      </div>
+
+      <div class="ticket-modal-actions">
+        <button id="tkt-accept-btn" class="ticket-action-btn print-btn">
+          <span>Aceptar y Continuar</span>
+        </button>
+        <button id="tkt-print-simulate-btn" class="ticket-action-btn secondary-btn" onclick="window.print()">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>
+          <span>Imprimir Real (Físico)</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- REPRINT SALES TICKET MODAL -->
+  <div id="reprint-modal" class="modal-overlay" style="display: none;">
+    <div class="search-modal-content" style="width: 750px;">
+      <div class="search-modal-header">
+        <button id="close-reprint-modal-btn" class="back-circle-btn" title="Regresar/Cerrar">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+          </svg>
+        </button>
+        <span style="font-size: 1.1rem; font-weight: 700; font-family: var(--font-family); margin-left: 0.5rem;">Reimprimir Ticket de Venta</span>
+      </div>
+      
+      <div class="search-modal-body" style="max-height: 400px; padding: 1rem;">
+        <!-- Filters Row -->
+        <div style="display: flex; gap: 0.75rem; margin-bottom: 1rem; align-items: flex-end; flex-wrap: wrap;">
+          <div style="display: flex; flex-direction: column; gap: 0.25rem; flex-grow: 1; min-width: 180px;">
+            <label for="reprint-search-input" style="font-size: 0.75rem; font-weight: 600; color: #475569;">Buscador (N° Ticket, Cliente o Producto):</label>
+            <input type="text" id="reprint-search-input" placeholder="Buscar..." style="height: 32px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0.4rem; font-size: 0.85rem; font-family: var(--font-family); outline: none;">
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 0.25rem; width: 130px;">
+            <label for="reprint-date-start" style="font-size: 0.75rem; font-weight: 600; color: #475569;">Desde:</label>
+            <input type="date" id="reprint-date-start" style="height: 32px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0.2rem; font-size: 0.85rem; font-family: var(--font-family); outline: none;">
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 0.25rem; width: 130px;">
+            <label for="reprint-date-end" style="font-size: 0.75rem; font-weight: 600; color: #475569;">Hasta:</label>
+            <input type="date" id="reprint-date-end" style="height: 32px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0.2rem; font-size: 0.85rem; font-family: var(--font-family); outline: none;">
+          </div>
+          <button id="reprint-clear-filters-btn" style="height: 32px; padding: 0 0.75rem; border: 1px solid #cbd5e0; border-radius: 4px; background-color: #f1f5f9; color: #475569; font-weight: 600; font-size: 0.8rem; cursor: pointer; transition: background-color 0.2s; font-family: var(--font-family);">Limpiar</button>
+        </div>
+
+        <!-- Table -->
+        <div class="search-modal-table-container" style="border: 1px solid #cbd5e0; border-radius: 4px; overflow: hidden; background-color: white;">
+          <table class="search-modal-table">
+            <thead>
+              <tr>
+                <th style="width: 15%">TICKET N°</th>
+                <th style="width: 15%">FECHA</th>
+                <th style="width: 12%">HORA</th>
+                <th style="width: 25%">CLIENTE</th>
+                <th style="width: 15%; text-align: right;">TOTAL ($)</th>
+                <th style="width: 18%; text-align: center;">ACCIONES</th>
+              </tr>
+            </thead>
+            <tbody id="reprint-modal-table-body">
+              <!-- Dynamic sales history entries -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DEVOLUCION MODAL -->
+  <div id="devolucion-modal" class="modal-overlay" style="display: none;">
+    <div class="search-modal-content" style="width: 750px;">
+      <div class="search-modal-header" style="background-color: #c53030; border-color: #c53030;">
+        <button id="close-devolucion-modal-btn" class="back-circle-btn" title="Regresar/Cerrar">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+          </svg>
+        </button>
+        <span style="font-size: 1.1rem; font-weight: 700; font-family: var(--font-family); margin-left: 0.5rem;">Procesar Devolución de Venta</span>
+      </div>
+      
+      <!-- Phase 1: Search Ticket (Initial view) -->
+      <div id="devolucion-search-view" class="search-modal-body" style="max-height: 400px; padding: 1rem;">
+        <div style="display: flex; gap: 0.75rem; margin-bottom: 1rem; align-items: flex-end; flex-wrap: wrap;">
+          <div style="display: flex; flex-direction: column; gap: 0.25rem; flex-grow: 1; min-width: 180px;">
+            <label for="devolucion-search-input" style="font-size: 0.75rem; font-weight: 600; color: #475569;">Buscador de ticket a devolver:</label>
+            <input type="text" id="devolucion-search-input" placeholder="Buscar ticket por número, cliente o producto..." style="height: 32px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0.4rem; font-size: 0.85rem; font-family: var(--font-family); outline: none;">
+          </div>
+          <button id="devolucion-clear-filters-btn" style="height: 32px; padding: 0 0.75rem; border: 1px solid #cbd5e0; border-radius: 4px; background-color: #f1f5f9; color: #475569; font-weight: 600; font-size: 0.8rem; cursor: pointer; transition: background-color 0.2s; font-family: var(--font-family);">Limpiar</button>
+        </div>
+
+        <div class="search-modal-table-container" style="border: 1px solid #cbd5e0; border-radius: 4px; overflow: hidden; background-color: white;">
+          <table class="search-modal-table">
+            <thead>
+              <tr>
+                <th style="width: 15%">TICKET N°</th>
+                <th style="width: 20%">FECHA</th>
+                <th style="width: 35%">CLIENTE</th>
+                <th style="width: 15%; text-align: right;">TOTAL ($)</th>
+                <th style="width: 15%; text-align: center;">ACCIONES</th>
+              </tr>
+            </thead>
+            <tbody id="devolucion-modal-table-body">
+              <!-- Tickets list -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Phase 2: Select Items for Return -->
+      <div id="devolucion-items-view" class="search-modal-body" style="display: none; max-height: 400px; padding: 1rem;">
+        <div style="background-color: #fff5f5; border: 1px solid #fed7d7; border-radius: 6px; padding: 0.75rem; margin-bottom: 1rem; font-size: 0.8rem; color: #9b2c2c;">
+          <strong>Ticket Seleccionado: <span id="devolucion-tkt-id">000000</span></strong> | Cliente: <span id="devolucion-client-name">PUBLICO GENERAL</span>
+        </div>
+        
+        <p style="font-size: 0.8rem; font-weight: 600; color: #475569; margin-bottom: 0.5rem;">Seleccione los artículos y cantidades que desea devolver:</p>
+        
+        <div class="search-modal-table-container" style="border: 1px solid #cbd5e0; border-radius: 4px; overflow: hidden; background-color: white; margin-bottom: 1rem;">
+          <table class="search-modal-table">
+            <thead>
+              <tr>
+                <th style="width: 8%; text-align: center;">SEL</th>
+                <th style="width: 45%">PRODUCTO</th>
+                <th style="width: 15%; text-align: center;">COMPRADO</th>
+                <th style="width: 17%; text-align: center;">CANT. DEVOLVER</th>
+                <th style="width: 15%; text-align: right;">P. UNIT</th>
+              </tr>
+            </thead>
+            <tbody id="devolucion-items-table-body">
+              <!-- Dynamic item checkboxes -->
+            </tbody>
+          </table>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <button id="devolucion-back-btn" style="height: 34px; padding: 0 1rem; border: 1px solid #cbd5e0; border-radius: 4px; background-color: #f8fafc; color: #475569; font-weight: 700; font-size: 0.8rem; cursor: pointer; transition: background-color 0.2s; font-family: var(--font-family);">
+            Volver a Tickets
+          </button>
+          <button id="devolucion-submit-btn" style="height: 34px; padding: 0 1.25rem; border: none; border-radius: 4px; background-color: #e53e3e; color: white; font-weight: 700; font-size: 0.8rem; cursor: pointer; transition: background-color 0.2s; font-family: var(--font-family); display: flex; align-items: center; gap: 0.4rem;">
+            <span>Procesar Devolución</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  <!-- ============================================================ -->
+  <!-- REPORT VIEWER MODAL (z-index 400)                             -->
+  <!-- ============================================================ -->
+  <div id="report-viewer-modal" class="modal-overlay" style="display: none; z-index: 400; align-items: flex-start; padding: 0; background-color: #f1f5f9; overflow-y: auto;">
+    <div style="width: 100%; min-height: 100%; display: flex; flex-direction: column;">
+      
+      <!-- Top Title Bar (Classic blue theme matching image) -->
+      <div style="background-color: #20589d; color: white; padding: 0.75rem 1.5rem; display: flex; align-items: center; gap: 1rem; flex-shrink: 0; box-shadow: 0 2px 6px rgba(0,0,0,0.15);">
+        <button id="report-viewer-back-btn" style="background: none; border: none; cursor: pointer; color: white; display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-family); font-weight: 700; font-size: 1.1rem; outline: none; padding: 0.2rem 0.5rem; border-radius: 4px;">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+          <span id="report-viewer-title">Reporte Productos</span>
+        </button>
+      </div>
+
+      <!-- Report Viewer Toolbar (Grey control bar matching standard reporting software) -->
+      <div style="background-color: #f8fafc; border-bottom: 1px solid #cbd5e0; padding: 0.5rem 1.5rem; display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; font-family: var(--font-family); font-size: 0.82rem; color: #475569; box-shadow: inset 0 -2px 4px rgba(0,0,0,0.02);">
+        
+        <!-- Pagination controls -->
+        <div style="display: flex; align-items: center; gap: 0.35rem;">
+          <button id="report-page-first" class="inv-btn-small" style="padding: 0.25rem; min-width: 28px; height: 28px; background: #e2e8f0; color: #475569; font-weight: bold; border-radius: 4px; border: 1px solid #cbd5e0;" title="Primera página">|&lt;</button>
+          <button id="report-page-prev" class="inv-btn-small" style="padding: 0.25rem; min-width: 28px; height: 28px; background: #e2e8f0; color: #475569; font-weight: bold; border-radius: 4px; border: 1px solid #cbd5e0;" title="Página anterior">&lt;</button>
+          <span style="margin: 0 0.5rem;">Página <strong id="report-current-page">1</strong> de <strong id="report-total-pages">1</strong></span>
+          <button id="report-page-next" class="inv-btn-small" style="padding: 0.25rem; min-width: 28px; height: 28px; background: #e2e8f0; color: #475569; font-weight: bold; border-radius: 4px; border: 1px solid #cbd5e0;" title="Página siguiente">&gt;</button>
+          <button id="report-page-last" class="inv-btn-small" style="padding: 0.25rem; min-width: 28px; height: 28px; background: #e2e8f0; color: #475569; font-weight: bold; border-radius: 4px; border: 1px solid #cbd5e0;" title="Última página">&gt;|</button>
+        </div>
+
+        <div style="width: 1px; height: 20px; background-color: #cbd5e0;"></div>
+
+        <!-- Zoom level -->
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <span style="font-size: 0.8rem; font-weight: 600;">Zoom:</span>
+          <select id="report-zoom-select" style="height: 28px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.4rem; font-size: 0.8rem;">
+            <option value="75%">75%</option>
+            <option value="100%" selected>100%</option>
+            <option value="125%">125%</option>
+            <option value="150%">150%</option>
+          </select>
+        </div>
+
+        <div style="width: 1px; height: 20px; background-color: #cbd5e0;"></div>
+
+        <!-- Search in report -->
+        <div style="display: flex; align-items: center; gap: 0.4rem;">
+          <input type="text" id="report-search-input" placeholder="Buscar texto..." style="height: 28px; width: 140px; border: 1px solid #cbd5e0; border-radius: 4px; padding: 0 0.5rem; font-size: 0.8rem; outline: none;">
+          <button id="report-search-btn" style="height: 28px; padding: 0 0.75rem; background: #e2e8f0; border: 1px solid #cbd5e0; border-radius: 4px; cursor: pointer; font-size: 0.78rem; font-weight: 600;">Buscar</button>
+        </div>
+
+        <div style="width: 1px; height: 20px; background-color: #cbd5e0;"></div>
+
+        <!-- Export selection buttons (CRITICAL USER REQUEST) -->
+        <div style="display: flex; align-items: center; gap: 0.75rem; margin-left: auto;">
+          <span style="font-weight: 700; color: #1e3a5f;">Exportar Documento :</span>
+          
+          <!-- PDF / Print download button -->
+          <button id="report-export-pdf" style="background-color: #c53030; color: white; border: none; border-radius: 4px; height: 32px; padding: 0 1rem; display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; font-weight: 700; cursor: pointer; box-shadow: 0 2px 4px rgba(197,48,48,0.25);">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2v9.67z"/></svg>
+            Descargar PDF
+          </button>
+          
+          <!-- Excel download button -->
+          <button id="report-export-excel" style="background-color: #276749; color: white; border: none; border-radius: 4px; height: 32px; padding: 0 1rem; display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; font-weight: 700; cursor: pointer; box-shadow: 0 2px 4px rgba(39,103,73,0.25);">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+            Descargar Excel
+          </button>
+        </div>
+      </div>
+
+      <!-- Report Sheet Container (Centered like a sheet of paper) -->
+      <div id="report-sheet-scroller" style="flex-grow: 1; overflow-y: auto; padding: 2rem 1rem; display: flex; justify-content: center; align-items: flex-start; background: #e2e8f0;">
+        
+        <!-- White Page Sheet -->
+        <div id="report-print-area" style="background: white; width: 1000px; min-height: 1290px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); border-radius: 2px; padding: 2.5rem; display: flex; flex-direction: column; font-family: var(--font-family); box-sizing: border-box; transition: transform 0.2s; transform-origin: top center;">
+          
+          <!-- Sheet Header: business details on left, empty logo space on right -->
+          <div style="display: flex; justify-content: space-between; border-bottom: 2px solid #1a365d; padding-bottom: 1rem; margin-bottom: 1.25rem;">
+            
+            <!-- Left: Company text fields -->
+            <div style="display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.85rem; color: #2d3748; line-height: 1.3;">
+              <strong id="report-header-bizname" style="font-size: 1.25rem; color: #1a365d;">INVERSIONES NIQUITAO</strong>
+              <div>R.U.C / RIF: <span id="report-header-bizruc">J-41132631</span></div>
+              <div id="report-header-bizaddress">23 de Enero</div>
+              <div>Tel: <span id="report-header-bizphone">0424-2042877</span> / Email: <span id="report-header-bizemail">inversiones.niquitao3000@gmail.com</span></div>
+            </div>
+
+            <!-- Right: Logo placeholder (Blank rectangle box as per user's request) -->
+            <div style="width: 140px; height: 80px; border: 1px dashed #a0aec0; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #718096; font-size: 0.72rem; text-align: center; background-color: #fafafa; font-weight: 500;" id="report-header-logo-placeholder">
+              [ LOGO NEGOCIO ]
+            </div>
+          </div>
+
+          <!-- Report Main Title -->
+          <div style="text-align: center; margin-bottom: 1.5rem;">
+            <h2 id="report-sheet-main-title" style="margin: 0; font-size: 1.35rem; font-weight: 800; color: #1a365d; letter-spacing: 0.05em; text-transform: uppercase;">REPORTE DE PRODUCTOS</h2>
+          </div>
+
+          <!-- Report Data Table -->
+          <div style="flex-grow: 1;">
+            <table id="report-data-table-el" style="width: 100%; border-collapse: collapse; font-size: 0.77rem; line-height: 1.35;">
+              <thead id="report-data-table-head">
+                <!-- Replaced by JS -->
+              </thead>
+              <tbody id="report-data-table-body">
+                <!-- Replaced by JS -->
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Sheet Footer: Pagination and timestamp -->
+          <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #e2e8f0; padding-top: 0.85rem; margin-top: 1.5rem; font-size: 0.74rem; color: #718096; font-family: var(--font-family);">
+            <div>Página <span id="report-footer-page">1</span> de <span id="report-footer-total-pages">1</span></div>
+            <div id="report-footer-timestamp">12/07/2026 20:15:42</div>
+          </div>
+
+        </div><!-- /White Page Sheet -->
+      </div><!-- /Report Sheet Container -->
+
+    </div>
+  </div>
+
+  <!-- Print Specific CSS to isolate sheet during print dialog -->
+  <style>
+    @media print {
+      body * {
+        visibility: hidden !important;
+      }
+      #report-viewer-modal, #report-viewer-modal * {
+        visibility: visible !important;
+      }
+      #report-viewer-modal {
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 100% !important;
+        height: auto !important;
+        background: white !important;
+        overflow: visible !important;
+      }
+      #report-viewer-back-btn, 
+      [style*="background-color: #f8fafc"], 
+      #report-sheet-scroller {
+        display: none !important;
+      }
+      #report-print-area {
+        box-shadow: none !important;
+        border: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 100% !important;
+        min-height: auto !important;
+        transform: none !important;
+      }
+    }
+  </style>
+
+
+
+
+  <!-- Lightweight debug overlay to capture runtime logs and errors directly on-screen -->
+  <div id="pos-debug" style="position: fixed; bottom: 0; left: 0; right: 0; height: 32px; background: rgba(0,0,0,0.85); color: #00ff00; font-family: monospace; font-size: 0.72rem; display: flex; align-items: center; padding: 0 1rem; z-index: 9999; pointer-events: none; gap: 1rem; border-top: 1px solid #00ff00;">
+    <strong style="color: #ff9900;">DEBUG CONSOLE:</strong>
+    <span id="pos-debug-text">Iniciando sistema...</span>
+  </div>
+
+  <script src="app.js?v=2"></script>
+</body>
+</html>
