@@ -229,8 +229,16 @@ document.addEventListener('DOMContentLoaded', () => {
   applyBusinessDetails(bizInfo);
 
   // Global State Variables
+  let _cierreHistory = JSON.parse(localStorage.getItem('pos_cierre_history')) || [];
   let currentUser = { name: '', role: '' };
-  let currentSession = { cashUSD: 0.00, cashVES: 0.00, isOpened: false };
+  let currentSession = { 
+    cashUSD: 0.00, 
+    cashVES: 0.00, 
+    isOpened: false, 
+    openedAt: null,
+    sales: [],
+    abonos: []
+  };
   let currentSale = [];
   let isReprinting = false;
   let movimientosLog = [];
@@ -526,8 +534,30 @@ document.addEventListener('DOMContentLoaded', () => {
           userDisplayRole.textContent = currentUser.role;
           posSellerInput.value = currentUser.name.split(' - ')[1] || currentUser.name;
 
-          // Open cash drawer opening modal
-          showAperturaModal();
+          // If there is an active session in localStorage for this cashier, restore it!
+          const savedSession = JSON.parse(localStorage.getItem('pos_current_session') || 'null');
+          if (savedSession && savedSession.isOpened) {
+            currentSession.isOpened = true;
+            currentSession.cashUSD = savedSession.cashUSD || 0;
+            currentSession.cashVES = savedSession.cashVES || 0;
+            currentSession.openedAt = savedSession.openedAt ? new Date(savedSession.openedAt) : null;
+            currentSession.sales = savedSession.sales || [];
+            currentSession.abonos = savedSession.abonos || [];
+            
+            // Set exchange rate text in footer
+            headerRateDisplay.textContent = `Tasa Oficial: 1.00 USD = ${exchangeRate.toFixed(2)} Bs`;
+            
+            // Initialize a new empty sale
+            resetSale();
+            
+            // Initialize inventory table list
+            renderInventoryTable();
+            
+            logDebug('Sesión de caja restaurada.');
+          } else {
+            // Open cash drawer opening modal
+            showAperturaModal();
+          }
         }, 800);
 
       } else {
@@ -629,6 +659,20 @@ document.addEventListener('DOMContentLoaded', () => {
     currentSession.cashUSD = isNaN(usdVal) ? 0.00 : usdVal;
     currentSession.cashVES = isNaN(vesVal) ? 0.00 : vesVal;
     currentSession.isOpened = true;
+    currentSession.openedAt = new Date();
+    currentSession.sales = [];
+    currentSession.abonos = [];
+
+    // Save active session to localStorage so it survives page reloads
+    localStorage.setItem('pos_current_session', JSON.stringify({
+      cashUSD: currentSession.cashUSD,
+      cashVES: currentSession.cashVES,
+      isOpened: true,
+      openedAt: currentSession.openedAt,
+      sales: currentSession.sales,
+      abonos: currentSession.abonos,
+      cashier: currentUser.name
+    }));
 
     // Close Modal and notify
     aperturaModal.style.display = 'none';
@@ -961,6 +1005,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const chkPayCash = document.getElementById('chk-pay-cash');
   const chkPayCashVes = document.getElementById('chk-pay-cash-ves');
   const chkPayCard = document.getElementById('chk-pay-card');
+  const chkPayCardVes = document.getElementById('chk-pay-card-ves');
   const chkPayBiopago = document.getElementById('chk-pay-biopago');
   
   const chkDisplayTotalUsd = document.getElementById('chk-display-total-usd');
@@ -993,6 +1038,7 @@ document.addEventListener('DOMContentLoaded', () => {
     chkPayCash.value = '';
     chkPayCashVes.value = '';
     chkPayCard.value = '';      // starts empty; tab into it to auto-fill remainder
+    chkPayCardVes.value = '';
     chkPayBiopago.value = '';
 
     checkoutModal.style.display = 'flex';
@@ -1005,8 +1051,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Listeners for changes in payments or discount
-  [chkDiscount, chkPayCash, chkPayCashVes, chkPayCard, chkPayBiopago].forEach(input => {
-    input.addEventListener('input', recalculateCheckoutValues);
+  [chkDiscount, chkPayCash, chkPayCashVes, chkPayCard, chkPayCardVes, chkPayBiopago].forEach(input => {
+    if (input) input.addEventListener('input', recalculateCheckoutValues);
   });
 
   // When user tabs into Tarjeta field, auto-fill with the remaining unpaid balance
@@ -1018,6 +1064,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const netUSD = (currentSubtotalUSD - discAmount) * 1.16;
     const alreadyPaid = (parseFloat(chkPayCash.value) || 0)
       + ((parseFloat(chkPayCashVes.value) || 0) / (exchangeRate || 36.45))
+      + ((parseFloat(chkPayCardVes.value) || 0) / (exchangeRate || 36.45))
       + ((parseFloat(chkPayBiopago.value) || 0) / (exchangeRate || 36.45));
     const remaining = netUSD - alreadyPaid;
     if (remaining > 0.001) {
@@ -1048,9 +1095,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const payCash = parseFloat(chkPayCash.value) || 0;
     const payCashVes = parseFloat(chkPayCashVes.value) || 0;
     const payCard = parseFloat(chkPayCard.value) || 0;
+    const payCardVes = parseFloat(chkPayCardVes.value) || 0;
     const payBiopago = parseFloat(chkPayBiopago.value) || 0;
     
-    const totalPaid = payCash + payCard + (payCashVes / exchangeRate) + (payBiopago / exchangeRate);
+    const totalPaid = payCash + payCard + (payCardVes / exchangeRate) + (payCashVes / exchangeRate) + (payBiopago / exchangeRate);
     const diff = totalPaid - netUSD;
 
     if (diff > 0.005) {
@@ -1086,13 +1134,14 @@ document.addEventListener('DOMContentLoaded', () => {
     chkDisplayTotalVes.textContent = `Bs ${(netUSD * exchangeRate).toFixed(2)}`;
     chkDisplayFraction.textContent = getCentsFractionText(netUSD);
 
-    // Sum paid values (Cash USD and Card are in USD, Cash VES and Biopago are in VES)
+    // Sum paid values (Cash USD and Card are in USD, Cash VES, Card VES and Biopago are in VES)
     const payCash = parseFloat(chkPayCash.value) || 0;
     const payCashVes = parseFloat(chkPayCashVes.value) || 0;
     const payCard = parseFloat(chkPayCard.value) || 0;
+    const payCardVes = parseFloat(chkPayCardVes.value) || 0;
     const payBiopago = parseFloat(chkPayBiopago.value) || 0;
     
-    const totalPaid = payCash + payCard + (payCashVes / exchangeRate) + (payBiopago / exchangeRate);
+    const totalPaid = payCash + payCard + (payCardVes / exchangeRate) + (payCashVes / exchangeRate) + (payBiopago / exchangeRate);
     const diff = totalPaid - netUSD;
 
     if (diff < -0.005) { // accounts for floating precision
@@ -1160,20 +1209,21 @@ document.addEventListener('DOMContentLoaded', () => {
       const payCash = parseFloat(chkPayCash.value) || 0;
       const payCashVes = parseFloat(chkPayCashVes.value) || 0;
       const payCard = parseFloat(chkPayCard.value) || 0;
+      const payCardVes = parseFloat(chkPayCardVes.value) || 0;
       const payBiopago = parseFloat(chkPayBiopago.value) || 0;
       
-      const totalPaid = payCash + payCard + (payCashVes / exchangeRate) + (payBiopago / exchangeRate);
+      const totalPaid = payCash + payCard + (payCardVes / exchangeRate) + (payCashVes / exchangeRate) + (payBiopago / exchangeRate);
       const changeUSD = totalPaid - netUSD;
 
       const usdToGive = changeUSD > 0.005 ? (parseInt(chkVueltoUsd.value) || 0) : 0;
       const bsToGive = changeUSD > 0.005 ? Math.max(0, (changeUSD - usdToGive) * exchangeRate) : 0;
 
       // Save completed transaction to history database
-      saveSaleToHistory(netUSD, totalPaid, changeUSD, usdToGive, bsToGive, payCash, payCashVes, payCard, payBiopago);
+      saveSaleToHistory(netUSD, totalPaid, changeUSD, usdToGive, bsToGive, payCash, payCashVes, payCard, payCardVes, payBiopago);
 
       if (btn.id === 'chk-btn-ticket') {
         // Render Ticket
-        renderTicketDetails(netUSD, totalPaid, changeUSD, usdToGive, bsToGive, payCash, payCashVes, payCard, payBiopago);
+        renderTicketDetails(netUSD, totalPaid, changeUSD, usdToGive, bsToGive, payCash, payCashVes, payCard, payCardVes, payBiopago);
         // Show ticket modal and hide checkout modal
         checkoutModal.style.display = 'none';
         document.getElementById('ticket-modal').style.display = 'flex';
@@ -1193,7 +1243,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Render ticket elements
-  function renderTicketDetails(netUSD, totalPaid, changeUSD, usdToGive, bsToGive, payCash, payCashVes, payCard, payBiopago) {
+  function renderTicketDetails(netUSD, totalPaid, changeUSD, usdToGive, bsToGive, payCash, payCashVes, payCard, payCardVes, payBiopago) {
     const tktNumber = document.getElementById('tkt-number');
     const tktDate = document.getElementById('tkt-date');
     const tktTime = document.getElementById('tkt-time');
@@ -1275,6 +1325,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (payCard > 0) {
       addPaymentRow('TARJETA ($)', payCard, 0);
     }
+    if (payCardVes > 0) {
+      addPaymentRow('TARJETA (Bs)', 0, payCardVes);
+    }
     if (payBiopago > 0) {
       addPaymentRow('BIOPAGO (Bs)', 0, payBiopago);
     }
@@ -1313,17 +1366,17 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Save sale details into history database
-  function saveSaleToHistory(netUSD, totalPaid, changeUSD, usdToGive, bsToGive, payCash, payCashVes, payCard, payBiopago) {
+  function saveSaleToHistory(netUSD, totalPaid, changeUSD, usdToGive, bsToGive, payCash, payCashVes, payCard, payCardVes, payBiopago) {
     const now = new Date();
     const formattedDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
     const formattedTime = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    processedSales.push({
+    const saleObj = {
       ticketNumber: ticketNumberId.textContent,
       date: formattedDate,
       time: formattedTime,
       cashier: currentUser.name,
-      client: posClientInput.value,
+      client: posClientInput.value || 'PUBLICO GENERAL',
       items: currentSale.map(item => ({
         name: item.name,
         qty: item.qty,
@@ -1336,11 +1389,28 @@ document.addEventListener('DOMContentLoaded', () => {
       payCash: payCash,
       payCashVes: payCashVes,
       payCard: payCard,
+      payCardVes: payCardVes,
       payBiopago: payBiopago,
       changeUSD: changeUSD,
       usdToGive: usdToGive,
       bsToGive: bsToGive
-    });
+    };
+
+    processedSales.push(saleObj);
+
+    // Save to active session if open
+    if (currentSession.isOpened) {
+      currentSession.sales.push(saleObj);
+      localStorage.setItem('pos_current_session', JSON.stringify({
+        cashUSD: currentSession.cashUSD,
+        cashVES: currentSession.cashVES,
+        isOpened: true,
+        openedAt: currentSession.openedAt,
+        sales: currentSession.sales,
+        abonos: currentSession.abonos,
+        cashier: currentUser.name
+      }));
+    }
   }
 
   // DOM Elements - Reprint Modal
@@ -1738,24 +1808,261 @@ document.addEventListener('DOMContentLoaded', () => {
     posProductInput.focus();
   });
 
-  // Close Register button handler
-  closeRegisterBtn.addEventListener('click', () => {
-    const confirmClose = confirm(
-      '¿Está seguro de que desea realizar el cierre de caja?\n' +
-      'Se imprimirá el Reporte Fiscal Z y finalizará la sesión del cajero actual.'
-    );
+  /* ==========================================================================
+     Helper: Spanish translation for Currency Numbers
+     ========================================================================== */
+  function numberToWordsUSD(amount) {
+    const formatter = new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+    const formatted = formatter.format(amount);
+    const parts = formatted.split('.');
+    const integerPart = parseInt(parts[0].replace(/,/g, ''));
+    const decimals = parts[1] || '00';
 
-    if (confirmClose) {
-      alert(
-        `CIERRE DE CAJA FISCAL PROCESADO:\n\n` +
-        `Operador: ${currentUser.name}\n` +
-        `Monto USD Inicial: $${currentSession.cashUSD.toFixed(2)}\n` +
-        `Monto VES Inicial: Bs ${currentSession.cashVES.toFixed(2)}\n\n` +
-        `Cierre de sesión exitoso.`
-      );
-      logout();
+    if (integerPart === 0) {
+      return `CERO CON ${decimals}/100 DOLARES`;
     }
-  });
+
+    const units = ['', 'UN', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE'];
+    const tens = ['', 'DIEZ', 'VEINTE', 'TREINTA', 'CUARENTA', 'CINCUENTA', 'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA'];
+    const teens = ['DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISEIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE'];
+    const hundreds = ['', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS', 'QUINIENTOS', 'SEISCIENTOS', 'SETECIENTOS', 'OCHOCIENTOS', 'NOVECIENTOS'];
+
+    function convertGroup(n) {
+      let output = '';
+      if (n >= 100) {
+        if (n === 100) {
+          return 'CIEN';
+        }
+        output += hundreds[Math.floor(n / 100)] + ' ';
+        n %= 100;
+      }
+      if (n >= 10) {
+        if (n >= 10 && n <= 19) {
+          output += teens[n - 10] + ' ';
+          return output;
+        } else if (n === 20) {
+          output += 'VEINTE ';
+          return output;
+        } else if (n > 20 && n < 30) {
+          output += 'VEINTI' + units[n - 20] + ' ';
+          return output;
+        } else {
+          output += tens[Math.floor(n / 10)] + ' ';
+          n %= 10;
+          if (n > 0) {
+            output += 'Y ' + units[n] + ' ';
+          }
+          return output;
+        }
+      }
+      if (n > 0) {
+        output += units[n] + ' ';
+      }
+      return output;
+    }
+
+    let temp = integerPart;
+    let millions = Math.floor(temp / 1000000);
+    temp %= 1000000;
+    let thousands = Math.floor(temp / 1000);
+    let remainder = temp % 1000;
+
+    let words = '';
+    if (millions > 0) {
+      if (millions === 1) words += 'UN MILLON ';
+      else words += convertGroup(millions) + ' MILLONES ';
+    }
+
+    if (thousands > 0) {
+      if (thousands === 1) words += 'MIL ';
+      else words += convertGroup(thousands) + ' MIL ';
+    }
+
+    if (remainder > 0) {
+      words += convertGroup(remainder) + ' ';
+    }
+
+    return `${words.trim()} CON ${decimals}/100 DOLARES`;
+  }
+
+  // DOM Elements - Cierre Caja Modal
+  const closureModal = document.getElementById('cierre-caja-modal');
+  const closureBackBtn = document.getElementById('cierre-caja-back-btn');
+  const closureActionBtn = document.getElementById('cierre-caja-action-btn');
+  const closureActionBtnText = document.getElementById('cierre-caja-action-btn-text');
+
+  const cierreConfirmOverlay = document.getElementById('cierre-confirm-overlay');
+  const cierreConfirmOk = document.getElementById('cierre-confirm-ok');
+  const cierreConfirmCancel = document.getElementById('cierre-confirm-cancel');
+
+  let activeClosureData = null;
+  let closureMode = 'close'; // 'close' or 'view'
+
+  // Expose closure modal globally for inline onclick
+  window.abrirCierreCaja = function() {
+    // If session was lost (e.g. reload), restore from localStorage
+    if (!currentSession.isOpened) {
+      const saved = JSON.parse(localStorage.getItem('pos_current_session') || 'null');
+      if (saved && saved.isOpened) {
+        currentSession.isOpened = true;
+        currentSession.cashUSD = saved.cashUSD || 0;
+        currentSession.cashVES = saved.cashVES || 0;
+        currentSession.openedAt = saved.openedAt ? new Date(saved.openedAt) : new Date();
+        currentSession.sales = saved.sales || [];
+        currentSession.abonos = saved.abonos || [];
+      } else {
+        alert('No hay una sesión de caja activa. Por favor realice la Apertura de Caja primero.');
+        return;
+      }
+    }
+
+    closureMode = 'close';
+    document.getElementById('cierre-caja-modal-title').textContent = 'Cierre de Caja';
+    if (closureActionBtnText) closureActionBtnText.textContent = 'Cerrar Caja';
+    if (closureActionBtn) closureActionBtn.style.backgroundColor = '#20589d';
+
+    const cashUSD_apertura = currentSession.cashUSD;
+    const cashVES_apertura = currentSession.cashVES;
+
+    let cashUSD_ventas = 0;
+    let cashVES_ventas = 0;
+    let tarjetaPaidUSD = 0;
+    let tarjetaPaidVES = 0;
+    let biopagoPaidVES = 0;
+    let ventasTotalesUSD = 0;
+    let ventasTotalesVES = 0;
+    let descuentosUSD = 0;
+    let ventaBrutaUSD = 0;
+
+    currentSession.sales.forEach(sale => {
+      cashUSD_ventas += (sale.payCash - sale.usdToGive);
+      cashVES_ventas += (sale.payCashVes - sale.bsToGive);
+      tarjetaPaidUSD += sale.payCard;
+      tarjetaPaidVES += (sale.payCardVes || 0);
+      biopagoPaidVES += sale.payBiopago;
+      ventasTotalesUSD += sale.netUSD;
+      ventasTotalesVES += sale.totalVES;
+      ventaBrutaUSD += (sale.subtotalUSD * 1.16);
+    });
+
+    descuentosUSD = Math.max(0, ventaBrutaUSD - ventasTotalesUSD);
+
+    let abonosUSD = 0;
+    currentSession.abonos.forEach(ab => {
+      abonosUSD += ab.pay;
+    });
+
+    const dineroCajaUSD = cashUSD_apertura + cashUSD_ventas + abonosUSD;
+    const dineroCajaVES = cashVES_apertura + cashVES_ventas;
+
+    activeClosureData = {
+      date: new Date().toLocaleDateString(),
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      cashier: currentUser.name,
+      tasaDia: exchangeRate,
+      cashUSD_apertura,
+      cashVES_apertura,
+      cashUSD_ventas,
+      cashVES_ventas,
+      abonosUSD,
+      dineroCajaUSD,
+      dineroCajaVES,
+      ventasTotalesUSD,
+      ventasTotalesVES,
+      descuentosUSD,
+      ventaBrutaUSD,
+      tarjetaPaidUSD,
+      tarjetaPaidVES,
+      biopagoPaidVES
+    };
+
+    const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+
+    setEl('cierre-usuario-name', currentUser.name);
+    setEl('cierre-apertura-usd', cashUSD_apertura.toFixed(2));
+    setEl('cierre-apertura-ves', cashVES_apertura.toFixed(2));
+    setEl('cierre-ventas-usd', cashUSD_ventas.toFixed(2));
+    setEl('cierre-ventas-ves', cashVES_ventas.toFixed(2));
+    setEl('cierre-abono-usd', abonosUSD.toFixed(2));
+    setEl('cierre-abono-ves', '0.00');
+    setEl('cierre-entrada-usd', '0.00');
+    setEl('cierre-entrada-ves', '0.00');
+    setEl('cierre-salida-usd', '0.00');
+    setEl('cierre-salida-ves', '0.00');
+    setEl('cierre-devolucion-usd', '0.00');
+    setEl('cierre-devolucion-ves', '0.00');
+    setEl('cierre-caja-total-usd', dineroCajaUSD.toFixed(2));
+    setEl('cierre-caja-total-ves', dineroCajaVES.toFixed(2));
+    setEl('cierre-caja-total-text', numberToWordsUSD(dineroCajaUSD));
+
+    setEl('cierre-sales-tot-usd', ventasTotalesUSD.toFixed(2));
+    setEl('cierre-sales-tot-ves', ventasTotalesVES.toFixed(2));
+    setEl('cierre-sales-disc-usd', descuentosUSD.toFixed(2));
+    setEl('cierre-sales-disc-ves', (descuentosUSD * exchangeRate).toFixed(2));
+    setEl('cierre-sales-brut-usd', ventaBrutaUSD.toFixed(2));
+    setEl('cierre-sales-brut-ves', (ventaBrutaUSD * exchangeRate).toFixed(2));
+
+    setEl('cierre-pay-efectivo-usd', cashUSD_ventas.toFixed(2));
+    setEl('cierre-pay-efectivo-ves', cashVES_ventas.toFixed(2));
+    setEl('cierre-pay-tarjeta-usd', tarjetaPaidUSD.toFixed(2));
+    setEl('cierre-pay-tarjeta-ves', tarjetaPaidVES.toFixed(2));
+    setEl('cierre-pay-biopago-ves', biopagoPaidVES.toFixed(2));
+    setEl('cierre-pay-credito-usd', '0.00');
+    setEl('cierre-pay-credito-ves', '0.00');
+    setEl('cierre-pay-puntos-usd', '0.00');
+    setEl('cierre-pay-puntos-ves', '0.00');
+    setEl('cierre-sales-dev-usd', '0.00');
+    setEl('cierre-sales-dev-ves', '0.00');
+    setEl('cierre-sales-total-usd', ventasTotalesUSD.toFixed(2));
+    setEl('cierre-sales-total-ves', ventasTotalesVES.toFixed(2));
+    setEl('cierre-sales-total-text', numberToWordsUSD(ventasTotalesUSD));
+
+    if (closureModal) closureModal.style.display = 'flex';
+  };
+
+  // Close Register button handler
+  closeRegisterBtn.addEventListener('click', window.abrirCierreCaja);
+
+  if (closureBackBtn) {
+    closureBackBtn.addEventListener('click', () => {
+      closureModal.style.display = 'none';
+    });
+  }
+
+  // Handle Action Button click (Save closure or just Close View)
+  if (closureActionBtn) {
+    closureActionBtn.addEventListener('click', () => {
+      if (closureMode === 'close') {
+        cierreConfirmOverlay.style.display = 'flex';
+      } else {
+        closureModal.style.display = 'none';
+      }
+    });
+  }
+
+  if (cierreConfirmCancel) {
+    cierreConfirmCancel.addEventListener('click', () => {
+      cierreConfirmOverlay.style.display = 'none';
+    });
+  }
+
+  if (cierreConfirmOk) {
+    cierreConfirmOk.addEventListener('click', () => {
+      // Save closure snapshot to database
+      _cierreHistory.push({
+        ...activeClosureData,
+        id: 'C-' + String(_cierreHistory.length + 1).padStart(4, '0')
+      });
+      localStorage.setItem('pos_cierre_history', JSON.stringify(_cierreHistory));
+
+      cierreConfirmOverlay.style.display = 'none';
+      closureModal.style.display = 'none';
+      logout();
+    });
+  }
 
   // Logout/Return to Login Helper
   logoutBtn.addEventListener('click', (e) => {
@@ -1769,8 +2076,14 @@ document.addEventListener('DOMContentLoaded', () => {
     currentSession.isOpened = false;
     currentSession.cashUSD = 0.00;
     currentSession.cashVES = 0.00;
+    currentSession.openedAt = null;
+    currentSession.sales = [];
+    currentSession.abonos = [];
     currentUser.name = '';
     currentUser.role = '';
+
+    // Clear active session from localStorage
+    localStorage.removeItem('pos_current_session');
 
     // Switch screens
     dashboardView.style.display = 'none';
@@ -3173,6 +3486,8 @@ document.addEventListener('DOMContentLoaded', () => {
       setTimeout(() => posProductInput.focus(), 50);
     } else if (targetTab === 'clientes') {
       renderClientesCatalogoTable();
+    } else if (targetTab === 'ventas') {
+      renderVentasTransaccionesTable();
     }
   }
 
@@ -3495,6 +3810,251 @@ document.addEventListener('DOMContentLoaded', () => {
         alert('Usuario eliminado del sistema.');
       }
     });
+  }
+
+  /* ==========================================================================
+     8.5. F3 VENTAS WORKSPACE CONTROLLER
+     ========================================================================== */
+
+  const ventasSubTabItems = document.querySelectorAll('.ventas-sub-tab-item');
+  const ventasSubPanels = [
+    document.getElementById('ventas-panel-transacciones'),
+    document.getElementById('ventas-panel-cierres')
+  ];
+
+  const ventasFilterStart = document.getElementById('ventas-filter-start');
+  const ventasFilterEnd = document.getElementById('ventas-filter-end');
+  const ventasClearFilters = document.getElementById('ventas-clear-filters');
+
+  // Subtab switching
+  ventasSubTabItems.forEach(btn => {
+    btn.addEventListener('click', () => {
+      ventasSubTabItems.forEach(item => {
+        item.classList.remove('active');
+        item.style.backgroundColor = '#20589d';
+        item.style.color = 'white';
+      });
+      btn.classList.add('active');
+      btn.style.backgroundColor = '#f8fafc';
+      btn.style.color = '#20589d';
+
+      const targetSubtab = btn.getAttribute('data-subtab');
+      ventasSubPanels.forEach(panel => {
+        if (panel) {
+          panel.style.display = 'none';
+          if (panel.getAttribute('id') === `ventas-panel-${targetSubtab}`) {
+            panel.style.display = 'flex';
+          }
+        }
+      });
+
+      if (targetSubtab === 'transacciones') {
+        renderVentasTransaccionesTable();
+      } else if (targetSubtab === 'cierres') {
+        renderVentasCierresTable();
+      }
+    });
+  });
+
+  // Filter events
+  if (ventasFilterStart) ventasFilterStart.addEventListener('change', renderVentasTransaccionesTable);
+  if (ventasFilterEnd) ventasFilterEnd.addEventListener('change', renderVentasTransaccionesTable);
+  if (ventasClearFilters) {
+    ventasClearFilters.addEventListener('click', () => {
+      ventasFilterStart.value = '';
+      ventasFilterEnd.value = '';
+      renderVentasTransaccionesTable();
+    });
+  }
+
+  // Render processed sales list
+  function renderVentasTransaccionesTable() {
+    const tbody = document.getElementById('ventas-transacciones-table-body');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    const startVal = ventasFilterStart.value; // YYYY-MM-DD
+    const endVal = ventasFilterEnd.value;
+
+    let filtered = processedSales;
+
+    if (startVal) {
+      filtered = filtered.filter(sale => sale.date >= startVal);
+    }
+    if (endVal) {
+      filtered = filtered.filter(sale => sale.date <= endVal);
+    }
+
+    // Totals calculations
+    let sumBruto = 0;
+    let sumDescuentos = 0;
+    let sumTotal = 0;
+    let sumEfectivo = 0;
+    let sumTarjeta = 0;
+    let sumCredito = 0;
+    let sumPuntos = 0;
+
+    filtered.forEach(sale => {
+      // Calculate Gross Venta Bruta USD
+      const itemsSub = sale.items ? sale.items.reduce((acc, it) => acc + (it.totalUSD || 0), 0) : sale.subtotalUSD;
+      const brute = itemsSub * 1.16;
+      sumBruto += brute;
+      sumTotal += sale.netUSD;
+      sumDescuentos += Math.max(0, brute - sale.netUSD);
+      sumEfectivo += (sale.payCash - sale.usdToGive);
+      sumTarjeta += sale.payCard + ((sale.payCardVes || 0) / (sale.tasaDia || exchangeRate || 36.45));
+    });
+
+    const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    setEl('ventas-sum-monto', `$ ${sumBruto.toFixed(2)}`);
+    setEl('ventas-sum-descuentos', `$ ${sumDescuentos.toFixed(2)}`);
+    setEl('ventas-sum-total', `$ ${sumTotal.toFixed(2)}`);
+    setEl('ventas-sum-efectivo', `$ ${sumEfectivo.toFixed(2)}`);
+    setEl('ventas-sum-tarjeta', `$ ${sumTarjeta.toFixed(2)}`);
+    setEl('ventas-sum-credito', `$ ${sumCredito.toFixed(2)}`);
+    setEl('ventas-sum-puntos', `$ ${sumPuntos.toFixed(2)}`);
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="13" style="text-align: center; padding: 1.5rem; color: #64748b;">No hay transacciones registradas para este rango de fecha.</td></tr>`;
+      return;
+    }
+
+    // Render transactions reverse chronological order
+    [...filtered].reverse().forEach(sale => {
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid #e2e8f0';
+      tr.style.cursor = 'pointer';
+
+      const itemsSub = sale.items ? sale.items.reduce((acc, it) => acc + (it.totalUSD || 0), 0) : sale.subtotalUSD;
+      const brute = itemsSub * 1.16;
+      const desc = Math.max(0, brute - sale.netUSD);
+      const efecUSD = (sale.payCash - sale.usdToGive);
+      const cardUSD = sale.payCard + ((sale.payCardVes || 0) / (sale.tasaDia || exchangeRate || 36.45));
+
+      tr.innerHTML = `
+        <td style="padding: 0.45rem 0.5rem; font-weight: 500; color: #475569;">${sale.date} ${sale.time}</td>
+        <td style="padding: 0.45rem 0.5rem; color: #1e293b; font-weight: 600;">VENTA TICKET</td>
+        <td style="padding: 0.45rem 0.5rem; text-align: center; font-weight: 700; color: #20589d;">${sale.ticketNumber}</td>
+        <td style="padding: 0.45rem 0.5rem; color: #475569; text-transform: uppercase;">${sale.cashier.split(' - ')[0]}</td>
+        <td style="padding: 0.45rem 0.5rem; color: #475569; text-transform: uppercase;">${sale.client.toUpperCase()}</td>
+        <td style="padding: 0.45rem 0.5rem; text-align: right; font-weight: 700; color: #15803d;">$ ${sale.netUSD.toFixed(2)}</td>
+        <td style="padding: 0.45rem 0.5rem; text-align: right; color: #64748b;">$ ${(itemsSub * 0.16).toFixed(2)}</td>
+        <td style="padding: 0.45rem 0.5rem; text-align: right; color: #475569;">$ ${itemsSub.toFixed(2)}</td>
+        <td style="padding: 0.45rem 0.5rem; text-align: right; color: #dc2626;">$ ${desc.toFixed(2)}</td>
+        <td style="padding: 0.45rem 0.5rem; text-align: right; color: #0f766e; font-weight: 600;">$ ${efecUSD.toFixed(2)}</td>
+        <td style="padding: 0.45rem 0.5rem; text-align: right; color: #0369a1; font-weight: 600;">$ ${cardUSD.toFixed(2)}</td>
+        <td style="padding: 0.45rem 0.5rem; text-align: right; color: #64748b;">$ 0.00</td>
+        <td style="padding: 0.45rem 0.5rem; text-align: right; color: #64748b;">$ 0.00</td>
+      `;
+
+      tr.addEventListener('click', () => {
+        // Re-use reprintTicket flow
+        isReprinting = true;
+        reprintBtn.click();
+        const searchInput = document.getElementById('reprint-search-input');
+        if (searchInput) {
+          searchInput.value = sale.ticketNumber;
+          // Trigger search event
+          searchInput.dispatchEvent(new Event('input'));
+          // Locate the row and click it
+          setTimeout(() => {
+            const rows = document.querySelectorAll('#reprint-modal-table-body tr');
+            if (rows.length > 0) rows[0].click();
+          }, 150);
+        }
+      });
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  // Render Cierre History table list
+  function renderVentasCierresTable() {
+    const tbody = document.getElementById('ventas-cierres-table-body');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    if (_cierreHistory.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="11" style="text-align: center; padding: 1.5rem; color: #64748b;">No hay cierres de caja registrados en el historial.</td></tr>`;
+      return;
+    }
+
+    [..._cierreHistory].reverse().forEach(c => {
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid #e2e8f0';
+      tr.style.cursor = 'pointer';
+
+      tr.innerHTML = `
+        <td style="padding: 0.45rem 0.5rem; font-weight: 600; color: #20589d;">${c.date} ${c.time}</td>
+        <td style="padding: 0.45rem 0.5rem; color: #1e293b; text-transform: uppercase;">${c.cashier.split(' - ')[0]}</td>
+        <td style="padding: 0.45rem 0.5rem; text-align: center; font-weight: 700; color: #475569;">${c.tasaDia.toFixed(2)} Bs</td>
+        <td style="padding: 0.45rem 0.5rem; text-align: right; color: #0b5fa5; font-weight: 500;">$ ${c.cashUSD_apertura.toFixed(2)}</td>
+        <td style="padding: 0.45rem 0.5rem; text-align: right; color: #64748b;">Bs ${c.cashVES_apertura.toFixed(2)}</td>
+        <td style="padding: 0.45rem 0.5rem; text-align: right; color: #1e293b; font-weight: 700;">$ ${c.dineroCajaUSD.toFixed(2)}</td>
+        <td style="padding: 0.45rem 0.5rem; text-align: right; color: #1e293b; font-weight: 700;">Bs ${c.dineroCajaVES.toFixed(2)}</td>
+        <td style="padding: 0.45rem 0.5rem; text-align: right; color: #15803d;">$ ${c.cashUSD_ventas.toFixed(2)}</td>
+        <td style="padding: 0.45rem 0.5rem; text-align: right; color: #64748b;">Bs ${c.cashVES_ventas.toFixed(2)}</td>
+        <td style="padding: 0.45rem 0.5rem; text-align: right; color: #15803d;">$ ${c.abonosUSD.toFixed(2)}</td>
+        <td style="padding: 0.45rem 0.5rem; text-align: right; color: #16a34a; font-weight: 700;">$ ${c.ventasTotalesUSD.toFixed(2)}</td>
+      `;
+
+      tr.addEventListener('click', () => {
+        openCierreConsultation(c);
+      });
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  // Open closure details modal in read-only view
+  function openCierreConsultation(c) {
+    closureMode = 'view';
+    document.getElementById('cierre-caja-modal-title').textContent = 'Consulta de Cierre de Caja';
+    if (closureActionBtnText) closureActionBtnText.textContent = 'Cerrar Vista';
+    if (closureActionBtn) closureActionBtn.style.backgroundColor = '#64748b';
+
+    const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+
+    setEl('cierre-usuario-name', c.cashier);
+    setEl('cierre-apertura-usd', c.cashUSD_apertura.toFixed(2));
+    setEl('cierre-apertura-ves', c.cashVES_apertura.toFixed(2));
+    setEl('cierre-ventas-usd', c.cashUSD_ventas.toFixed(2));
+    setEl('cierre-ventas-ves', c.cashVES_ventas.toFixed(2));
+    setEl('cierre-abono-usd', c.abonosUSD.toFixed(2));
+    setEl('cierre-abono-ves', '0.00');
+    setEl('cierre-entrada-usd', '0.00');
+    setEl('cierre-entrada-ves', '0.00');
+    setEl('cierre-salida-usd', '0.00');
+    setEl('cierre-salida-ves', '0.00');
+    setEl('cierre-devolucion-usd', '0.00');
+    setEl('cierre-devolucion-ves', '0.00');
+    setEl('cierre-caja-total-usd', c.dineroCajaUSD.toFixed(2));
+    setEl('cierre-caja-total-ves', c.dineroCajaVES.toFixed(2));
+    setEl('cierre-caja-total-text', numberToWordsUSD(c.dineroCajaUSD));
+
+    setEl('cierre-sales-tot-usd', c.ventasTotalesUSD.toFixed(2));
+    setEl('cierre-sales-tot-ves', c.ventasTotalesVES.toFixed(2));
+    setEl('cierre-sales-disc-usd', c.descuentosUSD.toFixed(2));
+    setEl('cierre-sales-disc-ves', (c.descuentosUSD * c.tasaDia).toFixed(2));
+    setEl('cierre-sales-brut-usd', c.ventaBrutaUSD.toFixed(2));
+    setEl('cierre-sales-brut-ves', (c.ventaBrutaUSD * c.tasaDia).toFixed(2));
+
+    setEl('cierre-pay-efectivo-usd', c.cashUSD_ventas.toFixed(2));
+    setEl('cierre-pay-efectivo-ves', c.cashVES_ventas.toFixed(2));
+    setEl('cierre-pay-tarjeta-usd', c.tarjetaPaidUSD.toFixed(2));
+    setEl('cierre-pay-tarjeta-ves', c.tarjetaPaidVES.toFixed(2));
+    setEl('cierre-pay-biopago-ves', c.biopagoPaidVES.toFixed(2));
+    setEl('cierre-pay-credito-usd', '0.00');
+    setEl('cierre-pay-credito-ves', '0.00');
+    setEl('cierre-pay-puntos-usd', '0.00');
+    setEl('cierre-pay-puntos-ves', '0.00');
+    setEl('cierre-sales-dev-usd', '0.00');
+    setEl('cierre-sales-dev-ves', '0.00');
+    setEl('cierre-sales-total-usd', c.ventasTotalesUSD.toFixed(2));
+    setEl('cierre-sales-total-ves', c.ventasTotalesVES.toFixed(2));
+    setEl('cierre-sales-total-text', numberToWordsUSD(c.ventasTotalesUSD));
+
+    if (closureModal) closureModal.style.display = 'flex';
   }
 
   /* ==========================================================================
@@ -4032,7 +4592,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const abonoNum = '0000' + Math.floor(100 + Math.random() * 900);
 
       // Add to client statement history
-      client.history.push({
+      const abonoObj = {
         type: 'ABONO',
         date: formattedDate,
         user: currentUser.name.split(' - ')[0] || 'ADMIN',
@@ -4041,7 +4601,27 @@ document.addEventListener('DOMContentLoaded', () => {
         sale: 0.00,
         pay: amount,
         balance: client.pending
-      });
+      };
+      client.history.push(abonoObj);
+
+      // Add to active session if open
+      if (currentSession.isOpened) {
+        currentSession.abonos.push({
+          date: formattedDate,
+          user: currentUser.name.split(' - ')[0] || 'ADMIN',
+          doc: `PAGO ABONO ${abonoNum}`,
+          pay: amount
+        });
+        localStorage.setItem('pos_current_session', JSON.stringify({
+          cashUSD: currentSession.cashUSD,
+          cashVES: currentSession.cashVES,
+          isOpened: true,
+          openedAt: currentSession.openedAt,
+          sales: currentSession.sales,
+          abonos: currentSession.abonos,
+          cashier: currentUser.name
+        }));
+      }
 
       // Clear input
       cliAbonoAmount.value = '';

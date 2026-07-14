@@ -2254,5 +2254,38 @@ body {
   color: #20589d !important;
 }
 
+/* F3 Ventas Subtab navigation styles */
+.ventas-sub-tab-item {
+  border: none;
+  background: none;
+  font-family: var(--font-family), sans-serif;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.4rem 1rem;
+  border-radius: 4px 4px 0 0;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+}
+.ventas-sub-tab-item:hover {
+  background-color: rgba(255, 255, 255, 0.15) !important;
+  color: white !important;
+}
+.ventas-sub-tab-item.active {
+  background-color: #f8fafc !important;
+  color: #20589d !important;
+  cursor: default;
+}
+
+/* Hover highlights for lists and closure details */
+.cierre-row:hover {
+  background-color: #f8fafc;
+}
+#ventas-cierres-table-body tr:hover {
+  background-color: #f1f5f9;
+}
+#ventas-transacciones-table-body tr:hover {
+  background-color: #f8fafc;
+}
+
 
 
