@@ -106,6 +106,7 @@ export default function App() {
   const [lanIP, setLanIP] = useState('192.168.1.100');
   const [dbMode, setDbMode] = useState('remote');
   const [reprintSale, setReprintSale] = useState<Sale | null>(null);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   // Active Pestaña Tab F1-F10
   const [activeTab, setActiveTab] = useState<'caja' | 'inventario' | 'ventas' | 'clientes' | 'tasa' | 'config'>('caja');
@@ -577,7 +578,7 @@ export default function App() {
 
   const handleLogout = () => {
     if (cajaAbierta) {
-      alert('Debe realizar el Cierre de Caja Físico obligatorio antes de poder salir del terminal.');
+      setShowLogoutConfirm(true);
       return;
     }
     setCurrentUser(null);
@@ -902,6 +903,53 @@ export default function App() {
               ACEPTAR Y REGRESAR
             </button>
 
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CONFIRMACIÓN DE CIERRE DE SESIÓN */}
+      {showLogoutConfirm && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-mono text-slate-800">
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-md shadow-2xl p-6 space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+              <h3 className="text-sm font-extrabold text-red-650 flex items-center gap-2">
+                <LogOut className="w-4 h-4 text-red-600" />
+                ADVERTENCIA DE SEGURIDAD
+              </h3>
+              <button onClick={() => setShowLogoutConfirm(false)} className="text-slate-400 hover:text-slate-700">✕</button>
+            </div>
+
+            <div className="text-xs space-y-3 font-sans text-slate-600">
+              <p className="font-bold text-slate-800 text-sm">
+                ⚠️ La caja registradora de este terminal se encuentra abierta.
+              </p>
+              <p>
+                Si cierra la sesión, el turno y saldo de caja continuarán activos. Al volver a iniciar sesión, podrá continuar con las operaciones pendientes.
+              </p>
+              <p className="font-semibold text-red-500">
+                ¿Está seguro de que desea cerrar la sesión actual del operador?
+              </p>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowLogoutConfirm(false)}
+                className="w-1/2 bg-slate-100 border border-slate-250 text-slate-600 py-2.5 rounded font-sans text-xs hover:bg-slate-200 transition-all font-bold"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLogoutConfirm(false);
+                  setCurrentUser(null);
+                }}
+                className="w-1/2 bg-red-600 hover:bg-red-750 text-white py-2.5 rounded font-bold font-sans text-xs tracking-wider transition-all"
+              >
+                SÍ, CERRAR SESIÓN
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Product, InventoryMovement, PriceAdjustmentHistory, User } from '../types';
-import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus } from 'lucide-react';
+import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer } from 'lucide-react';
 
 interface InventarioProps {
   products: Product[];
@@ -23,6 +23,11 @@ export default function Inventario({
 }: InventarioProps) {
   const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'movimientos' | 'precios'>('catalogo');
   const [searchTerm, setSearchTerm] = useState('');
+  
+  // Filter states
+  const [filterCategory, setFilterCategory] = useState('TODAS');
+  const [filterStock, setFilterStock] = useState<'todos' | 'con_existencia' | 'sin_existencia'>('todos');
+  const [filterMinStock, setFilterMinStock] = useState<'todos' | 'bajo_minimo'>('todos');
   
   // Modals / Actions states
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -129,10 +134,23 @@ export default function Inventario({
     };
   }, [isDragging]);
 
-  const filteredProducts = products.filter(p =>
-    p.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.barcode.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredProducts = products.filter(p => {
+    const matchesSearch = p.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      p.barcode.toLowerCase().includes(searchTerm.toLowerCase());
+      
+    const matchesCategory = filterCategory === 'TODAS' || p.category.toUpperCase() === filterCategory.toUpperCase();
+    
+    const matchesStock = 
+      filterStock === 'todos' ? true :
+      filterStock === 'con_existencia' ? p.stock_actual > 0 :
+      filterStock === 'sin_existencia' ? p.stock_actual === 0 : true;
+      
+    const matchesMinStock = 
+      filterMinStock === 'todos' ? true :
+      filterMinStock === 'bajo_minimo' ? p.stock_actual <= p.stock_minimo : true;
+      
+    return matchesSearch && matchesCategory && matchesStock && matchesMinStock;
+  });
 
   const handleOpenAdjust = (prod: Product) => {
     setSelectedProduct(prod);
@@ -251,6 +269,137 @@ export default function Inventario({
     setNewVencimiento('');
   };
 
+  const handlePrintReport = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('Por favor permita las ventanas emergentes para poder imprimir el reporte.');
+      return;
+    }
+
+    const totalFilteredProducts = filteredProducts.length;
+    const totalFilteredQty = filteredProducts.reduce((acc, p) => acc + p.stock_actual, 0);
+    const totalFilteredValueVenta = filteredProducts.reduce((acc, p) => acc + p.precio_detalle_usd * p.stock_actual, 0);
+    const totalFilteredValueCosto = filteredProducts.reduce((acc, p) => acc + p.precio_costo_usd * p.stock_actual, 0);
+
+    const now = new Date().toLocaleString();
+
+    const categoryFilterLabel = filterCategory === 'TODAS' ? 'TODAS' : filterCategory;
+    const stockFilterLabel = 
+      filterStock === 'todos' ? 'TODOS' :
+      filterStock === 'con_existencia' ? 'CON EXISTENCIA' : 'SIN EXISTENCIA';
+    const minStockFilterLabel = 
+      filterMinStock === 'todos' ? 'TODOS' : 'BAJO STOCK MÍNIMO';
+
+    const rowsHtml = filteredProducts.map(p => `
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 6px 8px; font-family: monospace; font-size: 10px; font-weight: bold; color: #475569;">${p.barcode}</td>
+        <td style="padding: 6px 8px; font-size: 10px; font-weight: bold;">${p.description}</td>
+        <td style="padding: 6px 8px; font-size: 10px;">${p.category}</td>
+        <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-size: 10px; color: #64748b;">${p.stock_minimo}</td>
+        <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-size: 10px; font-weight: bold; ${p.stock_actual <= p.stock_minimo ? 'color: #ef4444;' : 'color: #1e293b;'}">${p.stock_actual}</td>
+        <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-size: 10px; color: #475569;">$${p.precio_costo_usd.toFixed(2)}</td>
+        <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-size: 10px; font-weight: bold; color: #059669;">$${p.precio_detalle_usd.toFixed(2)}</td>
+        <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-size: 10px; color: #475569;">$${p.precio_mayor_usd.toFixed(2)} <span style="font-size: 8px; color: #94a3b8;">x${p.cantidad_mayorista}</span></td>
+      </tr>
+    `).join('');
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Reporte de Inventario - Inversiones Niquitao</title>
+          <style>
+            body { font-family: system-ui, -apple-system, sans-serif; color: #1e293b; margin: 20px; font-size: 11px; }
+            .header { border-bottom: 2px solid #0f172a; padding-bottom: 10px; margin-bottom: 15px; }
+            .title { font-size: 16px; font-weight: bold; text-transform: uppercase; margin: 0; color: #0f172a; }
+            .subtitle { font-size: 10px; color: #64748b; margin: 2px 0 0 0; }
+            .info-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 15px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 10px; border-radius: 6px; }
+            .info-item { display: flex; flex-direction: column; }
+            .info-label { font-size: 8px; text-transform: uppercase; color: #64748b; font-weight: bold; }
+            .info-value { font-size: 11px; font-weight: bold; color: #0f172a; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+            th { background-color: #f1f5f9; padding: 8px; font-weight: bold; text-align: left; text-transform: uppercase; font-size: 9px; border-bottom: 2px solid #cbd5e1; color: #475569; }
+            @media print {
+              body { margin: 10px; }
+              .no-print { display: none; }
+              @page { size: portrait; margin: 1cm; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <h1 class="title">INVERSIONES NIQUITAO 3000 C.A.</h1>
+                <p class="subtitle">RIF: J-41132631 | Tel: 0424-2042877 | Reporte de Inventario</p>
+              </div>
+              <div style="text-align: right;">
+                <p style="margin: 0; font-weight: bold; font-size: 11px;">Estación: CAJA_01</p>
+                <p style="margin: 2px 0 0 0; font-size: 9px; color: #64748b;">Generado: ${now}</p>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-bottom: 8px; font-weight: bold; text-transform: uppercase; font-size: 9px; letter-spacing: 0.5px; color: #64748b;">
+            Filtros Aplicados: 
+            <span style="background: #f1f5f9; border: 1px solid #e2e8f0; padding: 2px 6px; border-radius: 4px; margin-right: 5px; color: #334155;">Categoría: ${categoryFilterLabel}</span>
+            <span style="background: #f1f5f9; border: 1px solid #e2e8f0; padding: 2px 6px; border-radius: 4px; margin-right: 5px; color: #334155;">Existencia: ${stockFilterLabel}</span>
+            <span style="background: #f1f5f9; border: 1px solid #e2e8f0; padding: 2px 6px; border-radius: 4px; color: #334155;">Stock Mínimo: ${minStockFilterLabel}</span>
+          </div>
+
+          <div class="info-grid">
+            <div class="info-item">
+              <span class="info-label">Productos Listados</span>
+              <span class="info-value">${totalFilteredProducts} artículos</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Total Unidades</span>
+              <span class="info-value">${totalFilteredQty} uds</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Valor Inv. (Detalle)</span>
+              <span class="info-value" style="color: #059669;">$${totalFilteredValueVenta.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Valor Inv. (Costo)</span>
+              <span class="info-value">$${totalFilteredValueCosto.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 15%; text-align: left;">Código</th>
+                <th style="width: 35%; text-align: left;">Descripción</th>
+                <th style="width: 15%; text-align: left;">Categoría</th>
+                <th style="width: 8%; text-align: right;">Mínimo</th>
+                <th style="width: 8%; text-align: right;">Existencia</th>
+                <th style="width: 8%; text-align: right;">P. Costo</th>
+                <th style="width: 8%; text-align: right; color: #059669;">P. Detalle</th>
+                <th style="width: 10%; text-align: right;">P. Mayor</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml || '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #64748b;">No hay productos con los filtros seleccionados.</td></tr>'}
+            </tbody>
+          </table>
+
+          <div style="margin-top: 30px; text-align: center; font-size: 9px; color: #94a3b8; border-top: 1px dashed #e2e8f0; padding-top: 10px;" class="no-print">
+            <button onclick="window.print()" style="background: #0f172a; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-weight: bold; cursor: pointer; font-family: inherit;">Imprimir Reporte</button>
+          </div>
+
+          <script>
+            window.onload = function() {
+              setTimeout(function() {
+                window.print();
+              }, 300);
+            }
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
   return (
     <div className="space-y-6 text-slate-800 font-mono text-xs">
       
@@ -326,9 +475,9 @@ export default function Inventario({
               </span>
             </div>
           </div>
-          <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
+          <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center justify-between bg-slate-50 border border-slate-200 rounded-xl p-4 shadow-sm">
             {/* Search Input */}
-            <div className="relative w-full sm:w-80">
+            <div className="relative flex-grow max-w-md">
               <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                 <Search className="w-4 h-4" />
               </span>
@@ -337,17 +486,72 @@ export default function Inventario({
                 placeholder="Buscar por código o descripción..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-350 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart font-sans"
+                className="w-full bg-white border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-800 focus:border-winter-inventarioStart font-sans focus:outline-none"
               />
             </div>
             
-            <button
-              onClick={() => setShowNewProdModal(true)}
-              className="bg-winter-inventarioStart hover:bg-winter-inventarioEnd text-white px-4 py-2 rounded-lg text-xs font-bold font-sans transition-all flex items-center gap-1.5 shadow-sm w-full sm:w-auto justify-center"
-            >
-              <Plus className="w-4 h-4" />
-              Crear Nuevo Producto
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={handlePrintReport}
+                className="bg-slate-700 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-xs font-bold font-sans transition-all flex items-center gap-1.5 shadow-sm"
+              >
+                <Printer className="w-4 h-4" />
+                Imprimir Reporte
+              </button>
+              
+              <button
+                onClick={() => setShowNewProdModal(true)}
+                className="bg-winter-inventarioStart hover:bg-winter-inventarioEnd text-white px-4 py-2 rounded-lg text-xs font-bold font-sans transition-all flex items-center gap-1.5 shadow-sm"
+              >
+                <Plus className="w-4 h-4" />
+                Crear Nuevo Producto
+              </button>
+            </div>
+          </div>
+
+          {/* FILTER CONTROLS */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50/50 border border-slate-200/60 rounded-xl p-3 shadow-sm">
+            {/* Category Filter */}
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold text-slate-500 font-sans uppercase">Categoría</label>
+              <select
+                value={filterCategory}
+                onChange={(e) => setFilterCategory(e.target.value)}
+                className="bg-white border border-slate-300 rounded-lg p-2 text-xs text-slate-800 font-sans focus:border-winter-inventarioStart focus:outline-none"
+              >
+                <option value="TODAS">TODAS LAS CATEGORÍAS</option>
+                {categories.map(cat => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Stock Existence Filter */}
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold text-slate-500 font-sans uppercase">Existencia (Stock)</label>
+              <select
+                value={filterStock}
+                onChange={(e) => setFilterStock(e.target.value as any)}
+                className="bg-white border border-slate-300 rounded-lg p-2 text-xs text-slate-800 font-sans focus:border-winter-inventarioStart focus:outline-none"
+              >
+                <option value="todos">TODOS LOS PRODUCTOS</option>
+                <option value="con_existencia">CON EXISTENCIA (&gt; 0)</option>
+                <option value="sin_existencia">SIN EXISTENCIA (0)</option>
+              </select>
+            </div>
+
+            {/* Min Stock Warning Filter */}
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold text-slate-500 font-sans uppercase">Alertas de Stock</label>
+              <select
+                value={filterMinStock}
+                onChange={(e) => setFilterMinStock(e.target.value as any)}
+                className="bg-white border border-slate-300 rounded-lg p-2 text-xs text-slate-800 font-sans focus:border-winter-inventarioStart focus:outline-none"
+              >
+                <option value="todos">MOSTRAR TODO EL STOCK</option>
+                <option value="bajo_minimo">BAJO STOCK MÍNIMO (ALERTA)</option>
+              </select>
+            </div>
           </div>
 
           <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
@@ -355,15 +559,15 @@ export default function Inventario({
               <table className="w-full border-collapse text-xs text-left">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr className="text-slate-550">
-                    <th className="px-4 py-3 font-sans uppercase">Código</th>
-                    <th className="px-4 py-3 font-sans uppercase">Descripción</th>
-                    <th className="px-4 py-3 font-sans uppercase">Categoría</th>
-                    <th className="px-4 py-3 text-right font-sans uppercase">Stock Mínimo</th>
-                    <th className="px-4 py-3 text-right text-slate-800 font-sans uppercase">Existencia</th>
-                    <th className="px-4 py-3 text-right font-sans uppercase">P. Costo</th>
-                    <th className="px-4 py-3 text-right text-emerald-600 font-sans uppercase">P. Detalle</th>
-                    <th className="px-4 py-3 text-right font-sans uppercase">P. Mayor</th>
-                    <th className="px-4 py-3 text-center font-sans uppercase">Acciones</th>
+                    <th className="px-2.5 py-1.5 font-sans uppercase">Código</th>
+                    <th className="px-2.5 py-1.5 font-sans uppercase">Descripción</th>
+                    <th className="px-2.5 py-1.5 font-sans uppercase">Categoría</th>
+                    <th className="px-2.5 py-1.5 text-right font-sans uppercase">Stock Mínimo</th>
+                    <th className="px-2.5 py-1.5 text-right text-slate-800 font-sans uppercase">Existencia</th>
+                    <th className="px-2.5 py-1.5 text-right font-sans uppercase">P. Costo</th>
+                    <th className="px-2.5 py-1.5 text-right text-emerald-600 font-sans uppercase">P. Detalle</th>
+                    <th className="px-2.5 py-1.5 text-right font-sans uppercase">P. Mayor</th>
+                    <th className="px-2.5 py-1.5 text-center font-sans uppercase">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -378,9 +582,9 @@ export default function Inventario({
                       const isLowStock = p.stock_actual <= p.stock_minimo;
                       return (
                         <tr key={p.id} className="hover:bg-slate-50/50">
-                          <td className="px-4 py-3 font-mono font-bold text-slate-450">{p.barcode}</td>
-                          <td className="px-4 py-3 font-sans select-text">
-                            <div className="font-bold text-slate-800">{p.description}</div>
+                          <td className="px-2.5 py-1.5 font-mono font-bold text-slate-450">{p.barcode}</td>
+                          <td className="px-2.5 py-1.5 font-sans select-text">
+                            <div className="font-bold text-slate-850">{p.description}</div>
                             <div className="flex gap-1.5 mt-0.5 text-[9px]">
                               {p.a_granel && (
                                 <span className="bg-amber-50 border border-amber-250 text-amber-700 px-1 py-0.2 rounded font-bold uppercase font-sans">A Granel</span>
@@ -392,33 +596,33 @@ export default function Inventario({
                               )}
                             </div>
                           </td>
-                          <td className="px-4 py-3 font-sans">{p.category}</td>
-                          <td className="px-4 py-3 text-right font-mono text-slate-500">{p.stock_minimo}</td>
-                          <td className={`px-4 py-3 text-right font-black font-mono ${isLowStock ? 'text-red-500 animate-pulse font-bold' : 'text-slate-800'}`}>
+                          <td className="px-2.5 py-1.5 font-sans">{p.category}</td>
+                          <td className="px-2.5 py-1.5 text-right font-mono text-slate-500">{p.stock_minimo}</td>
+                          <td className={`px-2.5 py-1.5 text-right font-black font-mono ${isLowStock ? 'text-red-500 animate-pulse font-bold' : 'text-slate-800'}`}>
                             {p.stock_actual}
                           </td>
-                          <td className="px-4 py-3 text-right font-mono text-slate-600">${p.precio_costo_usd.toFixed(2)}</td>
-                          <td className="px-4 py-3 text-right font-mono text-emerald-600 font-bold">${p.precio_detalle_usd.toFixed(2)}</td>
-                          <td className="px-4 py-3 text-right font-mono text-slate-600">
+                          <td className="px-2.5 py-1.5 text-right font-mono text-slate-600">${p.precio_costo_usd.toFixed(2)}</td>
+                          <td className="px-2.5 py-1.5 text-right font-mono text-emerald-600 font-bold">${p.precio_detalle_usd.toFixed(2)}</td>
+                          <td className="px-2.5 py-1.5 text-right font-mono text-slate-600">
                             ${p.precio_mayor_usd.toFixed(2)}
                             <span className="text-[9px] text-slate-400 block font-sans">x{p.cantidad_mayorista}</span>
                           </td>
-                          <td className="px-4 py-3">
-                            <div className="flex gap-2 justify-center">
+                          <td className="px-2.5 py-1.5">
+                            <div className="flex gap-1 justify-center">
                               <button
                                 onClick={() => handleOpenAdjust(p)}
-                                className="bg-slate-50 border border-slate-200 text-slate-650 px-2.5 py-1.5 rounded hover:border-winter-inventarioStart hover:text-winter-inventarioStart font-sans transition-all flex items-center gap-1 shadow-sm"
+                                className="bg-slate-50 border border-slate-200 text-slate-650 px-2 py-1 rounded hover:border-winter-inventarioStart hover:text-winter-inventarioStart font-sans transition-all flex items-center gap-1 shadow-sm text-[10px]"
                                 title="Ajustar Stock (Entradas, Salidas, Mermas)"
                               >
-                                <RefreshCw className="w-3 h-3" />
+                                <RefreshCw className="w-2.5 h-2.5" />
                                 Stock
                               </button>
                               <button
                                 onClick={() => handleOpenPrices(p)}
-                                className="bg-slate-50 border border-slate-200 text-slate-650 px-2.5 py-1.5 rounded hover:border-winter-inventarioStart hover:text-winter-inventarioStart font-sans transition-all flex items-center gap-1 shadow-sm"
+                                className="bg-slate-50 border border-slate-200 text-slate-650 px-2 py-1 rounded hover:border-winter-inventarioStart hover:text-winter-inventarioStart font-sans transition-all flex items-center gap-1 shadow-sm text-[10px]"
                                 title="Actualizar precios de costo/venta"
                               >
-                                <PenTool className="w-3 h-3" />
+                                <PenTool className="w-2.5 h-2.5" />
                                 Precios
                               </button>
                             </div>
