@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-winter-bg text-slate-800 antialiased font-sans select-none;
+  }
+}
+
+/* Tab Active Gradients matching WinterPOS variables */
+.tab-grad-caja {
+  background: linear-gradient(180deg, #074080 0%, #0d5aa5 100%);
+}
+
+.tab-grad-inventario {
+  background: linear-gradient(180deg, #7c1232 0%, #a01d44 100%);
+}
+
+.tab-grad-ventas {
+  background: linear-gradient(180deg, #132148 0%, #1e3573 100%);
+}
+
+.tab-grad-clientes {
+  background: linear-gradient(180deg, #116265 0%, #1b8589 100%);
+}
+
+.tab-grad-tasa {
+  background: linear-gradient(180deg, #116265 0%, #1b8589 100%);
+}
+
+.tab-grad-config {
+  background: linear-gradient(180deg, #10624d 0%, #18896c 100%);
+}
+
+/* Custom terminal animations and scanline styling */
+.scanline {
+  background: linear-gradient(
+    to bottom,
+    rgba(255,255,255,0),
+    rgba(255,255,255,0) 50%,
+    rgba(0, 21, 36, 0.05) 50%,
+    rgba(0, 21, 36, 0.05)
+  );
+  background-size: 100% 4px;
+}
+
+@keyframes pulse-slow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-slate-200;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-400 rounded-md;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-500;
+}
