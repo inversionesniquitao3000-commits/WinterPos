@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Product, InventoryMovement, PriceAdjustmentHistory, User } from '../types';
-import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer } from 'lucide-react';
+import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 
 interface InventarioProps {
   products: Product[];
@@ -28,6 +28,41 @@ export default function Inventario({
   const [filterCategory, setFilterCategory] = useState('TODAS');
   const [filterStock, setFilterStock] = useState<'todos' | 'con_existencia' | 'sin_existencia'>('todos');
   const [filterMinStock, setFilterMinStock] = useState<'todos' | 'bajo_minimo'>('todos');
+
+  // Sorting states
+  const [sortField, setSortField] = useState<'existencia' | 'categoria' | 'descripcion' | null>(null);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  const handleSort = (field: 'existencia' | 'categoria' | 'descripcion') => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  const renderSortHeader = (label: string, field: 'existencia' | 'categoria' | 'descripcion', align: 'left' | 'right' = 'left') => {
+    const isSorted = sortField === field;
+    return (
+      <button
+        type="button"
+        onClick={() => handleSort(field)}
+        className={`flex items-center gap-1 hover:text-winter-inventarioStart transition-colors font-sans uppercase font-bold focus:outline-none whitespace-nowrap ${align === 'right' ? 'justify-end ml-auto' : ''}`}
+      >
+        <span>{label}</span>
+        {isSorted ? (
+          sortDirection === 'asc' ? (
+            <ArrowUp className="w-3.5 h-3.5 text-winter-inventarioStart" />
+          ) : (
+            <ArrowDown className="w-3.5 h-3.5 text-winter-inventarioStart" />
+          )
+        ) : (
+          <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
+        )}
+      </button>
+    );
+  };
   
   // Modals / Actions states
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -150,6 +185,28 @@ export default function Inventario({
       filterMinStock === 'bajo_minimo' ? p.stock_actual <= p.stock_minimo : true;
       
     return matchesSearch && matchesCategory && matchesStock && matchesMinStock;
+  });
+
+  const sortedProducts = [...filteredProducts].sort((a, b) => {
+    if (!sortField) return 0;
+    
+    let aVal: any = '';
+    let bVal: any = '';
+    
+    if (sortField === 'existencia') {
+      aVal = a.stock_actual;
+      bVal = b.stock_actual;
+    } else if (sortField === 'categoria') {
+      aVal = a.category.toLowerCase();
+      bVal = b.category.toLowerCase();
+    } else if (sortField === 'descripcion') {
+      aVal = a.description.toLowerCase();
+      bVal = b.description.toLowerCase();
+    }
+    
+    if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+    if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+    return 0;
   });
 
   const handleOpenAdjust = (prod: Product) => {
@@ -560,10 +617,16 @@ export default function Inventario({
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr className="text-slate-550">
                     <th className="px-2.5 py-1.5 font-sans uppercase">Código</th>
-                    <th className="px-2.5 py-1.5 font-sans uppercase">Descripción</th>
-                    <th className="px-2.5 py-1.5 font-sans uppercase">Categoría</th>
+                    <th className="px-2.5 py-1.5 font-sans uppercase">
+                      {renderSortHeader('Descripción', 'descripcion')}
+                    </th>
+                    <th className="px-2.5 py-1.5 font-sans uppercase">
+                      {renderSortHeader('Categoría', 'categoria')}
+                    </th>
                     <th className="px-2.5 py-1.5 text-right font-sans uppercase">Stock Mínimo</th>
-                    <th className="px-2.5 py-1.5 text-right text-slate-800 font-sans uppercase">Existencia</th>
+                    <th className="px-2.5 py-1.5 text-right text-slate-800 font-sans uppercase">
+                      {renderSortHeader('Existencia', 'existencia', 'right')}
+                    </th>
                     <th className="px-2.5 py-1.5 text-right font-sans uppercase">P. Costo</th>
                     <th className="px-2.5 py-1.5 text-right text-emerald-600 font-sans uppercase">P. Detalle</th>
                     <th className="px-2.5 py-1.5 text-right font-sans uppercase">P. Mayor</th>
@@ -571,14 +634,14 @@ export default function Inventario({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {filteredProducts.length === 0 ? (
+                  {sortedProducts.length === 0 ? (
                     <tr>
                       <td colSpan={9} className="text-center py-8 text-slate-400 font-sans">
                         No se encontraron productos registrados.
                       </td>
                     </tr>
                   ) : (
-                    filteredProducts.map(p => {
+                    sortedProducts.map(p => {
                       const isLowStock = p.stock_actual <= p.stock_minimo;
                       return (
                         <tr key={p.id} className="hover:bg-slate-50/50">

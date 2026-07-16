@@ -721,7 +721,7 @@ export default function App() {
 
       {/* MAIN CONTENT AREA */}
       <main className="flex-grow p-6 overflow-y-auto max-h-[calc(100vh-130px)]">
-        <div className="max-w-7xl mx-auto">
+        <div className="max-w-[1600px] mx-auto">
           {activeTab === 'caja' && (
             <CajaPOS
               products={products}

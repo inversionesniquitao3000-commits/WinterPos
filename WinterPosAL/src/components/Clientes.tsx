@@ -212,49 +212,70 @@ export default function Clientes({ clients, currentUser: _currentUser, onAddClie
             <thead className="bg-slate-55 border-b border-slate-200">
               <tr className="text-slate-550">
                 <th
-                  className="px-4 py-3 font-sans uppercase cursor-pointer select-none hover:bg-slate-100 transition-colors"
+                  className="px-2.5 py-2 font-sans uppercase cursor-pointer select-none hover:bg-slate-100 transition-colors"
                   onClick={() => handleSort('cedula_rif')}
                 >
-                  Identificación (ID) <SortIcon field="cedula_rif" />
+                  <div className="flex items-center gap-1.5 whitespace-nowrap">
+                    <span>Identificación (ID)</span>
+                    <SortIcon field="cedula_rif" />
+                  </div>
                 </th>
                 <th
-                  className="px-4 py-3 font-sans uppercase cursor-pointer select-none hover:bg-slate-100 transition-colors"
+                  className="px-2.5 py-2 font-sans uppercase cursor-pointer select-none hover:bg-slate-100 transition-colors"
                   onClick={() => handleSort('nombre')}
                 >
-                  Nombre / Razón Social <SortIcon field="nombre" />
+                  <div className="flex items-center gap-1.5 whitespace-nowrap">
+                    <span>Nombre / Razón Social</span>
+                    <SortIcon field="nombre" />
+                  </div>
                 </th>
                 <th
-                  className="px-4 py-3 font-sans uppercase cursor-pointer select-none hover:bg-slate-100 transition-colors"
+                  className="px-2.5 py-2 font-sans uppercase cursor-pointer select-none hover:bg-slate-100 transition-colors"
                   onClick={() => handleSort('telefono')}
                 >
-                  Teléfono <SortIcon field="telefono" />
+                  <div className="flex items-center gap-1.5 whitespace-nowrap">
+                    <span>Teléfono</span>
+                    <SortIcon field="telefono" />
+                  </div>
                 </th>
-                <th className="px-4 py-3 font-sans uppercase">Dirección</th>
+                <th className="px-2.5 py-2 font-sans uppercase">Dirección</th>
                 <th
-                  className="px-4 py-3 text-right font-sans uppercase cursor-pointer select-none hover:bg-slate-100 transition-colors"
+                  className="px-2.5 py-2 text-right font-sans uppercase cursor-pointer select-none hover:bg-slate-100 transition-colors"
                   onClick={() => handleSort('porcentaje_descuento')}
                 >
-                  Descuento (%) <SortIcon field="porcentaje_descuento" />
+                  <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+                    <span>Descuento (%)</span>
+                    <SortIcon field="porcentaje_descuento" />
+                  </div>
                 </th>
                 <th
-                  className="px-4 py-3 text-right font-sans uppercase cursor-pointer select-none hover:bg-slate-100 transition-colors"
+                  className="px-2.5 py-2 text-right font-sans uppercase cursor-pointer select-none hover:bg-slate-100 transition-colors"
                   onClick={() => handleSort('limite_credito')}
                 >
-                  Límite Crédito <SortIcon field="limite_credito" />
+                  <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+                    <span>Límite Crédito</span>
+                    <SortIcon field="limite_credito" />
+                  </div>
                 </th>
                 <th
-                  className="px-4 py-3 text-right font-sans uppercase cursor-pointer select-none hover:bg-slate-100 transition-colors"
+                  className="px-2.5 py-2 text-right font-sans uppercase cursor-pointer select-none hover:bg-slate-100 transition-colors"
                   onClick={() => handleSort('credito_disponible')}
                 >
-                  Crédito Disp. <SortIcon field="credito_disponible" />
+                  <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+                    <span>Crédito Disp.</span>
+                    <SortIcon field="credito_disponible" />
+                  </div>
                 </th>
                 <th
-                  className="px-4 py-3 text-right font-sans uppercase cursor-pointer select-none hover:bg-slate-100 transition-colors"
+                  className="px-2.5 py-2 text-right font-sans uppercase cursor-pointer select-none hover:bg-slate-100 transition-colors"
                   onClick={() => handleSort('saldo_pendiente')}
                 >
-                  Deuda Pendiente <SortIcon field="saldo_pendiente" />
+                  <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+                    <span>Deuda Pendiente</span>
+                    <SortIcon field="saldo_pendiente" />
+                  </div>
                 </th>
-                <th className="px-4 py-3 text-center font-sans uppercase">Acciones</th>
+                <th className="px-2.5 py-2 text-center font-sans uppercase">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -262,17 +283,17 @@ export default function Clientes({ clients, currentUser: _currentUser, onAddClie
                 const hasDebt = c.saldo_pendiente > 0;
                 return (
                   <tr key={c.id} className="hover:bg-slate-50/50">
-                    <td className="px-4 py-3 font-mono font-bold text-slate-450">{c.cedula_rif}</td>
-                    <td className="px-4 py-3 font-sans font-medium">{c.nombre}</td>
-                    <td className="px-4 py-3 font-sans">{c.telefono || 'N/A'}</td>
-                    <td className="px-4 py-3 font-sans truncate max-w-xs">{c.direccion || 'N/A'}</td>
-                    <td className="px-4 py-3 text-right font-mono font-bold text-emerald-600">{c.porcentaje_descuento}%</td>
-                    <td className="px-4 py-3 text-right font-mono">${c.limite_credito.toFixed(2)}</td>
-                    <td className="px-4 py-3 text-right font-mono text-slate-600">${c.credito_disponible.toFixed(2)}</td>
-                    <td className={`px-4 py-3 text-right font-mono font-bold ${hasDebt ? 'text-red-500 font-bold' : 'text-slate-400'}`}>
+                    <td className="px-2.5 py-2 font-mono font-bold text-slate-450">{c.cedula_rif}</td>
+                    <td className="px-2.5 py-2 font-sans font-medium">{c.nombre}</td>
+                    <td className="px-2.5 py-2 font-sans">{c.telefono || 'N/A'}</td>
+                    <td className="px-2.5 py-2 font-sans truncate max-w-xs">{c.direccion || 'N/A'}</td>
+                    <td className="px-2.5 py-2 text-right font-mono font-bold text-emerald-600">{c.porcentaje_descuento}%</td>
+                    <td className="px-2.5 py-2 text-right font-mono">${c.limite_credito.toFixed(2)}</td>
+                    <td className="px-2.5 py-2 text-right font-mono text-slate-600">${c.credito_disponible.toFixed(2)}</td>
+                    <td className={`px-2.5 py-2 text-right font-mono font-bold ${hasDebt ? 'text-red-500 font-bold' : 'text-slate-400'}`}>
                       ${c.saldo_pendiente.toFixed(2)}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-2.5 py-2">
                       <div className="flex justify-center">
                         <button
                           onClick={() => handleOpenAbono(c)}
