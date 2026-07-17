@@ -190,6 +190,22 @@ export default function App() {
     return null;
   };
 
+  // Load business config immediately when app starts/network settings change
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const configRes = await fetch(getApiUrl('/config'));
+        if (configRes.ok) {
+          const configData = await configRes.json();
+          setCompanyConfig(configData);
+        }
+      } catch (err) {
+        console.warn('⚠️ No se pudo obtener la configuración del negocio al iniciar.');
+      }
+    };
+    loadConfig();
+  }, [lanIP, dbMode]);
+
   // Load all initial data from centralized backend database
   useEffect(() => {
     if (!currentUser) return;
