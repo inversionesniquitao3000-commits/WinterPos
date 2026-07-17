@@ -368,11 +368,15 @@ export default function CajaPOS({
   const changeUSD = Math.max(0, totalPaidUSD - totalUSD);
   const changeVES = changeUSD * tasaVuelto;
 
-  const canConfirmCheckout = totalPaidUSD >= totalUSD;
+  const isPagoMovilValid = pagoMovilVESVal === 0 || (refPagoMovil.trim().length >= 4 && bankPagoMovil !== '');
+  const isBiopagoValid = biopagoVESVal === 0 || (refBiopago.trim().length >= 4 && bankBiopago !== '');
+  const isCreditValid = creditUSDVal === 0 || creditUSDVal <= selectedClient.credito_disponible;
+
+  const canConfirmCheckout = totalPaidUSD >= totalUSD && isPagoMovilValid && isBiopagoValid && isCreditValid;
 
   const handleConfirmCheckout = () => {
     if (!canConfirmCheckout) {
-      alert('Pago insuficiente.');
+      alert('Información de cobro incompleta o inválida.');
       return;
     }
 
@@ -998,22 +1002,29 @@ export default function CajaPOS({
                     className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-700 focus:bg-white focus:border-winter-blueBtn focus:outline-none"
                   />
                   {pagoMovilVESVal > 0 && (
-                    <div className="grid grid-cols-2 gap-2">
-                      <select
-                        value={bankPagoMovil}
-                        onChange={(e) => setBankPagoMovil(e.target.value)}
-                        className="bg-slate-55 border border-slate-300 text-[10px] p-2 rounded text-slate-700 outline-none focus:bg-white focus:border-winter-blueBtn font-sans"
-                      >
-                        <option value="">Banco Emisor...</option>
-                        {venezuelanBanks.map(b => <option key={b} value={b}>{b}</option>)}
-                      </select>
-                      <input
-                        type="text"
-                        placeholder="N° Referencia (>3 dig)..."
-                        value={refPagoMovil}
-                        onChange={(e) => setRefPagoMovil(e.target.value)}
-                        className="bg-slate-55 border border-slate-300 p-2 rounded text-[10px] font-bold text-yellow-600 outline-none focus:bg-white focus:border-winter-blueBtn"
-                      />
+                    <div className="space-y-1">
+                      <div className="grid grid-cols-2 gap-2">
+                        <select
+                          value={bankPagoMovil}
+                          onChange={(e) => setBankPagoMovil(e.target.value)}
+                          className="bg-slate-55 border border-slate-300 text-[10px] p-2 rounded text-slate-700 outline-none focus:bg-white focus:border-winter-blueBtn font-sans"
+                        >
+                          <option value="">Banco Emisor...</option>
+                          {venezuelanBanks.map(b => <option key={b} value={b}>{b}</option>)}
+                        </select>
+                        <input
+                          type="text"
+                          placeholder="N° Referencia (>3 dig)..."
+                          value={refPagoMovil}
+                          onChange={(e) => setRefPagoMovil(e.target.value)}
+                          className="bg-slate-55 border border-slate-300 p-2 rounded text-[10px] font-bold text-yellow-600 outline-none focus:bg-white focus:border-winter-blueBtn"
+                        />
+                      </div>
+                      {!isPagoMovilValid && (
+                        <span className="text-[9px] text-red-500 font-bold block mt-1 font-sans">
+                          * Ingrese Banco y Referencia (mín. 4 caracteres)
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1030,22 +1041,29 @@ export default function CajaPOS({
                     className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-700 focus:bg-white focus:border-winter-blueBtn focus:outline-none"
                   />
                   {biopagoVESVal > 0 && (
-                    <div className="grid grid-cols-2 gap-2">
-                      <select
-                        value={bankBiopago}
-                        onChange={(e) => setBankBiopago(e.target.value)}
-                        className="bg-slate-55 border border-slate-300 text-[10px] p-2 rounded text-slate-700 outline-none focus:bg-white focus:border-winter-blueBtn font-sans"
-                      >
-                        <option value="">Banco Emisor...</option>
-                        {venezuelanBanks.map(b => <option key={b} value={b}>{b}</option>)}
-                      </select>
-                      <input
-                        type="text"
-                        placeholder="N° Referencia (>3 dig)..."
-                        value={refBiopago}
-                        onChange={(e) => setRefBiopago(e.target.value)}
-                        className="bg-slate-55 border border-slate-300 p-2 rounded text-[10px] font-bold text-yellow-600 outline-none focus:bg-white focus:border-winter-blueBtn"
-                      />
+                    <div className="space-y-1">
+                      <div className="grid grid-cols-2 gap-2">
+                        <select
+                          value={bankBiopago}
+                          onChange={(e) => setBankBiopago(e.target.value)}
+                          className="bg-slate-55 border border-slate-300 text-[10px] p-2 rounded text-slate-700 outline-none focus:bg-white focus:border-winter-blueBtn font-sans"
+                        >
+                          <option value="">Banco Emisor...</option>
+                          {venezuelanBanks.map(b => <option key={b} value={b}>{b}</option>)}
+                        </select>
+                        <input
+                          type="text"
+                          placeholder="N° Referencia (>3 dig)..."
+                          value={refBiopago}
+                          onChange={(e) => setRefBiopago(e.target.value)}
+                          className="bg-slate-55 border border-slate-300 p-2 rounded text-[10px] font-bold text-yellow-600 outline-none focus:bg-white focus:border-winter-blueBtn"
+                        />
+                      </div>
+                      {!isBiopagoValid && (
+                        <span className="text-[9px] text-red-500 font-bold block mt-1 font-sans">
+                          * Ingrese Banco y Referencia (mín. 4 caracteres)
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1062,6 +1080,11 @@ export default function CajaPOS({
                       onChange={(e) => setPayCreditUSD(e.target.value)}
                       className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-red-550 focus:bg-white focus:border-winter-blueBtn focus:outline-none"
                     />
+                    {!isCreditValid && (
+                      <span className="text-[9px] text-red-550 font-bold block mt-1 font-sans">
+                        * Límite de crédito excedido (máx: ${selectedClient.credito_disponible.toFixed(2)} USD)
+                      </span>
+                    )}
                     <span className="text-[9px] text-slate-500 block font-sans">
                       * El saldo pendiente del cliente se incrementará al confirmar la venta.
                     </span>
@@ -1167,7 +1190,13 @@ export default function CajaPOS({
                       ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
                       : 'bg-red-50 border-red-200 text-red-700'
                   }`}>
-                    {canConfirmCheckout ? 'PAGO COMPLETO Y VALIDADO' : 'INGRESE LOS MEDIOS DE PAGO'}
+                    {canConfirmCheckout 
+                      ? 'PAGO COMPLETO Y VALIDADO' 
+                      : (totalPaidUSD < totalUSD 
+                          ? 'INGRESE LOS MEDIOS DE PAGO' 
+                          : (!isPagoMovilValid || !isBiopagoValid 
+                              ? 'VERIFIQUE BANCO Y REFERENCIA' 
+                              : 'CRÉDITO EXCEDIDO'))}
                   </div>
 
                   <button
