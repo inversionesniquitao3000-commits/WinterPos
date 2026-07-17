@@ -134,7 +134,13 @@ export interface CierreCaja {
   ventasTotalesUsd: number;
   descuentosUsd: number;
   ventaBrutaUsd: number;
-  pagosEfectivoUsd: number;
+  pagosEfectivoUsd: number;      // Efectivo $
+  pagosEfectivoBsUsd: number;    // Efectivo Bs (USD equivalent)
+  pagosEfectivoBsVes: number;    // Efectivo Bs (monto real)
+  pagosBiopagoUsd: number;       // Biopago (USD equivalent)
+  pagosBiopagoVes: number;       // Biopago (monto real)
+  pagosPuntoUsd: number;         // Punto (Tarjeta/PagoMovil USD equivalent)
+  pagosPuntoVes: number;         // Punto (Tarjeta/PagoMovil monto real)
   pagosTarjetaUsd: number;
   pagosCreditoUsd: number;
   pagosPuntosUsd: number;

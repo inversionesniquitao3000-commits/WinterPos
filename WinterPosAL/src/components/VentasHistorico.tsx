@@ -210,6 +210,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
         const realUsd = selectedCierre.realUsd ?? 0;
         const diffUsd = realUsd - dineroEnCajaExpected;
         const aperturaUsd = selectedCierre.aperturaUsd ?? 0;
+        const aperturaVes = selectedCierre.aperturaVes ?? 0;
         const ventasEfectivoUsd = selectedCierre.ventasEfectivoUsd ?? 0;
         const abonoClientesUsd = selectedCierre.abonoClientesUsd ?? 0;
         const entradaEfectivoUsd = selectedCierre.entradaEfectivoUsd ?? 0;
@@ -221,9 +222,13 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
         const ventaBrutaUsd = selectedCierre.ventaBrutaUsd ?? 0;
         
         const pagosEfectivoUsd = selectedCierre.pagosEfectivoUsd ?? 0;
-        const pagosTarjetaUsd = selectedCierre.pagosTarjetaUsd ?? 0;
+        const pagosEfectivoBsUsd = (selectedCierre as any).pagosEfectivoBsUsd ?? 0;
+        const pagosEfectivoBsVes = (selectedCierre as any).pagosEfectivoBsVes ?? 0;
+        const pagosBiopagoUsd = (selectedCierre as any).pagosBiopagoUsd ?? 0;
+        const pagosBiopagoVes = (selectedCierre as any).pagosBiopagoVes ?? 0;
+        const pagosPuntoUsd = (selectedCierre as any).pagosPuntoUsd ?? 0;
+        const pagosPuntoVes = (selectedCierre as any).pagosPuntoVes ?? 0;
         const pagosCreditoUsd = selectedCierre.pagosCreditoUsd ?? 0;
-        const pagosPuntosUsd = selectedCierre.pagosPuntosUsd ?? 0;
         const devolucionVentasUsd = selectedCierre.devolucionVentasUsd ?? 0;
         const ventaTotalUsd = selectedCierre.ventaTotalUsd ?? 0;
         
@@ -261,7 +266,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
                   <div className="space-y-1.5 border-t border-slate-100 pt-2 font-mono">
                     <div className="flex justify-between">
                       <span>Apertura de Caja :</span>
-                      <span className="font-bold text-slate-800">$ {aperturaUsd.toFixed(2)}</span>
+                      <span className="font-bold text-slate-800">$ {aperturaUsd.toFixed(2)} / Bs {aperturaVes.toFixed(2)}</span>
                     </div>
                     
                     <div className="flex justify-between">
@@ -318,15 +323,25 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
                     </div>
                   </div>
 
-                  <div className="space-y-1.5 pt-1 font-mono">
+                  <div className="space-y-1.5 pt-1 font-mono text-[9px]">
                     <div className="flex justify-between">
-                      <span>En Efectivo :</span>
+                      <span>Efectivo $ :</span>
                       <span className="font-bold text-slate-800">$ {pagosEfectivoUsd.toFixed(2)}</span>
                     </div>
                     
                     <div className="flex justify-between">
-                      <span>Con Tarjeta :</span>
-                      <span className="font-bold text-slate-800">$ {pagosTarjetaUsd.toFixed(2)}</span>
+                      <span>Efectivo Bs :</span>
+                      <span className="font-bold text-slate-800">$ {pagosEfectivoBsUsd.toFixed(2)} (Bs {pagosEfectivoBsVes.toFixed(2)})</span>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span>Biopago :</span>
+                      <span className="font-bold text-slate-800">$ {pagosBiopagoUsd.toFixed(2)} (Bs {pagosBiopagoVes.toFixed(2)})</span>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span>Punto / Tarjeta :</span>
+                      <span className="font-bold text-slate-800">$ {pagosPuntoUsd.toFixed(2)} (Bs {pagosPuntoVes.toFixed(2)})</span>
                     </div>
 
                     <div className="flex justify-between">
@@ -334,12 +349,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
                       <span className="font-bold text-slate-800">$ {pagosCreditoUsd.toFixed(2)}</span>
                     </div>
 
-                    <div className="flex justify-between">
-                      <span>Con Puntos :</span>
-                      <span className="font-bold text-slate-800">$ {pagosPuntosUsd.toFixed(2)}</span>
-                    </div>
-
-                    <div className="flex justify-between text-red-550">
+                    <div className="flex justify-between text-red-500">
                       <span>Devolución Ventas :</span>
                       <span>- $ {devolucionVentasUsd.toFixed(2)}</span>
                     </div>

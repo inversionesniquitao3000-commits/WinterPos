@@ -554,6 +554,12 @@ export default function App() {
       descuentosUsd: number;
       ventaBrutaUsd: number;
       pagosEfectivoUsd: number;
+      pagosEfectivoBsUsd: number;
+      pagosEfectivoBsVes: number;
+      pagosBiopagoUsd: number;
+      pagosBiopagoVes: number;
+      pagosPuntoUsd: number;
+      pagosPuntoVes: number;
       pagosTarjetaUsd: number;
       pagosCreditoUsd: number;
       pagosPuntosUsd: number;
@@ -587,6 +593,12 @@ export default function App() {
       descuentosUsd: details?.descuentosUsd ?? shiftSales.reduce((acc, s) => acc + s.descuento, 0),
       ventaBrutaUsd: details?.ventaBrutaUsd ?? (shiftSales.reduce((acc, s) => acc + s.totalUSD, 0) + shiftSales.reduce((acc, s) => acc + s.descuento, 0)),
       pagosEfectivoUsd: details?.pagosEfectivoUsd ?? 0,
+      pagosEfectivoBsUsd: details?.pagosEfectivoBsUsd ?? 0,
+      pagosEfectivoBsVes: details?.pagosEfectivoBsVes ?? 0,
+      pagosBiopagoUsd: details?.pagosBiopagoUsd ?? 0,
+      pagosBiopagoVes: details?.pagosBiopagoVes ?? 0,
+      pagosPuntoUsd: details?.pagosPuntoUsd ?? 0,
+      pagosPuntoVes: details?.pagosPuntoVes ?? 0,
       pagosTarjetaUsd: details?.pagosTarjetaUsd ?? 0,
       pagosCreditoUsd: details?.pagosCreditoUsd ?? 0,
       pagosPuntosUsd: details?.pagosPuntosUsd ?? 0,

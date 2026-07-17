@@ -45,6 +45,12 @@ interface CajaPOSProps {
       descuentosUsd: number;
       ventaBrutaUsd: number;
       pagosEfectivoUsd: number;
+      pagosEfectivoBsUsd: number;
+      pagosEfectivoBsVes: number;
+      pagosBiopagoUsd: number;
+      pagosBiopagoVes: number;
+      pagosPuntoUsd: number;
+      pagosPuntoVes: number;
       pagosTarjetaUsd: number;
       pagosCreditoUsd: number;
       pagosPuntosUsd: number;
@@ -507,17 +513,32 @@ export default function CajaPOS({
     const ventaBrutaUsd = ventasTotalesUsd + descuentosUsd;
     
     const pagosEfectivoUsd = shiftSales.reduce((acc, sale) => {
-      return acc + sale.pagos.reduce((a, p) => p.metodo.startsWith('Efectivo') ? a + p.montoUSD : a, 0);
+      return acc + sale.pagos.reduce((a, p) => p.metodo === 'Efectivo$' ? a + p.montoUSD : a, 0);
     }, 0);
-    const pagosTarjetaUsd = shiftSales.reduce((acc, sale) => {
-      return acc + sale.pagos.reduce((a, p) => p.metodo.startsWith('Tarjeta') ? a + p.montoUSD : a, 0);
+    const pagosEfectivoBsUsd = shiftSales.reduce((acc, sale) => {
+      return acc + sale.pagos.reduce((a, p) => p.metodo === 'EfectivoBs' ? a + p.montoUSD : a, 0);
     }, 0);
+    const pagosEfectivoBsVes = shiftSales.reduce((acc, sale) => {
+      return acc + sale.pagos.reduce((a, p) => p.metodo === 'EfectivoBs' ? a + p.monto : a, 0);
+    }, 0);
+    const pagosBiopagoUsd = shiftSales.reduce((acc, sale) => {
+      return acc + sale.pagos.reduce((a, p) => p.metodo === 'Biopago' ? a + p.montoUSD : a, 0);
+    }, 0);
+    const pagosBiopagoVes = shiftSales.reduce((acc, sale) => {
+      return acc + sale.pagos.reduce((a, p) => p.metodo === 'Biopago' ? a + p.monto : a, 0);
+    }, 0);
+    const pagosPuntoUsd = shiftSales.reduce((acc, sale) => {
+      return acc + sale.pagos.reduce((a, p) => (p.metodo === 'Tarjeta$' || p.metodo === 'PagoMovil' || p.metodo === 'TarjetaBs') ? a + p.montoUSD : a, 0);
+    }, 0);
+    const pagosPuntoVes = shiftSales.reduce((acc, sale) => {
+      return acc + sale.pagos.reduce((a, p) => (p.metodo === 'Tarjeta$' || p.metodo === 'PagoMovil' || p.metodo === 'TarjetaBs') ? a + p.monto : a, 0);
+    }, 0);
+    
+    const pagosTarjetaUsd = pagosEfectivoBsUsd; 
     const pagosCreditoUsd = shiftSales.reduce((acc, sale) => {
-      return acc + sale.pagos.reduce((a, p) => p.metodo.startsWith('Credito') ? a + p.montoUSD : a, 0);
+      return acc + sale.pagos.reduce((a, p) => p.metodo === 'CreditoCliente' ? a + p.montoUSD : a, 0);
     }, 0);
-    const pagosPuntosUsd = shiftSales.reduce((acc, sale) => {
-      return acc + sale.pagos.reduce((a, p) => (p.metodo === 'PagoMovil' || p.metodo === 'Biopago') ? a + p.montoUSD : a, 0);
-    }, 0);
+    const pagosPuntosUsd = pagosBiopagoUsd; 
     const devolucionVentasUsd = 0;
     const ventaTotalUsd = ventasTotalesUsd;
 
@@ -532,6 +553,12 @@ export default function CajaPOS({
       descuentosUsd,
       ventaBrutaUsd,
       pagosEfectivoUsd,
+      pagosEfectivoBsUsd,
+      pagosEfectivoBsVes,
+      pagosBiopagoUsd,
+      pagosBiopagoVes,
+      pagosPuntoUsd,
+      pagosPuntoVes,
       pagosTarjetaUsd,
       pagosCreditoUsd,
       pagosPuntosUsd,
@@ -1408,7 +1435,7 @@ export default function CajaPOS({
                     <div className="space-y-1.5 border-t border-slate-100 pt-2 font-mono">
                       <div className="flex justify-between">
                         <span>Apertura de Caja :</span>
-                        <span className="font-bold text-slate-800">$ {cierreResult.aperturaUsd.toFixed(2)}</span>
+                        <span className="font-bold text-slate-800">$ {cierreResult.aperturaUsd.toFixed(2)} / Bs {cierreResult.aperturaVes.toFixed(2)}</span>
                       </div>
                       
                       <div className="flex justify-between">
@@ -1468,25 +1495,30 @@ export default function CajaPOS({
                       </div>
                     </div>
 
-                    <div className="space-y-1.5 pt-1 font-mono">
+                    <div className="space-y-1.5 pt-1 font-mono text-[9px]">
                       <div className="flex justify-between">
-                        <span>En Efectivo :</span>
+                        <span>Efectivo $ :</span>
                         <span className="font-bold text-slate-800">$ {cierreResult.pagosEfectivoUsd.toFixed(2)}</span>
                       </div>
                       
                       <div className="flex justify-between">
-                        <span>Con Tarjeta :</span>
-                        <span className="font-bold text-slate-800">$ {cierreResult.pagosTarjetaUsd.toFixed(2)}</span>
+                        <span>Efectivo Bs :</span>
+                        <span className="font-bold text-slate-800">$ {cierreResult.pagosEfectivoBsUsd.toFixed(2)} (Bs {cierreResult.pagosEfectivoBsVes.toFixed(2)})</span>
+                      </div>
+
+                      <div className="flex justify-between">
+                        <span>Biopago :</span>
+                        <span className="font-bold text-slate-800">$ {cierreResult.pagosBiopagoUsd.toFixed(2)} (Bs {cierreResult.pagosBiopagoVes.toFixed(2)})</span>
+                      </div>
+
+                      <div className="flex justify-between">
+                        <span>Punto / Tarjeta :</span>
+                        <span className="font-bold text-slate-800">$ {cierreResult.pagosPuntoUsd.toFixed(2)} (Bs {cierreResult.pagosPuntoVes.toFixed(2)})</span>
                       </div>
 
                       <div className="flex justify-between">
                         <span>A Crédito :</span>
                         <span className="font-bold text-slate-800">$ {cierreResult.pagosCreditoUsd.toFixed(2)}</span>
-                      </div>
-
-                      <div className="flex justify-between">
-                        <span>Con Puntos :</span>
-                        <span className="font-bold text-slate-800">$ {cierreResult.pagosPuntosUsd.toFixed(2)}</span>
                       </div>
 
                       <div className="flex justify-between text-red-500">
