@@ -167,6 +167,121 @@ export default function App() {
     setDbMode(mode);
   }, [currentUser]);
 
+  const getApiUrl = (path: string) => {
+    const host = dbMode === 'local' ? 'localhost' : lanIP;
+    return `http://${host}:5000/api${path}`;
+  };
+
+  const postApiData = async (path: string, body: any) => {
+    try {
+      const res = await fetch(getApiUrl(path), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      console.error(`Error al enviar datos al servidor API central (${path}):`, err);
+    }
+    return null;
+  };
+
+  // Load all initial data from centralized backend database
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const loadAllData = async () => {
+      console.log('Intentando conectar al servidor central:', getApiUrl('/status'));
+      try {
+        const statusRes = await fetch(getApiUrl('/status'));
+        if (!statusRes.ok) throw new Error('Servidor no disponible');
+
+        // Fetch config
+        const configRes = await fetch(getApiUrl('/config'));
+        if (configRes.ok) {
+          const configData = await configRes.json();
+          setCompanyConfig(configData);
+        }
+
+        // Fetch products
+        const productsRes = await fetch(getApiUrl('/productos'));
+        if (productsRes.ok) {
+          const productsData = await productsRes.json();
+          setProducts(productsData);
+        }
+
+        // Fetch clients
+        const clientsRes = await fetch(getApiUrl('/clientes'));
+        if (clientsRes.ok) {
+          const clientsData = await clientsRes.json();
+          setClients(clientsData);
+        }
+
+        // Fetch tasas
+        const tasasRes = await fetch(getApiUrl('/tasas'));
+        if (tasasRes.ok) {
+          const tasasData = await tasasRes.json();
+          setTasaHistory(tasasData);
+        }
+
+        // Fetch movements
+        const movementsRes = await fetch(getApiUrl('/movements'));
+        if (movementsRes.ok) {
+          const movementsData = await movementsRes.json();
+          setMovements(movementsData);
+        }
+
+        // Fetch price history
+        const priceRes = await fetch(getApiUrl('/price-history'));
+        if (priceRes.ok) {
+          const priceData = await priceRes.json();
+          setPriceHistory(priceData);
+        }
+
+        // Fetch sales
+        const salesRes = await fetch(getApiUrl('/sales'));
+        if (salesRes.ok) {
+          const salesData = await salesRes.json();
+          setSales(salesData);
+        }
+
+        // Fetch active caja state
+        const cajaRes = await fetch(getApiUrl('/cajas/estado'));
+        if (cajaRes.ok) {
+          const cajaData = await cajaRes.json();
+          if (cajaData.abierta) {
+            setCajaAbierta(true);
+            setMontoAperturaUsd(cajaData.aperturaUsd || 0);
+            setMontoAperturaVes(cajaData.aperturaVes || 0);
+            setCajaVentasUsd(cajaData.ventasUsd || 0);
+            setCajaVentasVes(cajaData.ventasVes || 0);
+            setCajaMovimientosUsd(cajaData.movimientosUsd || 0);
+            setCajaMovimientosVes(cajaData.movimientosVes || 0);
+            setShiftSales(cajaData.shiftSales || []);
+            setShiftAbonosUsd(cajaData.shiftAbonosUsd || 0);
+            setShiftEntradasUsd(cajaData.shiftEntradasUsd || 0);
+            setShiftSalidasUsd(cajaData.shiftSalidasUsd || 0);
+          }
+        }
+
+        // Fetch cierres history
+        const cierresRes = await fetch(getApiUrl('/cajas/cierres'));
+        if (cierresRes.ok) {
+          const cierresData = await cierresRes.json();
+          setCierres(cierresData);
+        }
+      } catch (err) {
+        console.warn('⚠️ No se pudo establecer conexión con el servidor API central. Utilizando datos locales (localStorage).');
+      }
+    };
+
+    loadAllData();
+  }, [currentUser, lanIP, dbMode]);
+
   // Keyboard Navigation Listener
   useEffect(() => {
     const handleGlobalKeys = (e: KeyboardEvent) => {
@@ -212,7 +327,7 @@ export default function App() {
   const tasaDia = currentTasa ? currentTasa.tasa_cobro : 40.00;
   const tasaVuelto = currentTasa ? currentTasa.tasa_vuelto : 40.00;
 
-  const handleUpdateTasa = (newDia: number, newVuelto: number) => {
+  const handleUpdateTasa = async (newDia: number, newVuelto: number) => {
     const newItem: TasaHistoryItem = {
       id: Date.now(),
       tasa_cobro: newDia,
@@ -220,40 +335,40 @@ export default function App() {
       fecha_actualizacion: new Date().toISOString().replace('T', ' ').substring(0, 16),
       usuario: currentUser?.nombre || 'SISTEMA'
     };
-    setTasaHistory(prev => [...prev, newItem]);
+    const saved = await postApiData('/tasas', newItem);
+    if (saved) {
+      setTasaHistory(prev => [...prev, saved]);
+    } else {
+      setTasaHistory(prev => [...prev, newItem]);
+    }
   };
 
-  const handleAddProduct = (prod: Product) => {
-    setProducts(prev => [...prev, prod]);
+  const handleAddProduct = async (prod: Product) => {
+    const saved = await postApiData('/productos', prod);
+    if (saved) {
+      setProducts(prev => [...prev, saved]);
+    } else {
+      setProducts(prev => [...prev, prod]);
+    }
   };
 
-  const handleUpdateProductStock = (
+  const handleUpdateProductStock = async (
     prodId: number,
     type: 'Entrada' | 'Salida' | 'Merma' | 'Devolucion',
     qty: number,
     reason: string
   ) => {
+    let nextStock = 0;
+    let barcode = '';
+    let description = '';
+    
     setProducts(prev =>
       prev.map(p => {
         if (p.id === prodId) {
           const multiplier = (type === 'Entrada' || type === 'Devolucion') ? 1 : -1;
-          const nextStock = Math.max(0, p.stock_actual + qty * multiplier);
-          
-          // Log movement
-          const newMov: InventoryMovement = {
-            id: Date.now(),
-            date: new Date().toISOString().replace('T', ' ').substring(0, 16),
-            productCode: p.barcode,
-            productDescription: p.description,
-            type,
-            qty: qty * multiplier,
-            stock_anterior: p.stock_actual,
-            stock_posterior: nextStock,
-            motivo: reason,
-            usuario: currentUser?.nombre || 'SISTEMA'
-          };
-          setMovements(prevMovs => [...prevMovs, newMov]);
-          
+          nextStock = Math.max(0, p.stock_actual + qty * multiplier);
+          barcode = p.barcode;
+          description = p.description;
           return {
             ...p,
             stock_actual: nextStock
@@ -262,66 +377,43 @@ export default function App() {
         return p;
       })
     );
+
+    const multiplier = (type === 'Entrada' || type === 'Devolucion') ? 1 : -1;
+    const newMov: InventoryMovement = {
+      id: Date.now(),
+      date: new Date().toISOString().replace('T', ' ').substring(0, 16),
+      productCode: barcode,
+      productDescription: description,
+      type,
+      qty: qty * multiplier,
+      stock_anterior: nextStock - (qty * multiplier),
+      stock_posterior: nextStock,
+      motivo: reason,
+      usuario: currentUser?.nombre || 'SISTEMA'
+    };
+    setMovements(prevMovs => [...prevMovs, newMov]);
+
+    await postApiData('/productos/stock', { id: prodId, stock_actual: nextStock });
+    await postApiData('/movements', newMov);
   };
 
-  const handleUpdateProductPrices = (
+  const handleUpdateProductPrices = async (
     prodId: number,
     prices: { cost: number; detail: number; mayor: number },
     reason: string
   ) => {
+    let oldCost = 0, oldDetail = 0, oldMayor = 0;
+    let barcode = '';
+    let description = '';
+
     setProducts(prev =>
       prev.map(p => {
         if (p.id === prodId) {
-          const adjDate = new Date().toISOString().replace('T', ' ').substring(0, 16);
-          const user = currentUser?.nombre || 'SISTEMA';
-          const logs: PriceAdjustmentHistory[] = [];
-
-          if (p.precio_costo_usd !== prices.cost) {
-            logs.push({
-              id: Math.random(),
-              date: adjDate,
-              productCode: p.barcode,
-              productDescription: p.description,
-              type: 'Costo',
-              precio_anterior: p.precio_costo_usd,
-              precio_nuevo: prices.cost,
-              motivo: reason,
-              usuario: user
-            });
-          }
-
-          if (p.precio_detalle_usd !== prices.detail) {
-            logs.push({
-              id: Math.random(),
-              date: adjDate,
-              productCode: p.barcode,
-              productDescription: p.description,
-              type: 'Detalle',
-              precio_anterior: p.precio_detalle_usd,
-              precio_nuevo: prices.detail,
-              motivo: reason,
-              usuario: user
-            });
-          }
-
-          if (p.precio_mayor_usd !== prices.mayor) {
-            logs.push({
-              id: Math.random(),
-              date: adjDate,
-              productCode: p.barcode,
-              productDescription: p.description,
-              type: 'Mayor',
-              precio_anterior: p.precio_mayor_usd,
-              precio_nuevo: prices.mayor,
-              motivo: reason,
-              usuario: user
-            });
-          }
-
-          if (logs.length > 0) {
-            setPriceHistory(prevLogs => [...prevLogs, ...logs]);
-          }
-
+          oldCost = p.precio_costo_usd;
+          oldDetail = p.precio_detalle_usd;
+          oldMayor = p.precio_mayor_usd;
+          barcode = p.barcode;
+          description = p.description;
           return {
             ...p,
             precio_costo_usd: prices.cost,
@@ -332,22 +424,79 @@ export default function App() {
         return p;
       })
     );
+
+    const adjDate = new Date().toISOString().replace('T', ' ').substring(0, 16);
+    const user = currentUser?.nombre || 'SISTEMA';
+    const logs: PriceAdjustmentHistory[] = [];
+
+    if (oldCost !== prices.cost) {
+      logs.push({
+        id: Math.random(),
+        date: adjDate,
+        productCode: barcode,
+        productDescription: description,
+        type: 'Costo',
+        precio_anterior: oldCost,
+        precio_nuevo: prices.cost,
+        motivo: reason,
+        usuario: user
+      });
+    }
+
+    if (oldDetail !== prices.detail) {
+      logs.push({
+        id: Math.random(),
+        date: adjDate,
+        productCode: barcode,
+        productDescription: description,
+        type: 'Detalle',
+        precio_anterior: oldDetail,
+        precio_nuevo: prices.detail,
+        motivo: reason,
+        usuario: user
+      });
+    }
+
+    if (oldMayor !== prices.mayor) {
+      logs.push({
+        id: Math.random(),
+        date: adjDate,
+        productCode: barcode,
+        productDescription: description,
+        type: 'Mayor',
+        precio_anterior: oldMayor,
+        precio_nuevo: prices.mayor,
+        motivo: reason,
+        usuario: user
+      });
+    }
+
+    if (logs.length > 0) {
+      setPriceHistory(prevLogs => [...prevLogs, ...logs]);
+      for (const log of logs) {
+        await postApiData('/price-history', log);
+      }
+    }
+
+    await postApiData('/productos/precios', { id: prodId, cost: prices.cost, detail: prices.detail, mayor: prices.mayor });
   };
 
-  const handleAddClient = (cli: Client) => {
-    setClients(prev => [...prev, cli]);
+  const handleAddClient = async (cli: Client) => {
+    const saved = await postApiData('/clientes', cli);
+    if (saved) {
+      setClients(prev => [...prev, saved]);
+    } else {
+      setClients(prev => [...prev, cli]);
+    }
   };
 
-  const handleRegisterAbono = (clientId: number, amountUSD: number) => {
+  const handleRegisterAbono = async (clientId: number, amountUSD: number) => {
     setClients(prev =>
       prev.map(c => {
         if (c.id === clientId) {
           const nextPending = Math.max(0, c.saldo_pendiente - amountUSD);
           const nextCreditAvailable = Math.min(c.limite_credito, c.credito_disponible + amountUSD);
-          
-          // Log manual cash entry movement
           handleRegisterCajaMovement('Entrada', `Abono de Crédito Cliente: ${c.nombre}`, amountUSD, 0);
-
           return {
             ...c,
             saldo_pendiente: nextPending,
@@ -357,9 +506,11 @@ export default function App() {
         return c;
       })
     );
+
+    await postApiData('/clientes/abono', { id: clientId, monto: amountUSD });
   };
 
-  const handleAbrirCaja = (usd: number, ves: number) => {
+  const handleAbrirCaja = async (usd: number, ves: number) => {
     setCajaAbierta(true);
     setMontoAperturaUsd(usd);
     setMontoAperturaVes(ves);
@@ -385,6 +536,8 @@ export default function App() {
     localStorage.setItem('pos_ventas_ves', '0');
     localStorage.setItem('pos_movimientos_usd', '0');
     localStorage.setItem('pos_movimientos_ves', '0');
+
+    await postApiData('/cajas/abrir', { usd, ves });
   };
 
   const handleCerrarCaja = (
@@ -421,7 +574,7 @@ export default function App() {
       realVes,
       expectedVes,
 
-      // Detailed metrics mapping
+      // Detailed cash registry metrics
       ventasEfectivoUsd: details?.ventasEfectivoUsd ?? cajaVentasUsd,
       abonoClientesUsd: details?.abonoClientesUsd ?? shiftAbonosUsd,
       entradaEfectivoUsd: details?.entradaEfectivoUsd ?? shiftEntradasUsd,
@@ -429,6 +582,7 @@ export default function App() {
       devolucionEfectivoUsd: details?.devolucionEfectivoUsd ?? 0,
       dineroEnCajaExpected: details?.dineroEnCajaExpected ?? expectedUsd,
       
+      // Detailed sales metrics
       ventasTotalesUsd: details?.ventasTotalesUsd ?? shiftSales.reduce((acc, s) => acc + s.totalUSD, 0),
       descuentosUsd: details?.descuentosUsd ?? shiftSales.reduce((acc, s) => acc + s.descuento, 0),
       ventaBrutaUsd: details?.ventaBrutaUsd ?? (shiftSales.reduce((acc, s) => acc + s.totalUSD, 0) + shiftSales.reduce((acc, s) => acc + s.descuento, 0)),
@@ -468,10 +622,11 @@ export default function App() {
     localStorage.removeItem('pos_movimientos_usd');
     localStorage.removeItem('pos_movimientos_ves');
 
+    postApiData('/cajas/cerrar', newCierre);
     return { expectedUsd, expectedVes };
   };
 
-  const handleRegisterCajaMovement = (type: 'Entrada' | 'Salida', description: string, usd: number, ves: number) => {
+  const handleRegisterCajaMovement = async (type: 'Entrada' | 'Salida', description: string, usd: number, ves: number) => {
     const mult = type === 'Entrada' ? 1 : -1;
     const nextUsd = cajaMovimientosUsd + usd * mult;
     const nextVes = cajaMovimientosVes + ves * mult;
@@ -490,9 +645,11 @@ export default function App() {
     } else {
       setShiftSalidasUsd(prev => prev + usd);
     }
+
+    await postApiData('/cajas/movimiento', { tipo: type, descripcion: description, usd, ves });
   };
 
-  const handleRegisterSale = (sale: {
+  const handleRegisterSale = async (sale: {
     factura_nro: string;
     client: Client;
     items: SaleItem[];
@@ -574,6 +731,8 @@ export default function App() {
 
     localStorage.setItem('pos_ventas_usd', nextVentasUsd.toString());
     localStorage.setItem('pos_ventas_ves', nextVentasVes.toString());
+
+    await postApiData('/sales', newSaleObj);
   };
 
   const handleLogout = () => {

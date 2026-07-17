@@ -1,0 +1,971 @@
+import fs from 'fs';
+import path from 'path';
+import pg from 'pg';
+import dotenv from 'dotenv';
+import { 
+  mockUsers, mockProducts, mockClients, mockTasaHistory, mockConfig 
+} from './mockData.js';
+
+dotenv.config();
+
+const { Pool } = pg;
+const DATA_DIR = path.resolve('./data');
+
+// Ensure data directory exists for JSON storage
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+let usePostgres = false;
+let pool = null;
+
+// Initialize PostgreSQL connection pool
+try {
+  pool = new Pool({
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    host: process.env.DB_HOST,
+    port: parseInt(process.env.DB_PORT || '5432'),
+    database: process.env.DB_DATABASE,
+    connectionTimeoutMillis: 3000 // fail fast if not connected
+  });
+
+  // Try to connect to test if Postgres is accessible with configured user/pass
+  const client = await pool.connect();
+  console.log('✅ Base de datos central PostgreSQL conectada exitosamente.');
+  usePostgres = true;
+  client.release();
+} catch (err) {
+  console.warn('⚠️ No se pudo conectar a PostgreSQL. Usando almacenamiento JSON local centralizado en el servidor.');
+  console.warn('Detalle del error:', err.message);
+  usePostgres = false;
+}
+
+// Helper functions for JSON database fallback
+function getJsonPath(filename) {
+  return path.join(DATA_DIR, filename);
+}
+
+function readJsonFile(filename, defaultValue) {
+  const filePath = getJsonPath(filename);
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, JSON.stringify(defaultValue, null, 2), 'utf8');
+    return defaultValue;
+  }
+  try {
+    const content = fs.readFileSync(filePath, 'utf8');
+    return JSON.parse(content);
+  } catch (err) {
+    console.error(`Error al leer archivo JSON ${filename}:`, err);
+    return defaultValue;
+  }
+}
+
+function writeJsonFile(filename, data) {
+  const filePath = getJsonPath(filename);
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error(`Error al escribir archivo JSON ${filename}:`, err);
+  }
+}
+
+// CORE DATA ACCESS METHODS (Dual Mode: PostgreSQL / JSON)
+export async function getCompanyConfig() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query('SELECT * FROM Configuracion_Empresa ORDER BY id DESC LIMIT 1');
+      if (res.rowCount > 0) {
+        const row = res.rows[0];
+        return {
+          rif: row.rif,
+          nombre_comercio: row.nombre_comercio,
+          direccion: row.direccion,
+          telefono: row.telefono,
+          correo: row.correo,
+          moneda_base: row.moneda_base,
+          mensaje_pie_ticket: row.mensaje_pie_ticket,
+          metodos_pago_activos: row.metodos_pago_activos
+        };
+      }
+    } catch (err) {
+      console.error('Error en getCompanyConfig (Postgres):', err.message);
+    }
+  }
+  return readJsonFile('config.json', mockConfig);
+}
+
+export async function saveCompanyConfig(config) {
+  if (usePostgres) {
+    try {
+      const existing = await pool.query('SELECT id FROM Configuracion_Empresa ORDER BY id DESC LIMIT 1');
+      if (existing.rowCount > 0) {
+        await pool.query(
+          `UPDATE Configuracion_Empresa SET 
+            rif = $1, nombre_comercio = $2, direccion = $3, telefono = $4, 
+            correo = $5, moneda_base = $6, mensaje_pie_ticket = $7, metodos_pago_activos = $8
+           WHERE id = $9`,
+          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), existing.rows[0].id]
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO Configuracion_Empresa (rif, nombre_comercio, direccion, telefono, correo, moneda_base, mensaje_pie_ticket, metodos_pago_activos)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos)]
+        );
+      }
+      return config;
+    } catch (err) {
+      console.error('Error en saveCompanyConfig (Postgres):', err.message);
+    }
+  }
+  writeJsonFile('config.json', config);
+  return config;
+}
+
+export async function getUsers() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query('SELECT id, usuario, nombre, rol, estado FROM Usuarios ORDER BY id ASC');
+      if (res.rowCount > 0) {
+        return res.rows;
+      }
+    } catch (err) {
+      console.error('Error en getUsers (Postgres):', err.message);
+    }
+  }
+  return readJsonFile('users.json', mockUsers);
+}
+
+export async function getProducts() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query('SELECT * FROM Productos ORDER BY id ASC');
+      return res.rows.map(r => ({
+        id: r.id,
+        barcode: r.codigo_barras_clave,
+        description: r.descripcion,
+        category: r.categoria,
+        stock_actual: r.stock_actual,
+        stock_minimo: r.stock_minimo,
+        precio_costo_usd: parseFloat(r.precio_costo_usd),
+        precio_detalle_usd: parseFloat(r.precio_detalle_usd),
+        precio_mayor_usd: parseFloat(r.precio_mayor_usd),
+        cantidad_mayorista: r.cantidad_mayorista,
+        exento_impuesto: r.exento_impuesto,
+        imagen_url: r.imagen_url || '',
+        estado: r.estado
+      }));
+    } catch (err) {
+      console.error('Error en getProducts (Postgres):', err.message);
+    }
+  }
+  return readJsonFile('products.json', mockProducts);
+}
+
+export async function saveProduct(p) {
+  if (usePostgres) {
+    try {
+      const res = await pool.query(
+        `INSERT INTO Productos (codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, precio_costo_usd, precio_detalle_usd, precio_mayor_usd, cantidad_mayorista, exento_impuesto, imagen_url, estado)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
+        [p.barcode, p.description, p.category, p.stock_actual, p.stock_minimo, p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.cantidad_mayorista, p.exento_impuesto, p.imagen_url, p.estado]
+      );
+      return { ...p, id: res.rows[0].id };
+    } catch (err) {
+      console.error('Error en saveProduct (Postgres):', err.message);
+    }
+  }
+  const products = readJsonFile('products.json', mockProducts);
+  const newProduct = { ...p, id: Date.now() };
+  products.push(newProduct);
+  writeJsonFile('products.json', products);
+  return newProduct;
+}
+
+export async function updateProductStock(prodId, stockActual) {
+  if (usePostgres) {
+    try {
+      await pool.query('UPDATE Productos SET stock_actual = $1 WHERE id = $2', [stockActual, prodId]);
+      return true;
+    } catch (err) {
+      console.error('Error en updateProductStock (Postgres):', err.message);
+    }
+  }
+  const products = readJsonFile('products.json', mockProducts);
+  const idx = products.findIndex(p => p.id === prodId);
+  if (idx !== -1) {
+    products[idx].stock_actual = stockActual;
+    writeJsonFile('products.json', products);
+    return true;
+  }
+  return false;
+}
+
+export async function updateProductPrices(prodId, prices) {
+  if (usePostgres) {
+    try {
+      await pool.query(
+        'UPDATE Productos SET precio_costo_usd = $1, precio_detalle_usd = $2, precio_mayor_usd = $3 WHERE id = $4',
+        [prices.cost, prices.detail, prices.mayor, prodId]
+      );
+      return true;
+    } catch (err) {
+      console.error('Error en updateProductPrices (Postgres):', err.message);
+    }
+  }
+  const products = readJsonFile('products.json', mockProducts);
+  const idx = products.findIndex(p => p.id === prodId);
+  if (idx !== -1) {
+    products[idx].precio_costo_usd = prices.cost;
+    products[idx].precio_detalle_usd = prices.detail;
+    products[idx].precio_mayor_usd = prices.mayor;
+    writeJsonFile('products.json', products);
+    return true;
+  }
+  return false;
+}
+
+export async function getClients() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query('SELECT * FROM Clientes ORDER BY id ASC');
+      return res.rows.map(r => ({
+        id: r.id,
+        cedula_rif: r.cedula_rif,
+        nombre: r.nombre,
+        telefono: r.telefono || '',
+        direccion: r.direccion || '',
+        limite_credito: parseFloat(r.limite_credito),
+        credito_disponible: parseFloat(r.credito_disponible),
+        porcentaje_descuento: parseFloat(r.porcentaje_descuento),
+        estado: r.estado,
+        saldo_pendiente: parseFloat(r.limite_credito) - parseFloat(r.credito_disponible)
+      }));
+    } catch (err) {
+      console.error('Error en getClients (Postgres):', err.message);
+    }
+  }
+  return readJsonFile('clients.json', mockClients);
+}
+
+export async function saveClient(c) {
+  if (usePostgres) {
+    try {
+      const res = await pool.query(
+        `INSERT INTO Clientes (cedula_rif, nombre, telefono, direccion, limite_credito, credito_disponible, porcentaje_descuento, estado)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+        [c.cedula_rif, c.nombre, c.telefono, c.direccion, c.limite_credito, c.credito_disponible, c.porcentaje_descuento, c.estado]
+      );
+      return { ...c, id: res.rows[0].id, saldo_pendiente: 0 };
+    } catch (err) {
+      console.error('Error en saveClient (Postgres):', err.message);
+    }
+  }
+  const clients = readJsonFile('clients.json', mockClients);
+  const newClient = { ...c, id: Date.now(), saldo_pendiente: 0 };
+  clients.push(newClient);
+  writeJsonFile('clients.json', clients);
+  return newClient;
+}
+
+export async function registerAbono(clientId, amountUSD) {
+  if (usePostgres) {
+    try {
+      // Get current client
+      const res = await pool.query('SELECT limite_credito, credito_disponible FROM Clientes WHERE id = $1', [clientId]);
+      if (res.rowCount > 0) {
+        const client = res.rows[0];
+        const nextCredito = Math.min(parseFloat(client.limite_credito), parseFloat(client.credito_disponible) + amountUSD);
+        await pool.query('UPDATE Clientes SET credito_disponible = $1 WHERE id = $2', [nextCredito, clientId]);
+        return true;
+      }
+    } catch (err) {
+      console.error('Error en registerAbono (Postgres):', err.message);
+    }
+  }
+  const clients = readJsonFile('clients.json', mockClients);
+  const idx = clients.findIndex(c => c.id === clientId);
+  if (idx !== -1) {
+    clients[idx].saldo_pendiente = Math.max(0, clients[idx].saldo_pendiente - amountUSD);
+    clients[idx].credito_disponible = Math.min(clients[idx].limite_credito, clients[idx].credito_disponible + amountUSD);
+    writeJsonFile('clients.json', clients);
+    return true;
+  }
+  return false;
+}
+
+export async function getTasaHistory() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query(`
+        SELECT t.id, t.tasa_cobro, t.tasa_vuelto, t.fecha_actualizacion, u.nombre as usuario 
+        FROM Tasas_Cambio t 
+        LEFT JOIN Usuarios u ON t.usuario_id = u.id 
+        ORDER BY t.id ASC
+      `);
+      return res.rows.map(r => ({
+        id: r.id,
+        tasa_cobro: parseFloat(r.tasa_cobro),
+        tasa_vuelto: parseFloat(r.tasa_vuelto),
+        fecha_actualizacion: new Date(r.fecha_actualizacion).toISOString().replace('T', ' ').substring(0, 16),
+        usuario: r.usuario || 'SISTEMA'
+      }));
+    } catch (err) {
+      console.error('Error en getTasaHistory (Postgres):', err.message);
+    }
+  }
+  return readJsonFile('tasa_history.json', mockTasaHistory);
+}
+
+export async function saveTasa(t) {
+  if (usePostgres) {
+    try {
+      // Find database user ID or default to admin (id 1)
+      const userRes = await pool.query('SELECT id FROM Usuarios LIMIT 1');
+      const userId = userRes.rowCount > 0 ? userRes.rows[0].id : 1;
+      
+      const res = await pool.query(
+        `INSERT INTO Tasas_Cambio (tasa_cobro, tasa_vuelto, usuario_id)
+         VALUES ($1, $2, $3) RETURNING id, fecha_actualizacion`,
+        [t.tasa_cobro, t.tasa_vuelto, userId]
+      );
+      return { 
+        ...t, 
+        id: res.rows[0].id,
+        fecha_actualizacion: new Date(res.rows[0].fecha_actualizacion).toISOString().replace('T', ' ').substring(0, 16)
+      };
+    } catch (err) {
+      console.error('Error en saveTasa (Postgres):', err.message);
+    }
+  }
+  const history = readJsonFile('tasa_history.json', mockTasaHistory);
+  const newItem = { ...t, id: Date.now() };
+  history.push(newItem);
+  writeJsonFile('tasa_history.json', history);
+  return newItem;
+}
+
+export async function getMovements() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query(`
+        SELECT m.id, m.fecha as date, p.codigo_barras_clave as "productCode", p.descripcion as "productDescription",
+               m.tipo, m.cantidad as qty, m.stock_anterior, m.stock_posterior, m.motivo, u.nombre as usuario
+        FROM Movimientos_Inventario m
+        LEFT JOIN Productos p ON m.producto_id = p.id
+        LEFT JOIN Usuarios u ON m.usuario_id = u.id
+        ORDER BY m.id DESC
+      `);
+      return res.rows.map(r => ({
+        id: r.id,
+        date: new Date(r.date).toISOString().replace('T', ' ').substring(0, 16),
+        productCode: r.productCode,
+        productDescription: r.productDescription,
+        type: r.tipo,
+        qty: r.qty,
+        stock_anterior: r.stock_anterior,
+        stock_posterior: r.stock_posterior,
+        motivo: r.motivo,
+        usuario: r.usuario || 'SISTEMA'
+      }));
+    } catch (err) {
+      console.error('Error en getMovements (Postgres):', err.message);
+    }
+  }
+  return readJsonFile('movements.json', []);
+}
+
+export async function saveMovement(m) {
+  if (usePostgres) {
+    try {
+      const prodRes = await pool.query('SELECT id FROM Productos WHERE codigo_barras_clave = $1', [m.productCode]);
+      const userRes = await pool.query('SELECT id FROM Usuarios LIMIT 1');
+      
+      if (prodRes.rowCount > 0) {
+        const prodId = prodRes.rows[0].id;
+        const userId = userRes.rowCount > 0 ? userRes.rows[0].id : 1;
+        
+        const res = await pool.query(
+          `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
+           VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, fecha`,
+          [prodId, userId, m.type, m.qty, m.stock_anterior, m.stock_posterior, m.motivo]
+        );
+        return {
+          ...m,
+          id: res.rows[0].id,
+          date: new Date(res.rows[0].fecha).toISOString().replace('T', ' ').substring(0, 16)
+        };
+      }
+    } catch (err) {
+      console.error('Error en saveMovement (Postgres):', err.message);
+    }
+  }
+  const movements = readJsonFile('movements.json', []);
+  const newItem = { ...m, id: Date.now() };
+  movements.push(newItem);
+  writeJsonFile('movements.json', movements);
+  return newItem;
+}
+
+export async function getPriceHistory() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query(`
+        SELECT h.id, p.codigo_barras_clave as "productCode", p.descripcion as "productDescription",
+               h.tipo_precio as "priceType", h.precio_anterior as "oldPrice", h.precio_nuevo as "newPrice",
+               h.motivo, h.fecha, u.nombre as usuario
+        FROM Historial_Precios h
+        LEFT JOIN Productos p ON h.producto_id = p.id
+        LEFT JOIN Usuarios u ON h.usuario_id = u.id
+        ORDER BY h.id DESC
+      `);
+      return res.rows.map(r => ({
+        id: r.id,
+        date: new Date(r.fecha).toISOString().replace('T', ' ').substring(0, 16),
+        productCode: r.productCode,
+        productDescription: r.productDescription,
+        priceType: r.priceType,
+        oldPrice: parseFloat(r.oldPrice),
+        newPrice: parseFloat(r.newPrice),
+        motivo: r.motivo,
+        usuario: r.usuario || 'SISTEMA'
+      }));
+    } catch (err) {
+      console.error('Error en getPriceHistory (Postgres):', err.message);
+    }
+  }
+  return readJsonFile('price_history.json', []);
+}
+
+export async function savePriceHistory(h) {
+  if (usePostgres) {
+    try {
+      const prodRes = await pool.query('SELECT id FROM Productos WHERE codigo_barras_clave = $1', [h.productCode]);
+      const userRes = await pool.query('SELECT id FROM Usuarios LIMIT 1');
+      
+      if (prodRes.rowCount > 0) {
+        const prodId = prodRes.rows[0].id;
+        const userId = userRes.rowCount > 0 ? userRes.rows[0].id : 1;
+        
+        const res = await pool.query(
+          `INSERT INTO Historial_Precios (producto_id, usuario_id, tipo_precio, precio_anterior, precio_nuevo, motivo)
+           VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, fecha`,
+          [prodId, userId, h.priceType, h.oldPrice, h.newPrice, h.motivo]
+        );
+        return {
+          ...h,
+          id: res.rows[0].id,
+          date: new Date(res.rows[0].fecha).toISOString().replace('T', ' ').substring(0, 16)
+        };
+      }
+    } catch (err) {
+      console.error('Error en savePriceHistory (Postgres):', err.message);
+    }
+  }
+  const history = readJsonFile('price_history.json', []);
+  const newItem = { ...h, id: Date.now() };
+  history.push(newItem);
+  writeJsonFile('price_history.json', history);
+  return newItem;
+}
+
+export async function getSales() {
+  if (usePostgres) {
+    try {
+      // Query sales from Postgres database
+      // Join clients and payments details
+      const salesRes = await pool.query(`
+        SELECT v.id, v.factura_nro, v.fecha, v.subtotal_usd, v.descuento_usd, v.total_usd, v.total_ves, v.con_ticket,
+               c.cedula_rif as "clientDoc", c.nombre as "clientName", u.nombre as usuario
+        FROM Ventas v
+        LEFT JOIN Clientes c ON v.cliente_id = c.id
+        LEFT JOIN Usuarios u ON v.usuario_id = u.id
+        ORDER BY v.id DESC
+      `);
+      
+      const salesList = [];
+      for (const row of salesRes.rows) {
+        // Fetch items
+        const itemsRes = await pool.query(`
+          SELECT vd.cantidad as qty, vd.precio_unitario_usd, vd.tipo_precio, vd.total_fila_usd,
+                 p.codigo_barras_clave as barcode, p.descripcion
+          FROM Ventas_Detalle vd
+          LEFT JOIN Productos p ON vd.producto_id = p.id
+          WHERE vd.venta_id = $1
+        `, [row.id]);
+        
+        // Fetch payments
+        const paymentsRes = await pool.query(`
+          SELECT metodo_pago as metodo, monto_entregado_usd as monto, monto_entregado_ves as montoVES, 
+                 banco_emisor as banco, numero_referencia as referencia
+          FROM Pagos_Venta
+          WHERE venta_id = $1
+        `, [row.id]);
+        
+        salesList.push({
+          id: row.id,
+          factura_nro: row.factura_nro,
+          fecha: new Date(row.fecha).toISOString().replace('T', ' ').substring(0, 16),
+          client: {
+            cedula_rif: row.clientDoc,
+            nombre: row.clientName
+          },
+          items: itemsRes.rows.map(i => ({
+            qty: i.qty,
+            precio_unitario_usd: parseFloat(i.precio_unitario_usd),
+            total_fila_usd: parseFloat(i.total_fila_usd),
+            product: {
+              barcode: i.barcode,
+              description: i.descripcion
+            }
+          })),
+          subtotal: parseFloat(row.subtotal_usd),
+          descuento: parseFloat(row.descuento_usd),
+          totalUSD: parseFloat(row.total_usd),
+          totalVES: parseFloat(row.total_ves),
+          pagos: paymentsRes.rows.map(p => ({
+            metodo: p.metodo,
+            monto: parseFloat(p.monto || '0'),
+            montoVES: parseFloat(p.montoVES || '0'),
+            banco: p.banco || '',
+            referencia: p.referencia || ''
+          })),
+          vueltoUSD: 0,
+          vueltoVES: 0,
+          usuario: row.usuario
+        });
+      }
+      return salesList;
+    } catch (err) {
+      console.error('Error en getSales (Postgres):', err.message);
+    }
+  }
+  return readJsonFile('sales.json', []);
+}
+
+export async function saveSale(s) {
+  if (usePostgres) {
+    const clientTarget = await pool.connect();
+    try {
+      await clientTarget.query('BEGIN');
+      
+      // Get IDs
+      const clientRes = await clientTarget.query('SELECT id FROM Clientes WHERE cedula_rif = $1', [s.client.cedula_rif]);
+      const userRes = await clientTarget.query('SELECT id FROM Usuarios LIMIT 1');
+      const activeCaja = await clientTarget.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
+      
+      const clientId = clientRes.rowCount > 0 ? clientRes.rows[0].id : 1;
+      const userId = userRes.rowCount > 0 ? userRes.rows[0].id : 1;
+      const cajaId = activeCaja.rowCount > 0 ? activeCaja.rows[0].id : 1;
+      
+      // Insert Sale
+      const saleRes = await clientTarget.query(
+        `INSERT INTO Ventas (factura_nro, cliente_id, usuario_id, caja_id, subtotal_usd, descuento_usd, total_usd, total_ves)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, fecha`,
+        [s.factura_nro, clientId, userId, cajaId, s.subtotal, s.descuento, s.totalUSD, s.totalVES]
+      );
+      
+      const saleId = saleRes.rows[0].id;
+      
+      // Insert Items & adjust stock
+      for (const item of s.items) {
+        const prodRes = await clientTarget.query('SELECT id, stock_actual, precio_detalle_usd FROM Productos WHERE codigo_barras_clave = $1', [item.product.barcode]);
+        if (prodRes.rowCount > 0) {
+          const prodId = prodRes.rows[0].id;
+          const currentStock = prodRes.rows[0].stock_actual;
+          const newStock = Math.max(0, currentStock - item.qty);
+          
+          // Insert details
+          await clientTarget.query(
+            `INSERT INTO Ventas_Detalle (venta_id, producto_id, cantidad, precio_unitario_usd, tipo_precio, total_fila_usd)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [saleId, prodId, item.qty, item.precio_unitario_usd, 'Detalle', item.total_fila_usd]
+          );
+          
+          // Update Stock
+          await clientTarget.query('UPDATE Productos SET stock_actual = $1 WHERE id = $2', [newStock, prodId]);
+          
+          // Log Kardex
+          await clientTarget.query(
+            `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [prodId, userId, 'Venta', -item.qty, currentStock, newStock, `Venta Facturada: ${s.factura_nro}`]
+          );
+        }
+      }
+      
+      // Insert Payments
+      for (const p of s.pagos) {
+        // Adjust client credit if Credit was used
+        if (p.metodo === 'CreditoCliente' && p.monto > 0) {
+          await clientTarget.query(
+            'UPDATE Clientes SET credito_disponible = credito_disponible - $1 WHERE id = $2',
+            [p.monto, clientId]
+          );
+        }
+        
+        await clientTarget.query(
+          `INSERT INTO Pagos_Venta (venta_id, metodo_pago, monto_entregado_usd, monto_entregado_ves, banco_emisor, numero_referencia)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [saleId, p.metodo, p.monto, p.montoVES || 0, p.banco || '', p.referencia || '']
+        );
+      }
+      
+      await clientTarget.query('COMMIT');
+      return {
+        ...s,
+        id: saleId,
+        fecha: new Date(saleRes.rows[0].fecha).toISOString().replace('T', ' ').substring(0, 16)
+      };
+    } catch (err) {
+      await clientTarget.query('ROLLBACK');
+      console.error('Error al registrar venta en Postgres:', err.message);
+    } finally {
+      clientTarget.release();
+    }
+  }
+  const sales = readJsonFile('sales.json', []);
+  const newSale = {
+    ...s,
+    id: Date.now(),
+    fecha: new Date().toISOString().replace('T', ' ').substring(0, 16)
+  };
+  sales.push(newSale);
+  writeJsonFile('sales.json', sales);
+  return newSale;
+}
+
+export async function getCierres() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query(`
+        SELECT c.id, c.fecha_apertura, c.fecha_cierre, c.monto_apertura_usd, c.monto_apertura_ves,
+               c.monto_cierre_real_usd, c.monto_cierre_real_ves, c.monto_cierre_esperado_usd, c.monto_cierre_esperado_ves,
+               u.nombre as usuario, c.estatus
+        FROM Cajas_Apertura_Cierre c
+        LEFT JOIN Usuarios u ON c.usuario_id = u.id
+        ORDER BY c.id DESC
+      `);
+      return res.rows.map(r => ({
+        id: r.id,
+        fechaApertura: new Date(r.fecha_apertura).toISOString().replace('T', ' ').substring(0, 16),
+        fechaCierre: r.fecha_cierre ? new Date(r.fecha_cierre).toISOString().replace('T', ' ').substring(0, 16) : null,
+        aperturaUsd: parseFloat(r.monto_apertura_usd),
+        aperturaVes: parseFloat(r.monto_apertura_ves),
+        realUsd: r.monto_cierre_real_usd ? parseFloat(r.monto_cierre_real_usd) : 0,
+        realVes: r.monto_cierre_real_ves ? parseFloat(r.monto_cierre_real_ves) : 0,
+        expectedUsd: r.monto_cierre_esperado_usd ? parseFloat(r.monto_cierre_esperado_usd) : 0,
+        expectedVes: r.monto_cierre_esperado_ves ? parseFloat(r.monto_cierre_esperado_ves) : 0,
+        usuario: r.usuario,
+        status: r.estatus === 'Abierta' ? 'Abierta' : 'Cerrada'
+      }));
+    } catch (err) {
+      console.error('Error en getCierres (Postgres):', err.message);
+    }
+  }
+  return readJsonFile('cierres.json', []);
+}
+
+export async function abrirCaja(usd, ves) {
+  if (usePostgres) {
+    try {
+      const userRes = await pool.query('SELECT id FROM Usuarios LIMIT 1');
+      const userId = userRes.rowCount > 0 ? userRes.rows[0].id : 1;
+      
+      const res = await pool.query(
+        `INSERT INTO Cajas_Apertura_Cierre (usuario_id, estacion_nombre, monto_apertura_usd, monto_apertura_ves, estatus)
+         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+        [userId, 'TERMINAL_01', usd, ves, 'Abierta']
+      );
+      return res.rows[0].id;
+    } catch (err) {
+      console.error('Error en abrirCaja (Postgres):', err.message);
+    }
+  }
+  const activeCheck = readJsonFile('caja_activa.json', { abierta: false });
+  
+  activeCheck.abierta = true;
+  activeCheck.aperturaUsd = usd;
+  activeCheck.aperturaVes = ves;
+  activeCheck.ventasUsd = 0;
+  activeCheck.ventasVes = 0;
+  activeCheck.movimientosUsd = 0;
+  activeCheck.movimientosVes = 0;
+  activeCheck.movimientos = [];
+  activeCheck.fechaApertura = new Date().toISOString().replace('T', ' ').substring(0, 16);
+  writeJsonFile('caja_activa.json', activeCheck);
+  return Date.now();
+}
+
+export async function cerrarCaja(cierre) {
+  if (usePostgres) {
+    try {
+      const activeCaja = await pool.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
+      if (activeCaja.rowCount > 0) {
+        const cajaId = activeCaja.rows[0].id;
+        await pool.query(
+          `UPDATE Cajas_Apertura_Cierre SET 
+            fecha_cierre = CURRENT_TIMESTAMP, 
+            monto_cierre_esperado_usd = $1, 
+            monto_cierre_esperado_ves = $2, 
+            monto_cierre_real_usd = $3, 
+            monto_cierre_real_ves = $4, 
+            estatus = 'Cerrada'
+           WHERE id = $5`,
+          [cierre.expectedUsd, cierre.expectedVes, cierre.realUsd, cierre.realVes, cajaId]
+        );
+        return true;
+      }
+    } catch (err) {
+      console.error('Error en cerrarCaja (Postgres):', err.message);
+    }
+  }
+  const cierres = readJsonFile('cierres.json', []);
+  const activeCheck = readJsonFile('caja_activa.json', { abierta: false });
+  
+  const newCierreObj = {
+    id: Date.now(),
+    fechaApertura: activeCheck.fechaApertura,
+    fechaCierre: new Date().toISOString().replace('T', ' ').substring(0, 16),
+    aperturaUsd: activeCheck.aperturaUsd,
+    aperturaVes: activeCheck.aperturaVes,
+    expectedUsd: cierre.expectedUsd,
+    expectedVes: cierre.expectedVes,
+    realUsd: cierre.realUsd,
+    realVes: cierre.realVes,
+    usuario: cierre.usuario || 'Anderson Laguna',
+    status: 'Cerrada'
+  };
+  
+  cierres.push(newCierreObj);
+  writeJsonFile('cierres.json', cierres);
+  
+  activeCheck.abierta = false;
+  writeJsonFile('caja_activa.json', activeCheck);
+  return true;
+}
+
+export async function getCajaEstado() {
+  if (usePostgres) {
+    try {
+      const activeRes = await pool.query("SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
+      if (activeRes.rowCount === 0) {
+        return { abierta: false };
+      }
+      const caja = activeRes.rows[0];
+      const cajaId = caja.id;
+      
+      const salesRes = await pool.query(`
+        SELECT v.id, v.factura_nro, v.fecha, v.subtotal_usd, v.descuento_usd, v.total_usd, v.total_ves, v.con_ticket,
+               c.cedula_rif as "clientDoc", c.nombre as "clientName", u.nombre as usuario
+        FROM Ventas v
+        LEFT JOIN Clientes c ON v.cliente_id = c.id
+        LEFT JOIN Usuarios u ON v.usuario_id = u.id
+        WHERE v.caja_id = $1
+      `, [cajaId]);
+      
+      const shiftSalesList = [];
+      let salesCashUsd = 0;
+      let salesCashVes = 0;
+      
+      for (const row of salesRes.rows) {
+        const paymentsRes = await pool.query(`
+          SELECT metodo_pago as metodo, monto_entregado_usd as monto, monto_entregado_ves as montoVES, 
+                 monto_vuelto_usd as "vueltoUSD", monto_vuelto_ves as "vueltoVES"
+          FROM Pagos_Venta
+          WHERE venta_id = $1
+        `, [row.id]);
+        
+        let cashUsd = 0;
+        let cashVes = 0;
+        const pagos = paymentsRes.rows.map(p => {
+          const m = parseFloat(p.monto || '0');
+          const mVES = parseFloat(p.montoVES || '0');
+          if (p.metodo === 'Efectivo$') cashUsd += m;
+          if (p.metodo === 'EfectivoBs') cashVes += mVES;
+          return {
+            metodo: p.metodo,
+            monto: m,
+            montoVES: mVES
+          };
+        });
+        
+        const vUSD = parseFloat(paymentsRes.rows[0]?.vueltoUSD || '0');
+        const vVES = parseFloat(paymentsRes.rows[0]?.vueltoVES || '0');
+        salesCashUsd += (cashUsd - vUSD);
+        salesCashVes += (cashVes - vVES);
+        
+        const itemsRes = await pool.query(`
+          SELECT vd.cantidad as qty, vd.precio_unitario_usd, vd.total_fila_usd, p.codigo_barras_clave as barcode, p.descripcion
+          FROM Ventas_Detalle vd
+          LEFT JOIN Productos p ON vd.producto_id = p.id
+          WHERE vd.venta_id = $1
+        `, [row.id]);
+        
+        shiftSalesList.push({
+          id: row.id,
+          factura_nro: row.factura_nro,
+          fecha: new Date(row.fecha).toISOString().replace('T', ' ').substring(0, 16),
+          client: {
+            cedula_rif: row.clientDoc,
+            nombre: row.clientName
+          },
+          items: itemsRes.rows.map(i => ({
+            qty: i.qty,
+            precio_unitario_usd: parseFloat(i.precio_unitario_usd),
+            total_fila_usd: parseFloat(i.total_fila_usd),
+            product: {
+              barcode: i.barcode,
+              description: i.descripcion
+            }
+          })),
+          subtotal: parseFloat(row.subtotal_usd),
+          descuento: parseFloat(row.descuento_usd),
+          totalUSD: parseFloat(row.total_usd),
+          totalVES: parseFloat(row.total_ves),
+          pagos,
+          vueltoUSD: vUSD,
+          vueltoVES: vVES,
+          usuario: row.usuario
+        });
+      }
+      
+      const movsRes = await pool.query("SELECT * FROM Movimientos_Caja WHERE caja_id = $1", [cajaId]);
+      let shiftAbonosUsd = 0;
+      let shiftEntradasUsd = 0;
+      let shiftSalidasUsd = 0;
+      let totalMovUsd = 0;
+      let totalMovVes = 0;
+      
+      for (const m of movsRes.rows) {
+        const mUsd = parseFloat(m.monto_usd);
+        const mVes = parseFloat(m.monto_ves);
+        const tipo = m.tipo;
+        const desc = m.descripcion;
+        
+        if (tipo === 'Entrada') {
+          totalMovUsd += mUsd;
+          totalMovVes += mVes;
+          if (desc.startsWith('Abono')) {
+            shiftAbonosUsd += mUsd;
+          } else {
+            shiftEntradasUsd += mUsd;
+          }
+        } else {
+          totalMovUsd -= mUsd;
+          totalMovVes -= mVes;
+          shiftSalidasUsd += mUsd;
+        }
+      }
+      
+      return {
+        abierta: true,
+        aperturaUsd: parseFloat(caja.monto_apertura_usd),
+        aperturaVes: parseFloat(caja.monto_apertura_ves),
+        fechaApertura: new Date(caja.fecha_apertura).toISOString().replace('T', ' ').substring(0, 16),
+        ventasUsd: salesCashUsd,
+        ventasVes: salesCashVes,
+        movimientosUsd: totalMovUsd,
+        movimientosVes: totalMovVes,
+        shiftSales: shiftSalesList,
+        shiftAbonosUsd,
+        shiftEntradasUsd,
+        shiftSalidasUsd
+      };
+    } catch (err) {
+      console.error('Error en getCajaEstado (Postgres):', err.message);
+    }
+  }
+  
+  const activeCheck = readJsonFile('caja_activa.json', { abierta: false });
+  if (!activeCheck.abierta) {
+    return { abierta: false };
+  }
+  
+  const sales = readJsonFile('sales.json', []);
+  const activeSales = sales.filter(s => s.fecha >= activeCheck.fechaApertura);
+  
+  let salesCashUsd = 0;
+  let salesCashVes = 0;
+  activeSales.forEach(s => {
+    let cashUsd = 0;
+    let cashVes = 0;
+    s.pagos.forEach(p => {
+      if (p.metodo === 'Efectivo$') cashUsd += p.monto;
+      if (p.metodo === 'EfectivoBs') cashVes += p.monto;
+    });
+    salesCashUsd += (cashUsd - (s.vueltoUSD || 0));
+    salesCashVes += (cashVes - (s.vueltoVES || 0));
+  });
+  
+  const movimientos = activeCheck.movimientos || [];
+  let shiftAbonosUsd = 0;
+  let shiftEntradasUsd = 0;
+  let shiftSalidasUsd = 0;
+  let totalMovUsd = 0;
+  let totalMovVes = 0;
+  
+  movimientos.forEach(m => {
+    if (m.tipo === 'Entrada') {
+      totalMovUsd += m.usd;
+      totalMovVes += m.ves;
+      if (m.descripcion.startsWith('Abono')) {
+        shiftAbonosUsd += m.usd;
+      } else {
+        shiftEntradasUsd += m.usd;
+      }
+    } else {
+      totalMovUsd -= m.usd;
+      totalMovVes -= m.ves;
+      shiftSalidasUsd += m.usd;
+    }
+  });
+  
+  return {
+    abierta: true,
+    aperturaUsd: activeCheck.aperturaUsd,
+    aperturaVes: activeCheck.aperturaVes,
+    fechaApertura: activeCheck.fechaApertura,
+    ventasUsd: salesCashUsd,
+    ventasVes: salesCashVes,
+    movimientosUsd: totalMovUsd,
+    movimientosVes: totalMovVes,
+    shiftSales: activeSales,
+    shiftAbonosUsd,
+    shiftEntradasUsd,
+    shiftSalidasUsd
+  };
+}
+
+export async function registrarCajaMovimiento(tipo, descripcion, usd, ves) {
+  if (usePostgres) {
+    try {
+      const activeCaja = await pool.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
+      if (activeCaja.rowCount > 0) {
+        const cajaId = activeCaja.rows[0].id;
+        await pool.query(
+          `INSERT INTO Movimientos_Caja (caja_id, tipo, descripcion, monto_usd, monto_ves)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [cajaId, tipo === 'Entrada' ? 'Entrada' : 'Salida', descripcion, usd, ves]
+        );
+        return true;
+      }
+    } catch (err) {
+      console.error('Error en registrarCajaMovimiento (Postgres):', err.message);
+    }
+  }
+  const activeCheck = readJsonFile('caja_activa.json', { abierta: false });
+  if (activeCheck.abierta) {
+    if (!activeCheck.movimientos) {
+      activeCheck.movimientos = [];
+    }
+    activeCheck.movimientos.push({ tipo, descripcion, usd, ves });
+    const mult = tipo === 'Entrada' ? 1 : -1;
+    activeCheck.movimientosUsd += usd * mult;
+    activeCheck.movimientosVes += ves * mult;
+    writeJsonFile('caja_activa.json', activeCheck);
+    return true;
+  }
+  return false;
+}
