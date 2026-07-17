@@ -560,7 +560,7 @@ export default function App() {
       devolucionVentasUsd: number;
       ventaTotalUsd: number;
     }
-  ) => {
+  ): CierreCaja => {
     const expectedUsd = montoAperturaUsd + cajaVentasUsd + cajaMovimientosUsd;
     const expectedVes = montoAperturaVes + cajaVentasVes + cajaMovimientosVes;
     
@@ -623,7 +623,7 @@ export default function App() {
     localStorage.removeItem('pos_movimientos_ves');
 
     postApiData('/cajas/cerrar', newCierre);
-    return { expectedUsd, expectedVes };
+    return newCierre;
   };
 
   const handleRegisterCajaMovement = async (type: 'Entrada' | 'Salida', description: string, usd: number, ves: number) => {

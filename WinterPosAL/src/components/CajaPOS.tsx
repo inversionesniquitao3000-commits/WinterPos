@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Product, Client, User, CompanyConfig, SaleItem, Payment, Sale } from '../types';
+import { Product, Client, User, CompanyConfig, SaleItem, Payment, Sale, CierreCaja } from '../types';
 import { 
   ShoppingBag, Search, Trash2, 
   Printer, XCircle, ArrowUpRight, 
@@ -51,7 +51,7 @@ interface CajaPOSProps {
       devolucionVentasUsd: number;
       ventaTotalUsd: number;
     }
-  ) => { expectedUsd: number; expectedVes: number };
+  ) => CierreCaja;
   shiftSales: Sale[];
   shiftAbonosUsd: number;
   shiftEntradasUsd: number;
@@ -85,7 +85,7 @@ export default function CajaPOS({
   const [showCierreModal, setShowCierreModal] = useState(false);
   const [cierreRealUsd, setCierreRealUsd] = useState('0');
   const [cierreRealVes, setCierreRealVes] = useState('0');
-  const [cierreResult, setCierreResult] = useState<{ expectedUsd: number; expectedVes: number } | null>(null);
+  const [cierreResult, setCierreResult] = useState<CierreCaja | null>(null);
 
   // Manual movements state
   const [showMovementsModal, setShowMovementsModal] = useState(false);
@@ -1379,35 +1379,32 @@ export default function CajaPOS({
                     <div className="space-y-1.5 border-t border-slate-100 pt-2 font-mono">
                       <div className="flex justify-between">
                         <span>Apertura de Caja :</span>
-                        <span className="font-bold text-slate-800">$ {_montoAperturaUsd.toFixed(2)}</span>
+                        <span className="font-bold text-slate-800">$ {cierreResult.aperturaUsd.toFixed(2)}</span>
                       </div>
                       
                       <div className="flex justify-between">
                         <span>Ventas en Efectivo :</span>
-                        <span className="font-bold text-slate-800">$ {shiftSales.reduce((acc, s) => {
-                          const cash = s.pagos.find(p => p.metodo === 'Efectivo$');
-                          return acc + (cash ? cash.monto : 0);
-                        }, 0).toFixed(2)}</span>
+                        <span className="font-bold text-slate-800">$ {cierreResult.ventasEfectivoUsd.toFixed(2)}</span>
                       </div>
 
                       <div className="flex justify-between">
                         <span>Abono de Clientes :</span>
-                        <span className="font-bold text-slate-800">$ {shiftAbonosUsd.toFixed(2)}</span>
+                        <span className="font-bold text-slate-800">$ {cierreResult.abonoClientesUsd.toFixed(2)}</span>
                       </div>
 
                       <div className="flex justify-between">
                         <span>Entrada Efectivo :</span>
-                        <span className="font-bold text-slate-800">$ {shiftEntradasUsd.toFixed(2)}</span>
+                        <span className="font-bold text-slate-800">$ {cierreResult.entradaEfectivoUsd.toFixed(2)}</span>
                       </div>
 
                       <div className="flex justify-between text-red-500 font-bold">
                         <span>Salida Efectivo :</span>
-                        <span>- $ {shiftSalidasUsd.toFixed(2)}</span>
+                        <span>- $ {cierreResult.salidaEfectivoUsd.toFixed(2)}</span>
                       </div>
 
                       <div className="flex justify-between text-red-550">
                         <span>Devolución Efectivo :</span>
-                        <span>- $ 0.00</span>
+                        <span>- $ {cierreResult.devolucionEfectivoUsd.toFixed(2)}</span>
                       </div>
                     </div>
 
@@ -1416,29 +1413,11 @@ export default function CajaPOS({
                       <div className="flex justify-between text-sm font-black text-slate-900">
                         <span className="font-sans uppercase text-[10px]">Dinero en Caja :</span>
                         <span className="text-base text-winter-blueBtn font-mono">
-                          $ {(
-                            _montoAperturaUsd +
-                            shiftSales.reduce((acc, s) => {
-                              const cash = s.pagos.find(p => p.metodo === 'Efectivo$');
-                              return acc + (cash ? cash.monto : 0);
-                            }, 0) +
-                            shiftAbonosUsd +
-                            shiftEntradasUsd -
-                            shiftSalidasUsd
-                          ).toFixed(2)}
+                          $ {cierreResult.dineroEnCajaExpected.toFixed(2)}
                         </span>
                       </div>
                       <div className="text-[7.5px] text-slate-450 italic font-sans font-medium uppercase tracking-tighter text-right">
-                        {formatNumberToWordsUSD(
-                          _montoAperturaUsd +
-                          shiftSales.reduce((acc, s) => {
-                            const cash = s.pagos.find(p => p.metodo === 'Efectivo$');
-                            return acc + (cash ? cash.monto : 0);
-                          }, 0) +
-                          shiftAbonosUsd +
-                          shiftEntradasUsd -
-                          shiftSalidasUsd
-                        )}
+                        {formatNumberToWordsUSD(cierreResult.dineroEnCajaExpected)}
                       </div>
                     </div>
                   </div>
@@ -1448,53 +1427,42 @@ export default function CajaPOS({
                     <div className="space-y-1.5 font-mono">
                       <div className="flex justify-between">
                         <span>Ventas Totales :</span>
-                        <span className="font-bold text-slate-800">$ {shiftSales.reduce((acc, s) => acc + s.totalUSD, 0).toFixed(2)}</span>
+                        <span className="font-bold text-slate-800">$ {cierreResult.ventasTotalesUsd.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span>Descuentos :</span>
-                        <span className="font-bold text-slate-800">$ {shiftSales.reduce((acc, s) => acc + s.descuento, 0).toFixed(2)}</span>
+                        <span className="font-bold text-slate-800">$ {cierreResult.descuentosUsd.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between font-bold text-slate-900 border-b border-dashed border-slate-200 pb-1.5">
                         <span className="font-sans text-[9px] uppercase">Venta Bruta :</span>
-                        <span>$ {(
-                          shiftSales.reduce((acc, s) => acc + s.totalUSD, 0) +
-                          shiftSales.reduce((acc, s) => acc + s.descuento, 0)
-                        ).toFixed(2)}</span>
+                        <span>$ {cierreResult.ventaBrutaUsd.toFixed(2)}</span>
                       </div>
                     </div>
 
                     <div className="space-y-1.5 pt-1 font-mono">
                       <div className="flex justify-between">
                         <span>En Efectivo :</span>
-                        <span className="font-bold text-slate-800">$ {shiftSales.reduce((acc, s) => {
-                          return acc + s.pagos.reduce((a, p) => p.metodo.startsWith('Efectivo') ? a + p.montoUSD : a, 0);
-                        }, 0).toFixed(2)}</span>
+                        <span className="font-bold text-slate-800">$ {cierreResult.pagosEfectivoUsd.toFixed(2)}</span>
                       </div>
                       
                       <div className="flex justify-between">
                         <span>Con Tarjeta :</span>
-                        <span className="font-bold text-slate-800">$ {shiftSales.reduce((acc, s) => {
-                          return acc + s.pagos.reduce((a, p) => p.metodo.startsWith('Tarjeta') ? a + p.montoUSD : a, 0);
-                        }, 0).toFixed(2)}</span>
+                        <span className="font-bold text-slate-800">$ {cierreResult.pagosTarjetaUsd.toFixed(2)}</span>
                       </div>
 
                       <div className="flex justify-between">
                         <span>A Crédito :</span>
-                        <span className="font-bold text-slate-800">$ {shiftSales.reduce((acc, s) => {
-                          return acc + s.pagos.reduce((a, p) => p.metodo.startsWith('Credito') ? a + p.montoUSD : a, 0);
-                        }, 0).toFixed(2)}</span>
+                        <span className="font-bold text-slate-800">$ {cierreResult.pagosCreditoUsd.toFixed(2)}</span>
                       </div>
 
                       <div className="flex justify-between">
                         <span>Con Puntos :</span>
-                        <span className="font-bold text-slate-800">$ {shiftSales.reduce((acc, s) => {
-                          return acc + s.pagos.reduce((a, p) => (p.metodo === 'PagoMovil' || p.metodo === 'Biopago') ? a + p.montoUSD : a, 0);
-                        }, 0).toFixed(2)}</span>
+                        <span className="font-bold text-slate-800">$ {cierreResult.pagosPuntosUsd.toFixed(2)}</span>
                       </div>
 
                       <div className="flex justify-between text-red-500">
                         <span>Devolución Ventas :</span>
-                        <span>- $ 0.00</span>
+                        <span>- $ {cierreResult.devolucionVentasUsd.toFixed(2)}</span>
                       </div>
                     </div>
 
@@ -1503,11 +1471,11 @@ export default function CajaPOS({
                       <div className="flex justify-between text-sm font-black text-slate-900">
                         <span className="font-sans uppercase text-[10px]">Venta Total :</span>
                         <span className="text-base text-winter-blueBtn font-mono">
-                          $ {shiftSales.reduce((acc, s) => acc + s.totalUSD, 0).toFixed(2)}
+                          $ {cierreResult.ventaTotalUsd.toFixed(2)}
                         </span>
                       </div>
                       <div className="text-[7.5px] text-slate-450 italic font-sans font-medium uppercase tracking-tighter text-right">
-                        {formatNumberToWordsUSD(shiftSales.reduce((acc, s) => acc + s.totalUSD, 0))}
+                        {formatNumberToWordsUSD(cierreResult.ventaTotalUsd)}
                       </div>
                     </div>
                   </div>
@@ -1526,7 +1494,7 @@ export default function CajaPOS({
                   </div>
                   <div className="grid grid-cols-3 gap-2 font-mono font-bold text-slate-700">
                     <span className="text-emerald-700">Dólares USD:</span>
-                    <span className="text-right">${cierreResult.expectedUsd.toFixed(2)}</span>
+                    <span className="text-right">${cierreResult.dineroEnCajaExpected.toFixed(2)}</span>
                     <span className="text-right text-emerald-600">${parseFloat(cierreRealUsd).toFixed(2)}</span>
                   </div>
                   <div className="grid grid-cols-3 gap-2 font-mono font-bold text-slate-700 border-b border-slate-205 pb-2">
@@ -1537,8 +1505,8 @@ export default function CajaPOS({
                   <div className="flex justify-between font-extrabold text-[11px] text-slate-800 font-mono">
                     <span>DIFERENCIA USD / VES:</span>
                     <div className="text-right space-y-0.5">
-                      <span className={parseFloat(cierreRealUsd) - cierreResult.expectedUsd >= 0 ? 'text-green-600' : 'text-red-650'}>
-                        USD: ${(parseFloat(cierreRealUsd) - cierreResult.expectedUsd).toFixed(2)}
+                      <span className={parseFloat(cierreRealUsd) - cierreResult.dineroEnCajaExpected >= 0 ? 'text-green-600' : 'text-red-650'}>
+                        USD: ${(parseFloat(cierreRealUsd) - cierreResult.dineroEnCajaExpected).toFixed(2)}
                       </span>
                       <span className={`block ${parseFloat(cierreRealVes) - cierreResult.expectedVes >= 0 ? 'text-green-600' : 'text-red-650'}`}>
                         VES: Bs {(parseFloat(cierreRealVes) - cierreResult.expectedVes).toFixed(2)}
