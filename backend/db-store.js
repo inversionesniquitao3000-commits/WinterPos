@@ -658,7 +658,7 @@ export async function getSales() {
         // Fetch items
         const itemsRes = await pool.query(`
           SELECT vd.cantidad as qty, vd.precio_unitario_usd, vd.tipo_precio, vd.total_fila_usd,
-                 p.codigo_barras_clave as barcode, p.descripcion
+                 p.codigo_barras_clave as barcode, p.descripcion, p.precio_costo_usd
           FROM Ventas_Detalle vd
           LEFT JOIN Productos p ON vd.producto_id = p.id
           WHERE vd.venta_id = $1
@@ -684,9 +684,12 @@ export async function getSales() {
             qty: i.qty,
             precio_unitario_usd: parseFloat(i.precio_unitario_usd),
             total_fila_usd: parseFloat(i.total_fila_usd),
+            priceUSD: parseFloat(i.precio_unitario_usd),
+            totalUSD: parseFloat(i.total_fila_usd),
             product: {
               barcode: i.barcode,
-              description: i.descripcion
+              description: i.descripcion,
+              precio_costo_usd: parseFloat(i.precio_costo_usd || 0)
             }
           })),
           subtotal: parseFloat(row.subtotal_usd),

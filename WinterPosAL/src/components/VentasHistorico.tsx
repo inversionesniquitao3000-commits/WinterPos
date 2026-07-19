@@ -12,6 +12,7 @@ interface VentasHistoricoProps {
 export default function VentasHistorico({ sales, cierres, onReprintTicket }: VentasHistoricoProps) {
   const [activeSubTab, setActiveSubTab] = useState<'ventas' | 'cierres'>('ventas');
   const [selectedCierre, setSelectedCierre] = useState<CierreCaja | null>(null);
+  const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
 
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
@@ -33,6 +34,27 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
     });
   }, [sales, startDate, endDate, filterEnabled]);
 
+  // Calculate totals and utility for the filtered sales
+  const filteredSalesTotals = useMemo(() => {
+    let totalVentas = 0;
+    let totalCosto = 0;
+    
+    filteredSales.forEach(s => {
+      totalVentas += s.totalUSD ?? 0;
+      (s.items ?? []).forEach(item => {
+        const itemCost = item.product?.precio_costo_usd ?? 0;
+        totalCosto += itemCost * (item.qty ?? 0);
+      });
+    });
+    
+    const totalUtilidad = totalVentas - totalCosto;
+    return {
+      totalVentas,
+      totalCosto,
+      totalUtilidad
+    };
+  }, [filteredSales]);
+
   // Filter cierres list by date range if enabled
   const filteredCierres = useMemo(() => {
     if (!filterEnabled) return cierres;
@@ -49,6 +71,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setSelectedCierre(null);
+        setSelectedSale(null);
       }
     };
     window.addEventListener('keydown', handleEsc);
@@ -495,13 +518,22 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
 
       {activeSubTab === 'ventas' && (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col h-[500px]">
-          <div className="bg-slate-55 border-b border-slate-200 px-5 py-3.5 flex justify-between items-center">
+          <div className="bg-slate-55 border-b border-slate-200 px-5 py-3.5 flex flex-wrap justify-between items-center gap-2">
             <span className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5 font-sans">
               <ShoppingCart className="w-4 h-4 text-slate-450" />
               Facturas y Ventas Registradas
-            </span>             <span className="text-[10px] bg-slate-200 text-slate-600 px-2.5 py-0.5 rounded border border-slate-300">
-              {filteredSales.length} facturas
             </span>
+            <div className="flex flex-wrap items-center gap-2 font-sans text-[10px]">
+              <span className="bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded border border-slate-250">
+                Facturas: <strong className="font-mono">{filteredSales.length}</strong>
+              </span>
+              <span className="bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded border border-slate-250">
+                Ventas Filtro: <strong className="font-mono text-winter-blueBtn">${filteredSalesTotals.totalVentas.toFixed(2)}</strong>
+              </span>
+              <span className="bg-emerald-50 text-emerald-800 px-2.5 py-0.5 rounded border border-emerald-200">
+                Utilidad Filtro: <strong className="font-mono font-bold text-emerald-600">${filteredSalesTotals.totalUtilidad.toFixed(2)}</strong>
+              </span>
+            </div>
           </div>
 
           <div className="flex-grow overflow-y-auto">
@@ -544,13 +576,22 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
                         </div>
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <button
-                          onClick={() => onReprintTicket(sale)}
-                          className="bg-slate-55 border border-slate-200 text-slate-600 p-1.5 rounded hover:bg-slate-100 hover:text-slate-800 transition-all shadow-sm"
-                          title="Reimprimir ticket fiscal"
-                        >
-                          <Printer className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => setSelectedSale(sale)}
+                            className="bg-slate-55 border border-slate-200 text-slate-600 p-1.5 rounded hover:bg-slate-100 hover:text-slate-800 transition-all shadow-sm flex items-center gap-1 text-[10px]"
+                            title="Ver Detalle de Venta y Utilidad"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-winter-blueBtn" />
+                          </button>
+                          <button
+                            onClick={() => onReprintTicket(sale)}
+                            className="bg-slate-55 border border-slate-200 text-slate-600 p-1.5 rounded hover:bg-slate-100 hover:text-slate-800 transition-all shadow-sm"
+                            title="Reimprimir ticket fiscal"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -865,6 +906,170 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
                 </button>
               </div>
 
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* SALE DETAIL MODAL */}
+      {selectedSale && (() => {
+        const subtotal = selectedSale.subtotal ?? 0;
+        const descuento = selectedSale.descuento ?? 0;
+        const totalUSD = selectedSale.totalUSD ?? 0;
+        
+        // Calculate items costs and profit
+        let totalCost = 0;
+        const itemsWithProfit = (selectedSale.items ?? []).map(item => {
+          const itemCost = item.product?.precio_costo_usd ?? 0;
+          const totalItemCost = itemCost * item.qty;
+          const totalItemSale = item.totalUSD ?? (item.priceUSD * item.qty);
+          const itemProfit = totalItemSale - totalItemCost;
+          totalCost += totalItemCost;
+          
+          return {
+            ...item,
+            cost: itemCost,
+            totalCost: totalItemCost,
+            totalSale: totalItemSale,
+            profit: itemProfit
+          };
+        });
+        
+        const totalProfit = totalUSD - totalCost;
+
+        return (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-slate-800">
+            <div className="bg-white border border-slate-355 rounded-xl overflow-hidden w-full max-w-2xl shadow-2xl flex flex-col">
+              
+              {/* Header Title Bar */}
+              <div className="bg-winter-header text-white px-5 py-3 flex items-center justify-between">
+                <h3 className="text-sm font-extrabold flex items-center gap-1.5 font-sans">
+                  <ShoppingCart className="w-4 h-4 text-winter-blueBtn" />
+                  DETALLE DE FACTURA / VENTA
+                </h3>
+                <button 
+                  onClick={() => setSelectedSale(null)} 
+                  className="text-white opacity-70 hover:opacity-100 text-xs font-sans"
+                >
+                  ✕ Cerrar [ESC]
+                </button>
+              </div>
+
+              <div className="p-6 text-[10px] text-slate-700 leading-relaxed max-h-[70vh] overflow-y-auto bg-slate-50 space-y-4">
+                
+                {/* Meta details row */}
+                <div className="grid grid-cols-2 gap-4 bg-white border border-slate-200 p-4 rounded-lg shadow-sm font-sans">
+                  <div>
+                    <span className="text-slate-400 block text-[9px] uppercase">Factura Nro</span>
+                    <strong className="text-slate-800 text-xs block font-mono font-extrabold">{selectedSale.factura_nro}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[9px] uppercase">Fecha y Hora</span>
+                    <strong className="text-slate-800 text-xs block font-mono font-medium">{selectedSale.fecha}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[9px] uppercase">Cliente</span>
+                    <strong className="text-slate-800 text-xs block uppercase truncate">{selectedSale.client.nombre}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[9px] uppercase">Operador / Cajero</span>
+                    <strong className="text-slate-800 text-xs block uppercase truncate">{selectedSale.usuario}</strong>
+                  </div>
+                </div>
+
+                {/* Items Table */}
+                <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
+                  <table className="w-full border-collapse text-left">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr className="text-slate-500 font-sans uppercase text-[8px] font-black font-semibold">
+                        <th className="px-3 py-2.5">PRODUCTO</th>
+                        <th className="px-3 py-2.5 text-center">CANT</th>
+                        <th className="px-3 py-2.5 text-right">UNIT VENTA</th>
+                        <th className="px-3 py-2.5 text-right">UNIT COSTO</th>
+                        <th className="px-3 py-2.5 text-right">TOTAL VENTA</th>
+                        <th className="px-3 py-2.5 text-right text-emerald-700">UTILIDAD</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-[10px] text-slate-700 font-mono">
+                      {itemsWithProfit.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/50">
+                          <td className="px-3 py-2 font-sans font-medium uppercase">{item.product.description}</td>
+                          <td className="px-3 py-2 text-center font-bold text-slate-800">{item.qty}</td>
+                          <td className="px-3 py-2 text-right text-slate-600">${item.priceUSD.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right text-slate-500">${item.cost.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-right text-slate-900 font-bold">${item.totalSale.toFixed(2)}</td>
+                          <td className={`px-3 py-2 text-right font-bold ${item.profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                            ${item.profit.toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Totals & Net Profit Breakdown Card */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  
+                  {/* Totals & Payments */}
+                  <div className="bg-white border border-slate-200 p-4 rounded-lg space-y-2 shadow-sm">
+                    <div className="font-bold text-[9px] text-slate-500 uppercase border-b border-slate-100 pb-1 font-sans">
+                      Montos y Pagos
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex justify-between">
+                        <span>Subtotal USD:</span>
+                        <span>$ {subtotal.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between text-red-500">
+                        <span>Descuentos USD:</span>
+                        <span>- $ {descuento.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between font-black text-slate-900 border-t border-dashed border-slate-200 pt-1 font-sans text-xs">
+                        <span>TOTAL FACTURADO:</span>
+                        <span className="text-winter-blueBtn font-mono font-bold">$ {totalUSD.toFixed(2)}</span>
+                      </div>
+                    </div>
+                    <div className="pt-2 border-t border-slate-100">
+                      <div className="text-[8px] uppercase text-slate-400 font-bold mb-1 font-sans">Métodos Aplicados</div>
+                      <div className="flex flex-wrap gap-1 font-sans">
+                        {(selectedSale.pagos ?? []).map((p, idx) => (
+                          <span key={idx} className="bg-slate-100 border border-slate-200 text-slate-600 px-1.5 py-0.5 rounded text-[8px] font-semibold">
+                            {p.metodo}: ${p.monto.toFixed(2)}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Profitability Panel */}
+                  <div className="bg-emerald-50/50 border border-emerald-100 p-4 rounded-lg space-y-3 shadow-sm flex flex-col justify-between">
+                    <div>
+                      <div className="font-bold text-[9px] text-emerald-855 uppercase border-b border-emerald-250/60 pb-1 font-sans">
+                        Rentabilidad de la Venta
+                      </div>
+                      <div className="space-y-1.5 pt-2">
+                        <div className="flex justify-between">
+                          <span>Ingreso Neto Venta:</span>
+                          <span className="font-bold text-slate-800">$ {totalUSD.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Costo Mercancía:</span>
+                          <span className="font-bold text-red-600">- $ {totalCost.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-emerald-300 pt-2 font-bold font-sans">
+                      <div className="flex justify-between text-xs text-emerald-800 font-extrabold items-baseline">
+                        <span className="uppercase text-[9px]">UTILIDAD NETA:</span>
+                        <span className="text-lg text-emerald-600 font-mono font-black">$ {totalProfit.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+
+              </div>
             </div>
           </div>
         );
