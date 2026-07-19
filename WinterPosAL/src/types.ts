@@ -28,6 +28,7 @@ export interface Client {
   porcentaje_descuento: number;
   estado: 'Activo' | 'Inactivo';
   saldo_pendiente: number;
+  aplica_precio_costo?: boolean;
 }
 
 export interface User {
@@ -49,7 +50,7 @@ export interface TasaHistoryItem {
 export interface SaleItem {
   product: Product;
   qty: number;
-  priceType: 'Detalle' | 'Mayor';
+  priceType: 'Detalle' | 'Mayor' | 'Costo';
   priceUSD: number;
   totalUSD: number;
 }

@@ -623,6 +623,9 @@ export default function CajaPOS({
       const itemUnit = prod.a_granel ? 'kg' : 'und';
       const formattedQty = prod.a_granel ? finalQty.toFixed(3) : finalQty.toString();
 
+      // Determine price based on client's aplica_precio_costo flag
+      const useCostPrice = !!selectedClient.aplica_precio_costo;
+
       if (existing) {
         const nextQty = existing.qty + finalQty;
         if (nextQty > prod.stock_actual) {
@@ -636,12 +639,13 @@ export default function CajaPOS({
             : item
         );
       } else {
-        const priceUSD = prod.precio_detalle_usd;
+        const priceUSD = useCostPrice ? prod.precio_costo_usd : prod.precio_detalle_usd;
+        const priceType = useCostPrice ? 'Costo' : 'Detalle';
         showToast(`Se agregó "${prod.description}" (${formattedQty} ${itemUnit}) al carrito.`, 'success');
         return [...prev, {
           product: prod,
           qty: finalQty,
-          priceType: 'Detalle',
+          priceType,
           priceUSD,
           totalUSD: finalQty * priceUSD
         }];
@@ -736,9 +740,15 @@ export default function CajaPOS({
           ? {
               ...item,
               qty: nextQty,
-              priceUSD: nextQty >= item.product.cantidad_mayorista ? item.product.precio_mayor_usd : item.product.precio_detalle_usd,
-              priceType: nextQty >= item.product.cantidad_mayorista ? 'Mayor' : 'Detalle',
-              totalUSD: nextQty * (nextQty >= item.product.cantidad_mayorista ? item.product.precio_mayor_usd : item.product.precio_detalle_usd)
+              priceUSD: selectedClient.aplica_precio_costo
+                ? item.product.precio_costo_usd
+                : (nextQty >= item.product.cantidad_mayorista ? item.product.precio_mayor_usd : item.product.precio_detalle_usd),
+              priceType: selectedClient.aplica_precio_costo
+                ? 'Costo'
+                : (nextQty >= item.product.cantidad_mayorista ? 'Mayor' : 'Detalle'),
+              totalUSD: nextQty * (selectedClient.aplica_precio_costo
+                ? item.product.precio_costo_usd
+                : (nextQty >= item.product.cantidad_mayorista ? item.product.precio_mayor_usd : item.product.precio_detalle_usd))
             }
           : item
       )
@@ -1147,16 +1157,34 @@ export default function CajaPOS({
                 if (cli) {
                   setSelectedClient(cli);
                   setDiscountPct(cli.porcentaje_descuento);
+                  // Recalculate all cart prices for the new client
+                  if (cli.aplica_precio_costo) {
+                    setSaleItems(prev => prev.map(item => {
+                      const costPrice = item.product.precio_costo_usd;
+                      return { ...item, priceUSD: costPrice, priceType: 'Costo', totalUSD: item.qty * costPrice };
+                    }));
+                  } else {
+                    setSaleItems(prev => prev.map(item => {
+                      const normalPrice = item.qty >= item.product.cantidad_mayorista ? item.product.precio_mayor_usd : item.product.precio_detalle_usd;
+                      const normalType = item.qty >= item.product.cantidad_mayorista ? 'Mayor' : 'Detalle';
+                      return { ...item, priceUSD: normalPrice, priceType: normalType, totalUSD: item.qty * normalPrice };
+                    }));
+                  }
                 }
               }}
-              className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-slate-800 outline-none focus:bg-white focus:border-winter-blueBtn font-sans"
+              className={`w-full border rounded p-2.5 text-slate-800 outline-none focus:bg-white focus:border-winter-blueBtn font-sans ${selectedClient.aplica_precio_costo ? 'bg-amber-50 border-amber-400' : 'bg-slate-50 border-slate-350'}`}
             >
               {clients.map(c => (
                 <option key={c.id} value={c.id}>
-                  {c.nombre} ({c.cedula_rif}) {c.porcentaje_descuento > 0 ? `[Desc ${c.porcentaje_descuento}%]` : ''}
+                  {c.nombre} ({c.cedula_rif}) {c.porcentaje_descuento > 0 ? `[Desc ${c.porcentaje_descuento}%]` : ''}{c.aplica_precio_costo ? ' ★ P.COSTO' : ''}
                 </option>
               ))}
             </select>
+            {selectedClient.aplica_precio_costo && (
+              <div className="flex items-center gap-1.5 bg-amber-100 border border-amber-300 rounded px-2 py-1 mt-1">
+                <span className="text-amber-700 text-[10px] font-bold font-sans">⚠ CLIENTE A PRECIO COSTO — Todos los productos se facturan al costo de inventario</span>
+              </div>
+            )}
           </div>
 
           {/* VENDEDOR SELECTOR */}

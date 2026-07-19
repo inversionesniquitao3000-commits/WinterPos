@@ -46,6 +46,8 @@ try {
     ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS venta_total_usd NUMERIC DEFAULT 0;
     ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS utilidad_usd NUMERIC DEFAULT 0;
     ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS detalles_json TEXT;
+    ALTER TABLE Clientes ADD COLUMN IF NOT EXISTS aplica_precio_costo BOOLEAN DEFAULT FALSE;
+    ALTER TABLE Ventas_Detalle DROP CONSTRAINT IF EXISTS ventas_detalle_tipo_precio_check;
   `);
 
   // Alter enum type outside of main multi-statement query to prevent implicit transaction block errors in Postgres
@@ -287,6 +289,7 @@ export async function getClients() {
         credito_disponible: parseFloat(r.credito_disponible),
         porcentaje_descuento: parseFloat(r.porcentaje_descuento),
         estado: r.estado,
+        aplica_precio_costo: !!r.aplica_precio_costo,
         saldo_pendiente: parseFloat(r.limite_credito) - parseFloat(r.credito_disponible)
       }));
     } catch (err) {
@@ -300,17 +303,17 @@ export async function saveClient(c) {
   if (usePostgres) {
     try {
       const res = await pool.query(
-        `INSERT INTO Clientes (cedula_rif, nombre, telefono, direccion, limite_credito, credito_disponible, porcentaje_descuento, estado)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-        [c.cedula_rif, c.nombre, c.telefono, c.direccion, c.limite_credito, c.credito_disponible, c.porcentaje_descuento, c.estado]
+        `INSERT INTO Clientes (cedula_rif, nombre, telefono, direccion, limite_credito, credito_disponible, porcentaje_descuento, estado, aplica_precio_costo)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+        [c.cedula_rif, c.nombre, c.telefono, c.direccion, c.limite_credito, c.credito_disponible, c.porcentaje_descuento, c.estado, !!c.aplica_precio_costo]
       );
-      return { ...c, id: res.rows[0].id, saldo_pendiente: 0 };
+      return { ...c, id: res.rows[0].id, saldo_pendiente: 0, aplica_precio_costo: !!c.aplica_precio_costo };
     } catch (err) {
       console.error('Error en saveClient (Postgres):', err.message);
     }
   }
   const clients = readJsonFile('clients.json', mockClients);
-  const newClient = { ...c, id: Date.now(), saldo_pendiente: 0 };
+  const newClient = { ...c, id: Date.now(), saldo_pendiente: 0, aplica_precio_costo: !!c.aplica_precio_costo };
   clients.push(newClient);
   writeJsonFile('clients.json', clients);
   return newClient;
@@ -399,9 +402,10 @@ export async function updateClient(id, c) {
           limite_credito = $5, 
           credito_disponible = $6, 
           porcentaje_descuento = $7, 
-          estado = $8
-         WHERE id = $9 RETURNING *`,
-        [c.cedula_rif, c.nombre, c.telefono, c.direccion, parseFloat(c.limite_credito), newCredito, parseFloat(c.porcentaje_descuento), c.estado || 'Activo', id]
+          estado = $8,
+          aplica_precio_costo = $9
+         WHERE id = $10 RETURNING *`,
+        [c.cedula_rif, c.nombre, c.telefono, c.direccion, parseFloat(c.limite_credito), newCredito, parseFloat(c.porcentaje_descuento), c.estado || 'Activo', !!c.aplica_precio_costo, id]
       );
       
       if (res.rowCount > 0) {
@@ -416,6 +420,7 @@ export async function updateClient(id, c) {
           credito_disponible: parseFloat(r.credito_disponible),
           porcentaje_descuento: parseFloat(r.porcentaje_descuento),
           estado: r.estado,
+          aplica_precio_costo: !!r.aplica_precio_costo,
           saldo_pendiente: parseFloat(r.limite_credito) - parseFloat(r.credito_disponible)
         };
       }
@@ -443,6 +448,7 @@ export async function updateClient(id, c) {
       credito_disponible: newAvail,
       porcentaje_descuento: parseFloat(c.porcentaje_descuento),
       estado: c.estado || 'Activo',
+      aplica_precio_costo: !!c.aplica_precio_costo,
       saldo_pendiente: debt
     };
     writeJsonFile('clients.json', clients);

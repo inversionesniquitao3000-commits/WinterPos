@@ -58,6 +58,10 @@ export default function Clientes({
   const [editDiscount, setEditDiscount] = useState('0');
   const [editEstado, setEditEstado] = useState<'Activo' | 'Inactivo'>('Activo');
 
+  // Precio Costo toggles
+  const [newPrecioCosto, setNewPrecioCosto] = useState(false);
+  const [editPrecioCosto, setEditPrecioCosto] = useState(false);
+
   const [abonoVal, setAbonoVal] = useState('');
 
   // Sorting state (Catálogo)
@@ -263,7 +267,8 @@ export default function Clientes({
       credito_disponible: limit,
       porcentaje_descuento: discount,
       estado: 'Activo',
-      saldo_pendiente: 0.00
+      saldo_pendiente: 0.00,
+      aplica_precio_costo: newPrecioCosto
     };
 
     onAddClient(newClient);
@@ -276,6 +281,7 @@ export default function Clientes({
     setNewAddress('');
     setNewCreditLimit('0');
     setNewDiscount('0');
+    setNewPrecioCosto(false);
   };
 
   const handleOpenEdit = () => {
@@ -287,6 +293,7 @@ export default function Clientes({
     setEditCreditLimit(String(selectedRowClient.limite_credito));
     setEditDiscount(String(selectedRowClient.porcentaje_descuento));
     setEditEstado(selectedRowClient.estado || 'Activo');
+    setEditPrecioCosto(!!selectedRowClient.aplica_precio_costo);
     setShowEditModal(true);
   };
 
@@ -315,7 +322,8 @@ export default function Clientes({
       direccion: editAddress.trim(),
       limite_credito: limit,
       porcentaje_descuento: discount,
-      estado: editEstado
+      estado: editEstado,
+      aplica_precio_costo: editPrecioCosto
     };
 
     if (onUpdateClient) {
@@ -1266,6 +1274,23 @@ export default function Clientes({
                 </div>
               </div>
 
+              {/* Precio Costo Toggle */}
+              <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newPrecioCosto}
+                    onChange={(e) => setNewPrecioCosto(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
+                </label>
+                <div>
+                  <span className="text-xs font-bold text-amber-800 font-sans">Cobrar a Precio Costo</span>
+                  <p className="text-[10px] text-amber-600 font-sans">Si se activa, todos los productos que compre este cliente se facturarán al precio de costo del inventario.</p>
+                </div>
+              </div>
+
               <div className="flex gap-2 pt-2">
                 <button
                   type="button"
@@ -1387,6 +1412,23 @@ export default function Clientes({
                   <strong>Nota Importante:</strong> Este cliente posee una deuda de <strong>${selectedRowClient.saldo_pendiente.toFixed(2)} USD</strong>. Si modificas su límite de crédito, el crédito disponible se reajustará automáticamente manteniendo el saldo pendiente actual.
                 </div>
               )}
+
+              {/* Precio Costo Toggle */}
+              <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editPrecioCosto}
+                    onChange={(e) => setEditPrecioCosto(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
+                </label>
+                <div>
+                  <span className="text-xs font-bold text-amber-800 font-sans">Cobrar a Precio Costo</span>
+                  <p className="text-[10px] text-amber-600 font-sans">Si se activa, todos los productos que compre este cliente se facturarán al precio de costo del inventario.</p>
+                </div>
+              </div>
 
               <div className="flex gap-2 pt-2">
                 <button
