@@ -1144,9 +1144,9 @@ export default function Inventario({
                     type="text"
                     required
                     placeholder="Ej. HARINA-PAN-1K"
-                    value={newClave}
-                    onChange={(e) => setNewClave(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none"
+                    value={newClave.toUpperCase()}
+                    onChange={(e) => setNewClave(e.target.value.toUpperCase())}
+                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-850 focus:bg-white focus:border-winter-inventarioStart focus:outline-none uppercase font-bold"
                   />
                 </div>
                 <div>
@@ -1235,10 +1235,10 @@ export default function Inventario({
                 <input
                   type="text"
                   required
-                  placeholder="DESCRIPCIÓN COMERCIAL EN MAYÚSCULAS..."
+                  placeholder="Descripción del artículo..."
                   value={newDesc.toUpperCase()}
                   onChange={(e) => setNewDesc(e.target.value.toUpperCase())}
-                  className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-sans font-bold"
+                  className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-850 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-sans font-bold uppercase"
                 />
               </div>
 
