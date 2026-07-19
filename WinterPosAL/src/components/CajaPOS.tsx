@@ -439,6 +439,7 @@ export default function CajaPOS({
         setShowCajaAbonoModal(false);
         setShowBulkModal(false);
         setShowQtyEditModal(false);
+        setShowOnHoldModal(false);
         setCierreResult(null);
       }
     };
