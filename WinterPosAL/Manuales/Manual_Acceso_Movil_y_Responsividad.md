@@ -21,31 +21,26 @@ WinterPosAL está optimizado con **Tailwind CSS** empleando patrones de diseño 
 Para poder abrir WinterPosAL en tu teléfono o tablet, ambos equipos (la computadora Servidor y el dispositivo móvil) deben estar conectados al **mismo router Wi-Fi**.
 
 #### Paso 1: Configurar el Servidor Vite para Acceso de Red
-Por defecto, la ejecución local `npm run dev` solo responde dentro de la misma computadora (`localhost`). Debemos indicarle que escuche peticiones externas:
+El sistema ya viene preconfigurado en `vite.config.ts` con la directiva `server: { host: true }`. Esto significa que ya no hace falta pasar ningún parámetro especial.
 
-1. Detén el servidor actual en la terminal con `Ctrl + C`.
-2. Vuelve a iniciar el servidor agregando el parámetro `--host`:
+1. Simplemente inicia el servidor normalmente:
    ```bash
-   npm run dev -- --host
+   npm run dev
    ```
-3. En la terminal se mostrará la dirección de red local similar a esta:
+2. En la terminal se mostrará la dirección de red local similar a esta:
    ```text
-     VITE v5.4.21  ready in 450 ms
+     VITE v5.4.21  ready in 663 ms
 
      ➜  Local:   http://localhost:5173/
-     ➜  Network: http://192.168.1.100:5173/
+     ➜  Network: http://192.168.11.13:5173/
    ```
 
-*(Opcional)* Si quieres configurar esto para siempre en el archivo `package.json`, modifica la línea de inicio:
-```json
-"dev": "vite --host"
-```
-
-#### Paso 2: Conectar desde el Dispositivo Móvil
+#### Paso 2: Conectar desde el Dispositivo Móvil (Detección Automática)
 1. Asegúrate de que el Wi-Fi de tu celular o tablet esté **encendido** y conectado a la misma red de la tienda.
 2. Abre el navegador web de tu preferencia (Chrome, Safari, Firefox).
-3. Introduce en la barra de direcciones la URL de la red local que te dio la consola del servidor (ej. `http://192.168.1.100:5173`).
+3. Introduce en la barra de direcciones la URL de la red local que te dio la consola del servidor (ej. `http://192.168.11.13:5173`).
 4. **¡Listo!** La pantalla de login del sistema cargará de inmediato en tu pantalla móvil.
+5. **Conexión de Base de Datos Automática:** El sistema detectará de forma inteligente que estás accediendo desde una IP de la red local, y configurará el backend automáticamente para que se comunique con la PC Servidor en `http://192.168.11.13:5000`. No requiere que configures nada en la pantalla oculta de la app.
 
 ---
 
