@@ -208,12 +208,13 @@ export default function CajaPOS({
         qty, 
         'Entrada Rápida desde Caja POS'
       );
-      alert(`Entrada Rápida procesada con éxito: Se añadieron ${qty} unidades a "${matchedProduct.description}".`);
+      showToast(`Entrada Rápida procesada con éxito: Se añadieron ${qty} unidades a "${matchedProduct.description}".`, 'success');
+      setShowEntradaRapidaModal(false);
       setEntradaBarcode('');
       setEntradaQty('1');
     } catch (e) {
       console.error(e);
-      alert("Ocurrió un error al registrar la entrada rápida de inventario.");
+      showToast("Ocurrió un error al registrar la entrada rápida de inventario.", "error");
     }
   };
 
