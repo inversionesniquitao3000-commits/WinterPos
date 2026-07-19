@@ -410,10 +410,10 @@ export default function CajaPOS({
     }
   }, [cajaAbierta, showAperturaModal, showCheckoutModal, showCierreModal, showMovementsModal, showTicketModal]);
 
-  // Listener for F11 and Escape (modals closing)
+  // Listener for F6 and Escape (modals closing)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'F11') {
+      if (e.key === 'F6') {
         e.preventDefault();
         searchInputRef.current?.focus();
       } else if (e.key === 'Escape') {
@@ -938,7 +938,7 @@ export default function CajaPOS({
           
           {/* SEARCH PRODUCT SELECTOR */}
           <div className="space-y-1">
-            <label className="text-[10px] text-slate-500 font-sans block">Buscar Producto (F11)</label>
+            <label className="text-[10px] text-slate-500 font-sans block">Buscar Producto (F6)</label>
             <div className="relative">
               <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-slate-400 pointer-events-none" />
               <input
