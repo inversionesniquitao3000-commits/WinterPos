@@ -384,6 +384,25 @@ export default function App() {
     }
   };
 
+  const handleDeleteProduct = async (prodId: number) => {
+    try {
+      const response = await fetch(getApiUrl(`/productos/${prodId}`), {
+        method: 'DELETE'
+      });
+      if (response.ok) {
+        setProducts(prev => prev.filter(p => p.id !== prodId));
+        return true;
+      } else {
+        const err = await response.json();
+        alert(`Error al eliminar producto: ${err.error || 'No se pudo completar la operación'}`);
+        return false;
+      }
+    } catch (err: any) {
+      alert(`Error al conectar con el servidor: ${err.message}`);
+      return false;
+    }
+  };
+
   const handleUpdateProductStock = async (
     prodId: number,
     type: 'Entrada' | 'Salida' | 'Merma' | 'Devolucion' | 'Entrada Rápida',
@@ -1030,6 +1049,7 @@ export default function App() {
               onAddProduct={handleAddProduct}
               onUpdateProductStock={handleUpdateProductStock}
               onUpdateProductPrices={handleUpdateProductPrices}
+              onDeleteProduct={handleDeleteProduct}
             />
           )}
 

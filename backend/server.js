@@ -6,7 +6,7 @@ import {
   updateProductStock, updateProductPrices, getClients, saveClient, registerAbono,
   getTasaHistory, saveTasa, getMovements, saveMovement, getPriceHistory, savePriceHistory,
   getSales, saveSale, getCierres, abrirCaja, cerrarCaja, getCajaEstado, registrarCajaMovimiento,
-  updateClient, deleteClient, getAbonos
+  updateClient, deleteClient, getAbonos, deleteProduct
 } from './db-store.js';
 
 dotenv.config();
@@ -113,6 +113,18 @@ app.delete('/api/clientes/:id', async (req, res) => {
   }
 });
 
+app.delete('/api/productos/:id', async (req, res) => {
+  try {
+    const success = await deleteProduct(req.params.id);
+    if (success) {
+      res.json({ success: true });
+    } else {
+      res.status(404).json({ error: 'Producto no encontrado o no pudo ser eliminado' });
+    }
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 
 app.get('/api/tasas', async (req, res) => {
   const history = await getTasaHistory();

@@ -10,6 +10,7 @@ interface InventarioProps {
   onAddProduct: (prod: Product) => void;
   onUpdateProductStock: (prodId: number, type: 'Entrada' | 'Salida' | 'Merma' | 'Devolucion', qty: number, reason: string) => void;
   onUpdateProductPrices: (prodId: number, prices: { cost: number; detail: number; mayor: number }, reason: string) => void;
+  onDeleteProduct: (prodId: number) => Promise<boolean>;
 }
 
 export default function Inventario({
@@ -19,7 +20,8 @@ export default function Inventario({
   currentUser: _currentUser,
   onAddProduct,
   onUpdateProductStock,
-  onUpdateProductPrices
+  onUpdateProductPrices,
+  onDeleteProduct
 }: InventarioProps) {
   const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'movimientos' | 'precios'>('catalogo');
   const [searchTerm, setSearchTerm] = useState('');
@@ -93,6 +95,21 @@ export default function Inventario({
   const [inputDetail, setInputDetail] = useState('');
   const [inputMayor, setInputMayor] = useState('');
   const [priceReason, setPriceReason] = useState('');
+
+  const handleDeleteProductClick = async () => {
+    if (!selectedProduct) return;
+    if (selectedProduct.stock_actual > 0) {
+      alert("No se puede eliminar un producto con existencia mayor a 0");
+      return;
+    }
+    
+    if (window.confirm(`¿Está seguro de que desea eliminar el producto "${selectedProduct.description}" permanentemente del sistema? Esta acción no se puede deshacer.`)) {
+      const success = await onDeleteProduct(selectedProduct.id);
+      if (success) {
+        setSelectedProduct(null);
+      }
+    }
+  };
 
   // Dynamic categories state
   const [categories, setCategories] = useState<string[]>(() => {
@@ -555,14 +572,6 @@ export default function Inventario({
                 <Printer className="w-4 h-4" />
                 Imprimir Reporte
               </button>
-              
-              <button
-                onClick={() => setShowNewProdModal(true)}
-                className="bg-winter-inventarioStart hover:bg-winter-inventarioEnd text-white px-4 py-2 rounded-lg text-xs font-bold font-sans transition-all flex items-center gap-1.5 shadow-sm"
-              >
-                <Plus className="w-4 h-4" />
-                Crear Nuevo Producto
-              </button>
             </div>
           </div>
 
@@ -611,91 +620,168 @@ export default function Inventario({
             </div>
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-xs text-left">
-                <thead className="bg-slate-50 border-b border-slate-200">
-                  <tr className="text-slate-550">
-                    <th className="px-2.5 py-1.5 font-sans uppercase">Código</th>
-                    <th className="px-2.5 py-1.5 font-sans uppercase">
-                      {renderSortHeader('Descripción', 'descripcion')}
-                    </th>
-                    <th className="px-2.5 py-1.5 font-sans uppercase">
-                      {renderSortHeader('Categoría', 'categoria')}
-                    </th>
-                    <th className="px-2.5 py-1.5 text-right font-sans uppercase">Stock Mínimo</th>
-                    <th className="px-2.5 py-1.5 text-right text-slate-800 font-sans uppercase">
-                      {renderSortHeader('Existencia', 'existencia', 'right')}
-                    </th>
-                    <th className="px-2.5 py-1.5 text-right font-sans uppercase">P. Costo</th>
-                    <th className="px-2.5 py-1.5 text-right text-emerald-600 font-sans uppercase">P. Detalle</th>
-                    <th className="px-2.5 py-1.5 text-right font-sans uppercase">P. Mayor</th>
-                    <th className="px-2.5 py-1.5 text-center font-sans uppercase">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {sortedProducts.length === 0 ? (
-                    <tr>
-                      <td colSpan={9} className="text-center py-8 text-slate-400 font-sans">
-                        No se encontraron productos registrados.
-                      </td>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            {/* Catalog Table */}
+            <div className="lg:col-span-10 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm h-fit">
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-xs text-left">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr className="text-slate-550 border-b border-slate-200">
+                      <th className="px-2.5 py-2 font-sans uppercase">Código</th>
+                      <th className="px-2.5 py-2 font-sans uppercase">
+                        {renderSortHeader('Descripción', 'descripcion')}
+                      </th>
+                      <th className="px-2.5 py-2 font-sans uppercase">
+                        {renderSortHeader('Categoría', 'categoria')}
+                      </th>
+                      <th className="px-2.5 py-2 text-right font-sans uppercase">Stock Mínimo</th>
+                      <th className="px-2.5 py-2 text-right text-slate-800 font-sans uppercase">
+                        {renderSortHeader('Existencia', 'existencia', 'right')}
+                      </th>
+                      <th className="px-2.5 py-2 text-right font-sans uppercase">P. Costo</th>
+                      <th className="px-2.5 py-2 text-right text-emerald-600 font-sans uppercase">P. Detalle</th>
+                      <th className="px-2.5 py-2 text-right font-sans uppercase">P. Mayor</th>
                     </tr>
-                  ) : (
-                    sortedProducts.map(p => {
-                      const isLowStock = p.stock_actual <= p.stock_minimo;
-                      return (
-                        <tr key={p.id} className="hover:bg-slate-50/50">
-                          <td className="px-2.5 py-1.5 font-mono font-bold text-slate-450">{p.barcode}</td>
-                          <td className="px-2.5 py-1.5 font-sans select-text">
-                            <div className="font-bold text-slate-850">{p.description}</div>
-                            <div className="flex gap-1.5 mt-0.5 text-[9px]">
-                              {p.a_granel && (
-                                <span className="bg-amber-50 border border-amber-250 text-amber-700 px-1 py-0.2 rounded font-bold uppercase font-sans">A Granel</span>
-                              )}
-                              {p.fecha_vencimiento && (
-                                <span className="bg-red-50 border border-red-250 text-red-700 px-1 py-0.2 rounded font-bold font-sans">
-                                  Vence: {p.fecha_vencimiento}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-2.5 py-1.5 font-sans">{p.category}</td>
-                          <td className="px-2.5 py-1.5 text-right font-mono text-slate-500">{p.stock_minimo}</td>
-                          <td className={`px-2.5 py-1.5 text-right font-black font-mono ${isLowStock ? 'text-red-500 animate-pulse font-bold' : 'text-slate-800'}`}>
-                            {p.stock_actual}
-                          </td>
-                          <td className="px-2.5 py-1.5 text-right font-mono text-slate-600">${p.precio_costo_usd.toFixed(2)}</td>
-                          <td className="px-2.5 py-1.5 text-right font-mono text-emerald-600 font-bold">${p.precio_detalle_usd.toFixed(2)}</td>
-                          <td className="px-2.5 py-1.5 text-right font-mono text-slate-600">
-                            ${p.precio_mayor_usd.toFixed(2)}
-                            <span className="text-[9px] text-slate-400 block font-sans">x{p.cantidad_mayorista}</span>
-                          </td>
-                          <td className="px-2.5 py-1.5">
-                            <div className="flex gap-1 justify-center">
-                              <button
-                                onClick={() => handleOpenAdjust(p)}
-                                className="bg-slate-50 border border-slate-200 text-slate-650 px-2 py-1 rounded hover:border-winter-inventarioStart hover:text-winter-inventarioStart font-sans transition-all flex items-center gap-1 shadow-sm text-[10px]"
-                                title="Ajustar Stock (Entradas, Salidas, Mermas)"
-                              >
-                                <RefreshCw className="w-2.5 h-2.5" />
-                                Stock
-                              </button>
-                              <button
-                                onClick={() => handleOpenPrices(p)}
-                                className="bg-slate-50 border border-slate-200 text-slate-650 px-2 py-1 rounded hover:border-winter-inventarioStart hover:text-winter-inventarioStart font-sans transition-all flex items-center gap-1 shadow-sm text-[10px]"
-                                title="Actualizar precios de costo/venta"
-                              >
-                                <PenTool className="w-2.5 h-2.5" />
-                                Precios
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {sortedProducts.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="text-center py-8 text-slate-400 font-sans">
+                          No se encontraron productos registrados.
+                        </td>
+                      </tr>
+                    ) : (
+                      sortedProducts.map(p => {
+                        const isLowStock = p.stock_actual <= p.stock_minimo;
+                        return (
+                          <tr 
+                            key={p.id} 
+                            onClick={() => setSelectedProduct(selectedProduct?.id === p.id ? null : p)}
+                            className={`hover:bg-slate-50/50 cursor-pointer transition-all border-b border-slate-100 ${
+                              selectedProduct?.id === p.id 
+                                ? 'bg-sky-50 hover:bg-sky-100/70 border-l-4 border-l-winter-inventarioStart' 
+                                : ''
+                            }`}
+                          >
+                            <td className="px-2.5 py-2 font-mono font-bold text-slate-450">{p.barcode}</td>
+                            <td className="px-2.5 py-2 font-sans select-text">
+                              <div className="font-bold text-slate-850">{p.description}</div>
+                              <div className="flex gap-1.5 mt-0.5 text-[9px]">
+                                {p.a_granel && (
+                                  <span className="bg-amber-50 border border-amber-250 text-amber-700 px-1 py-0.2 rounded font-bold uppercase font-sans">A Granel</span>
+                                )}
+                                {p.fecha_vencimiento && (
+                                  <span className="bg-red-50 border border-red-250 text-red-700 px-1 py-0.2 rounded font-bold font-sans">
+                                    Vence: {p.fecha_vencimiento}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-2.5 py-2 font-sans">{p.category}</td>
+                            <td className="px-2.5 py-2 text-right font-mono text-slate-500">{p.stock_minimo}</td>
+                            <td className={`px-2.5 py-2 text-right font-black font-mono ${isLowStock ? 'text-red-500 animate-pulse font-bold' : 'text-slate-800'}`}>
+                              {p.stock_actual}
+                            </td>
+                            <td className="px-2.5 py-2 text-right font-mono text-slate-600">${p.precio_costo_usd.toFixed(2)}</td>
+                            <td className="px-2.5 py-2 text-right font-mono text-emerald-600 font-bold">${p.precio_detalle_usd.toFixed(2)}</td>
+                            <td className="px-2.5 py-2 text-right font-mono text-slate-600">
+                              ${p.precio_mayor_usd.toFixed(2)}
+                              <span className="text-[9px] text-slate-400 block font-sans">x{p.cantidad_mayorista}</span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Sidebar Operations Column */}
+            <div className="lg:col-span-2 space-y-3 font-sans text-slate-800">
+              <div className="bg-slate-150 border border-slate-200 rounded-lg p-3 shadow-inner flex flex-col justify-start h-fit">
+                <h4 className="text-[10px] font-sans font-extrabold text-slate-500 uppercase tracking-widest border-b border-slate-200 pb-1.5 mb-3 flex items-center gap-1">
+                  <Package className="w-3.5 h-3.5 text-slate-450" />
+                  Operaciones
+                </h4>
+
+                {/* Selected Product Preview */}
+                {selectedProduct && (
+                  <div className="bg-sky-50 border border-sky-200 text-sky-900 text-[10px] p-2 rounded mb-3 font-sans shadow-sm leading-tight flex flex-col gap-0.5">
+                    <span className="font-extrabold uppercase truncate">{selectedProduct.description}</span>
+                    <span className="font-mono text-slate-500 font-bold">{selectedProduct.barcode}</span>
+                    <span className={`font-mono font-black mt-1 ${selectedProduct.stock_actual <= selectedProduct.stock_minimo ? 'text-red-700 animate-pulse' : 'text-slate-700'}`}>
+                      Stock: {selectedProduct.stock_actual}
+                    </span>
+                  </div>
+                )}
+
+                {/* Operations buttons */}
+                <div className="flex flex-col gap-2.5">
+                  {/* BUTTON 1: AGREGAR */}
+                  <button
+                    onClick={() => setShowNewProdModal(true)}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all active:scale-95"
+                  >
+                    <Plus className="w-4 h-4 bg-emerald-700/50 rounded-full p-0.5" />
+                    <span>Agregar</span>
+                  </button>
+
+                  {/* BUTTON 2: STOCK */}
+                  <button
+                    onClick={() => selectedProduct && handleOpenAdjust(selectedProduct)}
+                    disabled={!selectedProduct}
+                    className="w-full bg-cyan-600 hover:bg-cyan-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-350 text-white border border-cyan-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all enabled:active:scale-95 disabled:cursor-not-allowed"
+                    title={!selectedProduct ? "Seleccione un producto para ajustar stock" : "Ajustar stock (Entrada/Salida/Merma)"}
+                  >
+                    <RefreshCw className="w-4 h-4 bg-cyan-750/50 disabled:bg-transparent rounded-full p-0.5" />
+                    <span>Ajustar Stock</span>
+                  </button>
+
+                  {/* BUTTON 3: PRECIOS */}
+                  <button
+                    onClick={() => selectedProduct && handleOpenPrices(selectedProduct)}
+                    disabled={!selectedProduct}
+                    className="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-350 text-white border border-amber-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all enabled:active:scale-95 disabled:cursor-not-allowed"
+                    title={!selectedProduct ? "Seleccione un producto para editar precios" : "Editar precios del producto"}
+                  >
+                    <PenTool className="w-4 h-4 bg-amber-750/50 disabled:bg-transparent rounded-full p-0.5" />
+                    <span>Editar Precios</span>
+                  </button>
+
+                  {/* BUTTON 4: ELIMINAR */}
+                  <button
+                    onClick={handleDeleteProductClick}
+                    disabled={!selectedProduct || selectedProduct.stock_actual > 0}
+                    className="w-full bg-red-655 hover:bg-red-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-350 text-white border border-red-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all enabled:active:scale-95 disabled:cursor-not-allowed"
+                    title={
+                      !selectedProduct 
+                        ? "Seleccione un producto para eliminar" 
+                        : selectedProduct.stock_actual > 0 
+                          ? "No se puede eliminar un producto con existencia mayor a 0" 
+                          : "Eliminar producto permanentemente"
+                    }
+                  >
+                    <Minus className="w-4 h-4 bg-red-700/50 disabled:bg-transparent rounded-full p-0.5" />
+                    <span>Eliminar</span>
+                  </button>
+                </div>
+
+                {selectedProduct && (
+                  <button
+                    onClick={() => setSelectedProduct(null)}
+                    className="mt-6 text-[10px] text-slate-455 hover:text-slate-650 underline font-sans text-center transition-all"
+                  >
+                    Limpiar selección
+                  </button>
+                )}
+
+                {/* Informative Tooltip */}
+                <div className="mt-4 p-2 bg-slate-200 border border-slate-300 text-[9px] font-sans text-slate-500 rounded flex gap-1.5 leading-tight">
+                  <span>Seleccione un producto de la tabla para activar los botones de operaciones de Stock, Precios y Eliminar. El botón de eliminar se activará únicamente si la existencia del producto es 0.</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>

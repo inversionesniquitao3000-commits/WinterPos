@@ -1173,3 +1173,43 @@ export async function registrarCajaMovimiento(tipo, descripcion, usd, ves) {
   }
   return false;
 }
+
+export async function deleteProduct(id) {
+  if (usePostgres) {
+    try {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const res = await client.query('SELECT stock_actual FROM Productos WHERE id = $1', [id]);
+        if (res.rowCount > 0 && parseInt(res.rows[0].stock_actual) > 0) {
+          throw new Error('No se puede eliminar un producto con existencia mayor a 0');
+        }
+        await client.query('DELETE FROM Productos WHERE id = $1', [id]);
+        await client.query('COMMIT');
+        return true;
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    } catch (err) {
+      console.error('Error en deleteProduct (Postgres):', err.message);
+      throw err;
+    }
+  }
+  
+  // JSON Fallback
+  let products = readJsonFile('products.json', []);
+  const initialLen = products.length;
+  const prod = products.find(p => p.id == id);
+  if (prod && prod.stock_actual > 0) {
+    throw new Error('No se puede eliminar un producto con existencia mayor a 0');
+  }
+  products = products.filter(p => p.id != id);
+  if (products.length < initialLen) {
+    writeJsonFile('products.json', products);
+    return true;
+  }
+  return false;
+}
