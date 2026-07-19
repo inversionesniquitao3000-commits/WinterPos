@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Product, Client, User, CompanyConfig, SaleItem, Payment, Sale, CierreCaja } from '../types';
 import { 
   ShoppingBag, Search, Trash2, 
-  Printer, XCircle, ArrowUpRight, 
+  XCircle, ArrowUpRight, 
   Calculator, CheckCircle2, Ticket,
   Clock, ListOrdered, Plus, AlertCircle
 } from 'lucide-react';
@@ -374,6 +374,7 @@ export default function CajaPOS({
 
   // Search input ref and auto-focus handlers
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const checkoutModalRef = useRef<HTMLDivElement>(null);
 
   // Auto-focus on state changes or mounting
   useEffect(() => {
@@ -562,7 +563,7 @@ export default function CajaPOS({
 
   const canConfirmCheckout = totalPaidUSD >= totalUSD && isPagoMovilValid && isBiopagoValid && isCreditValid;
 
-  const handleConfirmCheckout = () => {
+  const handleConfirmCheckout = (shouldPrint: boolean = false) => {
     if (!canConfirmCheckout) {
       alert('Información de cobro incompleta o inválida.');
       return;
@@ -632,10 +633,11 @@ export default function CajaPOS({
 
     onRegisterSale(saleResult);
     
-    // Setup printable data
-    setPrintedTicketData(saleResult);
     setShowCheckoutModal(false);
-    setShowTicketModal(true);
+    if (shouldPrint) {
+      setPrintedTicketData(saleResult);
+      setShowTicketModal(true);
+    }
 
     // Clear sale state
     setSaleItems([]);
@@ -644,6 +646,59 @@ export default function CajaPOS({
     localStorage.removeItem('pos_current_discount');
     localStorage.removeItem('pos_current_client_doc');
   };
+
+  // Focus Trap & Enter key listener for Checkout Modal
+  useEffect(() => {
+    if (!showCheckoutModal) return;
+
+    // Focus the first enabled input
+    const inputs = checkoutModalRef.current?.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>(
+      'input, select, button'
+    );
+    if (inputs && inputs.length > 0) {
+      const firstInput = Array.from(inputs).find(el => !el.disabled && el.tabIndex !== -1);
+      if (firstInput) {
+        setTimeout(() => firstInput.focus(), 80);
+      }
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Tab') {
+        if (!checkoutModalRef.current) return;
+        const focusable = checkoutModalRef.current.querySelectorAll<HTMLElement>(
+          'input:not([disabled]), select:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            last.focus();
+            e.preventDefault();
+          }
+        } else {
+          if (document.activeElement === last) {
+            first.focus();
+            e.preventDefault();
+          }
+        }
+      }
+
+      if (e.key === 'Enter') {
+        if (canConfirmCheckout) {
+          if (document.activeElement?.tagName === 'BUTTON') {
+            return;
+          }
+          e.preventDefault();
+          handleConfirmCheckout(false); // Cobrar sin imprimir by default
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showCheckoutModal, canConfirmCheckout]);
 
   const handleSaveApertura = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1173,14 +1228,14 @@ export default function CajaPOS({
       {/* MODAL: CHECKOUT - Light Styled */}
       {showCheckoutModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-mono text-slate-800">
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-3xl shadow-2xl flex flex-col max-h-[90vh]">
+          <div ref={checkoutModalRef} className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-3xl shadow-2xl flex flex-col max-h-[90vh]">
             
             <div className="bg-slate-100 border-b border-slate-250 px-6 py-4 flex justify-between items-center flex-shrink-0">
               <span className="text-xs font-black text-slate-700 tracking-widest uppercase flex items-center gap-1.5">
                 <Calculator className="w-4 h-4 text-winter-blueBtn" />
                 Interfaz de Liquidación (Checkout)
               </span>
-              <button onClick={() => setShowCheckoutModal(false)} className="text-slate-400 hover:text-slate-700">✕</button>
+              <button onClick={() => setShowCheckoutModal(false)} className="text-slate-400 hover:text-slate-700 focus:ring-2 focus:ring-winter-blueBtn focus:outline-none p-1 rounded">✕</button>
             </div>
 
             <div className="flex-grow overflow-y-auto p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1200,7 +1255,7 @@ export default function CajaPOS({
                     placeholder="0.00"
                     value={payCashUSD}
                     onChange={(e) => setPayCashUSD(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-emerald-600 focus:bg-white focus:border-winter-blueBtn focus:outline-none"
+                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-emerald-600 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
                   />
                 </div>
 
@@ -1213,7 +1268,7 @@ export default function CajaPOS({
                     placeholder="0.00"
                     value={payCashVES}
                     onChange={(e) => setPayCashVES(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-purple-700 focus:bg-white focus:border-winter-blueBtn focus:outline-none"
+                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-purple-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
                   />
                 </div>
 
@@ -1226,7 +1281,7 @@ export default function CajaPOS({
                     placeholder="0.00"
                     value={payCardVES}
                     onChange={(e) => setPayCardVES(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-700 focus:bg-white focus:border-winter-blueBtn focus:outline-none"
+                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
                   />
                 </div>
 
@@ -1239,7 +1294,7 @@ export default function CajaPOS({
                     placeholder="0.00"
                     value={payPagoMovilVES}
                     onChange={(e) => setPayPagoMovilVES(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-700 focus:bg-white focus:border-winter-blueBtn focus:outline-none"
+                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
                   />
                   {pagoMovilVESVal > 0 && (
                     <div className="space-y-1">
@@ -1247,7 +1302,7 @@ export default function CajaPOS({
                         <select
                           value={bankPagoMovil}
                           onChange={(e) => setBankPagoMovil(e.target.value)}
-                          className="bg-slate-55 border border-slate-300 text-[10px] p-2 rounded text-slate-700 outline-none focus:bg-white focus:border-winter-blueBtn font-sans"
+                          className="bg-slate-55 border border-slate-300 text-[10px] p-2 rounded text-slate-700 outline-none focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent font-sans"
                         >
                           <option value="">Banco Emisor...</option>
                           {venezuelanBanks.map(b => <option key={b} value={b}>{b}</option>)}
@@ -1257,7 +1312,7 @@ export default function CajaPOS({
                           placeholder="N° Referencia (>3 dig)..."
                           value={refPagoMovil}
                           onChange={(e) => setRefPagoMovil(e.target.value)}
-                          className="bg-slate-55 border border-slate-300 p-2 rounded text-[10px] font-bold text-yellow-600 outline-none focus:bg-white focus:border-winter-blueBtn"
+                          className="bg-slate-55 border border-slate-300 p-2 rounded text-[10px] font-bold text-yellow-600 outline-none focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent"
                         />
                       </div>
                       {!isPagoMovilValid && (
@@ -1278,7 +1333,7 @@ export default function CajaPOS({
                     placeholder="0.00"
                     value={payBiopagoVES}
                     onChange={(e) => setPayBiopagoVES(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-700 focus:bg-white focus:border-winter-blueBtn focus:outline-none"
+                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
                   />
                 </div>
 
@@ -1292,7 +1347,7 @@ export default function CajaPOS({
                       placeholder={`Máximo $${selectedClient.credito_disponible.toFixed(2)}`}
                       value={payCreditUSD}
                       onChange={(e) => setPayCreditUSD(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-red-550 focus:bg-white focus:border-winter-blueBtn focus:outline-none"
+                      className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-red-550 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
                     />
                     {!isCreditValid && (
                       <span className="text-[9px] text-red-550 font-bold block mt-1 font-sans">
@@ -1413,14 +1468,26 @@ export default function CajaPOS({
                               : 'CRÉDITO EXCEDIDO'))}
                   </div>
 
-                  <button
-                    onClick={handleConfirmCheckout}
-                    disabled={!canConfirmCheckout}
-                    className="w-full bg-winter-blueBtn hover:bg-winter-blueBtnHover disabled:bg-slate-200 disabled:text-slate-450 text-white py-4 rounded-xl font-black text-xs tracking-widest transition-all shadow-[0_4px_12px_rgba(11,95,165,0.2)] flex items-center justify-center gap-1.5 font-sans"
-                  >
-                    <Printer className="w-4 h-4" />
-                    CONFIRMAR COBRO Y EMITIR TICKET
-                  </button>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button
+                      onClick={() => handleConfirmCheckout(true)}
+                      disabled={!canConfirmCheckout}
+                      className="bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 disabled:text-slate-450 text-white py-3.5 px-4 rounded-xl font-extrabold text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 font-sans focus:ring-2 focus:ring-sky-500 focus:ring-offset-1 focus:outline-none"
+                    >
+                      <Ticket className="w-4 h-4" />
+                      Cobrar con Ticket
+                    </button>
+                    
+                    <button
+                      onClick={() => handleConfirmCheckout(false)}
+                      disabled={!canConfirmCheckout}
+                      className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-455 text-white py-3.5 px-4 rounded-xl font-extrabold text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 font-sans focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 focus:outline-none ring-2 ring-emerald-500/20"
+                      title="Presione Enter para confirmar"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      Cobrar Sin Imprimir (Enter)
+                    </button>
+                  </div>
                 </div>
 
               </div>
