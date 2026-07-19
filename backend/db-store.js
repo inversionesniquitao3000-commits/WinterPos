@@ -877,15 +877,16 @@ export async function cerrarCaja(cierre) {
   const activeCheck = readJsonFile('caja_activa.json', { abierta: false });
   
   const newCierreObj = {
-    id: Date.now(),
-    fechaApertura: activeCheck.fechaApertura,
+    ...cierre,
+    id: cierre.id || Date.now(),
+    fechaApertura: activeCheck.fechaApertura || cierre.fechaApertura || new Date().toISOString().replace('T', ' ').substring(0, 16),
     fechaCierre: new Date().toISOString().replace('T', ' ').substring(0, 16),
-    aperturaUsd: activeCheck.aperturaUsd,
-    aperturaVes: activeCheck.aperturaVes,
-    expectedUsd: cierre.expectedUsd,
-    expectedVes: cierre.expectedVes,
-    realUsd: cierre.realUsd,
-    realVes: cierre.realVes,
+    aperturaUsd: activeCheck.aperturaUsd ?? cierre.aperturaUsd ?? 0,
+    aperturaVes: activeCheck.aperturaVes ?? cierre.aperturaVes ?? 0,
+    expectedUsd: cierre.expectedUsd ?? (cierre.dineroEnCajaExpected ?? 0),
+    expectedVes: cierre.expectedVes ?? (cierre.expectedVes ?? 0),
+    realUsd: cierre.realUsd ?? 0,
+    realVes: cierre.realVes ?? 0,
     usuario: cierre.usuario || 'Anderson Laguna',
     status: 'Cerrada'
   };

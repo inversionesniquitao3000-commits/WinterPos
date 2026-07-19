@@ -626,6 +626,7 @@ export default function App() {
     localStorage.setItem('pos_ventas_ves', '0');
     localStorage.setItem('pos_movimientos_usd', '0');
     localStorage.setItem('pos_movimientos_ves', '0');
+    localStorage.setItem('pos_apertura_fecha', new Date().toISOString().replace('T', ' ').substring(0, 16));
 
     await postApiData('/cajas/abrir', { usd, ves });
   };
@@ -660,15 +661,28 @@ export default function App() {
     const expectedUsd = montoAperturaUsd + cajaVentasUsd + cajaMovimientosUsd;
     const expectedVes = montoAperturaVes + cajaVentasVes + cajaMovimientosVes;
     
+    // Calculate total cost of items sold during this shift
+    const costoTotalUsd = shiftSales.reduce((acc, sale) => {
+      return acc + (sale.items || []).reduce((itemAcc, item) => {
+        return itemAcc + ((item.product.precio_costo_usd || 0) * item.qty);
+      }, 0);
+    }, 0);
+    const ventaTotalUsd = details?.ventaTotalUsd ?? shiftSales.reduce((acc, s) => acc + s.totalUSD, 0);
+    const utilidadUsd = Math.max(0, ventaTotalUsd - costoTotalUsd);
+    
     const newCierre: CierreCaja = {
       id: Date.now(),
       fecha: new Date().toISOString().replace('T', ' ').substring(0, 16),
+      fechaCierre: new Date().toISOString().replace('T', ' ').substring(0, 16),
+      fechaApertura: localStorage.getItem('pos_apertura_fecha') || new Date().toISOString().replace('T', ' ').substring(0, 16),
       usuario: currentUser?.nombre || 'SISTEMA',
       aperturaUsd: montoAperturaUsd,
       aperturaVes: montoAperturaVes,
       realUsd,
       realVes,
       expectedVes,
+      costoTotalUsd,
+      utilidadUsd,
 
       // Detailed cash registry metrics
       ventasEfectivoUsd: details?.ventasEfectivoUsd ?? cajaVentasUsd,
@@ -693,7 +707,7 @@ export default function App() {
       pagosCreditoUsd: details?.pagosCreditoUsd ?? 0,
       pagosPuntosUsd: details?.pagosPuntosUsd ?? 0,
       devolucionVentasUsd: details?.devolucionVentasUsd ?? 0,
-      ventaTotalUsd: details?.ventaTotalUsd ?? shiftSales.reduce((acc, s) => acc + s.totalUSD, 0),
+      ventaTotalUsd,
     };
     
     setCierres(prev => [...prev, newCierre]);
@@ -723,6 +737,7 @@ export default function App() {
     localStorage.removeItem('pos_ventas_ves');
     localStorage.removeItem('pos_movimientos_usd');
     localStorage.removeItem('pos_movimientos_ves');
+    localStorage.removeItem('pos_apertura_fecha');
 
     postApiData('/cajas/cerrar', newCierre);
     return newCierre;

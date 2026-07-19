@@ -118,6 +118,10 @@ export interface Sale {
 export interface CierreCaja {
   id: number;
   fecha: string;
+  fechaCierre?: string;
+  fechaApertura?: string;
+  costoTotalUsd?: number;
+  utilidadUsd?: number;
   usuario: string;
   aperturaUsd: number;
   aperturaVes: number;

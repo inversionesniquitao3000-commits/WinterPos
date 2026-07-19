@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Sale, CierreCaja } from '../types';
 import { History, Printer, ShieldAlert, ShoppingCart, Eye } from 'lucide-react';
 import { formatNumberToWordsUSD } from '../utils';
@@ -13,6 +13,37 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
   const [activeSubTab, setActiveSubTab] = useState<'ventas' | 'cierres'>('ventas');
   const [selectedCierre, setSelectedCierre] = useState<CierreCaja | null>(null);
 
+  const [startDate, setStartDate] = useState(() => {
+    const d = new Date();
+    return d.toISOString().split('T')[0];
+  });
+  const [endDate, setEndDate] = useState(() => {
+    const d = new Date();
+    return d.toISOString().split('T')[0];
+  });
+  const [filterEnabled, setFilterEnabled] = useState(true);
+
+  // Filter sales list by date range if enabled
+  const filteredSales = useMemo(() => {
+    if (!filterEnabled) return sales;
+    return sales.filter(s => {
+      if (!s.fecha) return false;
+      const dateStr = s.fecha.substring(0, 10); // "YYYY-MM-DD"
+      return dateStr >= startDate && dateStr <= endDate;
+    });
+  }, [sales, startDate, endDate, filterEnabled]);
+
+  // Filter cierres list by date range if enabled
+  const filteredCierres = useMemo(() => {
+    if (!filterEnabled) return cierres;
+    return cierres.filter(c => {
+      const closingDate = c.fechaCierre || c.fecha || "";
+      if (!closingDate) return false;
+      const dateStr = closingDate.substring(0, 10); // "YYYY-MM-DD"
+      return dateStr >= startDate && dateStr <= endDate;
+    });
+  }, [cierres, startDate, endDate, filterEnabled]);
+
   // Escape key listener to close details modal
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -23,6 +54,359 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
   }, []);
+
+  const handleDownloadCierresReport = () => {
+    const title = "Historial de Cierres de Caja Conciliados";
+    const dateStr = new Date().toLocaleString();
+    const periodText = filterEnabled ? `Período: Desde ${startDate} Hasta ${endDate}` : "Todos los cierres registrados";
+
+    const tableHtml = `
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>Fecha Cierre</th>
+            <th>Cajero</th>
+            <th class="text-right">Apertura USD / VES</th>
+            <th class="text-right">Ventas Netas</th>
+            <th class="text-right">Físico USD / VES</th>
+            <th class="text-right">Diferencia USD</th>
+            <th class="text-right">Utilidad USD</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${filteredCierres.length === 0 ? `
+            <tr><td colspan="7" style="text-align: center; color: #777;">Sin cierres conciliados en este rango de fechas.</td></tr>
+          ` : filteredCierres.map(c => {
+            const dineroEnCajaExpected = c.dineroEnCajaExpected ?? (c as any).expectedUsd ?? 0;
+            const realUsd = c.realUsd ?? 0;
+            const diffUsd = realUsd - dineroEnCajaExpected;
+            const aperturaUsd = c.aperturaUsd ?? 0;
+            const aperturaVes = c.aperturaVes ?? 0;
+            const ventaTotalUsd = c.ventaTotalUsd ?? 0;
+            const realVes = c.realVes ?? 0;
+            const utilidadUsd = c.utilidadUsd ?? (ventaTotalUsd - (c.costoTotalUsd ?? 0));
+
+            return `
+              <tr>
+                <td>${c.fechaCierre || c.fecha || 'N/A'}</td>
+                <td style="text-transform: uppercase;">${c.usuario}</td>
+                <td class="text-right">$${aperturaUsd.toFixed(2)} / Bs ${aperturaVes.toFixed(2)}</td>
+                <td class="text-right">$${ventaTotalUsd.toFixed(2)}</td>
+                <td class="text-right">$${realUsd.toFixed(2)} / Bs ${realVes.toFixed(2)}</td>
+                <td class="text-right font-bold ${diffUsd >= 0 ? 'text-green' : 'text-red'}">$${diffUsd.toFixed(2)}</td>
+                <td class="text-right font-bold text-emerald">$${utilidadUsd.toFixed(2)}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+      <div class="report-summary">
+        <p><strong>Cierres en Reporte:</strong> ${filteredCierres.length}</p>
+        <p><strong>Total Ventas Netas:</strong> $${filteredCierres.reduce((acc, c) => acc + (c.ventaTotalUsd ?? 0), 0).toFixed(2)} USD</p>
+        <p><strong>Total Utilidad Cierres:</strong> $${filteredCierres.reduce((acc, c) => acc + (c.utilidadUsd ?? 0), 0).toFixed(2)} USD</p>
+      </div>
+    `;
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      alert("No se pudo abrir la ventana de impresión. Por favor habilite los popups.");
+      return;
+    }
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Reporte PDF - ${title}</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              color: #333;
+              margin: 30px;
+              font-size: 11px;
+            }
+            .header {
+              border-bottom: 2px solid #333;
+              padding-bottom: 8px;
+              margin-bottom: 15px;
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-end;
+            }
+            .header-left h1 {
+              margin: 0 0 3px 0;
+              font-size: 18px;
+              color: #0f172a;
+              letter-spacing: 0.5px;
+            }
+            .header-left p {
+              margin: 0;
+              color: #64748b;
+              font-size: 10px;
+            }
+            .header-right {
+              text-align: right;
+              font-size: 9px;
+              color: #64748b;
+              line-height: 1.4;
+            }
+            h2 {
+              font-size: 12px;
+              text-transform: uppercase;
+              color: #1e293b;
+              margin-top: 0;
+              margin-bottom: 12px;
+              border-bottom: 1px solid #cbd5e1;
+              padding-bottom: 4px;
+              letter-spacing: 0.5px;
+            }
+            .report-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 15px;
+            }
+            .report-table th, .report-table td {
+              border: 1px solid #94a3b8;
+              padding: 6px 8px;
+              text-align: left;
+            }
+            .report-table th {
+              background-color: #f1f5f9;
+              font-weight: bold;
+              text-transform: uppercase;
+              font-size: 9px;
+              color: #334155;
+            }
+            .text-right {
+              text-align: right !important;
+            }
+            .font-bold {
+              font-weight: bold;
+            }
+            .text-green {
+              color: #16a34a !important;
+            }
+            .text-red {
+              color: #dc2626 !important;
+            }
+            .text-emerald {
+              color: #059669 !important;
+            }
+            .report-summary {
+              margin-top: 20px;
+              padding: 12px;
+              background-color: #f8fafc;
+              border: 1px solid #e2e8f0;
+              border-radius: 4px;
+              width: fit-content;
+              min-width: 250px;
+            }
+            .report-summary p {
+              margin: 0 0 5px 0;
+              font-size: 11px;
+            }
+            .report-summary p:last-child {
+              margin-bottom: 0;
+            }
+            @media print {
+              body { margin: 15px; }
+              .no-print { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="header-left">
+              <h1>INVERSIONES NIQUITAO 3000 C.A.</h1>
+              <p>RIF: J-41132631 | Telf: 0424-2042877</p>
+              <p style="margin-top: 5px; font-weight: bold;">${periodText}</p>
+            </div>
+            <div class="header-right">
+              <p><strong>Fecha Reporte:</strong> ${dateStr}</p>
+              <p><strong>Módulo:</strong> Historial de Cierres</p>
+            </div>
+          </div>
+          
+          <h2>${title}</h2>
+          ${tableHtml}
+          
+          <script>
+            window.onload = function() {
+              window.print();
+              setTimeout(function() {
+                window.close();
+              }, 300);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
+  const handleDownloadTransactionsReport = () => {
+    const title = "Historial de Facturas y Ventas Registradas";
+    const dateStr = new Date().toLocaleString();
+    const periodText = filterEnabled ? `Período: Desde ${startDate} Hasta ${endDate}` : "Todas las facturas registradas";
+
+    const tableHtml = `
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Factura</th>
+            <th>Cliente</th>
+            <th>Cajero</th>
+            <th class="text-right">Total USD</th>
+            <th class="text-right">Total VES</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${filteredSales.length === 0 ? `
+            <tr><td colspan="6" style="text-align: center; color: #777;">Sin ventas registradas en este rango de fechas.</td></tr>
+          ` : filteredSales.map(sale => `
+            <tr>
+              <td>${sale.fecha}</td>
+              <td class="font-bold">${sale.factura_nro}</td>
+              <td style="text-transform: uppercase;">${sale.client.nombre}</td>
+              <td>${sale.usuario}</td>
+              <td class="text-right font-bold text-emerald">$${(sale.totalUSD ?? 0).toFixed(2)}</td>
+              <td class="text-right font-bold">Bs ${(sale.totalVES ?? 0).toFixed(2)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+      <div class="report-summary">
+        <p><strong>Total Facturas:</strong> ${filteredSales.length}</p>
+        <p><strong>Total Ventas Netas:</strong> $${filteredSales.reduce((acc, s) => acc + (s.totalUSD ?? 0), 0).toFixed(2)} USD</p>
+      </div>
+    `;
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      alert("No se pudo abrir la ventana de impresión. Por favor habilite los popups.");
+      return;
+    }
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Reporte PDF - ${title}</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              color: #333;
+              margin: 30px;
+              font-size: 11px;
+            }
+            .header {
+              border-bottom: 2px solid #333;
+              padding-bottom: 8px;
+              margin-bottom: 15px;
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-end;
+            }
+            .header-left h1 {
+              margin: 0 0 3px 0;
+              font-size: 18px;
+              color: #0f172a;
+              letter-spacing: 0.5px;
+            }
+            .header-left p {
+              margin: 0;
+              color: #64748b;
+              font-size: 10px;
+            }
+            .header-right {
+              text-align: right;
+              font-size: 9px;
+              color: #64748b;
+              line-height: 1.4;
+            }
+            h2 {
+              font-size: 12px;
+              text-transform: uppercase;
+              color: #1e293b;
+              margin-top: 0;
+              margin-bottom: 12px;
+              border-bottom: 1px solid #cbd5e1;
+              padding-bottom: 4px;
+              letter-spacing: 0.5px;
+            }
+            .report-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 15px;
+            }
+            .report-table th, .report-table td {
+              border: 1px solid #94a3b8;
+              padding: 6px 8px;
+              text-align: left;
+            }
+            .report-table th {
+              background-color: #f1f5f9;
+              font-weight: bold;
+              text-transform: uppercase;
+              font-size: 9px;
+              color: #334155;
+            }
+            .text-right {
+              text-align: right !important;
+            }
+            .font-bold {
+              font-weight: bold;
+            }
+            .text-emerald {
+              color: #059669 !important;
+            }
+            .report-summary {
+              margin-top: 20px;
+              padding: 12px;
+              background-color: #f8fafc;
+              border: 1px solid #e2e8f0;
+              border-radius: 4px;
+              width: fit-content;
+              min-width: 250px;
+            }
+            .report-summary p {
+              margin: 0 0 5px 0;
+              font-size: 11px;
+            }
+            @media print {
+              body { margin: 15px; }
+              .no-print { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="header-left">
+              <h1>INVERSIONES NIQUITAO 3000 C.A.</h1>
+              <p>RIF: J-41132631 | Telf: 0424-2042877</p>
+              <p style="margin-top: 5px; font-weight: bold;">${periodText}</p>
+            </div>
+            <div class="header-right">
+              <p><strong>Fecha Reporte:</strong> ${dateStr}</p>
+              <p><strong>Módulo:</strong> Historial de Transacciones</p>
+            </div>
+          </div>
+          
+          <h2>${title}</h2>
+          ${tableHtml}
+          
+          <script>
+            window.onload = function() {
+              window.print();
+              setTimeout(function() {
+                window.close();
+              }, 300);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
 
   return (
     <div className="space-y-6 font-mono text-xs text-slate-800">
@@ -62,15 +446,61 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
         </div>
       </div>
 
+      {/* SHARED DATE RANGE FILTER & PDF EXPORT BAR */}
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4 shadow-sm font-sans">
+        <div className="flex flex-wrap items-center gap-3 text-xs">
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="enable-date-filter"
+              checked={filterEnabled}
+              onChange={(e) => setFilterEnabled(e.target.checked)}
+              className="w-4 h-4 rounded text-winter-blueBtn focus:ring-winter-blueBtn"
+            />
+            <label htmlFor="enable-date-filter" className="font-bold text-slate-600 cursor-pointer">Filtrar por Rango:</label>
+          </div>
+
+          <div className="flex items-center gap-2 font-sans">
+            <span className="text-slate-500">Desde:</span>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              disabled={!filterEnabled}
+              className="bg-white border border-slate-300 rounded px-2 py-1 text-xs outline-none focus:border-winter-blueBtn text-slate-700 font-mono disabled:opacity-50"
+            />
+          </div>
+
+          <div className="flex items-center gap-2 font-sans">
+            <span className="text-slate-500">Hasta:</span>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              disabled={!filterEnabled}
+              className="bg-white border border-slate-300 rounded px-2 py-1 text-xs outline-none focus:border-winter-blueBtn text-slate-700 font-mono disabled:opacity-50"
+            />
+          </div>
+        </div>
+
+        <button
+          onClick={activeSubTab === 'cierres' ? handleDownloadCierresReport : handleDownloadTransactionsReport}
+          className="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded text-xs transition-all shadow-sm flex items-center gap-1.5 font-sans"
+          title="Generar y abrir reporte PDF de lo que ve en la tabla"
+        >
+          <Printer className="w-4 h-4" />
+          <span>Reporte PDF</span>
+        </button>
+      </div>
+
       {activeSubTab === 'ventas' && (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col h-[500px]">
           <div className="bg-slate-55 border-b border-slate-200 px-5 py-3.5 flex justify-between items-center">
             <span className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5 font-sans">
               <ShoppingCart className="w-4 h-4 text-slate-450" />
               Facturas y Ventas Registradas
-            </span>
-            <span className="text-[10px] bg-slate-200 text-slate-600 px-2.5 py-0.5 rounded border border-slate-300">
-              {sales.length} facturas
+            </span>             <span className="text-[10px] bg-slate-200 text-slate-600 px-2.5 py-0.5 rounded border border-slate-300">
+              {filteredSales.length} facturas
             </span>
           </div>
 
@@ -89,14 +519,14 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-[11px] text-slate-700">
-                {sales.length === 0 ? (
+                {filteredSales.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="text-center py-12 text-slate-400 font-sans">
-                      No se han procesado ventas en la sesión actual.
+                      No se han procesado ventas en este rango de fechas.
                     </td>
                   </tr>
                 ) : (
-                  [...sales].reverse().map(sale => (
+                  [...filteredSales].reverse().map(sale => (
                     <tr key={sale.factura_nro} className="hover:bg-slate-50/50">
                       <td className="px-4 py-3 font-mono">{sale.fecha}</td>
                       <td className="px-4 py-3 font-bold font-mono text-slate-600">{sale.factura_nro}</td>
@@ -139,7 +569,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
               Historial de Cierres de Caja Ejecutados
             </span>
             <span className="text-[10px] bg-slate-200 text-slate-600 px-2.5 py-0.5 rounded border border-slate-300">
-              {cierres.length} cierres
+              {filteredCierres.length} cierres
             </span>
           </div>
 
@@ -149,45 +579,55 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
                 <tr className="text-slate-550">
                   <th className="px-4 py-3 font-bold font-sans">FECHA CIERRE</th>
                   <th className="px-4 py-3 font-bold font-sans">CAJERO</th>
-                  <th className="px-4 py-3 text-right font-bold font-sans">APERTURA USD</th>
-                  <th className="px-4 py-3 text-right font-bold font-sans">EFECTIVO USD</th>
+                  <th className="px-4 py-3 text-right font-bold font-sans">APERTURA ($ / Bs)</th>
                   <th className="px-4 py-3 text-right font-bold font-sans">VENTAS NETAS</th>
-                  <th className="px-4 py-3 text-right font-bold font-sans">FISICO USD</th>
+                  <th className="px-4 py-3 text-right font-bold font-sans">FISICO ($ / Bs)</th>
                   <th className="px-4 py-3 text-right font-bold font-sans">DIF USD</th>
+                  <th className="px-4 py-3 text-right font-bold font-sans text-emerald-600">UTILIDAD</th>
                   <th className="px-4 py-3 text-center"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-[11px] text-slate-700">
-                {cierres.length === 0 ? (
+                {filteredCierres.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="text-center py-12 text-slate-400 font-sans">
-                      No se han registrado cierres de caja en el sistema.
+                      No se han registrado cierres de caja en este rango de fechas.
                     </td>
                   </tr>
                 ) : (
-                  [...cierres].reverse().map(c => {
+                  [...filteredCierres].reverse().map(c => {
                     const dineroEnCajaExpected = c.dineroEnCajaExpected ?? (c as any).expectedUsd ?? 0;
                     const realUsd = c.realUsd ?? 0;
+                    const realVes = c.realVes ?? 0;
                     const diffUsd = realUsd - dineroEnCajaExpected;
                     const aperturaUsd = c.aperturaUsd ?? 0;
-                    const ventasEfectivoUsd = c.ventasEfectivoUsd ?? 0;
+                    const aperturaVes = c.aperturaVes ?? 0;
                     const ventaTotalUsd = c.ventaTotalUsd ?? 0;
+                    const utilidadUsd = c.utilidadUsd ?? (ventaTotalUsd - (c.costoTotalUsd ?? 0));
 
                     return (
                       <tr key={c.id} className="hover:bg-slate-50/50">
-                        <td className="px-4 py-3 font-mono">{c.fecha}</td>
-                        <td className="px-4 py-3 font-sans font-medium">{c.usuario}</td>
-                        <td className="px-4 py-3 text-right font-mono">${aperturaUsd.toFixed(2)}</td>
-                        <td className="px-4 py-3 text-right font-mono">${ventasEfectivoUsd.toFixed(2)}</td>
-                        <td className="px-4 py-3 text-right font-mono">${ventaTotalUsd.toFixed(2)}</td>
-                        <td className="px-4 py-3 text-right font-mono">${realUsd.toFixed(2)}</td>
+                        <td className="px-4 py-3 font-mono">{c.fechaCierre || c.fecha || 'N/A'}</td>
+                        <td className="px-4 py-3 font-sans font-medium uppercase">{c.usuario}</td>
+                        <td className="px-4 py-3 text-right font-mono text-slate-600">
+                          <div>${aperturaUsd.toFixed(2)}</div>
+                          <div className="text-[9px] text-slate-400">Bs {aperturaVes.toFixed(2)}</div>
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono font-bold">${ventaTotalUsd.toFixed(2)}</td>
+                        <td className="px-4 py-3 text-right font-mono text-slate-700 font-semibold">
+                          <div>${realUsd.toFixed(2)}</div>
+                          <div className="text-[9px] text-purple-650">Bs {realVes.toFixed(2)}</div>
+                        </td>
                         <td className={`px-4 py-3 text-right font-mono font-bold ${diffUsd >= 0 ? 'text-green-600' : 'text-red-655'}`}>
                           ${diffUsd.toFixed(2)}
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono text-emerald-600 font-extrabold">
+                          ${utilidadUsd.toFixed(2)}
                         </td>
                         <td className="px-4 py-3 text-center">
                           <button
                             onClick={() => setSelectedCierre(c)}
-                            className="bg-slate-55 border border-slate-200 text-slate-600 p-1.5 rounded hover:bg-slate-100 hover:text-slate-800 transition-all shadow-sm flex items-center gap-1 font-sans text-[10px]"
+                            className="bg-slate-55 border border-slate-200 text-slate-600 p-1.5 rounded hover:bg-slate-100 hover:text-slate-800 transition-all shadow-sm flex items-center gap-1 font-sans mx-auto text-[10px]"
                             title="Ver Comprobante de Cierre Completo"
                           >
                             <Eye className="w-3.5 h-3.5 text-winter-blueBtn" />
@@ -356,12 +796,31 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
                   </div>
 
                   <div className="border-t border-slate-300 pt-2 font-bold font-sans">
-                    <div className="flex justify-between text-sm text-slate-900 font-black">
+                    <div className="flex justify-between text-sm text-slate-900 font-black border-b border-dashed border-slate-200 pb-1.5">
                       <span className="uppercase text-[10px]">Venta Total :</span>
                       <span className="text-base text-winter-blueBtn font-mono">$ {ventaTotalUsd.toFixed(2)}</span>
                     </div>
-                    <div className="text-[7.5px] text-slate-450 italic mt-0.5 leading-tight font-medium uppercase tracking-tighter text-right">
+                    <div className="text-[7.5px] text-slate-450 italic mt-0.5 leading-tight font-medium uppercase tracking-tighter text-right mb-2">
                       {formatNumberToWordsUSD(ventaTotalUsd)}
+                    </div>
+                  </div>
+
+                  {/* PROFITABILITY BREAKDOWN */}
+                  <div className="pt-2.5 font-sans space-y-1.5 text-[10px] text-slate-700 bg-emerald-50/50 p-2.5 rounded border border-emerald-100 mt-2">
+                    <div className="font-bold text-[9px] text-emerald-855 uppercase border-b border-emerald-200/60 pb-1">
+                      CÁLCULO DE UTILIDAD DEL CIERRE
+                    </div>
+                    <div className="flex justify-between font-mono">
+                      <span>Ingreso Neto (Ventas):</span>
+                      <span className="font-bold text-slate-800">$ {ventaTotalUsd.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between font-mono">
+                      <span>Costo de Mercancía:</span>
+                      <span className="font-bold text-red-600">- $ {(selectedCierre.costoTotalUsd ?? 0).toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between font-mono text-xs border-t border-emerald-300/80 pt-1 mt-1 font-extrabold text-emerald-700">
+                      <span>UTILIDAD NETA:</span>
+                      <span>$ {(selectedCierre.utilidadUsd ?? (ventaTotalUsd - (selectedCierre.costoTotalUsd ?? 0))).toFixed(2)}</span>
                     </div>
                   </div>
                 </div>
