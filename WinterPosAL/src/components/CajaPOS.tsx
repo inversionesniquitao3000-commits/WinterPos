@@ -236,21 +236,25 @@ export default function CajaPOS({
 
   const handlePutOnHold = () => {
     if (saleItems.length === 0) return;
-    
     const defaultTag = `Ticket ${ticketsOnHold.length + 1} - ${selectedClient.nombre}`;
-    const customTag = window.prompt("Ingrese una nota o referencia para guardar este ticket en espera:", defaultTag);
-    if (customTag === null) return; // user cancelled
+    setHoldTag(defaultTag);
+    setShowHoldModal(true);
+  };
 
+  const handleConfirmHold = () => {
+    const finalTag = holdTag.trim() || `Ticket ${ticketsOnHold.length + 1} - ${selectedClient.nombre}`;
+    
     const newHold = {
       id: Date.now(),
       fecha: new Date().toLocaleString(),
-      tag: customTag || defaultTag,
+      tag: finalTag,
       client: selectedClient,
       items: saleItems,
       discount: discountPct
     };
 
     setTicketsOnHold(prev => [...prev, newHold]);
+    setShowHoldModal(false);
     
     // Clear active POS state
     setSaleItems([]);
@@ -262,9 +266,9 @@ export default function CajaPOS({
     localStorage.removeItem('pos_current_cart');
     localStorage.removeItem('pos_current_discount');
     localStorage.removeItem('pos_current_client_doc');
-
-    alert("Venta guardada en espera con éxito.");
   };
+
+
 
   const handleRetrieveHold = (hold: any) => {
     if (saleItems.length > 0) {
@@ -376,6 +380,10 @@ export default function CajaPOS({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const checkoutModalRef = useRef<HTMLDivElement>(null);
 
+  const [showHoldModal, setShowHoldModal] = useState(false);
+  const [holdTag, setHoldTag] = useState('');
+  const holdModalRef = useRef<HTMLDivElement>(null);
+
   // Auto-focus on state changes or mounting
   useEffect(() => {
     if (cajaAbierta && !showAperturaModal && !showCheckoutModal && !showCierreModal && !showMovementsModal && !showTicketModal) {
@@ -406,6 +414,53 @@ export default function CajaPOS({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
+
+  // Focus Trap & Keyboard navigation for Hold Modal
+  useEffect(() => {
+    if (!showHoldModal) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Tab') {
+        if (!holdModalRef.current) return;
+        const focusable = holdModalRef.current.querySelectorAll<HTMLElement>(
+          'input:not([disabled]), button:not([disabled])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            last.focus();
+            e.preventDefault();
+          }
+        } else {
+          if (document.activeElement === last) {
+            first.focus();
+            e.preventDefault();
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showHoldModal]);
+
+  // F12 keydown handler
+  useEffect(() => {
+    const handleF12Key = (e: KeyboardEvent) => {
+      if (e.key === 'F12') {
+        e.preventDefault();
+        if (cajaAbierta && saleItems.length > 0 && !showCheckoutModal) {
+          handleOpenCheckout();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleF12Key);
+    return () => window.removeEventListener('keydown', handleF12Key);
+  }, [cajaAbierta, saleItems, showCheckoutModal]);
 
   // Sync selected seller with currentUser
   useEffect(() => {
@@ -1492,6 +1547,60 @@ export default function CajaPOS({
 
               </div>
 
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CUSTOM PUT ON HOLD - Beautiful In-System Alert */}
+      {showHoldModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-mono text-slate-800">
+          <div ref={holdModalRef} className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-md shadow-2xl flex flex-col">
+            
+            <div className="bg-slate-100 border-b border-slate-250 px-5 py-3.5 flex justify-between items-center">
+              <span className="text-xs font-black text-slate-700 tracking-widest uppercase flex items-center gap-1.5 font-sans">
+                <Clock className="w-4 h-4 text-winter-blueBtn" />
+                Guardar Ticket en Espera
+              </span>
+              <button onClick={() => setShowHoldModal(false)} className="text-slate-400 hover:text-slate-700 focus:ring-2 focus:ring-winter-blueBtn focus:outline-none p-1 rounded">✕</button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-[10px] text-slate-500 block mb-1.5 font-sans font-bold uppercase tracking-wider">Nota o Referencia para el Ticket:</label>
+                <input
+                  type="text"
+                  value={holdTag}
+                  onChange={(e) => setHoldTag(e.target.value)}
+                  className="w-full bg-slate-55 border border-slate-300 rounded p-2 text-xs font-bold focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none font-sans"
+                  placeholder="Ej: Mesa 5, Cliente Hugo, etc."
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleConfirmHold();
+                    }
+                    if (e.key === 'Escape') {
+                      setShowHoldModal(false);
+                    }
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="bg-slate-50 px-5 py-3.5 border-t border-slate-200 flex justify-end gap-2.5">
+              <button
+                onClick={() => setShowHoldModal(false)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold font-sans transition-all active:scale-95 focus:ring-2 focus:ring-slate-400 focus:outline-none"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmHold}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold font-sans transition-all active:scale-95 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+              >
+                Guardar Ticket
+              </button>
             </div>
 
           </div>
