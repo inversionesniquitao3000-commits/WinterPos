@@ -1037,6 +1037,7 @@ export default function App() {
               shiftEntradasUsd={shiftEntradasUsd}
               shiftSalidasUsd={shiftSalidasUsd}
               onUpdateProductStock={handleUpdateProductStock}
+              onRegisterAbono={handleRegisterAbono}
             />
           )}
 

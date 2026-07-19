@@ -4,7 +4,7 @@ import {
   ShoppingBag, Search, Trash2, 
   XCircle, ArrowUpRight, 
   Calculator, CheckCircle2, Ticket,
-  Clock, ListOrdered, Plus, AlertCircle
+  Clock, ListOrdered, Plus, AlertCircle, DollarSign
 } from 'lucide-react';
 import { formatNumberToWordsUSD } from '../utils';
 
@@ -69,6 +69,7 @@ interface CajaPOSProps {
     qty: number,
     reason: string
   ) => Promise<void>;
+  onRegisterAbono: (clientId: number, amountUSD: number) => void;
 }
 
 export default function CajaPOS({
@@ -89,7 +90,8 @@ export default function CajaPOS({
   shiftAbonosUsd,
   shiftEntradasUsd,
   shiftSalidasUsd,
-  onUpdateProductStock
+  onUpdateProductStock,
+  onRegisterAbono
 }: CajaPOSProps) {
   // Opening/Closing state
   const [showAperturaModal, setShowAperturaModal] = useState(!cajaAbierta);
@@ -384,6 +386,13 @@ export default function CajaPOS({
   const [holdTag, setHoldTag] = useState('');
   const holdModalRef = useRef<HTMLDivElement>(null);
 
+  // Client Abono modal in Cashier view
+  const [showCajaAbonoModal, setShowCajaAbonoModal] = useState(false);
+  const [abonoClient, setAbonoClient] = useState<Client | null>(null);
+  const [abonoAmount, setAbonoAmount] = useState('');
+  const [abonoSearchTerm, setAbonoSearchTerm] = useState('');
+  const abonoModalRef = useRef<HTMLDivElement>(null);
+
   // Auto-focus on state changes or mounting
   useEffect(() => {
     if (cajaAbierta && !showAperturaModal && !showCheckoutModal && !showCierreModal && !showMovementsModal && !showTicketModal) {
@@ -394,7 +403,6 @@ export default function CajaPOS({
     }
   }, [cajaAbierta, showAperturaModal, showCheckoutModal, showCierreModal, showMovementsModal, showTicketModal]);
 
-  // Listener for F11
   // Listener for F11 and Escape (modals closing)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -407,13 +415,46 @@ export default function CajaPOS({
         setShowCierreModal(false);
         setShowTicketModal(false);
         setShowEntradaRapidaModal(false);
-        setShowOnHoldModal(false);
+        setShowHoldModal(false);
+        setShowCajaAbonoModal(false);
         setCierreResult(null);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
+
+  // Focus Trap for Caja Abono Modal
+  useEffect(() => {
+    if (!showCajaAbonoModal) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Tab') {
+        if (!abonoModalRef.current) return;
+        const focusable = abonoModalRef.current.querySelectorAll<HTMLElement>(
+          'input:not([disabled]), button:not([disabled]), select:not([disabled])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            last.focus();
+            e.preventDefault();
+          }
+        } else {
+          if (document.activeElement === last) {
+            first.focus();
+            e.preventDefault();
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showCajaAbonoModal]);
 
   // Focus Trap & Keyboard navigation for Hold Modal
   useEffect(() => {
@@ -1168,10 +1209,26 @@ export default function CajaPOS({
               setShowEntradaRapidaModal(true);
             }}
             disabled={!cajaAbierta}
-            className="col-span-2 flex items-center justify-center p-3 bg-white border border-slate-200 rounded-lg hover:border-slate-350 hover:bg-slate-50 transition-all gap-1.5 text-center text-[11px] font-sans font-bold text-slate-650 shadow-sm disabled:opacity-40"
+            className="flex flex-col items-center justify-center p-3 bg-white border border-slate-200 rounded-lg hover:border-slate-350 hover:bg-slate-50 transition-all gap-1.5 text-center text-[10px] text-slate-550 shadow-sm disabled:opacity-40 font-sans"
+            title="Ingreso rápido de mercancía a inventario"
           >
             <Plus className="w-4 h-4 text-sky-500" />
             Entrada Rápida
+          </button>
+
+          <button
+            onClick={() => {
+              setAbonoClient(null);
+              setAbonoAmount('');
+              setAbonoSearchTerm('');
+              setShowCajaAbonoModal(true);
+            }}
+            disabled={!cajaAbierta}
+            className="flex flex-col items-center justify-center p-3 bg-white border border-slate-200 rounded-lg hover:border-slate-350 hover:bg-slate-50 transition-all gap-1.5 text-center text-[10px] text-slate-550 shadow-sm disabled:opacity-40 font-sans"
+            title="Registrar abono de deuda de un cliente"
+          >
+            <DollarSign className="w-4 h-4 text-emerald-600" />
+            Abono Cliente
           </button>
 
         </div>
@@ -1606,6 +1663,153 @@ export default function CajaPOS({
           </div>
         </div>
       )}
+
+      {/* MODAL: CAJA REGISTRAR ABONO */}
+      {showCajaAbonoModal && (() => {
+        const filteredAbonoClients = clients.filter(c => {
+          if (c.cedula_rif === 'V-00000000') return false;
+          return c.nombre.toLowerCase().includes(abonoSearchTerm.toLowerCase()) ||
+                 c.cedula_rif.toLowerCase().includes(abonoSearchTerm.toLowerCase());
+        });
+
+        const handleSaveCajaAbono = () => {
+          if (!abonoClient) return;
+          const val = parseFloat(abonoAmount);
+          if (isNaN(val) || val <= 0) {
+            alert('Por favor ingrese un monto válido para el abono.');
+            return;
+          }
+          if (val > abonoClient.saldo_pendiente + 0.01) {
+            alert(`El abono ($${val.toFixed(2)}) no puede ser mayor que el saldo pendiente ($${abonoClient.saldo_pendiente.toFixed(2)}).`);
+            return;
+          }
+
+          onRegisterAbono(abonoClient.id, val);
+          setShowCajaAbonoModal(false);
+          alert('Abono registrado con éxito de forma segura.');
+        };
+
+        return (
+          <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-mono text-slate-800">
+            <div ref={abonoModalRef} className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-md shadow-2xl flex flex-col">
+              
+              <div className="bg-slate-100 border-b border-slate-250 px-5 py-3.5 flex justify-between items-center">
+                <span className="text-xs font-black text-slate-700 tracking-widest uppercase flex items-center gap-1.5 font-sans">
+                  <DollarSign className="w-4 h-4 text-emerald-600" />
+                  Registrar Abono de Crédito
+                </span>
+                <button onClick={() => setShowCajaAbonoModal(false)} className="text-slate-400 hover:text-slate-700 focus:ring-2 focus:ring-winter-blueBtn focus:outline-none p-1 rounded">✕</button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                
+                {/* Search Client */}
+                {!abonoClient ? (
+                  <div className="space-y-2">
+                    <label className="text-[10px] text-slate-500 block font-sans font-bold uppercase tracking-wider">Buscar Cliente:</label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={abonoSearchTerm}
+                        onChange={(e) => setAbonoSearchTerm(e.target.value)}
+                        placeholder="Cédula, RIF o Nombre..."
+                        className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none font-sans"
+                        autoFocus
+                      />
+                    </div>
+                    
+                    {/* Search Results List */}
+                    <div className="border border-slate-200 rounded-lg max-h-40 overflow-y-auto divide-y divide-slate-100 text-xs font-sans">
+                      {filteredAbonoClients.length === 0 ? (
+                        <div className="p-3 text-center text-slate-400 italic">No se encontraron clientes de crédito.</div>
+                      ) : (
+                        filteredAbonoClients.map(c => (
+                          <div 
+                            key={c.id}
+                            onClick={() => {
+                              setAbonoClient(c);
+                              setAbonoAmount(c.saldo_pendiente.toFixed(2));
+                            }}
+                            className="p-2.5 hover:bg-slate-50 cursor-pointer flex justify-between items-center"
+                          >
+                            <div className="flex flex-col">
+                              <span className="font-bold text-slate-800 uppercase">{c.nombre}</span>
+                              <span className="text-[10px] text-slate-450 font-mono">{c.cedula_rif}</span>
+                            </div>
+                            <div className="text-right flex flex-col items-end">
+                              <span className={`font-mono font-bold ${c.saldo_pendiente > 0 ? 'text-red-600' : 'text-slate-500'}`}>Deuda: ${c.saldo_pendiente.toFixed(2)}</span>
+                              <span className="text-[9px] text-slate-400">Límite: ${c.limite_credito.toFixed(2)}</span>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  
+                  /* Amount Form */
+                  <div className="space-y-3">
+                    <div className="bg-sky-50 border border-sky-100 p-3 rounded-lg text-xs leading-tight font-sans">
+                      <div className="font-extrabold uppercase text-sky-900 mb-0.5">{abonoClient.nombre}</div>
+                      <div className="font-mono text-slate-500 text-[10px] font-bold mb-2">{abonoClient.cedula_rif}</div>
+                      <div className="flex justify-between font-mono font-bold">
+                        <span>Deuda Pendiente:</span>
+                        <span className="text-red-700">${abonoClient.saldo_pendiente.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between font-mono text-[10px] text-slate-500 mt-0.5">
+                        <span>Crédito Disponible:</span>
+                        <span>${abonoClient.credito_disponible.toFixed(2)} / ${abonoClient.limite_credito.toFixed(2)}</span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] text-slate-500 block mb-1.5 font-sans font-bold uppercase tracking-wider">Monto a Abonar ($ USD):</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={abonoAmount}
+                        onChange={(e) => setAbonoAmount(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-emerald-600 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleSaveCajaAbono();
+                          }
+                        }}
+                      />
+                    </div>
+                    
+                    <button
+                      onClick={() => setAbonoClient(null)}
+                      className="text-[9px] text-slate-455 hover:text-slate-650 underline font-sans"
+                    >
+                      ← Seleccionar otro cliente
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-slate-55 px-5 py-3.5 border-t border-slate-200 flex justify-end gap-2.5">
+                <button
+                  onClick={() => setShowCajaAbonoModal(false)}
+                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold font-sans transition-all active:scale-95 focus:ring-2 focus:ring-slate-400 focus:outline-none"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleSaveCajaAbono}
+                  disabled={!abonoClient}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-lg text-xs font-bold font-sans transition-all active:scale-95 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                >
+                  Registrar Abono
+                </button>
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
 
       {/* MODAL: TICKET FISCAL PRINT PREVIEW - Light Styled */}
       {showTicketModal && printedTicketData && (
