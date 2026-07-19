@@ -206,6 +206,30 @@ export async function saveProduct(p) {
   return newProduct;
 }
 
+export async function updateProduct(p) {
+  if (usePostgres) {
+    try {
+      await pool.query(
+        `UPDATE Productos 
+         SET codigo_barras_clave = $1, descripcion = $2, categoria = $3, stock_minimo = $4, precio_costo_usd = $5, precio_detalle_usd = $6, precio_mayor_usd = $7, cantidad_mayorista = $8, exento_impuesto = $9, imagen_url = $10, estado = $11
+         WHERE id = $12`,
+        [p.barcode, p.description, p.category, p.stock_minimo, p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.cantidad_mayorista, p.exento_impuesto, p.imagen_url, p.estado, p.id]
+      );
+      return p;
+    } catch (err) {
+      console.error('Error en updateProduct (Postgres):', err.message);
+    }
+  }
+  const products = readJsonFile('products.json', mockProducts);
+  const idx = products.findIndex(item => item.id === p.id);
+  if (idx !== -1) {
+    products[idx] = { ...products[idx], ...p };
+    writeJsonFile('products.json', products);
+    return products[idx];
+  }
+  return null;
+}
+
 export async function updateProductStock(prodId, stockActual) {
   if (usePostgres) {
     try {

@@ -6,7 +6,7 @@ import {
   updateProductStock, updateProductPrices, getClients, saveClient, registerAbono,
   getTasaHistory, saveTasa, getMovements, saveMovement, getPriceHistory, savePriceHistory,
   getSales, saveSale, getCierres, abrirCaja, cerrarCaja, getCajaEstado, registrarCajaMovimiento,
-  updateClient, deleteClient, getAbonos, deleteProduct
+  updateClient, deleteClient, getAbonos, deleteProduct, updateProduct
 } from './db-store.js';
 
 dotenv.config();
@@ -63,6 +63,11 @@ app.post('/api/productos/precios', async (req, res) => {
   const { id, cost, detail, mayor } = req.body;
   const success = await updateProductPrices(id, { cost, detail, mayor });
   res.json({ success });
+});
+
+app.put('/api/productos/:id', async (req, res) => {
+  const updated = await updateProduct(req.body);
+  res.json(updated);
 });
 
 app.get('/api/clientes', async (req, res) => {

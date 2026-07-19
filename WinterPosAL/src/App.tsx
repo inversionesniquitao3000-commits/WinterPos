@@ -391,6 +391,30 @@ export default function App() {
     }
   };
 
+  const handleUpdateProduct = async (prod: Product) => {
+    try {
+      const res = await fetch(getApiUrl(`/productos/${prod.id}`), {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(prod)
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        setProducts(prev => prev.map(p => p.id === prod.id ? saved : p));
+        return true;
+      } else {
+        const errData = await res.json();
+        alert(`Error al actualizar producto: ${errData.error || 'No se pudo guardar'}`);
+        return false;
+      }
+    } catch (err: any) {
+      alert(`Error de conexión con el servidor: ${err.message}`);
+      return false;
+    }
+  };
+
   const handleDeleteProduct = async (prodId: number) => {
     try {
       const response = await fetch(getApiUrl(`/productos/${prodId}`), {
@@ -1058,6 +1082,7 @@ export default function App() {
               onUpdateProductStock={handleUpdateProductStock}
               onUpdateProductPrices={handleUpdateProductPrices}
               onDeleteProduct={handleDeleteProduct}
+              onUpdateProduct={handleUpdateProduct}
             />
           )}
 

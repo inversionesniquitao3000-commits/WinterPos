@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Product, InventoryMovement, PriceAdjustmentHistory, User } from '../types';
-import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit } from 'lucide-react';
 
 interface InventarioProps {
   products: Product[];
@@ -11,6 +11,7 @@ interface InventarioProps {
   onUpdateProductStock: (prodId: number, type: 'Entrada' | 'Salida' | 'Merma' | 'Devolucion', qty: number, reason: string) => void;
   onUpdateProductPrices: (prodId: number, prices: { cost: number; detail: number; mayor: number }, reason: string) => void;
   onDeleteProduct: (prodId: number) => Promise<boolean>;
+  onUpdateProduct: (prod: Product) => Promise<boolean>;
 }
 
 export default function Inventario({
@@ -21,7 +22,8 @@ export default function Inventario({
   onAddProduct,
   onUpdateProductStock,
   onUpdateProductPrices,
-  onDeleteProduct
+  onDeleteProduct,
+  onUpdateProduct
 }: InventarioProps) {
   const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'movimientos' | 'precios'>('catalogo');
   const [searchTerm, setSearchTerm] = useState('');
@@ -79,6 +81,7 @@ export default function Inventario({
         setShowAdjustModal(false);
         setShowPriceModal(false);
         setShowNewProdModal(false);
+        setShowEditProdModal(false);
       }
     };
     window.addEventListener('keydown', handleEsc);
@@ -136,6 +139,68 @@ export default function Inventario({
   const [newTaxPct, setNewTaxPct] = useState('16');
   const [newAGranel, setNewAGranel] = useState(false);
   const [newVencimiento, setNewVencimiento] = useState('');
+
+  // Edit product modal state
+  const [showEditProdModal, setShowEditProdModal] = useState(false);
+  const [editClave, setEditClave] = useState('');
+  const [editBarcode, setEditBarcode] = useState('');
+  const [editDesc, setEditDesc] = useState('');
+  const [editCat, setEditCat] = useState('ALIMENTOS');
+  const [editCost, setEditCost] = useState('');
+  const [editDetail, setEditDetail] = useState('');
+  const [editMayor, setEditMayor] = useState('');
+  const [editMinStock, setEditMinStock] = useState('5');
+  const [editWholesaleQty, setEditWholesaleQty] = useState('12');
+  const [editTaxActive, setEditTaxActive] = useState(true);
+  const [editTaxName, setEditTaxName] = useState('IVA');
+  const [editTaxPct, setEditTaxPct] = useState('16');
+  const [editAGranel, setEditAGranel] = useState(false);
+  const [editVencimiento, setEditVencimiento] = useState('');
+
+  const handleOpenEditProduct = (p: Product) => {
+    setEditClave(p.barcode);
+    setEditBarcode(p.barcode);
+    setEditDesc(p.description);
+    setEditCat(p.category);
+    setEditCost(p.precio_costo_usd.toString());
+    setEditDetail(p.precio_detalle_usd.toString());
+    setEditMayor(p.precio_mayor_usd.toString());
+    setEditMinStock(p.stock_minimo.toString());
+    setEditWholesaleQty(p.cantidad_mayorista.toString());
+    setEditTaxActive(!p.exento_impuesto);
+    setEditTaxName('IVA');
+    setEditTaxPct('16');
+    setEditAGranel(p.a_granel || false);
+    setEditVencimiento(p.fecha_vencimiento || '');
+    setShowEditProdModal(true);
+  };
+
+  const handleUpdateProductSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProduct) return;
+
+    const updatedProd: Product = {
+      ...selectedProduct,
+      barcode: editBarcode.trim() || editClave.trim(),
+      description: editDesc.trim().toUpperCase(),
+      category: editCat,
+      stock_minimo: parseInt(editMinStock) || 0,
+      cantidad_mayorista: parseInt(editWholesaleQty) || 12,
+      exento_impuesto: !editTaxActive,
+      a_granel: editAGranel,
+      fecha_vencimiento: editVencimiento || undefined,
+      precio_costo_usd: parseFloat(editCost) || 0,
+      precio_detalle_usd: parseFloat(editDetail) || 0,
+      precio_mayor_usd: parseFloat(editMayor) || 0,
+    };
+
+    const success = await onUpdateProduct(updatedProd);
+    if (success) {
+      setShowEditProdModal(false);
+      setSelectedProduct(null);
+      alert('Producto actualizado con éxito.');
+    }
+  };
 
   // Modal position and minimize state
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
@@ -750,6 +815,17 @@ export default function Inventario({
                     <span>Editar Precios</span>
                   </button>
 
+                  {/* BUTTON: MODIFICAR FICHA */}
+                  <button
+                    onClick={() => selectedProduct && handleOpenEditProduct(selectedProduct)}
+                    disabled={!selectedProduct}
+                    className="w-full bg-slate-700 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-350 text-white border border-slate-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all enabled:active:scale-95 disabled:cursor-not-allowed"
+                    title={!selectedProduct ? "Seleccione un producto para modificar" : "Modificar ficha técnica del producto"}
+                  >
+                    <Edit className="w-4 h-4 bg-slate-800/50 disabled:bg-transparent rounded-full p-0.5" />
+                    <span>Modificar</span>
+                  </button>
+
                   {/* BUTTON 4: ELIMINAR */}
                   <button
                     onClick={handleDeleteProductClick}
@@ -1354,6 +1430,212 @@ export default function Inventario({
                   className="w-2/3 bg-winter-inventarioStart hover:bg-winter-inventarioEnd text-white py-2.5 rounded font-bold font-sans text-xs tracking-wider transition-all"
                 >
                   CREAR PRODUCTO
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: MODIFICAR FICHA DE PRODUCTO */}
+      {showEditProdModal && (
+        <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-sans text-slate-800">
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-lg shadow-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+            
+            <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                <Edit className="w-4 h-4 text-slate-600 bg-slate-100 rounded-full p-0.5" />
+                MODIFICAR FICHA DE PRODUCTO
+              </h3>
+              <button type="button" onClick={() => setShowEditProdModal(false)} className="text-slate-400 hover:text-slate-700">✕</button>
+            </div>
+
+            <form onSubmit={handleUpdateProductSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1 font-sans">Clave del Producto <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej. HARINA-PAN-1K"
+                    value={editClave.toUpperCase()}
+                    onChange={(e) => setEditClave(e.target.value.toUpperCase())}
+                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-855 focus:bg-white focus:border-winter-inventarioStart focus:outline-none uppercase font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1 font-sans">Código de Barras</label>
+                  <input
+                    type="text"
+                    placeholder="Vacío = usar Clave"
+                    value={editBarcode}
+                    onChange={(e) => setEditBarcode(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1 font-sans">Categoría</label>
+                  <div className="flex gap-2">
+                    <select
+                      value={editCat}
+                      onChange={(e) => setEditCat(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none"
+                    >
+                      {categories.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1 font-sans">Impuesto</label>
+                  <div className="flex items-center gap-2 bg-slate-50 border border-slate-350 rounded p-2 text-xs select-none h-[38px]">
+                    <label className="flex items-center gap-1.5 cursor-pointer font-sans font-bold text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={editTaxActive}
+                        onChange={(e) => setEditTaxActive(e.target.checked)}
+                        className="rounded border-slate-300 text-winter-inventarioStart focus:ring-winter-inventarioStart w-4 h-4"
+                      />
+                      <span>Si</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="IVA"
+                      disabled={!editTaxActive}
+                      value={editTaxName}
+                      onChange={(e) => setEditTaxName(e.target.value.toUpperCase())}
+                      className="w-full bg-white border border-slate-300 rounded p-1 text-[11px] font-sans font-bold text-slate-800 uppercase disabled:opacity-40 disabled:bg-slate-100"
+                    />
+                    <span className="font-bold text-slate-500 font-sans">%</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      disabled={!editTaxActive}
+                      value={editTaxPct}
+                      onChange={(e) => setEditTaxPct(e.target.value)}
+                      className="w-12 text-center bg-white border border-slate-300 rounded p-1 font-bold font-mono text-[11px] text-slate-855 disabled:opacity-40 disabled:bg-slate-100"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-500 block mb-1 font-sans">Descripción del Artículo <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Descripción del artículo..."
+                  value={editDesc.toUpperCase()}
+                  onChange={(e) => setEditDesc(e.target.value.toUpperCase())}
+                  className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-855 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-sans font-bold uppercase"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1 font-sans">Forma de Venta</label>
+                  <select
+                    value={editAGranel ? 'granel' : 'unidad'}
+                    onChange={(e) => setEditAGranel(e.target.value === 'granel')}
+                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-sans font-semibold"
+                  >
+                    <option value="unidad">Venta por Unidad / Entero</option>
+                    <option value="granel">Venta a Granel (Peso / Kg / Fraccional)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1 font-sans">Fecha de Vencimiento (Opcional)</label>
+                  <input
+                    type="date"
+                    value={editVencimiento}
+                    onChange={(e) => setEditVencimiento(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-350 rounded p-2 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-sans font-medium"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Costo ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    value={editCost}
+                    onChange={(e) => setEditCost(e.target.value)}
+                    className="w-full bg-white border border-slate-300 rounded p-1.5 text-xs font-mono font-bold focus:ring-1 focus:ring-winter-inventarioStart focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Detalle ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    value={editDetail}
+                    onChange={(e) => setEditDetail(e.target.value)}
+                    className="w-full bg-white border border-slate-300 rounded p-1.5 text-xs font-mono font-bold focus:ring-1 focus:ring-winter-inventarioStart focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Mayor ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    value={editMayor}
+                    onChange={(e) => setEditMayor(e.target.value)}
+                    className="w-full bg-white border border-slate-300 rounded p-1.5 text-xs font-mono font-bold focus:ring-1 focus:ring-winter-inventarioStart focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1 font-sans">Stock Mínimo (Alerta)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={editMinStock}
+                    onChange={(e) => setEditMinStock(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-mono text-center"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1 font-sans">Cant. Mayorista</label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={editWholesaleQty}
+                    onChange={(e) => setEditWholesaleQty(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-mono text-center"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEditProdModal(false)}
+                  className="w-1/3 bg-slate-100 border border-slate-250 text-slate-600 py-2.5 rounded font-sans text-xs hover:bg-slate-200 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="w-2/3 bg-slate-700 hover:bg-slate-800 text-white py-2.5 rounded font-bold font-sans text-xs tracking-wider transition-all"
+                >
+                  GUARDAR CAMBIOS
                 </button>
               </div>
             </form>
