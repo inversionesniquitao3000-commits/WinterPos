@@ -1485,6 +1485,14 @@ export default function CajaPOS({
               <div className="flex flex-col justify-between space-y-6">
                 
                 <div className="bg-slate-50 border border-slate-200 p-5 rounded-xl space-y-4">
+                  
+                  {/* CLIENT INFO BANNER FOR OPERATOR CHECK */}
+                  <div className="bg-sky-50 border border-sky-100 p-3 rounded-lg flex flex-col font-sans text-xs leading-tight">
+                    <span className="text-[9px] text-sky-800 font-bold uppercase tracking-wider mb-1">Cliente Facturación</span>
+                    <span className="font-black text-slate-850 uppercase">{selectedClient.nombre}</span>
+                    <span className="font-mono font-bold text-slate-550 text-[10px] mt-0.5">{selectedClient.cedula_rif}</span>
+                  </div>
+
                   <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-200 pb-2">
                     Resumen de Liquidación
                   </h3>
