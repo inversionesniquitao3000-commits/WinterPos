@@ -34,6 +34,23 @@ try {
   const client = await pool.connect();
   console.log('✅ Base de datos central PostgreSQL conectada exitosamente.');
   usePostgres = true;
+  
+  // Run schema migration to add new closure fields if they do not exist
+  await client.query(`
+    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS venta_total_usd NUMERIC DEFAULT 0;
+    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS utilidad_usd NUMERIC DEFAULT 0;
+    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS detalles_json TEXT;
+  `);
+
+  // Alter enum type outside of main multi-statement query to prevent implicit transaction block errors in Postgres
+  try {
+    await client.query("ALTER TYPE tipo_movimiento_inv ADD VALUE IF NOT EXISTS 'Entrada Rápida'");
+  } catch (enumErr) {
+    console.log("ℹ️ Nota: No se pudo alterar tipo_movimiento_inv (puede que ya exista o no sea compatible):", enumErr.message);
+  }
+  
+  console.log('📋 Migración de base de datos PostgreSQL completada (columnas de cierres verificadas).');
+  
   client.release();
 } catch (err) {
   console.warn('⚠️ No se pudo conectar a PostgreSQL. Usando almacenamiento JSON local centralizado en el servidor.');
@@ -794,24 +811,38 @@ export async function getCierres() {
       const res = await pool.query(`
         SELECT c.id, c.fecha_apertura, c.fecha_cierre, c.monto_apertura_usd, c.monto_apertura_ves,
                c.monto_cierre_real_usd, c.monto_cierre_real_ves, c.monto_cierre_esperado_usd, c.monto_cierre_esperado_ves,
+               c.venta_total_usd, c.utilidad_usd, c.detalles_json,
                u.nombre as usuario, c.estatus
         FROM Cajas_Apertura_Cierre c
         LEFT JOIN Usuarios u ON c.usuario_id = u.id
         ORDER BY c.id DESC
       `);
-      return res.rows.map(r => ({
-        id: r.id,
-        fechaApertura: new Date(r.fecha_apertura).toISOString().replace('T', ' ').substring(0, 16),
-        fechaCierre: r.fecha_cierre ? new Date(r.fecha_cierre).toISOString().replace('T', ' ').substring(0, 16) : null,
-        aperturaUsd: parseFloat(r.monto_apertura_usd),
-        aperturaVes: parseFloat(r.monto_apertura_ves),
-        realUsd: r.monto_cierre_real_usd ? parseFloat(r.monto_cierre_real_usd) : 0,
-        realVes: r.monto_cierre_real_ves ? parseFloat(r.monto_cierre_real_ves) : 0,
-        expectedUsd: r.monto_cierre_esperado_usd ? parseFloat(r.monto_cierre_esperado_usd) : 0,
-        expectedVes: r.monto_cierre_esperado_ves ? parseFloat(r.monto_cierre_esperado_ves) : 0,
-        usuario: r.usuario,
-        status: r.estatus === 'Abierta' ? 'Abierta' : 'Cerrada'
-      }));
+      return res.rows.map(r => {
+        let parsedDetails = {};
+        if (r.detalles_json) {
+          try {
+            parsedDetails = JSON.parse(r.detalles_json);
+          } catch (e) {
+            console.error('Error parsing detalles_json', e);
+          }
+        }
+        return {
+          id: r.id,
+          fechaApertura: new Date(r.fecha_apertura).toISOString().replace('T', ' ').substring(0, 16),
+          fechaCierre: r.fecha_cierre ? new Date(r.fecha_cierre).toISOString().replace('T', ' ').substring(0, 16) : null,
+          aperturaUsd: parseFloat(r.monto_apertura_usd),
+          aperturaVes: parseFloat(r.monto_apertura_ves),
+          realUsd: r.monto_cierre_real_usd ? parseFloat(r.monto_cierre_real_usd) : 0,
+          realVes: r.monto_cierre_real_ves ? parseFloat(r.monto_cierre_real_ves) : 0,
+          expectedUsd: r.monto_cierre_esperado_usd ? parseFloat(r.monto_cierre_esperado_usd) : 0,
+          expectedVes: r.monto_cierre_esperado_ves ? parseFloat(r.monto_cierre_esperado_ves) : 0,
+          ventaTotalUsd: r.venta_total_usd ? parseFloat(r.venta_total_usd) : 0,
+          utilidadUsd: r.utilidad_usd ? parseFloat(r.utilidad_usd) : 0,
+          usuario: r.usuario,
+          status: r.estatus === 'Abierta' ? 'Abierta' : 'Cerrada',
+          ...parsedDetails
+        };
+      });
     } catch (err) {
       console.error('Error en getCierres (Postgres):', err.message);
     }
@@ -856,6 +887,11 @@ export async function cerrarCaja(cierre) {
       const activeCaja = await pool.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
       if (activeCaja.rowCount > 0) {
         const cajaId = activeCaja.rows[0].id;
+        
+        const ventaTotalUsd = cierre.ventaTotalUsd ?? 0;
+        const utilidadUsd = cierre.utilidadUsd ?? 0;
+        const detallesJson = JSON.stringify(cierre);
+
         await pool.query(
           `UPDATE Cajas_Apertura_Cierre SET 
             fecha_cierre = CURRENT_TIMESTAMP, 
@@ -863,9 +899,21 @@ export async function cerrarCaja(cierre) {
             monto_cierre_esperado_ves = $2, 
             monto_cierre_real_usd = $3, 
             monto_cierre_real_ves = $4, 
-            estatus = 'Cerrada'
-           WHERE id = $5`,
-          [cierre.expectedUsd, cierre.expectedVes, cierre.realUsd, cierre.realVes, cajaId]
+            estatus = 'Cerrada',
+            venta_total_usd = $5,
+            utilidad_usd = $6,
+            detalles_json = $7
+           WHERE id = $8`,
+          [
+            cierre.expectedUsd, 
+            cierre.expectedVes, 
+            cierre.realUsd, 
+            cierre.realVes, 
+            ventaTotalUsd, 
+            utilidadUsd, 
+            detallesJson, 
+            cajaId
+          ]
         );
         return true;
       }

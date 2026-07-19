@@ -167,7 +167,7 @@ CREATE TABLE Pagos_Venta (
 -- ==========================================
 -- 11. TRAZABILIDAD DE INVENTARIO (KARDEX / MERMAS)
 -- ==========================================
-CREATE TYPE tipo_movimiento_inv AS ENUM ('Entrada', 'Salida', 'Merma', 'Venta', 'Devolucion');
+CREATE TYPE tipo_movimiento_inv AS ENUM ('Entrada', 'Salida', 'Merma', 'Venta', 'Devolucion', 'Entrada Rápida');
 
 CREATE TABLE Movimientos_Inventario (
     id SERIAL PRIMARY KEY,
