@@ -782,7 +782,14 @@ export async function saveSale(s) {
           await clientTarget.query(
             `INSERT INTO Ventas_Detalle (venta_id, producto_id, cantidad, precio_unitario_usd, tipo_precio, total_fila_usd)
              VALUES ($1, $2, $3, $4, $5, $6)`,
-            [saleId, prodId, item.qty, item.precio_unitario_usd, 'Detalle', item.total_fila_usd]
+            [
+              saleId, 
+              prodId, 
+              item.qty, 
+              item.precio_unitario_usd || item.priceUSD || item.product.precio_detalle_usd, 
+              item.tipo_precio || item.priceType || 'Detalle', 
+              item.total_fila_usd || item.totalUSD || (item.qty * (item.priceUSD || item.product.precio_detalle_usd))
+            ]
           );
           
           // Update Stock

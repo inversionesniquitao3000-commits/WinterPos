@@ -916,6 +916,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
         const subtotal = selectedSale.subtotal ?? 0;
         const descuento = selectedSale.descuento ?? 0;
         const totalUSD = selectedSale.totalUSD ?? 0;
+        const iva = selectedSale.iva ?? 0;
         
         // Calculate items costs and profit
         let totalCost = 0;
@@ -1020,6 +1021,12 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
                         <span>Subtotal USD:</span>
                         <span>$ {subtotal.toFixed(2)}</span>
                       </div>
+                      {iva > 0 && (
+                        <div className="flex justify-between text-slate-700">
+                          <span>IVA (16%) USD:</span>
+                          <span>$ {iva.toFixed(2)}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between text-red-500">
                         <span>Descuentos USD:</span>
                         <span>- $ {descuento.toFixed(2)}</span>

@@ -602,7 +602,18 @@ export default function CajaPOS({
   // Compute Totals
   const subtotalUSD = saleItems.reduce((acc, item) => acc + item.totalUSD, 0);
   const discountAmountUSD = subtotalUSD * (discountPct / 100);
-  const totalUSD = Math.max(0, subtotalUSD - discountAmountUSD);
+
+  // Tax calculations: Standard IVA (16%) is applied only to non-exempt (taxable) items
+  const taxableSubtotal = saleItems.reduce((acc, item) => {
+    return acc + (item.product.exento_impuesto ? 0 : item.totalUSD);
+  }, 0);
+  const exemptSubtotal = subtotalUSD - taxableSubtotal;
+
+  const discountFactor = (1 - discountPct / 100);
+  const discountedTaxableSubtotal = taxableSubtotal * discountFactor;
+  const ivaAmount = discountedTaxableSubtotal * 0.16;
+
+  const totalUSD = Math.max(0, (taxableSubtotal + exemptSubtotal) * discountFactor + ivaAmount);
   const totalVES = totalUSD * tasaDia;
 
   const executeAddProduct = (prod: Product, finalQty: number) => {
@@ -855,6 +866,7 @@ export default function CajaPOS({
       items: saleItems,
       subtotal: subtotalUSD,
       descuento: discountAmountUSD,
+      iva: ivaAmount,
       totalUSD,
       totalVES,
       pagos,
@@ -1277,12 +1289,26 @@ export default function CajaPOS({
           </div>
 
           <div className="space-y-2">
-            <div className="flex justify-between text-slate-600">
+            <div className="flex justify-between text-slate-600 text-xs">
               <span className="font-sans">Subtotal</span>
               <span className="font-mono">${subtotalUSD.toFixed(2)}</span>
             </div>
+
+            {taxableSubtotal > 0 && (
+              <div className="flex justify-between text-slate-500 text-[11px]">
+                <span className="font-sans">Base Imponible (Gravable)</span>
+                <span className="font-mono">${taxableSubtotal.toFixed(2)}</span>
+              </div>
+            )}
+
+            {ivaAmount > 0 && (
+              <div className="flex justify-between text-slate-600 text-xs">
+                <span className="font-sans text-slate-700 font-bold">IVA (16%)</span>
+                <span className="font-mono text-slate-750 font-bold">${ivaAmount.toFixed(2)}</span>
+              </div>
+            )}
             
-            <div className="flex justify-between items-center text-slate-655">
+            <div className="flex justify-between items-center text-slate-655 text-xs">
               <span className="flex items-center gap-1 font-sans">
                 Descuento
                 <input
@@ -1620,12 +1646,34 @@ export default function CajaPOS({
                   </h3>
                   
                   <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-slate-550 font-sans">Monto Venta USD:</span>
-                      <span className="font-bold text-slate-800 font-mono">${totalUSD.toFixed(2)}</span>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-550 font-sans">Subtotal USD:</span>
+                      <span className="font-bold text-slate-600 font-mono">${subtotalUSD.toFixed(2)}</span>
+                    </div>
+                    {taxableSubtotal > 0 && (
+                      <div className="flex justify-between text-[11px] text-slate-500">
+                        <span className="font-sans">Base Imponible:</span>
+                        <span className="font-mono">${taxableSubtotal.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {ivaAmount > 0 && (
+                      <div className="flex justify-between text-xs text-slate-700">
+                        <span className="font-sans">IVA (16%) USD:</span>
+                        <span className="font-bold font-mono">${ivaAmount.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {discountAmountUSD > 0 && (
+                      <div className="flex justify-between text-xs text-red-500">
+                        <span className="font-sans">Descuento USD:</span>
+                        <span className="font-bold font-mono">-${discountAmountUSD.toFixed(2)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between border-t border-slate-200 pt-2 font-extrabold text-slate-800">
+                      <span className="font-sans text-sm">TOTAL USD:</span>
+                      <span className="font-mono text-base">${totalUSD.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-550 font-sans">Monto Venta VES:</span>
+                      <span className="text-slate-550 font-sans">TOTAL VES:</span>
                       <span className="font-bold text-slate-600 font-mono">Bs {totalVES.toFixed(2)}</span>
                     </div>
                     
@@ -2135,6 +2183,12 @@ export default function CajaPOS({
                   <span>SUBTOTAL USD:</span>
                   <span>${printedTicketData.subtotal.toFixed(2)}</span>
                 </div>
+                {printedTicketData.iva > 0 && (
+                  <div className="flex justify-between text-slate-700">
+                    <span>IVA (16%) USD:</span>
+                    <span>${printedTicketData.iva.toFixed(2)}</span>
+                  </div>
+                )}
                 {printedTicketData.descuento > 0 && (
                   <div className="flex justify-between text-red-500">
                     <span>DESCUENTO:</span>

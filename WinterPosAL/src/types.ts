@@ -113,6 +113,7 @@ export interface Sale {
   fecha: string;
   usuario: string;
   estatus?: string;
+  iva?: number;
 }
 
 export interface CierreCaja {
