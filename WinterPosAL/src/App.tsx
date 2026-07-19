@@ -184,7 +184,10 @@ export default function App() {
   }, [currentUser]);
 
   const getApiUrl = (path: string) => {
-    const host = dbMode === 'local' ? 'localhost' : lanIP;
+    // Auto-detect: if browser is accessed via a LAN IP (not localhost), use that same IP for API
+    const browserHost = window.location.hostname;
+    const isRemoteAccess = browserHost !== 'localhost' && browserHost !== '127.0.0.1';
+    const host = isRemoteAccess ? browserHost : (dbMode === 'local' ? 'localhost' : lanIP);
     return `http://${host}:5000/api${path}`;
   };
 
