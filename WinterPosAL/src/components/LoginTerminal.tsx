@@ -76,22 +76,17 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
     setTimeout(() => {
       setIsLoading(false);
       const matched = systemUsers.find(
-        u => u.usuario.toLowerCase() === username.trim().toLowerCase() && password === 'admin'
+        u => u.usuario.toLowerCase() === username.trim().toLowerCase() && password === (u.clave || 'admin')
       );
       
-      if (username.toLowerCase() === 'admin' && password === 'admin') {
-        const adminUser = systemUsers.find(u => u.usuario === 'admin') || {
-          id: 1,
-          usuario: 'admin',
-          nombre: 'Anderson Laguna',
-          rol: 'administrador' as const,
-          estado: 'Activo' as const
-        };
-        onLoginSuccess(adminUser);
-      } else if (matched) {
-        onLoginSuccess(matched);
+      if (matched) {
+        if (matched.estado === 'Inactivo') {
+          setErrorMsg('Su usuario se encuentra inactivo. Consulte al Administrador.');
+        } else {
+          onLoginSuccess(matched);
+        }
       } else {
-        setErrorMsg('Credenciales inválidas. Ingrese con clave de demostración "admin".');
+        setErrorMsg('Usuario o contraseña incorrectos. Verifique sus credenciales.');
       }
     }, 800);
   };

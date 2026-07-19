@@ -25,6 +25,12 @@ export default function Inventario({
   onDeleteProduct,
   onUpdateProduct
 }: InventarioProps) {
+  const hasPermission = (action: 'ver' | 'crear' | 'editar' | 'eliminar') => {
+    if (_currentUser.rol.toLowerCase() === 'administrador') return true;
+    if (!_currentUser.permisos) return true; // default fallback if none specified
+    return !!_currentUser.permisos.inventario?.[action];
+  };
+
   const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'movimientos' | 'precios'>('catalogo');
   const [searchTerm, setSearchTerm] = useState('');
   
@@ -785,20 +791,22 @@ export default function Inventario({
                 {/* Operations buttons */}
                 <div className="flex flex-col gap-2.5">
                   {/* BUTTON 1: AGREGAR */}
-                  <button
-                    onClick={() => setShowNewProdModal(true)}
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all active:scale-95"
-                  >
-                    <Plus className="w-4 h-4 bg-emerald-700/50 rounded-full p-0.5" />
-                    <span>Agregar</span>
-                  </button>
+                  {hasPermission('crear') && (
+                    <button
+                      onClick={() => setShowNewProdModal(true)}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all active:scale-95"
+                    >
+                      <Plus className="w-4 h-4 bg-emerald-700/50 rounded-full p-0.5" />
+                      <span>Agregar</span>
+                    </button>
+                  )}
 
                   {/* BUTTON 2: STOCK */}
                   <button
                     onClick={() => selectedProduct && handleOpenAdjust(selectedProduct)}
-                    disabled={!selectedProduct}
+                    disabled={!selectedProduct || !hasPermission('editar')}
                     className="w-full bg-cyan-600 hover:bg-cyan-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-350 text-white border border-cyan-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all enabled:active:scale-95 disabled:cursor-not-allowed"
-                    title={!selectedProduct ? "Seleccione un producto para ajustar stock" : "Ajustar stock (Entrada/Salida/Merma)"}
+                    title={!selectedProduct ? "Seleccione un producto para ajustar stock" : !hasPermission('editar') ? "No posee permisos para ajustar stock" : "Ajustar stock (Entrada/Salida/Merma)"}
                   >
                     <RefreshCw className="w-4 h-4 bg-cyan-750/50 disabled:bg-transparent rounded-full p-0.5" />
                     <span>Ajustar Stock</span>
@@ -807,9 +815,9 @@ export default function Inventario({
                   {/* BUTTON 3: PRECIOS */}
                   <button
                     onClick={() => selectedProduct && handleOpenPrices(selectedProduct)}
-                    disabled={!selectedProduct}
+                    disabled={!selectedProduct || !hasPermission('editar')}
                     className="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-350 text-white border border-amber-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all enabled:active:scale-95 disabled:cursor-not-allowed"
-                    title={!selectedProduct ? "Seleccione un producto para editar precios" : "Editar precios del producto"}
+                    title={!selectedProduct ? "Seleccione un producto para editar precios" : !hasPermission('editar') ? "No posee permisos para editar precios" : "Editar precios del producto"}
                   >
                     <PenTool className="w-4 h-4 bg-amber-750/50 disabled:bg-transparent rounded-full p-0.5" />
                     <span>Editar Precios</span>
@@ -818,30 +826,32 @@ export default function Inventario({
                   {/* BUTTON: MODIFICAR FICHA */}
                   <button
                     onClick={() => selectedProduct && handleOpenEditProduct(selectedProduct)}
-                    disabled={!selectedProduct}
+                    disabled={!selectedProduct || !hasPermission('editar')}
                     className="w-full bg-slate-700 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-350 text-white border border-slate-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all enabled:active:scale-95 disabled:cursor-not-allowed"
-                    title={!selectedProduct ? "Seleccione un producto para modificar" : "Modificar ficha técnica del producto"}
+                    title={!selectedProduct ? "Seleccione un producto para modificar" : !hasPermission('editar') ? "No posee permisos para modificar" : "Modificar ficha técnica del producto"}
                   >
                     <Edit className="w-4 h-4 bg-slate-800/50 disabled:bg-transparent rounded-full p-0.5" />
                     <span>Modificar</span>
                   </button>
 
                   {/* BUTTON 4: ELIMINAR */}
-                  <button
-                    onClick={handleDeleteProductClick}
-                    disabled={!selectedProduct || selectedProduct.stock_actual > 0}
-                    className="w-full bg-red-655 hover:bg-red-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-350 text-white border border-red-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all enabled:active:scale-95 disabled:cursor-not-allowed"
-                    title={
-                      !selectedProduct 
-                        ? "Seleccione un producto para eliminar" 
-                        : selectedProduct.stock_actual > 0 
-                          ? "No se puede eliminar un producto con existencia mayor a 0" 
-                          : "Eliminar producto permanentemente"
-                    }
-                  >
-                    <Minus className="w-4 h-4 bg-red-700/50 disabled:bg-transparent rounded-full p-0.5" />
-                    <span>Eliminar</span>
-                  </button>
+                  {hasPermission('eliminar') && (
+                    <button
+                      onClick={handleDeleteProductClick}
+                      disabled={!selectedProduct || selectedProduct.stock_actual > 0}
+                      className="w-full bg-red-655 hover:bg-red-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-350 text-white border border-red-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all enabled:active:scale-95 disabled:cursor-not-allowed"
+                      title={
+                        !selectedProduct 
+                          ? "Seleccione un producto para eliminar" 
+                          : selectedProduct.stock_actual > 0 
+                            ? "No se puede eliminar un producto con existencia mayor a 0" 
+                            : "Eliminar producto permanentemente"
+                      }
+                    >
+                      <Minus className="w-4 h-4 bg-red-700/50 disabled:bg-transparent rounded-full p-0.5" />
+                      <span>Eliminar</span>
+                    </button>
+                  )}
                 </div>
 
                 {selectedProduct && (

@@ -122,6 +122,7 @@ export default function App() {
 
   // Active Pestaña Tab F1-F10
   const [activeTab, setActiveTab] = useState<'caja' | 'inventario' | 'ventas' | 'clientes' | 'tasa' | 'config'>('caja');
+  const [users, setUsers] = useState<User[]>(mockUsers);
 
   // Sync to localStorage
   useEffect(() => {
@@ -209,7 +210,7 @@ export default function App() {
     return null;
   };
 
-  // Load business config immediately when app starts/network settings change
+  // Load business config and users immediately when app starts/network settings change
   useEffect(() => {
     const loadConfig = async () => {
       try {
@@ -220,6 +221,15 @@ export default function App() {
         }
       } catch (err) {
         console.warn('⚠️ No se pudo obtener la configuración del negocio al iniciar.');
+      }
+      try {
+        const usersRes = await fetch(getApiUrl('/users'));
+        if (usersRes.ok) {
+          const usersData = await usersRes.json();
+          setUsers(usersData);
+        }
+      } catch (err) {
+        console.warn('⚠️ No se pudo obtener la lista de usuarios al iniciar.');
       }
     };
     loadConfig();
@@ -329,22 +339,22 @@ export default function App() {
     const handleGlobalKeys = (e: KeyboardEvent) => {
       if (!currentUser) return;
       
-      if (e.key === 'F1') {
+      if (e.key === 'F1' && hasModulePermission('caja', 'ver')) {
         e.preventDefault();
         setActiveTab('caja');
-      } else if (e.key === 'F2') {
+      } else if (e.key === 'F2' && hasModulePermission('inventario', 'ver')) {
         e.preventDefault();
         setActiveTab('inventario');
-      } else if (e.key === 'F3') {
+      } else if (e.key === 'F3' && hasModulePermission('ventas', 'ver')) {
         e.preventDefault();
         setActiveTab('ventas');
-      } else if (e.key === 'F4') {
+      } else if (e.key === 'F4' && hasModulePermission('clientes', 'ver')) {
         e.preventDefault();
         setActiveTab('clientes');
-      } else if (e.key === 'F5' || e.key === 'F9') {
+      } else if ((e.key === 'F5' || e.key === 'F9') && hasModulePermission('tasa', 'ver')) {
         e.preventDefault();
         setActiveTab('tasa');
-      } else if (e.key === 'F10') {
+      } else if (e.key === 'F10' && hasModulePermission('config', 'ver')) {
         e.preventDefault();
         setActiveTab('config');
       }
@@ -913,12 +923,19 @@ export default function App() {
     setCurrentUser(null);
   };
 
+  const hasModulePermission = (modulo: string, accion: 'ver' | 'crear' | 'editar' | 'eliminar' = 'ver') => {
+    if (!currentUser) return false;
+    if (currentUser.rol.toLowerCase() === 'administrador') return true;
+    if (!currentUser.permisos) return true; // fallback to true if no permissions specified
+    return !!currentUser.permisos[modulo]?.[accion];
+  };
+
   const handleReprint = (sale: Sale) => {
     setReprintSale(sale);
   };
 
   if (!currentUser) {
-    return <LoginTerminal onLoginSuccess={setCurrentUser} systemUsers={mockUsers} companyConfig={companyConfig} />;
+    return <LoginTerminal onLoginSuccess={setCurrentUser} systemUsers={users} companyConfig={companyConfig} />;
   }
 
   return (
@@ -975,77 +992,89 @@ export default function App() {
 
       {/* TABS BAR - WinterPOS Colors */}
       <nav className="bg-winter-tabBar border-b border-slate-900/40 px-6 py-2 select-none flex flex-wrap gap-1.5 z-10 text-slate-300">
-        <button
-          onClick={() => setActiveTab('caja')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
-            activeTab === 'caja'
-              ? 'tab-grad-caja text-white shadow'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
-          }`}
-        >
-          <ShoppingBag className="w-4 h-4" />
-          F1 CAJA
-        </button>
+        {hasModulePermission('caja', 'ver') && (
+          <button
+            onClick={() => setActiveTab('caja')}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
+              activeTab === 'caja'
+                ? 'tab-grad-caja text-white shadow'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+            }`}
+          >
+            <ShoppingBag className="w-4 h-4" />
+            F1 CAJA
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('inventario')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
-            activeTab === 'inventario'
-              ? 'tab-grad-inventario text-white shadow'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
-          }`}
-        >
-          <Package className="w-4 h-4" />
-          F2 Inventario
-        </button>
+        {hasModulePermission('inventario', 'ver') && (
+          <button
+            onClick={() => setActiveTab('inventario')}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
+              activeTab === 'inventario'
+                ? 'tab-grad-inventario text-white shadow'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+            }`}
+          >
+            <Package className="w-4 h-4" />
+            F2 Inventario
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('ventas')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
-            activeTab === 'ventas'
-              ? 'tab-grad-ventas text-white shadow'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
-          }`}
-        >
-          <History className="w-4 h-4" />
-          F3 Ventas
-        </button>
+        {hasModulePermission('ventas', 'ver') && (
+          <button
+            onClick={() => setActiveTab('ventas')}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
+              activeTab === 'ventas'
+                ? 'tab-grad-ventas text-white shadow'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+            }`}
+          >
+            <History className="w-4 h-4" />
+            F3 Ventas
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('clientes')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
-            activeTab === 'clientes'
-              ? 'tab-grad-clientes text-white shadow'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          F4 Clientes
-        </button>
+        {hasModulePermission('clientes', 'ver') && (
+          <button
+            onClick={() => setActiveTab('clientes')}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
+              activeTab === 'clientes'
+                ? 'tab-grad-clientes text-white shadow'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            F4 Clientes
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('tasa')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
-            activeTab === 'tasa'
-              ? 'tab-grad-tasa text-white shadow'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
-          }`}
-        >
-          <TrendingUp className="w-4 h-4" />
-          F9 Tasa
-        </button>
+        {hasModulePermission('tasa', 'ver') && (
+          <button
+            onClick={() => setActiveTab('tasa')}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
+              activeTab === 'tasa'
+                ? 'tab-grad-tasa text-white shadow'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+            }`}
+          >
+            <TrendingUp className="w-4 h-4" />
+            F9 Tasa
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('config')}
-          className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
-            activeTab === 'config'
-              ? 'tab-grad-config text-white shadow'
-              : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
-          }`}
-        >
-          <Settings className="w-4 h-4" />
-          F10 Config.
-        </button>
+        {hasModulePermission('config', 'ver') && (
+          <button
+            onClick={() => setActiveTab('config')}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
+              activeTab === 'config'
+                ? 'tab-grad-config text-white shadow'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+            }`}
+          >
+            <Settings className="w-4 h-4" />
+            F10 Config.
+          </button>
+        )}
       </nav>
 
       {/* MAIN CONTENT AREA */}
@@ -1124,6 +1153,19 @@ export default function App() {
             <ConfiguracionEmpresa
               config={companyConfig}
               onSaveConfig={setCompanyConfig}
+              currentUser={currentUser}
+              getApiUrl={getApiUrl}
+              onReloadUsers={async () => {
+                try {
+                  const res = await fetch(getApiUrl('/users'));
+                  if (res.ok) {
+                    const data = await res.json();
+                    setUsers(data);
+                  }
+                } catch (e) {
+                  console.error('Error reloading users:', e);
+                }
+              }}
             />
           )}
         </div>

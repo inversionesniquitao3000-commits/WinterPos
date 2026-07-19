@@ -35,8 +35,47 @@ export interface User {
   id: number;
   usuario: string;
   nombre: string;
-  rol: 'administrador' | 'inventario' | 'vendedor' | 'inventario-vendedor';
+  rol: string; // custom role name or core roles
   estado: 'Activo' | 'Inactivo';
+  clave?: string;
+  permisos?: {
+    [modulo: string]: {
+      ver: boolean;
+      crear: boolean;
+      editar: boolean;
+      eliminar: boolean;
+      admin?: boolean;
+    }
+  };
+}
+
+export interface Role {
+  id: number;
+  nombre: string;
+  permisos: {
+    [modulo: string]: {
+      ver: boolean;
+      crear: boolean;
+      editar: boolean;
+      eliminar: boolean;
+      admin?: boolean;
+    }
+  };
+}
+
+export interface PrinterConfig {
+  puerto: string; // 'USB' | 'IP' | 'SISTEMA' | 'NINGUNA'
+  ipAddress?: string;
+  anchoPapel: '58mm' | '80mm';
+  cortarAutomatico: boolean;
+  copiaTicket: boolean;
+}
+
+export interface ScaleConfig {
+  puerto: string; // 'COM1' | 'COM2' | 'USB' | 'RED' | 'MANUAL'
+  baudRate: number;
+  protocolo: string; // 'CAS' | 'Toledo' | 'Custom'
+  taraPrevia: number;
 }
 
 export interface TasaHistoryItem {

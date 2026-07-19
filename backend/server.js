@@ -6,7 +6,9 @@ import {
   updateProductStock, updateProductPrices, getClients, saveClient, registerAbono,
   getTasaHistory, saveTasa, getMovements, saveMovement, getPriceHistory, savePriceHistory,
   getSales, saveSale, getCierres, abrirCaja, cerrarCaja, getCajaEstado, registrarCajaMovimiento,
-  updateClient, deleteClient, getAbonos, deleteProduct, updateProduct
+  updateClient, deleteClient, getAbonos, deleteProduct, updateProduct,
+  saveUser, updateUser, deleteUser, getRoles, saveRole, updateRole, deleteRole, wipeDatabase, backupDatabase, restoreDatabase,
+  readJsonFile, writeJsonFile
 } from './db-store.js';
 
 dotenv.config();
@@ -197,6 +199,166 @@ app.get('/api/cajas/cierres', async (req, res) => {
   const cierres = await getCierres();
   res.json(cierres);
 });
+// USER CRUD ENDPOINTS
+app.post('/api/users', async (req, res) => {
+  try {
+    const saved = await saveUser(req.body);
+    res.json(saved);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/users/:id', async (req, res) => {
+  try {
+    const updated = await updateUser(req.params.id, req.body);
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/users/:id', async (req, res) => {
+  try {
+    const success = await deleteUser(req.params.id);
+    res.json({ success });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ROLE CRUD ENDPOINTS
+app.get('/api/roles', async (req, res) => {
+  try {
+    const roles = await getRoles();
+    res.json(roles);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/roles', async (req, res) => {
+  try {
+    const saved = await saveRole(req.body);
+    res.json(saved);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/roles/:id', async (req, res) => {
+  try {
+    const updated = await updateRole(req.params.id, req.body);
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/roles/:id', async (req, res) => {
+  try {
+    const success = await deleteRole(req.params.id);
+    res.json({ success });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DATABASE ADMINISTRATION ENDPOINTS
+app.post('/api/db/wipe', async (req, res) => {
+  try {
+    const success = await wipeDatabase(req.body);
+    res.json({ success });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/db/backup', async (req, res) => {
+  try {
+    const backup = await backupDatabase();
+    // Return file attachment or JSON
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename=winterpos_backup_${Date.now()}.json`);
+    res.json(backup);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/db/restore', async (req, res) => {
+  try {
+    const success = await restoreDatabase(req.body);
+    res.json({ success });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/db/backup/schedule', async (req, res) => {
+  try {
+    const { schedule } = req.body;
+    const sched = readJsonFile('backup_schedule.json', { schedule: 'Diario', lastBackup: '' });
+    sched.schedule = schedule;
+    writeJsonFile('backup_schedule.json', sched);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// AUTOMATIC BACKGROUND BACKUP SCHEDULER
+import fs from 'fs';
+import path from 'path';
+
+const BACKUPS_DIR = path.resolve('./data/backups');
+if (!fs.existsSync(BACKUPS_DIR)) {
+  fs.mkdirSync(BACKUPS_DIR, { recursive: true });
+}
+
+async function runBackupTask() {
+  try {
+    const sched = readJsonFile('backup_schedule.json', { schedule: 'Diario', lastBackup: '' });
+    if (sched.schedule === 'Desactivado') return;
+
+    const now = new Date();
+    let shouldBackup = false;
+
+    if (!sched.lastBackup) {
+      shouldBackup = true;
+    } else {
+      const last = new Date(sched.lastBackup);
+      const diffMs = now.getTime() - last.getTime();
+      const diffHours = diffMs / (1000 * 60 * 65); // approximate checking buffer
+
+      if (sched.schedule === 'Diario' && diffHours >= 23.5) {
+        shouldBackup = true;
+      } else if (sched.schedule === 'Semanal' && diffHours >= 24 * 7 - 0.5) {
+        shouldBackup = true;
+      } else if (sched.schedule === 'Mensual' && diffHours >= 24 * 30 - 0.5) {
+        shouldBackup = true;
+      }
+    }
+
+    if (shouldBackup) {
+      console.log(`⏱️ [Backups] Iniciando copia de seguridad automática programada (${sched.schedule})...`);
+      const backupData = await backupDatabase();
+      const fileName = `backup_auto_${now.toISOString().split('T')[0]}_${now.getTime()}.json`;
+      fs.writeFileSync(path.join(BACKUPS_DIR, fileName), JSON.stringify(backupData, null, 2), 'utf8');
+      
+      sched.lastBackup = now.toISOString();
+      writeJsonFile('backup_schedule.json', sched);
+      console.log(`✅ [Backups] Backup automático guardado correctamente: ${fileName}`);
+    }
+  } catch (err) {
+    console.error('⚠️ [Backups] Error en backup automático:', err.message);
+  }
+}
+
+// Check every 1 hour
+setInterval(runBackupTask, 3600000);
+// Check once at startup after 5 seconds
+setTimeout(runBackupTask, 5000);
 
 // Start Server
 app.listen(PORT, '0.0.0.0', () => {

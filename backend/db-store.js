@@ -48,6 +48,13 @@ try {
     ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS detalles_json TEXT;
     ALTER TABLE Clientes ADD COLUMN IF NOT EXISTS aplica_precio_costo BOOLEAN DEFAULT FALSE;
     ALTER TABLE Ventas_Detalle DROP CONSTRAINT IF EXISTS ventas_detalle_tipo_precio_check;
+    ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS clave VARCHAR(100) DEFAULT 'admin';
+    ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS permisos TEXT;
+    CREATE TABLE IF NOT EXISTS Roles (
+      id SERIAL PRIMARY KEY,
+      nombre VARCHAR(100) UNIQUE,
+      permisos TEXT
+    );
   `);
 
   // Alter enum type outside of main multi-statement query to prevent implicit transaction block errors in Postgres
@@ -71,7 +78,7 @@ function getJsonPath(filename) {
   return path.join(DATA_DIR, filename);
 }
 
-function readJsonFile(filename, defaultValue) {
+export function readJsonFile(filename, defaultValue) {
   const filePath = getJsonPath(filename);
   if (!fs.existsSync(filePath)) {
     fs.writeFileSync(filePath, JSON.stringify(defaultValue, null, 2), 'utf8');
@@ -86,7 +93,7 @@ function readJsonFile(filename, defaultValue) {
   }
 }
 
-function writeJsonFile(filename, data) {
+export function writeJsonFile(filename, data) {
   const filePath = getJsonPath(filename);
   try {
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
@@ -149,17 +156,47 @@ export async function saveCompanyConfig(config) {
 }
 
 export async function getUsers() {
+  const defaultPermsAdmin = {
+    caja: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+    inventario: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+    ventas: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+    clientes: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+    tasa: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+    config: { ver: true, crear: true, editar: true, eliminar: true, admin: true }
+  };
+  const defaultPermsUser = {
+    caja: { ver: true, crear: true, editar: true, eliminar: false, admin: false },
+    inventario: { ver: true, crear: false, editar: false, eliminar: false, admin: false },
+    ventas: { ver: true, crear: false, editar: false, eliminar: false, admin: false },
+    clientes: { ver: true, crear: true, editar: true, eliminar: false, admin: false },
+    tasa: { ver: true, crear: false, editar: false, eliminar: false, admin: false },
+    config: { ver: false, crear: false, editar: false, eliminar: false, admin: false }
+  };
+
   if (usePostgres) {
     try {
-      const res = await pool.query('SELECT id, usuario, nombre, rol, estado FROM Usuarios ORDER BY id ASC');
+      const res = await pool.query('SELECT id, usuario, nombre, rol, estado, clave, permisos FROM Usuarios ORDER BY id ASC');
       if (res.rowCount > 0) {
-        return res.rows;
+        return res.rows.map(r => ({
+          id: r.id,
+          usuario: r.usuario,
+          nombre: r.nombre,
+          rol: r.rol,
+          estado: r.estado,
+          clave: r.clave || 'admin',
+          permisos: r.permisos ? JSON.parse(r.permisos) : (r.rol === 'administrador' ? defaultPermsAdmin : defaultPermsUser)
+        }));
       }
     } catch (err) {
       console.error('Error en getUsers (Postgres):', err.message);
     }
   }
-  return readJsonFile('users.json', mockUsers);
+  const localUsers = readJsonFile('users.json', mockUsers);
+  return localUsers.map(u => ({
+    clave: 'admin',
+    permisos: u.permisos || (u.rol === 'administrador' ? defaultPermsAdmin : defaultPermsUser),
+    ...u
+  }));
 }
 
 export async function getProducts() {
@@ -499,6 +536,342 @@ export async function deleteClient(id) {
   return false;
 }
 
+
+// --- USER & ROLE CRUD & DATABASE MANAGEMENT FUNCTIONS ---
+
+export async function saveUser(u) {
+  const permsStr = JSON.stringify(u.permisos);
+  if (usePostgres) {
+    try {
+      const res = await pool.query(
+        'INSERT INTO Usuarios (usuario, nombre, rol, estado, clave, permisos) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+        [u.usuario, u.nombre, u.rol, u.estado || 'Activo', u.clave || 'admin', permsStr]
+      );
+      if (res.rowCount > 0) {
+        const r = res.rows[0];
+        return { ...r, permisos: r.permisos ? JSON.parse(r.permisos) : null };
+      }
+    } catch (err) {
+      console.error('Error en saveUser (Postgres):', err.message);
+    }
+  }
+  const users = readJsonFile('users.json', mockUsers);
+  const newUser = {
+    id: Date.now(),
+    usuario: u.usuario,
+    nombre: u.nombre,
+    rol: u.rol,
+    estado: u.estado || 'Activo',
+    clave: u.clave || 'admin',
+    permisos: u.permisos
+  };
+  users.push(newUser);
+  writeJsonFile('users.json', users);
+  return newUser;
+}
+
+export async function updateUser(id, u) {
+  const permsStr = JSON.stringify(u.permisos);
+  if (usePostgres) {
+    try {
+      const res = await pool.query(
+        'UPDATE Usuarios SET usuario = $1, nombre = $2, rol = $3, estado = $4, clave = $5, permisos = $6 WHERE id = $7 RETURNING *',
+        [u.usuario, u.nombre, u.rol, u.estado, u.clave, permsStr, id]
+      );
+      if (res.rowCount > 0) {
+        const r = res.rows[0];
+        return { ...r, permisos: r.permisos ? JSON.parse(r.permisos) : null };
+      }
+    } catch (err) {
+      console.error('Error en updateUser (Postgres):', err.message);
+    }
+  }
+  const users = readJsonFile('users.json', mockUsers);
+  const idx = users.findIndex(user => user.id === parseInt(id) || user.id === id);
+  if (idx !== -1) {
+    users[idx] = {
+      ...users[idx],
+      usuario: u.usuario,
+      nombre: u.nombre,
+      rol: u.rol,
+      estado: u.estado,
+      clave: u.clave,
+      permisos: u.permisos
+    };
+    writeJsonFile('users.json', users);
+    return users[idx];
+  }
+  return null;
+}
+
+export async function deleteUser(id) {
+  if (usePostgres) {
+    try {
+      const res = await pool.query('DELETE FROM Usuarios WHERE id = $1 RETURNING id', [id]);
+      return res.rowCount > 0;
+    } catch (err) {
+      console.error('Error en deleteUser (Postgres):', err.message);
+      throw err;
+    }
+  }
+  const users = readJsonFile('users.json', mockUsers);
+  const idx = users.findIndex(user => user.id === parseInt(id) || user.id === id);
+  if (idx !== -1) {
+    users.splice(idx, 1);
+    writeJsonFile('users.json', users);
+    return true;
+  }
+  return false;
+}
+
+export async function getRoles() {
+  const defaultRoles = [
+    {
+      id: 1,
+      nombre: "Administrador",
+      permisos: {
+        caja: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        inventario: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        ventas: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        clientes: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        tasa: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        config: { ver: true, crear: true, editar: true, eliminar: true, admin: true }
+      }
+    },
+    {
+      id: 2,
+      nombre: "Cajero / Vendedor",
+      permisos: {
+        caja: { ver: true, crear: true, editar: true, eliminar: false, admin: false },
+        inventario: { ver: true, crear: false, editar: false, eliminar: false, admin: false },
+        ventas: { ver: true, crear: false, editar: false, eliminar: false, admin: false },
+        clientes: { ver: true, crear: true, editar: true, eliminar: false, admin: false },
+        tasa: { ver: true, crear: false, editar: false, eliminar: false, admin: false },
+        config: { ver: false, crear: false, editar: false, eliminar: false, admin: false }
+      }
+    }
+  ];
+  if (usePostgres) {
+    try {
+      const res = await pool.query('SELECT id, nombre, permisos FROM Roles ORDER BY id ASC');
+      if (res.rowCount > 0) {
+        return res.rows.map(r => ({
+          id: r.id,
+          nombre: r.nombre,
+          permisos: r.permisos ? JSON.parse(r.permisos) : {}
+        }));
+      }
+    } catch (err) {
+      console.error('Error en getRoles (Postgres):', err.message);
+    }
+  }
+  return readJsonFile('roles.json', defaultRoles);
+}
+
+export async function saveRole(r) {
+  const permsStr = JSON.stringify(r.permisos);
+  if (usePostgres) {
+    try {
+      const res = await pool.query(
+        'INSERT INTO Roles (nombre, permisos) VALUES ($1, $2) RETURNING *',
+        [r.nombre, permsStr]
+      );
+      if (res.rowCount > 0) {
+        const row = res.rows[0];
+        return { id: row.id, nombre: row.nombre, permisos: row.permisos ? JSON.parse(row.permisos) : {} };
+      }
+    } catch (err) {
+      console.error('Error en saveRole (Postgres):', err.message);
+    }
+  }
+  const roles = await getRoles();
+  const newRole = {
+    id: Date.now(),
+    nombre: r.nombre,
+    permisos: r.permisos
+  };
+  roles.push(newRole);
+  writeJsonFile('roles.json', roles);
+  return newRole;
+}
+
+export async function updateRole(id, r) {
+  const permsStr = JSON.stringify(r.permisos);
+  if (usePostgres) {
+    try {
+      const res = await pool.query(
+        'UPDATE Roles SET nombre = $1, permisos = $2 WHERE id = $3 RETURNING *',
+        [r.nombre, permsStr, id]
+      );
+      if (res.rowCount > 0) {
+        const row = res.rows[0];
+        return { id: row.id, nombre: row.nombre, permisos: row.permisos ? JSON.parse(row.permisos) : {} };
+      }
+    } catch (err) {
+      console.error('Error en updateRole (Postgres):', err.message);
+    }
+  }
+  const roles = await getRoles();
+  const idx = roles.findIndex(role => role.id === parseInt(id) || role.id === id);
+  if (idx !== -1) {
+    roles[idx] = {
+      ...roles[idx],
+      nombre: r.nombre,
+      permisos: r.permisos
+    };
+    writeJsonFile('roles.json', roles);
+    return roles[idx];
+  }
+  return null;
+}
+
+export async function deleteRole(id) {
+  if (usePostgres) {
+    try {
+      const res = await pool.query('DELETE FROM Roles WHERE id = $1 RETURNING id', [id]);
+      return res.rowCount > 0;
+    } catch (err) {
+      console.error('Error en deleteRole (Postgres):', err.message);
+      throw err;
+    }
+  }
+  const roles = await getRoles();
+  const idx = roles.findIndex(role => role.id === parseInt(id) || role.id === id);
+  if (idx !== -1) {
+    roles.splice(idx, 1);
+    writeJsonFile('roles.json', roles);
+    return true;
+  }
+  return false;
+}
+
+export async function wipeDatabase(options) {
+  if (usePostgres) {
+    try {
+      if (options.wipeInventory) {
+        await pool.query('TRUNCATE TABLE Productos, Movimientos_Inventario, Historial_Precios RESTART IDENTITY CASCADE');
+      }
+      if (options.wipeSales) {
+        await pool.query('TRUNCATE TABLE Ventas, Ventas_Detalle, Abonos RESTART IDENTITY CASCADE');
+        // Reset Caja shifts
+        await pool.query('TRUNCATE TABLE Cajas_Apertura_Cierre RESTART IDENTITY CASCADE');
+      }
+      if (options.wipeClients) {
+        await pool.query("DELETE FROM Clientes WHERE cedula_rif <> 'V-00000000'");
+        await pool.query("UPDATE Clientes SET limite_credito = 0, credito_disponible = 0, saldo_pendiente = 0");
+      }
+      return true;
+    } catch (err) {
+      console.error('Error en wipeDatabase (Postgres):', err.message);
+      throw err;
+    }
+  }
+
+  // JSON Mode
+  if (options.wipeInventory) {
+    writeJsonFile('products.json', []);
+    writeJsonFile('movements.json', []);
+    writeJsonFile('price-history.json', []);
+  }
+  if (options.wipeSales) {
+    writeJsonFile('sales.json', []);
+    writeJsonFile('abonos.json', []);
+    writeJsonFile('cierres.json', []);
+    // Close active shift
+    fs.writeFileSync(path.join(DATA_DIR, 'caja_estado.json'), JSON.stringify({ abierta: false, id: null, monto_usd: 0, monto_ves: 0 }));
+  }
+  if (options.wipeClients) {
+    const genericClient = mockClients.filter(c => c.cedula_rif === 'V-00000000');
+    writeJsonFile('clients.json', genericClient);
+  }
+  return true;
+}
+
+export async function backupDatabase() {
+  return {
+    config: await getCompanyConfig(),
+    users: await getUsers(),
+    roles: await getRoles(),
+    products: await getProducts(),
+    clients: await getClients(),
+    sales: await getSales(),
+    abonos: await getAbonos(),
+    movements: await getMovements(),
+    tasas: await getTasaHistory(),
+    cierres: await getCierres(),
+    timestamp: new Date().toISOString()
+  };
+}
+
+export async function restoreDatabase(data) {
+  if (usePostgres) {
+    try {
+      // In Postgres, we'll restore by cleaning tables first, then inserting items
+      // This is a powerful backup utility. Let's make sure it handles clean-up and inserts
+      if (data.products) {
+        await pool.query('TRUNCATE TABLE Productos RESTART IDENTITY CASCADE');
+        for (const p of data.products) {
+          await pool.query(
+            `INSERT INTO Productos (id, codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, 
+             precio_costo_usd, precio_detalle_usd, precio_mayor_usd, cantidad_mayorista, exento_impuesto, imagen_url, 
+             estado, a_granel, fecha_vencimiento, porcentaje_impuesto) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+            [p.id, p.barcode, p.description, p.category, p.stock_actual, p.stock_minimo,
+             p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.cantidad_mayorista, p.exento_impuesto, p.imagen_url || '',
+             p.estado || 'Activo', p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
+          );
+        }
+      }
+      if (data.clients) {
+        await pool.query('TRUNCATE TABLE Clientes RESTART IDENTITY CASCADE');
+        for (const c of data.clients) {
+          await pool.query(
+            `INSERT INTO Clientes (id, cedula_rif, nombre, telefono, direccion, limite_credito, credito_disponible, porcentaje_descuento, estado, saldo_pendiente, aplica_precio_costo) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+            [c.id, c.cedula_rif, c.nombre, c.telefono || '', c.direccion || '', c.limite_credito, c.credito_disponible, c.porcentaje_descuento, c.estado || 'Activo', c.saldo_pendiente || 0, c.aplica_precio_costo || false]
+          );
+        }
+      }
+      if (data.users) {
+        await pool.query('TRUNCATE TABLE Usuarios RESTART IDENTITY CASCADE');
+        for (const u of data.users) {
+          await pool.query(
+            'INSERT INTO Usuarios (id, usuario, nombre, rol, estado, clave, permisos) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+            [u.id, u.usuario, u.nombre, u.rol, u.estado || 'Activo', u.clave || 'admin', JSON.stringify(u.permisos)]
+          );
+        }
+      }
+      if (data.roles) {
+        await pool.query('TRUNCATE TABLE Roles RESTART IDENTITY CASCADE');
+        for (const r of data.roles) {
+          await pool.query(
+            'INSERT INTO Roles (id, nombre, permisos) VALUES ($1, $2, $3)',
+            [r.id, r.nombre, JSON.stringify(r.permisos)]
+          );
+        }
+      }
+      // Config restore
+      if (data.config) {
+        await saveCompanyConfig(data.config);
+      }
+    } catch (err) {
+      console.error('Error al restaurar en Postgres:', err.message);
+    }
+  }
+
+  // Backup restore write files
+  if (data.config) writeJsonFile('config.json', data.config);
+  if (data.users) writeJsonFile('users.json', data.users);
+  if (data.roles) writeJsonFile('roles.json', data.roles);
+  if (data.products) writeJsonFile('products.json', data.products);
+  if (data.clients) writeJsonFile('clients.json', data.clients);
+  if (data.sales) writeJsonFile('sales.json', data.sales);
+  if (data.abonos) writeJsonFile('abonos.json', data.abonos);
+  if (data.movements) writeJsonFile('movements.json', data.movements);
+  if (data.tasas) writeJsonFile('tasas.json', data.tasas);
+  if (data.cierres) writeJsonFile('cierres.json', data.cierres);
+  return true;
+}
 
 export async function getTasaHistory() {
   if (usePostgres) {

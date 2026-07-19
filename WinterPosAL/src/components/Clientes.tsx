@@ -27,6 +27,12 @@ export default function Clientes({
   sales,
   abonos
 }: ClientesProps) {
+  const hasPermission = (action: 'ver' | 'crear' | 'editar' | 'eliminar') => {
+    if (_currentUser.rol.toLowerCase() === 'administrador') return true;
+    if (!_currentUser.permisos) return true; // fallback to true
+    return !!_currentUser.permisos.clientes?.[action];
+  };
+
   // Navigation / Tabs
   const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'historial' | 'ranking' | 'creditos'>('catalogo');
   
@@ -1113,53 +1119,59 @@ export default function Clientes({
             <div className="flex flex-col gap-2.5">
               
               {/* BUTTON 1: AGREGAR */}
-              <button
-                onClick={() => setShowAddModal(true)}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all active:scale-95"
-              >
-                <Plus className="w-4 h-4 bg-emerald-700/50 rounded-full p-0.5" />
-                <span>Agregar</span>
-              </button>
+              {hasPermission('crear') && (
+                <button
+                  onClick={() => setShowAddModal(true)}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all active:scale-95"
+                >
+                  <Plus className="w-4 h-4 bg-emerald-700/50 rounded-full p-0.5" />
+                  <span>Agregar</span>
+                </button>
+              )}
 
               {/* BUTTON 2: MODIFICAR */}
               <button
                 onClick={handleOpenEdit}
-                disabled={!selectedRowClient}
+                disabled={!selectedRowClient || !hasPermission('editar')}
                 className="w-full bg-cyan-600 hover:bg-cyan-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-350 text-white border border-cyan-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all enabled:active:scale-95 disabled:cursor-not-allowed"
-                title={!selectedRowClient ? "Seleccione un cliente en el Catálogo para modificar" : "Modificar cliente seleccionado"}
+                title={!selectedRowClient ? "Seleccione un cliente en el Catálogo para modificar" : !hasPermission('editar') ? "No posee permisos para modificar" : "Modificar cliente seleccionado"}
               >
                 <RefreshCw className="w-4 h-4 bg-cyan-750/50 disabled:bg-transparent rounded-full p-0.5" />
                 <span>Modificar</span>
               </button>
 
               {/* BUTTON 3: ELIMINAR */}
-              <button
-                onClick={handleDeleteClick}
-                disabled={!selectedRowClient || selectedRowClient.saldo_pendiente > 0.01}
-                className="w-full bg-red-655 hover:bg-red-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-350 text-white border border-red-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all enabled:active:scale-95 disabled:cursor-not-allowed"
-                title={
-                  !selectedRowClient 
-                    ? "Seleccione un cliente en el Catálogo para eliminar" 
-                    : selectedRowClient.saldo_pendiente > 0.01 
-                      ? "No se puede eliminar un cliente con deuda pendiente" 
-                      : "Eliminar cliente permanentemente"
-                }
-              >
-                <MinusCircle className="w-4 h-4 bg-red-700/50 disabled:bg-transparent rounded-full p-0.5" />
-                <span>Eliminar</span>
-              </button>
+              {hasPermission('eliminar') && (
+                <button
+                  onClick={handleDeleteClick}
+                  disabled={!selectedRowClient || selectedRowClient.saldo_pendiente > 0.01}
+                  className="w-full bg-red-655 hover:bg-red-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-350 text-white border border-red-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all enabled:active:scale-95 disabled:cursor-not-allowed"
+                  title={
+                    !selectedRowClient 
+                      ? "Seleccione un cliente en el Catálogo para eliminar" 
+                      : selectedRowClient.saldo_pendiente > 0.01 
+                        ? "No se puede eliminar un cliente con deuda pendiente" 
+                        : "Eliminar cliente permanentemente"
+                  }
+                >
+                  <MinusCircle className="w-4 h-4 bg-red-700/50 disabled:bg-transparent rounded-full p-0.5" />
+                  <span>Eliminar</span>
+                </button>
+              )}
 
               {/* BUTTON 4: ABONO */}
               <button
                 onClick={handleOpenAbono}
-                disabled={!selectedRowClient || selectedRowClient.saldo_pendiente <= 0.01}
+                disabled={!selectedRowClient || selectedRowClient.saldo_pendiente <= 0.01 || !hasPermission('editar')}
                 className="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-350 text-white border border-amber-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all enabled:active:scale-95 disabled:cursor-not-allowed"
                 title={
                   !selectedRowClient 
                     ? "Seleccione un cliente en el Catálogo para registrar abono" 
-                    : selectedRowClient.saldo_pendiente <= 0.01 
-                      ? "El cliente seleccionado no presenta deuda pendiente" 
-                      : "Registrar abono de crédito"
+                    : !hasPermission('editar')
+                      ? "No posee permisos para registrar abonos"
+                      : selectedRowClient.saldo_pendiente <= 0.01 
+                        ? "El cliente seleccionado no presenta deuda pendiente" 
+                        : "Registrar abono de crédito"
                 }
               >
                 <DollarSign className="w-4 h-4 bg-amber-750/50 disabled:bg-transparent rounded-full p-0.5" />
