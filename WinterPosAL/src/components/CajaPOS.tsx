@@ -163,14 +163,32 @@ export default function CajaPOS({
   const [showEntradaRapidaModal, setShowEntradaRapidaModal] = useState(false);
   const [entradaBarcode, setEntradaBarcode] = useState('');
   const [entradaQty, setEntradaQty] = useState('1');
+  const [matchedProduct, setMatchedProduct] = useState<Product | null>(null);
 
-  // Search product dynamically in Caja for Entrada Rápida
-  const matchedProduct = useMemo(() => {
-    if (entradaBarcode.trim() === "") return null;
-    return products.find(
-      p => p.barcode.toUpperCase() === entradaBarcode.trim().toUpperCase() || 
+  // Search autocomplete dropdown visibility for Entrada Rápida
+  const showEntradaDropdown = entradaBarcode.trim() !== "" && (!matchedProduct || matchedProduct.barcode !== entradaBarcode);
+
+  const filteredSearchProducts = useMemo(() => {
+    if (entradaBarcode.trim() === "") return [];
+    return products.filter(
+      p => p.description.toLowerCase().includes(entradaBarcode.toLowerCase()) ||
+           p.barcode.toLowerCase().includes(entradaBarcode.toLowerCase())
+    );
+  }, [entradaBarcode, products]);
+
+  // Automatically match if the entered text is an exact match for a barcode or id
+  useEffect(() => {
+    if (entradaBarcode.trim() === "") {
+      setMatchedProduct(null);
+      return;
+    }
+    const exactMatch = products.find(
+      p => p.barcode.toUpperCase() === entradaBarcode.trim().toUpperCase() ||
            p.id.toString() === entradaBarcode.trim()
-    ) || null;
+    );
+    if (exactMatch) {
+      setMatchedProduct(exactMatch);
+    }
   }, [entradaBarcode, products]);
 
   const handleExecuteEntradaRapida = async () => {
@@ -379,6 +397,8 @@ export default function CajaPOS({
         setShowMovementsModal(false);
         setShowCierreModal(false);
         setShowTicketModal(false);
+        setShowEntradaRapidaModal(false);
+        setShowOnHoldModal(false);
         setCierreResult(null);
       }
     };
@@ -1936,6 +1956,27 @@ export default function CajaPOS({
                   <span className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-slate-400">
                     <Search className="w-4 h-4" />
                   </span>
+
+                  {/* Autocomplete Dropdown for Entrada Rápida */}
+                  {showEntradaDropdown && filteredSearchProducts.length > 0 && (
+                    <div className="absolute left-0 right-0 top-10 bg-white border border-slate-250 rounded max-h-40 overflow-y-auto z-50 shadow-2xl divide-y divide-slate-100 font-sans">
+                      {filteredSearchProducts.map(p => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            setMatchedProduct(p);
+                            setEntradaBarcode(p.barcode);
+                          }}
+                          className="w-full text-left p-2.5 text-[11px] font-sans hover:bg-slate-100 text-slate-800 transition-all block"
+                        >
+                          <span className="font-mono text-slate-500 font-bold mr-1.5">{p.barcode}</span>
+                          <span>{p.description}</span>
+                          <span className="float-right text-slate-500 text-[9px] font-sans font-semibold">Stock: {p.stock_actual}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
