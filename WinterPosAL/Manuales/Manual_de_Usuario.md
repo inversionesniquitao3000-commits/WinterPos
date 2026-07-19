@@ -67,3 +67,13 @@ El módulo de clientes proporciona control sobre cuentas y deudas:
 3. **Indicadores de Resumen:** Justo arriba de la tabla se muestran en tiempo real:
    * **Clientes Registrados:** Cantidad total de clientes en el sistema.
    * **Total Saldo Pendiente:** Monto total acumulado de deudas pendientes por cobrar.
+
+---
+
+### MÓDULO 7: NUEVAS FUNCIONALIDADES Y MEJORAS DE USABILIDAD
+1. **Atajo F12 para Cobro Rápido:** En el módulo de caja (F1), al presionar la tecla **`F12`**, se abre directamente la interfaz de liquidación de cobro, permitiendo pasar de escanear productos a ingresar pagos de manera inmediata.
+2. **Cobrar con Ticket y Sin Imprimir:** Al liquidar una cuenta, dispone de dos botones de confirmación:
+   * **Cobrar Sin Imprimir (Por Defecto):** Registra la venta y cierra el modal de forma instantánea. Se activa de manera directa pulsando la tecla **`Enter`** cuando el pago está validado y completo.
+   * **Cobrar con Ticket:** Registra la venta y despliega la vista previa del comprobante fiscal en pantalla para su impresión física.
+3. **Modal de Ticket en Espera:** La acción de "Poner en Espera" presenta ahora una ventana estilizada dentro del sistema que permite registrar una nota o referencia al ticket temporal antes de vaciar el carrito.
+4. **Registrar Abonos desde la Caja:** El botón **"Abono Cliente"** en la sección de operaciones de caja abre un buscador interactivo en tiempo real. Permite buscar al cliente deudor por nombre o identificación, previsualizar su saldo pendiente y registrar el pago en dólares para abonar de manera directa, ingresando el dinero a la caja y actualizando el estatus del cliente automáticamente.

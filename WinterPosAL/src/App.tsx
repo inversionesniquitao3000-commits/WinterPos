@@ -8,6 +8,13 @@ import {
   InventoryMovement, PriceAdjustmentHistory, SaleItem, Payment,
   Sale, CierreCaja, Abono
 } from './types';
+
+// Helper to get local date and time string in YYYY-MM-DD HH:MM format
+export function getLocalISODateString(d = new Date()) {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 import LoginTerminal from './components/LoginTerminal';
 import CajaPOS from './components/CajaPOS';
 import Inventario from './components/Inventario';
@@ -364,7 +371,7 @@ export default function App() {
       id: Date.now(),
       tasa_cobro: newDia,
       tasa_vuelto: newVuelto,
-      fecha_actualizacion: new Date().toISOString().replace('T', ' ').substring(0, 16),
+      fecha_actualizacion: getLocalISODateString(),
       usuario: currentUser?.nombre || 'SISTEMA'
     };
     const saved = await postApiData('/tasas', newItem);
@@ -432,7 +439,7 @@ export default function App() {
     const multiplier = (type === 'Entrada' || type === 'Devolucion' || type === 'Entrada Rápida') ? 1 : -1;
     const newMov: InventoryMovement = {
       id: Date.now(),
-      date: new Date().toISOString().replace('T', ' ').substring(0, 16),
+      date: getLocalISODateString(),
       productCode: barcode,
       productDescription: description,
       type,
@@ -476,7 +483,7 @@ export default function App() {
       })
     );
 
-    const adjDate = new Date().toISOString().replace('T', ' ').substring(0, 16);
+    const adjDate = getLocalISODateString();
     const user = currentUser?.nombre || 'SISTEMA';
     const logs: PriceAdjustmentHistory[] = [];
 
@@ -556,7 +563,7 @@ export default function App() {
             nombre: c.nombre,
             cedula_rif: c.cedula_rif,
             monto: amountUSD,
-            fecha: new Date().toISOString().replace('T', ' ').substring(0, 16)
+            fecha: getLocalISODateString()
           };
           setAbonos(prev => [...prev, newAbonoLog]);
 
@@ -645,7 +652,7 @@ export default function App() {
     localStorage.setItem('pos_ventas_ves', '0');
     localStorage.setItem('pos_movimientos_usd', '0');
     localStorage.setItem('pos_movimientos_ves', '0');
-    localStorage.setItem('pos_apertura_fecha', new Date().toISOString().replace('T', ' ').substring(0, 16));
+    localStorage.setItem('pos_apertura_fecha', getLocalISODateString());
 
     await postApiData('/cajas/abrir', { usd, ves });
   };
@@ -691,9 +698,9 @@ export default function App() {
     
     const newCierre: CierreCaja = {
       id: Date.now(),
-      fecha: new Date().toISOString().replace('T', ' ').substring(0, 16),
-      fechaCierre: new Date().toISOString().replace('T', ' ').substring(0, 16),
-      fechaApertura: localStorage.getItem('pos_apertura_fecha') || new Date().toISOString().replace('T', ' ').substring(0, 16),
+      fecha: getLocalISODateString(),
+      fechaCierre: getLocalISODateString(),
+      fechaApertura: localStorage.getItem('pos_apertura_fecha') || getLocalISODateString(),
       usuario: currentUser?.nombre || 'SISTEMA',
       aperturaUsd: montoAperturaUsd,
       aperturaVes: montoAperturaVes,
@@ -806,7 +813,7 @@ export default function App() {
           
           const newMov: InventoryMovement = {
             id: Math.random(),
-            date: new Date().toISOString().replace('T', ' ').substring(0, 16),
+            date: getLocalISODateString(),
             productCode: p.barcode,
             productDescription: p.description,
             type: 'Venta',
@@ -844,7 +851,7 @@ export default function App() {
     // 3. Log sale to processed list
     const newSaleObj: Sale = {
       ...sale,
-      fecha: new Date().toISOString().replace('T', ' ').substring(0, 16),
+      fecha: getLocalISODateString(),
       usuario: currentUser?.nombre || 'SISTEMA'
     };
     setSales(prev => [...prev, newSaleObj]);

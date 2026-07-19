@@ -16,6 +16,12 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
+// Local timezone Date/Time formatter helper
+function getLocalISODateString(d = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 let usePostgres = false;
 let pool = null;
 
@@ -312,7 +318,7 @@ export async function registerAbono(clientId, amountUSD) {
           nombre: clientNombre,
           cedula_rif: clientDoc,
           monto: amountUSD,
-          fecha: new Date().toISOString().replace('T', ' ').substring(0, 16)
+          fecha: getLocalISODateString()
         });
         writeJsonFile('abonos.json', abonos);
         return true;
@@ -338,7 +344,7 @@ export async function registerAbono(clientId, amountUSD) {
         nombre: clientNombre,
         cedula_rif: clientDoc,
         monto: amountUSD,
-        fecha: new Date().toISOString().replace('T', ' ').substring(0, 16)
+        fecha: getLocalISODateString()
       });
       writeJsonFile('abonos.json', abonos);
       return true;
@@ -477,7 +483,7 @@ export async function getTasaHistory() {
         id: r.id,
         tasa_cobro: parseFloat(r.tasa_cobro),
         tasa_vuelto: parseFloat(r.tasa_vuelto),
-        fecha_actualizacion: new Date(r.fecha_actualizacion).toISOString().replace('T', ' ').substring(0, 16),
+        fecha_actualizacion: getLocalISODateString(new Date(r.fecha_actualizacion)),
         usuario: r.usuario || 'SISTEMA'
       }));
     } catch (err) {
@@ -502,7 +508,7 @@ export async function saveTasa(t) {
       return { 
         ...t, 
         id: res.rows[0].id,
-        fecha_actualizacion: new Date(res.rows[0].fecha_actualizacion).toISOString().replace('T', ' ').substring(0, 16)
+        fecha_actualizacion: getLocalISODateString(new Date(res.rows[0].fecha_actualizacion))
       };
     } catch (err) {
       console.error('Error en saveTasa (Postgres):', err.message);
@@ -528,7 +534,7 @@ export async function getMovements() {
       `);
       return res.rows.map(r => ({
         id: r.id,
-        date: new Date(r.date).toISOString().replace('T', ' ').substring(0, 16),
+        date: getLocalISODateString(new Date(r.date)),
         productCode: r.productCode,
         productDescription: r.productDescription,
         type: r.tipo,
@@ -563,7 +569,7 @@ export async function saveMovement(m) {
         return {
           ...m,
           id: res.rows[0].id,
-          date: new Date(res.rows[0].fecha).toISOString().replace('T', ' ').substring(0, 16)
+          date: getLocalISODateString(new Date(res.rows[0].fecha))
         };
       }
     } catch (err) {
@@ -591,7 +597,7 @@ export async function getPriceHistory() {
       `);
       return res.rows.map(r => ({
         id: r.id,
-        date: new Date(r.fecha).toISOString().replace('T', ' ').substring(0, 16),
+        date: getLocalISODateString(new Date(r.fecha)),
         productCode: r.productCode,
         productDescription: r.productDescription,
         priceType: r.priceType,
@@ -625,7 +631,7 @@ export async function savePriceHistory(h) {
         return {
           ...h,
           id: res.rows[0].id,
-          date: new Date(res.rows[0].fecha).toISOString().replace('T', ' ').substring(0, 16)
+          date: getLocalISODateString(new Date(res.rows[0].fecha))
         };
       }
     } catch (err) {
@@ -675,7 +681,7 @@ export async function getSales() {
         salesList.push({
           id: row.id,
           factura_nro: row.factura_nro,
-          fecha: new Date(row.fecha).toISOString().replace('T', ' ').substring(0, 16),
+          fecha: getLocalISODateString(new Date(row.fecha)),
           client: {
             cedula_rif: row.clientDoc,
             nombre: row.clientName
@@ -788,7 +794,7 @@ export async function saveSale(s) {
       return {
         ...s,
         id: saleId,
-        fecha: new Date(saleRes.rows[0].fecha).toISOString().replace('T', ' ').substring(0, 16)
+        fecha: getLocalISODateString(new Date(saleRes.rows[0].fecha))
       };
     } catch (err) {
       await clientTarget.query('ROLLBACK');
@@ -801,7 +807,7 @@ export async function saveSale(s) {
   const newSale = {
     ...s,
     id: Date.now(),
-    fecha: new Date().toISOString().replace('T', ' ').substring(0, 16)
+    fecha: getLocalISODateString()
   };
   sales.push(newSale);
   writeJsonFile('sales.json', sales);
@@ -831,8 +837,8 @@ export async function getCierres() {
         }
         return {
           id: r.id,
-          fechaApertura: new Date(r.fecha_apertura).toISOString().replace('T', ' ').substring(0, 16),
-          fechaCierre: r.fecha_cierre ? new Date(r.fecha_cierre).toISOString().replace('T', ' ').substring(0, 16) : null,
+          fechaApertura: getLocalISODateString(new Date(r.fecha_apertura)),
+          fechaCierre: r.fecha_cierre ? getLocalISODateString(new Date(r.fecha_cierre)) : null,
           aperturaUsd: parseFloat(r.monto_apertura_usd),
           aperturaVes: parseFloat(r.monto_apertura_ves),
           realUsd: r.monto_cierre_real_usd ? parseFloat(r.monto_cierre_real_usd) : 0,
@@ -879,7 +885,7 @@ export async function abrirCaja(usd, ves) {
   activeCheck.movimientosUsd = 0;
   activeCheck.movimientosVes = 0;
   activeCheck.movimientos = [];
-  activeCheck.fechaApertura = new Date().toISOString().replace('T', ' ').substring(0, 16);
+  activeCheck.fechaApertura = getLocalISODateString();
   writeJsonFile('caja_activa.json', activeCheck);
   return Date.now();
 }
@@ -930,8 +936,8 @@ export async function cerrarCaja(cierre) {
   const newCierreObj = {
     ...cierre,
     id: cierre.id || Date.now(),
-    fechaApertura: activeCheck.fechaApertura || cierre.fechaApertura || new Date().toISOString().replace('T', ' ').substring(0, 16),
-    fechaCierre: new Date().toISOString().replace('T', ' ').substring(0, 16),
+    fechaApertura: activeCheck.fechaApertura || cierre.fechaApertura || getLocalISODateString(),
+    fechaCierre: getLocalISODateString(),
     aperturaUsd: activeCheck.aperturaUsd ?? cierre.aperturaUsd ?? 0,
     aperturaVes: activeCheck.aperturaVes ?? cierre.aperturaVes ?? 0,
     expectedUsd: cierre.expectedUsd ?? (cierre.dineroEnCajaExpected ?? 0),
@@ -1010,7 +1016,7 @@ export async function getCajaEstado() {
         shiftSalesList.push({
           id: row.id,
           factura_nro: row.factura_nro,
-          fecha: new Date(row.fecha).toISOString().replace('T', ' ').substring(0, 16),
+          fecha: getLocalISODateString(new Date(row.fecha)),
           client: {
             cedula_rif: row.clientDoc,
             nombre: row.clientName
@@ -1067,7 +1073,7 @@ export async function getCajaEstado() {
         abierta: true,
         aperturaUsd: parseFloat(caja.monto_apertura_usd),
         aperturaVes: parseFloat(caja.monto_apertura_ves),
-        fechaApertura: new Date(caja.fecha_apertura).toISOString().replace('T', ' ').substring(0, 16),
+        fechaApertura: getLocalISODateString(new Date(caja.fecha_apertura)),
         ventasUsd: salesCashUsd,
         ventasVes: salesCashVes,
         movimientosUsd: totalMovUsd,

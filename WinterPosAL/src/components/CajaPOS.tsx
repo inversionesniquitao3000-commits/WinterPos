@@ -393,6 +393,13 @@ export default function CajaPOS({
   const [abonoSearchTerm, setAbonoSearchTerm] = useState('');
   const abonoModalRef = useRef<HTMLDivElement>(null);
 
+  // Toast notifications state
+  const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const showToast = (text: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ text, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
   // Auto-focus on state changes or mounting
   useEffect(() => {
     if (cajaAbierta && !showAperturaModal && !showCheckoutModal && !showCierreModal && !showMovementsModal && !showTicketModal) {
@@ -1686,7 +1693,7 @@ export default function CajaPOS({
 
           onRegisterAbono(abonoClient.id, val);
           setShowCajaAbonoModal(false);
-          alert('Abono registrado con éxito de forma segura.');
+          showToast('Abono registrado con éxito de forma segura.', 'success');
         };
 
         return (
@@ -2421,6 +2428,24 @@ export default function CajaPOS({
 
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Toast Alert overlay */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-[100] animate-fade-in font-mono">
+          <div className={`flex items-center gap-3 px-5 py-4 rounded-xl border shadow-2xl text-xs font-bold font-sans ${
+            toast.type === 'success' ? 'bg-emerald-50 border-emerald-250 text-emerald-800 ring-4 ring-emerald-500/10' :
+            toast.type === 'error' ? 'bg-red-55 border-red-250 text-red-800 ring-4 ring-red-500/10' :
+            'bg-sky-50 border-sky-250 text-sky-850 ring-4 ring-sky-500/10'
+          }`}>
+            {toast.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 animate-bounce" />
+            ) : (
+              <AlertCircle className="w-5 h-5 text-red-500 animate-bounce" />
+            )}
+            <span>{toast.text}</span>
           </div>
         </div>
       )}
