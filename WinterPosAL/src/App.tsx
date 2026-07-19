@@ -386,7 +386,7 @@ export default function App() {
 
   const handleUpdateProductStock = async (
     prodId: number,
-    type: 'Entrada' | 'Salida' | 'Merma' | 'Devolucion',
+    type: 'Entrada' | 'Salida' | 'Merma' | 'Devolucion' | 'Entrada Rápida',
     qty: number,
     reason: string
   ) => {
@@ -397,7 +397,7 @@ export default function App() {
     setProducts(prev =>
       prev.map(p => {
         if (p.id === prodId) {
-          const multiplier = (type === 'Entrada' || type === 'Devolucion') ? 1 : -1;
+          const multiplier = (type === 'Entrada' || type === 'Devolucion' || type === 'Entrada Rápida') ? 1 : -1;
           nextStock = Math.max(0, p.stock_actual + qty * multiplier);
           barcode = p.barcode;
           description = p.description;
@@ -410,7 +410,7 @@ export default function App() {
       })
     );
 
-    const multiplier = (type === 'Entrada' || type === 'Devolucion') ? 1 : -1;
+    const multiplier = (type === 'Entrada' || type === 'Devolucion' || type === 'Entrada Rápida') ? 1 : -1;
     const newMov: InventoryMovement = {
       id: Date.now(),
       date: new Date().toISOString().replace('T', ' ').substring(0, 16),
@@ -1002,6 +1002,7 @@ export default function App() {
               shiftAbonosUsd={shiftAbonosUsd}
               shiftEntradasUsd={shiftEntradasUsd}
               shiftSalidasUsd={shiftSalidasUsd}
+              onUpdateProductStock={handleUpdateProductStock}
             />
           )}
 

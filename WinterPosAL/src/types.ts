@@ -68,7 +68,7 @@ export interface InventoryMovement {
   date: string;
   productCode: string;
   productDescription: string;
-  type: 'Entrada' | 'Salida' | 'Merma' | 'Venta' | 'Devolucion';
+  type: 'Entrada' | 'Salida' | 'Merma' | 'Venta' | 'Devolucion' | 'Entrada Rápida';
   qty: number;
   stock_anterior: number;
   stock_posterior: number;

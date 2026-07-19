@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Product, Client, User, CompanyConfig, SaleItem, Payment, Sale, CierreCaja } from '../types';
 import { 
   ShoppingBag, Search, Trash2, 
   Printer, XCircle, ArrowUpRight, 
   Calculator, CheckCircle2, Ticket,
-  Clock, ListOrdered
+  Clock, ListOrdered, Plus, AlertCircle
 } from 'lucide-react';
 import { formatNumberToWordsUSD } from '../utils';
 
@@ -63,6 +63,12 @@ interface CajaPOSProps {
   shiftAbonosUsd: number;
   shiftEntradasUsd: number;
   shiftSalidasUsd: number;
+  onUpdateProductStock: (
+    prodId: number,
+    type: 'Entrada' | 'Salida' | 'Merma' | 'Devolucion' | 'Entrada Rápida',
+    qty: number,
+    reason: string
+  ) => Promise<void>;
 }
 
 export default function CajaPOS({
@@ -82,7 +88,8 @@ export default function CajaPOS({
   shiftSales,
   shiftAbonosUsd,
   shiftEntradasUsd,
-  shiftSalidasUsd
+  shiftSalidasUsd,
+  onUpdateProductStock
 }: CajaPOSProps) {
   // Opening/Closing state
   const [showAperturaModal, setShowAperturaModal] = useState(!cajaAbierta);
@@ -151,6 +158,44 @@ export default function CajaPOS({
   });
 
   const [showOnHoldModal, setShowOnHoldModal] = useState(false);
+
+  // Entrada Rápida states
+  const [showEntradaRapidaModal, setShowEntradaRapidaModal] = useState(false);
+  const [entradaBarcode, setEntradaBarcode] = useState('');
+  const [entradaQty, setEntradaQty] = useState('1');
+
+  // Search product dynamically in Caja for Entrada Rápida
+  const matchedProduct = useMemo(() => {
+    if (entradaBarcode.trim() === "") return null;
+    return products.find(
+      p => p.barcode.toUpperCase() === entradaBarcode.trim().toUpperCase() || 
+           p.id.toString() === entradaBarcode.trim()
+    ) || null;
+  }, [entradaBarcode, products]);
+
+  const handleExecuteEntradaRapida = async () => {
+    if (!matchedProduct) return;
+    const qty = parseFloat(entradaQty);
+    if (isNaN(qty) || qty <= 0) {
+      alert("Por favor ingrese una cantidad válida mayor a 0.");
+      return;
+    }
+
+    try {
+      await onUpdateProductStock(
+        matchedProduct.id, 
+        'Entrada Rápida', 
+        qty, 
+        'Entrada Rápida desde Caja POS'
+      );
+      alert(`Entrada Rápida procesada con éxito: Se añadieron ${qty} unidades a "${matchedProduct.description}".`);
+      setEntradaBarcode('');
+      setEntradaQty('1');
+    } catch (e) {
+      console.error(e);
+      alert("Ocurrió un error al registrar la entrada rápida de inventario.");
+    }
+  };
 
   // Persist POS state to localStorage
   useEffect(() => {
@@ -984,6 +1029,19 @@ export default function CajaPOS({
           >
             <XCircle className="w-4 h-4 text-red-500" />
             Cierre de Caja
+          </button>
+
+          <button
+            onClick={() => {
+              setEntradaBarcode('');
+              setEntradaQty('1');
+              setShowEntradaRapidaModal(true);
+            }}
+            disabled={!cajaAbierta}
+            className="col-span-2 flex items-center justify-center p-3 bg-white border border-slate-200 rounded-lg hover:border-slate-350 hover:bg-slate-50 transition-all gap-1.5 text-center text-[11px] font-sans font-bold text-slate-650 shadow-sm disabled:opacity-40"
+          >
+            <Plus className="w-4 h-4 text-sky-500" />
+            Entrada Rápida
           </button>
 
         </div>
@@ -1845,6 +1903,103 @@ export default function CajaPOS({
                 Cerrar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ENTRADA RÁPIDA */}
+      {showEntradaRapidaModal && (
+        <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-slate-800 animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-sm shadow-2xl p-6 space-y-4">
+            
+            <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                <Plus className="w-4 h-4 text-sky-500 bg-sky-50 rounded-full p-0.5" />
+                ENTRADA RÁPIDA (INVENTARIO)
+              </h3>
+              <button onClick={() => setShowEntradaRapidaModal(false)} className="text-slate-400 hover:text-slate-705">✕</button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs text-slate-500 block mb-1 font-sans font-bold">Clave (Código o Barras):</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    placeholder="Escriba código..."
+                    value={entradaBarcode}
+                    onChange={(e) => setEntradaBarcode(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-350 rounded pl-3 pr-9 py-2 text-xs text-slate-800 focus:bg-white focus:border-slate-500 focus:outline-none"
+                    autoFocus
+                  />
+                  <span className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-slate-400">
+                    <Search className="w-4 h-4" />
+                  </span>
+                </div>
+              </div>
+
+              {/* PRODUCT INFORMATION DISPLAY AREA */}
+              <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 min-h-[70px] flex flex-col justify-center text-xs">
+                {entradaBarcode.trim() === "" ? (
+                  <div className="text-center text-slate-400 font-sans italic">
+                    Ingrese el código del producto para buscarlo.
+                  </div>
+                ) : matchedProduct ? (
+                  <div className="space-y-1">
+                    <div className="font-extrabold text-slate-800 uppercase font-sans">{matchedProduct.description}</div>
+                    <div className="text-[10px] text-slate-500">Categoría: {matchedProduct.category || 'N/A'}</div>
+                    <div className="text-[11px] font-bold text-slate-700 flex justify-between border-t border-slate-200 pt-1 mt-1 font-sans">
+                      <span>Existencia Actual:</span>
+                      <span className="font-mono text-blue-600 font-extrabold">{matchedProduct.stock_actual}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center text-red-500 font-bold font-sans flex items-center justify-center gap-1">
+                    <AlertCircle className="w-4 h-4" />
+                    <span>El producto no está registrado en el sistema.</span>
+                  </div>
+                )}
+              </div>
+
+              {/* QUANTITY INPUT */}
+              <div>
+                <label className="text-xs text-slate-500 block mb-1 font-sans font-bold">Cantidad Entrada Inventario:</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  required
+                  placeholder="0.00"
+                  value={entradaQty}
+                  onChange={(e) => setEntradaQty(e.target.value)}
+                  disabled={!matchedProduct}
+                  className="w-full bg-slate-50 border border-slate-350 rounded p-2 text-xs font-bold font-mono text-center text-slate-800 focus:bg-white focus:border-slate-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+              </div>
+
+              {/* ACTION BUTTONS */}
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEntradaRapidaModal(false)}
+                  className="w-1/3 bg-slate-100 border border-slate-250 text-slate-655 py-2.5 rounded font-sans text-xs hover:bg-slate-200 transition-all"
+                >
+                  Regresar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExecuteEntradaRapida}
+                  disabled={!matchedProduct}
+                  className="w-2/3 bg-winter-blueBtn hover:bg-winter-blueBtnHover disabled:bg-slate-300 disabled:cursor-not-allowed text-white py-2.5 rounded font-bold font-sans text-xs tracking-wider transition-all flex items-center justify-center gap-1"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  AGREGAR
+                </button>
+              </div>
+
+            </div>
+
           </div>
         </div>
       )}
