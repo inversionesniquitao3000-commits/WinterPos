@@ -400,6 +400,12 @@ export default function CajaPOS({
   const [bulkQtyVal, setBulkQtyVal] = useState('1.000');
   const bulkModalRef = useRef<HTMLDivElement>(null);
 
+  // Quantity edit modal state
+  const [showQtyEditModal, setShowQtyEditModal] = useState(false);
+  const [qtyEditItem, setQtyEditItem] = useState<SaleItem | null>(null);
+  const [qtyEditVal, setQtyEditVal] = useState('');
+  const qtyEditModalRef = useRef<HTMLDivElement>(null);
+
   // Toast notifications state
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
   const showToast = (text: string, type: 'success' | 'error' | 'info' = 'success') => {
@@ -432,6 +438,7 @@ export default function CajaPOS({
         setShowHoldModal(false);
         setShowCajaAbonoModal(false);
         setShowBulkModal(false);
+        setShowQtyEditModal(false);
         setCierreResult(null);
       }
     };
@@ -517,6 +524,38 @@ export default function CajaPOS({
     window.addEventListener('keydown', handleF12Key);
     return () => window.removeEventListener('keydown', handleF12Key);
   }, [cajaAbierta, saleItems, showCheckoutModal]);
+
+  // Focus Trap for Quantity Edit Modal
+  useEffect(() => {
+    if (!showQtyEditModal) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Tab') {
+        if (!qtyEditModalRef.current) return;
+        const focusable = qtyEditModalRef.current.querySelectorAll<HTMLElement>(
+          'input:not([disabled]), button:not([disabled])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            last.focus();
+            e.preventDefault();
+          }
+        } else {
+          if (document.activeElement === last) {
+            first.focus();
+            e.preventDefault();
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showQtyEditModal]);
 
   // Focus Trap for Bulk Modal
   useEffect(() => {
@@ -639,6 +678,30 @@ export default function CajaPOS({
     executeAddProduct(bulkProduct, parsed);
     setShowBulkModal(false);
     setBulkProduct(null);
+  };
+
+  const handleConfirmQtyEdit = () => {
+    if (!qtyEditItem) return;
+    const parsed = parseFloat(qtyEditVal);
+    if (isNaN(parsed) || parsed <= 0) {
+      showToast("Cantidad ingresada no es válida.", "error");
+      return;
+    }
+
+    // If unit item, ensure it's integer
+    if (!qtyEditItem.product.a_granel && !Number.isInteger(parsed)) {
+      showToast("Este producto se vende por unidades enteras.", "error");
+      return;
+    }
+
+    if (parsed > qtyEditItem.product.stock_actual) {
+      showToast(`No hay disponibilidad suficiente. Stock máximo disponible: ${qtyEditItem.product.stock_actual}`, "error");
+      return;
+    }
+
+    handleUpdateItemQty(qtyEditItem.product.id, parsed);
+    setShowQtyEditModal(false);
+    setQtyEditItem(null);
   };
 
   const handleUpdateItemQty = (prodId: number, nextQty: number) => {
@@ -1154,17 +1217,11 @@ export default function CajaPOS({
                             <span 
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (item.product.a_granel) {
-                                  const val = prompt(`Modificar cantidad en KG para "${item.product.description}":`, item.qty.toString());
-                                  if (val !== null) {
-                                    const parsed = parseFloat(val);
-                                    if (!isNaN(parsed) && parsed > 0) {
-                                      handleUpdateItemQty(item.product.id, parsed);
-                                    }
-                                  }
-                                }
+                                setQtyEditItem(item);
+                                setQtyEditVal(item.product.a_granel ? item.qty.toFixed(3) : item.qty.toString());
+                                setShowQtyEditModal(true);
                               }}
-                              className={`font-bold text-center text-slate-800 text-sm ${item.product.a_granel ? 'cursor-pointer underline decoration-dotted text-blue-600 hover:text-blue-800 px-1' : 'w-8'}`}
+                              className="font-bold text-center text-slate-800 text-sm cursor-pointer underline decoration-dotted text-blue-600 hover:text-blue-800 px-1 min-w-[32px] inline-block"
                             >
                               {item.product.a_granel ? item.qty.toFixed(3) : item.qty}
                             </span>
@@ -1684,6 +1741,72 @@ export default function CajaPOS({
 
               </div>
 
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: EDITAR CANTIDAD DE ITEM */}
+      {showQtyEditModal && qtyEditItem && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-mono text-slate-800">
+          <div ref={qtyEditModalRef} className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-sm shadow-2xl flex flex-col">
+            
+            <div className="bg-slate-100 border-b border-slate-250 px-5 py-3.5 flex justify-between items-center">
+              <span className="text-xs font-black text-slate-700 tracking-widest uppercase flex items-center gap-1.5 font-sans">
+                <Calculator className="w-4 h-4 text-sky-500" />
+                Modificar Cantidad
+              </span>
+              <button onClick={() => setShowQtyEditModal(false)} className="text-slate-400 hover:text-slate-700 focus:ring-2 focus:ring-sky-500 focus:outline-none p-1 rounded">✕</button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="bg-sky-50 border border-sky-100 p-3 rounded-lg text-xs leading-tight font-sans">
+                <div className="font-extrabold uppercase text-sky-900 mb-0.5">{qtyEditItem.product.description}</div>
+                <div className="font-mono text-slate-500 text-[10px] font-bold">Código: {qtyEditItem.product.barcode}</div>
+                <div className="flex justify-between font-mono font-bold mt-2">
+                  <span>Existencia disponible:</span>
+                  <span className="text-sky-700">{qtyEditItem.product.stock_actual} {qtyEditItem.product.a_granel ? 'kg' : 'und'}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] text-slate-500 block mb-1.5 font-sans font-bold uppercase tracking-wider">
+                  Ingrese nueva cantidad ({qtyEditItem.product.a_granel ? 'KG / Gramos' : 'Unidades'}):
+                </label>
+                <input
+                  type="number"
+                  step={qtyEditItem.product.a_granel ? "0.001" : "1"}
+                  value={qtyEditVal}
+                  onChange={(e) => setQtyEditVal(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono focus:bg-white focus:ring-2 focus:ring-sky-500 focus:border-transparent focus:outline-none text-center"
+                  autoFocus
+                  onFocus={(e) => e.target.select()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleConfirmQtyEdit();
+                    }
+                    if (e.key === 'Escape') {
+                      setShowQtyEditModal(false);
+                    }
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="bg-slate-50 px-5 py-3.5 border-t border-slate-200 flex justify-end gap-2.5">
+              <button
+                onClick={() => setShowQtyEditModal(false)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold font-sans transition-all active:scale-95 focus:ring-2 focus:ring-slate-400 focus:outline-none"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmQtyEdit}
+                className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-bold font-sans transition-all active:scale-95 focus:ring-2 focus:ring-sky-500 focus:outline-none"
+              >
+                Aceptar
+              </button>
             </div>
 
           </div>
