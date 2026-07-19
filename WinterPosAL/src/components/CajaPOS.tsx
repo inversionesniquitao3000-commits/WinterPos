@@ -394,6 +394,12 @@ export default function CajaPOS({
   const [abonoSearchTerm, setAbonoSearchTerm] = useState('');
   const abonoModalRef = useRef<HTMLDivElement>(null);
 
+  // Bulk / Granel product modal state
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkProduct, setBulkProduct] = useState<Product | null>(null);
+  const [bulkQtyVal, setBulkQtyVal] = useState('1.000');
+  const bulkModalRef = useRef<HTMLDivElement>(null);
+
   // Toast notifications state
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
   const showToast = (text: string, type: 'success' | 'error' | 'info' = 'success') => {
@@ -425,6 +431,7 @@ export default function CajaPOS({
         setShowEntradaRapidaModal(false);
         setShowHoldModal(false);
         setShowCajaAbonoModal(false);
+        setShowBulkModal(false);
         setCierreResult(null);
       }
     };
@@ -511,6 +518,38 @@ export default function CajaPOS({
     return () => window.removeEventListener('keydown', handleF12Key);
   }, [cajaAbierta, saleItems, showCheckoutModal]);
 
+  // Focus Trap for Bulk Modal
+  useEffect(() => {
+    if (!showBulkModal) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Tab') {
+        if (!bulkModalRef.current) return;
+        const focusable = bulkModalRef.current.querySelectorAll<HTMLElement>(
+          'input:not([disabled]), button:not([disabled])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            last.focus();
+            e.preventDefault();
+          }
+        } else {
+          if (document.activeElement === last) {
+            first.focus();
+            e.preventDefault();
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showBulkModal]);
+
   // Sync selected seller with currentUser
   useEffect(() => {
     setSelectedSeller(currentUser.nombre);
@@ -527,38 +566,19 @@ export default function CajaPOS({
   const totalUSD = Math.max(0, subtotalUSD - discountAmountUSD);
   const totalVES = totalUSD * tasaDia;
 
-  const handleAddProduct = (prod: Product, qty: number = 1) => {
-    if (!cajaAbierta) {
-      alert('Debe abrir la caja registradora para poder realizar ventas.');
-      return;
-    }
-    
-    // Strict block: do not add to sales list if there is no stock
-    if (prod.stock_actual <= 0) {
-      alert(`Sin Existencias: El producto "${prod.description}" no cuenta con stock disponible en almacén.`);
-      return;
-    }
-
-    let finalQty = qty;
-    if (prod.a_granel) {
-      const inputStr = prompt(`Ingrese la cantidad en KG para el producto a granel "${prod.description}" (Stock disponible: ${prod.stock_actual} uds/kg):`, "1.000");
-      if (inputStr === null) return; // User cancelled
-      const parsed = parseFloat(inputStr);
-      if (isNaN(parsed) || parsed <= 0) {
-        alert("Cantidad ingresada no es válida.");
-        return;
-      }
-      finalQty = parsed;
-    }
-
+  const executeAddProduct = (prod: Product, finalQty: number) => {
     setSaleItems(prev => {
       const existing = prev.find(item => item.product.id === prod.id);
+      const itemUnit = prod.a_granel ? 'kg' : 'und';
+      const formattedQty = prod.a_granel ? finalQty.toFixed(3) : finalQty.toString();
+
       if (existing) {
         const nextQty = existing.qty + finalQty;
         if (nextQty > prod.stock_actual) {
-          alert(`No hay disponibilidad suficiente. Stock máximo disponible: ${prod.stock_actual}`);
+          showToast(`No hay disponibilidad suficiente. Stock máximo disponible: ${prod.stock_actual}`, 'error');
           return prev;
         }
+        showToast(`Se agregaron ${formattedQty} ${itemUnit} de "${prod.description}" al carrito.`, 'success');
         return prev.map(item =>
           item.product.id === prod.id
             ? { ...item, qty: nextQty, totalUSD: nextQty * item.priceUSD }
@@ -566,15 +586,59 @@ export default function CajaPOS({
         );
       } else {
         const priceUSD = prod.precio_detalle_usd;
+        showToast(`Se agregó "${prod.description}" (${formattedQty} ${itemUnit}) al carrito.`, 'success');
         return [...prev, {
           product: prod,
           qty: finalQty,
           priceType: 'Detalle',
           priceUSD,
-          totalUSD: priceUSD * finalQty
+          totalUSD: finalQty * priceUSD
         }];
       }
     });
+  };
+
+  const handleAddProduct = (prod: Product, qty: number = 1) => {
+    if (!cajaAbierta) {
+      showToast('Debe abrir la caja registradora para poder realizar ventas.', 'error');
+      return;
+    }
+    
+    // Strict block: do not add to sales list if there is no stock
+    if (prod.stock_actual <= 0) {
+      showToast(`Sin Existencias: El producto "${prod.description}" no cuenta con stock disponible en almacén.`, 'error');
+      return;
+    }
+
+    if (prod.a_granel) {
+      setBulkProduct(prod);
+      setBulkQtyVal('1.000');
+      setShowBulkModal(true);
+      return;
+    }
+
+    executeAddProduct(prod, qty);
+  };
+
+  const handleConfirmBulkAdd = () => {
+    if (!bulkProduct) return;
+    const parsed = parseFloat(bulkQtyVal);
+    if (isNaN(parsed) || parsed <= 0) {
+      showToast("Cantidad ingresada no es válida.", "error");
+      return;
+    }
+
+    // Check availability (including existing in cart)
+    const existing = saleItems.find(item => item.product.id === bulkProduct.id);
+    const existingQty = existing ? existing.qty : 0;
+    if (parsed + existingQty > bulkProduct.stock_actual) {
+      showToast(`No hay disponibilidad suficiente. Stock máximo disponible: ${bulkProduct.stock_actual}`, "error");
+      return;
+    }
+
+    executeAddProduct(bulkProduct, parsed);
+    setShowBulkModal(false);
+    setBulkProduct(null);
   };
 
   const handleUpdateItemQty = (prodId: number, nextQty: number) => {
@@ -1620,6 +1684,71 @@ export default function CajaPOS({
 
               </div>
 
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CANTIDAD A GRANEL (KG / GRAMOS) */}
+      {showBulkModal && bulkProduct && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-mono text-slate-800">
+          <div ref={bulkModalRef} className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-sm shadow-2xl flex flex-col">
+            
+            <div className="bg-slate-100 border-b border-slate-250 px-5 py-3.5 flex justify-between items-center">
+              <span className="text-xs font-black text-slate-700 tracking-widest uppercase flex items-center gap-1.5 font-sans">
+                <Calculator className="w-4 h-4 text-amber-500" />
+                Producto a Granel
+              </span>
+              <button onClick={() => setShowBulkModal(false)} className="text-slate-400 hover:text-slate-700 focus:ring-2 focus:ring-amber-500 focus:outline-none p-1 rounded">✕</button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="bg-amber-50 border border-amber-100 p-3 rounded-lg text-xs leading-tight font-sans">
+                <div className="font-extrabold uppercase text-amber-900 mb-0.5">{bulkProduct.description}</div>
+                <div className="font-mono text-slate-500 text-[10px] font-bold">Código: {bulkProduct.barcode}</div>
+                <div className="flex justify-between font-mono font-bold mt-2">
+                  <span>Existencia disponible:</span>
+                  <span className="text-amber-700">{bulkProduct.stock_actual} kg</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] text-slate-500 block mb-1.5 font-sans font-bold uppercase tracking-wider">Ingrese cantidad (KG / Gramos):</label>
+                <input
+                  type="number"
+                  step="0.001"
+                  value={bulkQtyVal}
+                  onChange={(e) => setBulkQtyVal(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono focus:bg-white focus:ring-2 focus:ring-amber-500 focus:border-transparent focus:outline-none text-center"
+                  placeholder="1.000"
+                  autoFocus
+                  onFocus={(e) => e.target.select()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleConfirmBulkAdd();
+                    }
+                    if (e.key === 'Escape') {
+                      setShowBulkModal(false);
+                    }
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="bg-slate-50 px-5 py-3.5 border-t border-slate-200 flex justify-end gap-2.5">
+              <button
+                onClick={() => setShowBulkModal(false)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold font-sans transition-all active:scale-95 focus:ring-2 focus:ring-slate-400 focus:outline-none"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmBulkAdd}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold font-sans transition-all active:scale-95 focus:ring-2 focus:ring-amber-500 focus:outline-none"
+              >
+                Aceptar
+              </button>
             </div>
 
           </div>
