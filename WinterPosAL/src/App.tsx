@@ -6,7 +6,7 @@ import {
 import { 
   User, Product, Client, TasaHistoryItem, CompanyConfig, 
   InventoryMovement, PriceAdjustmentHistory, SaleItem, Payment,
-  Sale, CierreCaja
+  Sale, CierreCaja, Abono
 } from './types';
 import LoginTerminal from './components/LoginTerminal';
 import CajaPOS from './components/CajaPOS';
@@ -59,6 +59,11 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
+  const [abonos, setAbonos] = useState<Abono[]>(() => {
+    const saved = localStorage.getItem('pos_abonos');
+    return saved ? JSON.parse(saved) : [];
+  });
+
   const [cierres, setCierres] = useState<CierreCaja[]>(() => {
     const saved = localStorage.getItem('pos_cierres_log');
     return saved ? JSON.parse(saved) : [];
@@ -104,7 +109,7 @@ export default function App() {
   });
 
   const [lanIP, setLanIP] = useState('192.168.1.100');
-  const [dbMode, setDbMode] = useState('remote');
+  const [dbMode, setDbMode] = useState('local');
   const [reprintSale, setReprintSale] = useState<Sale | null>(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
@@ -141,6 +146,10 @@ export default function App() {
   }, [sales]);
 
   useEffect(() => {
+    localStorage.setItem('pos_abonos', JSON.stringify(abonos));
+  }, [abonos]);
+
+  useEffect(() => {
     localStorage.setItem('pos_cierres_log', JSON.stringify(cierres));
   }, [cierres]);
 
@@ -162,7 +171,7 @@ export default function App() {
 
   useEffect(() => {
     const ip = localStorage.getItem('pos_lan_ip') || '192.168.1.100';
-    const mode = localStorage.getItem('pos_db_mode') || 'remote';
+    const mode = localStorage.getItem('pos_db_mode') || 'local';
     setLanIP(ip);
     setDbMode(mode);
   }, [currentUser]);
@@ -263,6 +272,13 @@ export default function App() {
         if (salesRes.ok) {
           const salesData = await salesRes.json();
           setSales(salesData);
+        }
+
+        // Fetch abonos
+        const abonosRes = await fetch(getApiUrl('/abonos'));
+        if (abonosRes.ok) {
+          const abonosData = await abonosRes.json();
+          setAbonos(abonosData);
         }
 
         // Fetch active caja state
@@ -513,6 +529,18 @@ export default function App() {
           const nextPending = Math.max(0, c.saldo_pendiente - amountUSD);
           const nextCreditAvailable = Math.min(c.limite_credito, c.credito_disponible + amountUSD);
           handleRegisterCajaMovement('Entrada', `Abono de Crédito Cliente: ${c.nombre}`, amountUSD, 0);
+          
+          // Append to abonos state
+          const newAbonoLog: Abono = {
+            id: Date.now(),
+            cliente_id: clientId,
+            nombre: c.nombre,
+            cedula_rif: c.cedula_rif,
+            monto: amountUSD,
+            fecha: new Date().toISOString().replace('T', ' ').substring(0, 16)
+          };
+          setAbonos(prev => [...prev, newAbonoLog]);
+
           return {
             ...c,
             saldo_pendiente: nextPending,
@@ -525,6 +553,52 @@ export default function App() {
 
     await postApiData('/clientes/abono', { id: clientId, monto: amountUSD });
   };
+
+  const handleUpdateClient = async (updatedCli: Client) => {
+    try {
+      const res = await fetch(getApiUrl(`/clientes/${updatedCli.id}`), {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updatedCli)
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        setClients(prev => prev.map(c => c.id === updatedCli.id ? saved : c));
+        return true;
+      } else {
+        const errData = await res.json();
+        alert(`Error al actualizar cliente: ${errData.error || 'Error desconocido'}`);
+        return false;
+      }
+    } catch (err: any) {
+      console.error('Error al actualizar cliente:', err);
+      setClients(prev => prev.map(c => c.id === updatedCli.id ? updatedCli : c));
+      return true;
+    }
+  };
+
+  const handleDeleteClient = async (clientId: number) => {
+    try {
+      const res = await fetch(getApiUrl(`/clientes/${clientId}`), {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        setClients(prev => prev.filter(c => c.id !== clientId));
+        return true;
+      } else {
+        const errData = await res.json();
+        alert(`Error al eliminar cliente: ${errData.error || 'Error desconocido'}`);
+        return false;
+      }
+    } catch (err: any) {
+      console.error('Error al eliminar cliente:', err);
+      setClients(prev => prev.filter(c => c.id !== clientId));
+      return true;
+    }
+  };
+
 
   const handleAbrirCaja = async (usd: number, ves: number) => {
     setCajaAbierta(true);
@@ -957,6 +1031,10 @@ export default function App() {
               currentUser={currentUser}
               onAddClient={handleAddClient}
               onRegisterAbono={handleRegisterAbono}
+              onUpdateClient={handleUpdateClient}
+              onDeleteClient={handleDeleteClient}
+              sales={sales}
+              abonos={abonos}
             />
           )}
 

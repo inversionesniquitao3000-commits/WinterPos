@@ -3,7 +3,8 @@ import { Product, Client, User, CompanyConfig, SaleItem, Payment, Sale, CierreCa
 import { 
   ShoppingBag, Search, Trash2, 
   Printer, XCircle, ArrowUpRight, 
-  Calculator, CheckCircle2, Ticket
+  Calculator, CheckCircle2, Ticket,
+  Clock, ListOrdered
 } from 'lucide-react';
 import { formatNumberToWordsUSD } from '../utils';
 
@@ -101,12 +102,126 @@ export default function CajaPOS({
   const [movVes, setMovVes] = useState('');
 
   // POS State
-  const [selectedClient, setSelectedClient] = useState<Client>(clients.find(c => c.cedula_rif === 'V-00000000') || clients[0]);
+  const [selectedClient, setSelectedClient] = useState<Client>(() => {
+    try {
+      const savedDoc = localStorage.getItem('pos_current_client_doc');
+      if (savedDoc) {
+        const match = clients.find(c => c.cedula_rif === savedDoc);
+        if (match) return match;
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return clients.find(c => c.cedula_rif === 'V-00000000') || clients[0];
+  });
+  
   const [selectedSeller, setSelectedSeller] = useState<string>(currentUser.nombre);
   
   const [searchProdTerm, setSearchProdTerm] = useState('');
-  const [saleItems, setSaleItems] = useState<SaleItem[]>([]);
-  const [discountPct, setDiscountPct] = useState(0);
+  
+  const [saleItems, setSaleItems] = useState<SaleItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('pos_current_cart');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      console.error(e);
+      return [];
+    }
+  });
+
+  const [discountPct, setDiscountPct] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('pos_current_discount');
+      return saved ? parseFloat(saved) || 0 : 0;
+    } catch (e) {
+      console.error(e);
+      return 0;
+    }
+  });
+
+  // Tickets on hold state
+  const [ticketsOnHold, setTicketsOnHold] = useState<any[]>(() => {
+    try {
+      const saved = localStorage.getItem('pos_tickets_on_hold');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      console.error(e);
+      return [];
+    }
+  });
+
+  const [showOnHoldModal, setShowOnHoldModal] = useState(false);
+
+  // Persist POS state to localStorage
+  useEffect(() => {
+    localStorage.setItem('pos_current_cart', JSON.stringify(saleItems));
+  }, [saleItems]);
+
+  useEffect(() => {
+    localStorage.setItem('pos_current_discount', String(discountPct));
+  }, [discountPct]);
+
+  useEffect(() => {
+    if (selectedClient) {
+      localStorage.setItem('pos_current_client_doc', selectedClient.cedula_rif);
+    }
+  }, [selectedClient]);
+
+  useEffect(() => {
+    localStorage.setItem('pos_tickets_on_hold', JSON.stringify(ticketsOnHold));
+  }, [ticketsOnHold]);
+
+  const handlePutOnHold = () => {
+    if (saleItems.length === 0) return;
+    
+    const defaultTag = `Ticket ${ticketsOnHold.length + 1} - ${selectedClient.nombre}`;
+    const customTag = window.prompt("Ingrese una nota o referencia para guardar este ticket en espera:", defaultTag);
+    if (customTag === null) return; // user cancelled
+
+    const newHold = {
+      id: Date.now(),
+      fecha: new Date().toLocaleString(),
+      tag: customTag || defaultTag,
+      client: selectedClient,
+      items: saleItems,
+      discount: discountPct
+    };
+
+    setTicketsOnHold(prev => [...prev, newHold]);
+    
+    // Clear active POS state
+    setSaleItems([]);
+    setDiscountPct(0);
+    const defaultClient = clients.find(c => c.cedula_rif === 'V-00000000') || clients[0];
+    if (defaultClient) {
+      setSelectedClient(defaultClient);
+    }
+    localStorage.removeItem('pos_current_cart');
+    localStorage.removeItem('pos_current_discount');
+    localStorage.removeItem('pos_current_client_doc');
+
+    alert("Venta guardada en espera con éxito.");
+  };
+
+  const handleRetrieveHold = (hold: any) => {
+    if (saleItems.length > 0) {
+      const confirmReplace = window.confirm("Ya hay artículos en el carrito actual. ¿Desea reemplazarlos con el ticket recuperado?");
+      if (!confirmReplace) return;
+    }
+
+    setSaleItems(hold.items);
+    setDiscountPct(hold.discount);
+    setSelectedClient(hold.client);
+    
+    setTicketsOnHold(prev => prev.filter(h => h.id !== hold.id));
+    setShowOnHoldModal(false);
+  };
+
+  const handleRemoveHold = (holdId: number) => {
+    if (window.confirm("¿Está seguro de eliminar permanentemente este ticket en espera?")) {
+      setTicketsOnHold(prev => prev.filter(h => h.id !== holdId));
+    }
+  };
 
   // Checkout modal state
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
@@ -187,11 +302,8 @@ export default function CajaPOS({
   const [payBiopagoVES, setPayBiopagoVES] = useState('');
   const [payCreditUSD, setPayCreditUSD] = useState('');
 
-  // Mixed payment electronic properties
   const [refPagoMovil, setRefPagoMovil] = useState('');
   const [bankPagoMovil, setBankPagoMovil] = useState('');
-  const [refBiopago, setRefBiopago] = useState('');
-  const [bankBiopago, setBankBiopago] = useState('');
 
   // Generated Ticket Modal state
   const [showTicketModal, setShowTicketModal] = useState(false);
@@ -332,6 +444,13 @@ export default function CajaPOS({
     if (window.confirm('¿Está seguro de cancelar la venta en curso? Se limpiarán todos los ítems.')) {
       setSaleItems([]);
       setDiscountPct(0);
+      const defaultClient = clients.find(c => c.cedula_rif === 'V-00000000') || clients[0];
+      if (defaultClient) {
+        setSelectedClient(defaultClient);
+      }
+      localStorage.removeItem('pos_current_cart');
+      localStorage.removeItem('pos_current_discount');
+      localStorage.removeItem('pos_current_client_doc');
     }
   };
 
@@ -348,8 +467,6 @@ export default function CajaPOS({
     
     setRefPagoMovil('');
     setBankPagoMovil('');
-    setRefBiopago('');
-    setBankBiopago('');
 
     setShowCheckoutModal(true);
   };
@@ -375,7 +492,7 @@ export default function CajaPOS({
   const changeVES = changeUSD * tasaVuelto;
 
   const isPagoMovilValid = pagoMovilVESVal === 0 || (refPagoMovil.trim().length >= 4 && bankPagoMovil !== '');
-  const isBiopagoValid = biopagoVESVal === 0 || (refBiopago.trim().length >= 4 && bankBiopago !== '');
+  const isBiopagoValid = true;
   const isCreditValid = creditUSDVal === 0 || creditUSDVal <= selectedClient.credito_disponible;
 
   const canConfirmCheckout = totalPaidUSD >= totalUSD && isPagoMovilValid && isBiopagoValid && isCreditValid;
@@ -394,18 +511,6 @@ export default function CajaPOS({
       }
       if (!bankPagoMovil) {
         alert('Debe especificar el banco emisor para Pago Móvil.');
-        return;
-      }
-    }
-
-    // Reference validations (Biopago)
-    if (biopagoVESVal > 0) {
-      if (!refBiopago.trim() || refBiopago.trim().length < 4) {
-        alert('La referencia bancaria es obligatoria y debe tener mínimo 4 caracteres para pagos por Biopago.');
-        return;
-      }
-      if (!bankBiopago) {
-        alert('Debe especificar el banco emisor para Biopago.');
         return;
       }
     }
@@ -437,8 +542,8 @@ export default function CajaPOS({
         metodo: 'Biopago',
         monto: biopagoVESVal,
         montoUSD: biopagoVESVal / tasaDia,
-        reference: refBiopago,
-        bancoEmisor: bankBiopago
+        reference: '',
+        bancoEmisor: ''
       });
     }
     if (creditUSDVal > 0) {
@@ -470,6 +575,9 @@ export default function CajaPOS({
     // Clear sale state
     setSaleItems([]);
     setDiscountPct(0);
+    localStorage.removeItem('pos_current_cart');
+    localStorage.removeItem('pos_current_discount');
+    localStorage.removeItem('pos_current_client_doc');
   };
 
   const handleSaveApertura = (e: React.FormEvent) => {
@@ -890,16 +998,43 @@ export default function CajaPOS({
           COBRAR (F12)
         </button>
 
-        {/* CANCEL / CLEAR SALE BUTTON */}
-        {saleItems.length > 0 && (
-          <button
-            onClick={handleClearSale}
-            className="w-full bg-white border border-slate-200 text-red-500 hover:text-red-700 hover:bg-red-50 py-2.5 rounded-lg text-xs font-sans transition-all flex items-center justify-center gap-1.5 shadow-sm"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Cancelar Venta
-          </button>
-        )}
+        {/* TICKETS EN ESPERA CONTROLS */}
+        <div className="space-y-2 pt-2 border-t border-slate-200 mt-2 flex flex-col gap-1.5">
+          {saleItems.length > 0 && (
+            <button
+              onClick={handlePutOnHold}
+              className="w-full bg-amber-500 hover:bg-amber-600 text-white py-2 rounded-lg text-xs font-sans font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm"
+              title="Poner venta actual en espera"
+            >
+              <Clock className="w-3.5 h-3.5" />
+              Poner en Espera
+            </button>
+          )}
+          
+          {ticketsOnHold.length > 0 && (
+            <button
+              onClick={() => setShowOnHoldModal(true)}
+              className="w-full bg-slate-700 hover:bg-slate-800 text-white py-2 rounded-lg text-xs font-sans font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm relative"
+              title="Ver ventas en espera"
+            >
+              <ListOrdered className="w-3.5 h-3.5 text-sky-400" />
+              <span>Tickets en Espera</span>
+              <span className="absolute -top-1.5 -right-1.5 bg-red-650 text-white text-[9px] font-black w-4.5 h-4.5 rounded-full flex items-center justify-center border border-white animate-bounce">
+                {ticketsOnHold.length}
+              </span>
+            </button>
+          )}
+
+          {saleItems.length > 0 && (
+            <button
+              onClick={handleClearSale}
+              className="w-full bg-white border border-slate-200 text-red-500 hover:text-red-750 hover:bg-red-50 py-2 rounded-lg text-xs font-sans transition-all flex items-center justify-center gap-1.5 shadow-sm"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Cancelar Venta
+            </button>
+          )}
+        </div>
 
       </div>
 
@@ -1067,32 +1202,6 @@ export default function CajaPOS({
                     onChange={(e) => setPayBiopagoVES(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-700 focus:bg-white focus:border-winter-blueBtn focus:outline-none"
                   />
-                  {biopagoVESVal > 0 && (
-                    <div className="space-y-1">
-                      <div className="grid grid-cols-2 gap-2">
-                        <select
-                          value={bankBiopago}
-                          onChange={(e) => setBankBiopago(e.target.value)}
-                          className="bg-slate-55 border border-slate-300 text-[10px] p-2 rounded text-slate-700 outline-none focus:bg-white focus:border-winter-blueBtn font-sans"
-                        >
-                          <option value="">Banco Emisor...</option>
-                          {venezuelanBanks.map(b => <option key={b} value={b}>{b}</option>)}
-                        </select>
-                        <input
-                          type="text"
-                          placeholder="N° Referencia (>3 dig)..."
-                          value={refBiopago}
-                          onChange={(e) => setRefBiopago(e.target.value)}
-                          className="bg-slate-55 border border-slate-300 p-2 rounded text-[10px] font-bold text-yellow-600 outline-none focus:bg-white focus:border-winter-blueBtn"
-                        />
-                      </div>
-                      {!isBiopagoValid && (
-                        <span className="text-[9px] text-red-500 font-bold block mt-1 font-sans">
-                          * Ingrese Banco y Referencia (mín. 4 caracteres)
-                        </span>
-                      )}
-                    </div>
-                  )}
                 </div>
 
                 {/* Client Credit limit option */}
@@ -1677,6 +1786,65 @@ export default function CajaPOS({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: TICKETS EN ESPERA */}
+      {showOnHoldModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-slate-800 animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-lg shadow-2xl p-6 space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-amber-500" />
+                TICKETS EN ESPERA (VENTAS SUSPENDIDAS)
+              </h3>
+              <button onClick={() => setShowOnHoldModal(false)} className="text-slate-400 hover:text-slate-705">✕</button>
+            </div>
+
+            <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+              {ticketsOnHold.length === 0 ? (
+                <div className="text-center py-8 text-slate-400 font-sans italic">
+                  No hay tickets en espera registrados.
+                </div>
+              ) : (
+                ticketsOnHold.map(h => (
+                  <div key={h.id} className="border border-slate-250 p-3 rounded-lg flex justify-between items-center bg-slate-55 hover:bg-slate-100 transition-colors shadow-sm">
+                    <div className="space-y-1 font-sans text-xs">
+                      <div className="font-extrabold text-slate-800 uppercase">{h.tag}</div>
+                      <div className="text-[10px] text-slate-500">Fecha: {h.fecha}</div>
+                      <div className="text-[10px] text-slate-600 font-mono">
+                        Artículos: <span className="font-bold text-slate-800">{h.items.reduce((acc: number, item: any) => acc + item.qty, 0)}</span> | Total: <span className="font-bold text-emerald-600">${(h.items.reduce((acc: number, item: any) => acc + item.totalUSD, 0) * (1 - h.discount / 100)).toFixed(2)} USD</span>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleRetrieveHold(h)}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded text-[10px] uppercase shadow-sm transition-all"
+                      >
+                        Recuperar
+                      </button>
+                      <button
+                        onClick={() => handleRemoveHold(h.id)}
+                        className="bg-red-50 hover:bg-red-100 text-red-600 font-bold p-1.5 rounded border border-red-200 transition-all"
+                        title="Eliminar ticket"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="flex justify-end border-t border-slate-200 pt-3">
+              <button
+                onClick={() => setShowOnHoldModal(false)}
+                className="bg-slate-100 border border-slate-250 text-slate-650 px-4 py-2 rounded text-xs hover:bg-slate-200 transition-all font-sans"
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
         </div>
       )}

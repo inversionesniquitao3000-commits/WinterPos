@@ -112,6 +112,7 @@ export interface Sale {
   vueltoVES: number;
   fecha: string;
   usuario: string;
+  estatus?: string;
 }
 
 export interface CierreCaja {
@@ -149,3 +150,13 @@ export interface CierreCaja {
   realVes: number;
   expectedVes: number;
 }
+
+export interface Abono {
+  id: number;
+  cliente_id: number;
+  nombre: string;
+  cedula_rif: string;
+  monto: number;
+  fecha: string;
+}
+

@@ -5,7 +5,8 @@ import {
   getCompanyConfig, saveCompanyConfig, getUsers, getProducts, saveProduct,
   updateProductStock, updateProductPrices, getClients, saveClient, registerAbono,
   getTasaHistory, saveTasa, getMovements, saveMovement, getPriceHistory, savePriceHistory,
-  getSales, saveSale, getCierres, abrirCaja, cerrarCaja, getCajaEstado, registrarCajaMovimiento
+  getSales, saveSale, getCierres, abrirCaja, cerrarCaja, getCajaEstado, registrarCajaMovimiento,
+  updateClient, deleteClient, getAbonos
 } from './db-store.js';
 
 dotenv.config();
@@ -79,6 +80,39 @@ app.post('/api/clientes/abono', async (req, res) => {
   const success = await registerAbono(id, monto);
   res.json({ success });
 });
+
+app.get('/api/abonos', async (req, res) => {
+  const abonos = await getAbonos();
+  res.json(abonos);
+});
+
+
+app.put('/api/clientes/:id', async (req, res) => {
+  try {
+    const updated = await updateClient(req.params.id, req.body);
+    if (updated) {
+      res.json(updated);
+    } else {
+      res.status(404).json({ error: 'Cliente no encontrado' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/clientes/:id', async (req, res) => {
+  try {
+    const success = await deleteClient(req.params.id);
+    if (success) {
+      res.json({ success: true });
+    } else {
+      res.status(404).json({ error: 'Cliente no encontrado o no pudo ser eliminado' });
+    }
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 
 app.get('/api/tasas', async (req, res) => {
   const history = await getTasaHistory();

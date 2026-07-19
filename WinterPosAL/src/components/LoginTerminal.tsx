@@ -21,7 +21,7 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
   });
   const [dbMode, setDbMode] = useState(() => {
     const saved = localStorage.getItem('pos_db_mode');
-    return saved || 'remote'; 
+    return saved || 'local'; 
   });
   
   const [username, setUsername] = useState('');

@@ -269,31 +269,183 @@ export async function saveClient(c) {
   return newClient;
 }
 
+
+export async function getAbonos() {
+  return readJsonFile('abonos.json', []);
+}
+
 export async function registerAbono(clientId, amountUSD) {
+  let clientNombre = '';
+  let clientDoc = '';
   if (usePostgres) {
     try {
-      // Get current client
-      const res = await pool.query('SELECT limite_credito, credito_disponible FROM Clientes WHERE id = $1', [clientId]);
+      const res = await pool.query('SELECT nombre, cedula_rif, limite_credito, credito_disponible FROM Clientes WHERE id = $1', [clientId]);
       if (res.rowCount > 0) {
         const client = res.rows[0];
+        clientNombre = client.nombre;
+        clientDoc = client.cedula_rif;
         const nextCredito = Math.min(parseFloat(client.limite_credito), parseFloat(client.credito_disponible) + amountUSD);
         await pool.query('UPDATE Clientes SET credito_disponible = $1 WHERE id = $2', [nextCredito, clientId]);
+        
+        // Log abono
+        const abonos = readJsonFile('abonos.json', []);
+        abonos.push({
+          id: Date.now(),
+          cliente_id: clientId,
+          nombre: clientNombre,
+          cedula_rif: clientDoc,
+          monto: amountUSD,
+          fecha: new Date().toISOString().replace('T', ' ').substring(0, 16)
+        });
+        writeJsonFile('abonos.json', abonos);
         return true;
       }
     } catch (err) {
       console.error('Error en registerAbono (Postgres):', err.message);
     }
+  } else {
+    const clients = readJsonFile('clients.json', mockClients);
+    const idx = clients.findIndex(c => c.id === clientId || c.id === parseInt(clientId));
+    if (idx !== -1) {
+      clientNombre = clients[idx].nombre;
+      clientDoc = clients[idx].cedula_rif;
+      clients[idx].saldo_pendiente = Math.max(0, clients[idx].saldo_pendiente - amountUSD);
+      clients[idx].credito_disponible = Math.min(clients[idx].limite_credito, clients[idx].credito_disponible + amountUSD);
+      writeJsonFile('clients.json', clients);
+      
+      // Log abono
+      const abonos = readJsonFile('abonos.json', []);
+      abonos.push({
+        id: Date.now(),
+        cliente_id: clientId,
+        nombre: clientNombre,
+        cedula_rif: clientDoc,
+        monto: amountUSD,
+        fecha: new Date().toISOString().replace('T', ' ').substring(0, 16)
+      });
+      writeJsonFile('abonos.json', abonos);
+      return true;
+    }
   }
+  return false;
+}
+
+export async function updateClient(id, c) {
+  if (usePostgres) {
+    try {
+      const currentRes = await pool.query('SELECT limite_credito, credito_disponible FROM Clientes WHERE id = $1', [id]);
+      let newCredito = parseFloat(c.limite_credito);
+      if (currentRes.rowCount > 0) {
+        const current = currentRes.rows[0];
+        const oldLimit = parseFloat(current.limite_credito);
+        const oldAvail = parseFloat(current.credito_disponible);
+        const debt = oldLimit - oldAvail;
+        newCredito = Math.max(0, parseFloat(c.limite_credito) - debt);
+      }
+      
+      const res = await pool.query(
+        `UPDATE Clientes SET 
+          cedula_rif = $1, 
+          nombre = $2, 
+          telefono = $3, 
+          direccion = $4, 
+          limite_credito = $5, 
+          credito_disponible = $6, 
+          porcentaje_descuento = $7, 
+          estado = $8
+         WHERE id = $9 RETURNING *`,
+        [c.cedula_rif, c.nombre, c.telefono, c.direccion, parseFloat(c.limite_credito), newCredito, parseFloat(c.porcentaje_descuento), c.estado || 'Activo', id]
+      );
+      
+      if (res.rowCount > 0) {
+        const r = res.rows[0];
+        return {
+          id: r.id,
+          cedula_rif: r.cedula_rif,
+          nombre: r.nombre,
+          telefono: r.telefono || '',
+          direccion: r.direccion || '',
+          limite_credito: parseFloat(r.limite_credito),
+          credito_disponible: parseFloat(r.credito_disponible),
+          porcentaje_descuento: parseFloat(r.porcentaje_descuento),
+          estado: r.estado,
+          saldo_pendiente: parseFloat(r.limite_credito) - parseFloat(r.credito_disponible)
+        };
+      }
+    } catch (err) {
+      console.error('Error en updateClient (Postgres):', err.message);
+      throw err;
+    }
+  }
+  
   const clients = readJsonFile('clients.json', mockClients);
-  const idx = clients.findIndex(c => c.id === clientId);
+  const idx = clients.findIndex(client => client.id === parseInt(id) || client.id === id);
   if (idx !== -1) {
-    clients[idx].saldo_pendiente = Math.max(0, clients[idx].saldo_pendiente - amountUSD);
-    clients[idx].credito_disponible = Math.min(clients[idx].limite_credito, clients[idx].credito_disponible + amountUSD);
+    const current = clients[idx];
+    const debt = current.saldo_pendiente || 0;
+    const newLimit = parseFloat(c.limite_credito);
+    const newAvail = Math.max(0, newLimit - debt);
+    
+    clients[idx] = {
+      ...current,
+      cedula_rif: c.cedula_rif,
+      nombre: c.nombre,
+      telefono: c.telefono || '',
+      direccion: c.direccion || '',
+      limite_credito: newLimit,
+      credito_disponible: newAvail,
+      porcentaje_descuento: parseFloat(c.porcentaje_descuento),
+      estado: c.estado || 'Activo',
+      saldo_pendiente: debt
+    };
+    writeJsonFile('clients.json', clients);
+    return clients[idx];
+  }
+  return null;
+}
+
+export async function deleteClient(id) {
+  if (usePostgres) {
+    try {
+      const currentRes = await pool.query('SELECT limite_credito, credito_disponible FROM Clientes WHERE id = $1', [id]);
+      if (currentRes.rowCount > 0) {
+        const current = currentRes.rows[0];
+        const debt = parseFloat(current.limite_credito) - parseFloat(current.credito_disponible);
+        if (debt > 0.01) {
+          throw new Error('No se puede eliminar un cliente con deuda pendiente.');
+        }
+      }
+      
+      // Update any Ventas that refer to this client to reference the generic client
+      const genericRes = await pool.query("SELECT id FROM Clientes WHERE cedula_rif = 'V-00000000' LIMIT 1");
+      if (genericRes.rowCount > 0) {
+        const genericId = genericRes.rows[0].id;
+        await pool.query('UPDATE Ventas SET cliente_id = $1 WHERE cliente_id = $2', [genericId, id]);
+      }
+      
+      const res = await pool.query('DELETE FROM Clientes WHERE id = $1 RETURNING id', [id]);
+      return res.rowCount > 0;
+    } catch (err) {
+      console.error('Error en deleteClient (Postgres):', err.message);
+      throw err;
+    }
+  }
+  
+  const clients = readJsonFile('clients.json', mockClients);
+  const idx = clients.findIndex(client => client.id === parseInt(id) || client.id === id);
+  if (idx !== -1) {
+    const current = clients[idx];
+    const debt = current.saldo_pendiente || 0;
+    if (debt > 0.01) {
+      throw new Error('No se puede eliminar un cliente con deuda pendiente.');
+    }
+    clients.splice(idx, 1);
     writeJsonFile('clients.json', clients);
     return true;
   }
   return false;
 }
+
 
 export async function getTasaHistory() {
   if (usePostgres) {
