@@ -980,6 +980,7 @@ export default function CajaPOS({
 
     // Detailed metrics calculation
     const aperturaUsd = _montoAperturaUsd;
+    const aperturaVes = _montoAperturaVes;
     const ventasEfectivoUsd = shiftSales.reduce((acc, sale) => {
       const cashPay = sale.pagos.find(p => p.metodo === 'Efectivo$');
       return acc + (cashPay ? cashPay.monto : 0);
@@ -989,6 +990,7 @@ export default function CajaPOS({
     const salidaEfectivoUsd = shiftSalidasUsd;
     const devolucionEfectivoUsd = 0;
     const dineroEnCajaExpected = aperturaUsd + ventasEfectivoUsd + abonoClientesUsd + entradaEfectivoUsd - salidaEfectivoUsd;
+    const expectedVes = aperturaVes + cajaVentasVes + cajaMovimientosVes;
     
     const ventasTotalesUsd = shiftSales.reduce((acc, sale) => acc + sale.totalUSD, 0);
     const descuentosUsd = shiftSales.reduce((acc, sale) => acc + sale.descuento, 0);
@@ -1024,7 +1026,26 @@ export default function CajaPOS({
     const devolucionVentasUsd = 0;
     const ventaTotalUsd = ventasTotalesUsd;
 
-    const res = onCerrarCaja(realUsd, realVes, {
+    const costoTotalUsd = shiftSales.reduce((acc, sale) => {
+      return acc + (sale.items || []).reduce((itemAcc, item) => {
+        return itemAcc + ((item.product.precio_costo_usd || 0) * item.qty);
+      }, 0);
+    }, 0);
+    const utilidadUsd = Math.max(0, ventaTotalUsd - costoTotalUsd);
+
+    const localCierreResult: CierreCaja = {
+      id: Date.now(),
+      fecha: new Date().toLocaleString(),
+      fechaCierre: new Date().toLocaleString(),
+      fechaApertura: localStorage.getItem('pos_apertura_fecha') || new Date().toLocaleString(),
+      usuario: currentUser?.nombre || 'SISTEMA',
+      aperturaUsd,
+      aperturaVes,
+      realUsd,
+      realVes,
+      expectedVes,
+      costoTotalUsd,
+      utilidadUsd,
       ventasEfectivoUsd,
       abonoClientesUsd,
       entradaEfectivoUsd,
@@ -1046,9 +1067,9 @@ export default function CajaPOS({
       pagosPuntosUsd,
       devolucionVentasUsd,
       ventaTotalUsd
-    });
+    };
 
-    setCierreResult(res);
+    setCierreResult(localCierreResult);
   };
 
   const handleSaveCajaMovement = (e: React.FormEvent) => {
@@ -1543,6 +1564,7 @@ export default function CajaPOS({
                 </h3>
 
                 {/* Cash USD */}
+                {companyConfig.metodos_pago_activos.includes('efectivo_usd') && (
                 <div>
                   <label className="text-[10px] text-slate-500 block mb-1 font-sans">Efectivo ($ USD)</label>
                   <input
@@ -1554,8 +1576,10 @@ export default function CajaPOS({
                     className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-emerald-600 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
                   />
                 </div>
+                )}
 
                 {/* Cash VES */}
+                {companyConfig.metodos_pago_activos.includes('efectivo_ves') && (
                 <div>
                   <label className="text-[10px] text-slate-500 block mb-1 font-sans">Efectivo (Bs VES)</label>
                   <input
@@ -1567,8 +1591,10 @@ export default function CajaPOS({
                     className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-purple-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
                   />
                 </div>
+                )}
 
                 {/* Debit Card VES */}
+                {companyConfig.metodos_pago_activos.includes('tarjeta_ves') && (
                 <div>
                   <label className="text-[10px] text-slate-500 block mb-1 font-sans">Tarjeta de Débito (Bs VES)</label>
                   <input
@@ -1580,8 +1606,10 @@ export default function CajaPOS({
                     className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
                   />
                 </div>
+                )}
 
                 {/* Pago Móvil (VES) */}
+                {companyConfig.metodos_pago_activos.includes('pago_movil') && (
                 <div className="space-y-2 border-t border-slate-200 pt-2">
                   <label className="text-[10px] text-emerald-700 block font-bold font-sans">Pago Móvil (Bs VES)</label>
                   <input
@@ -1619,8 +1647,10 @@ export default function CajaPOS({
                     </div>
                   )}
                 </div>
+                )}
 
                 {/* Biopago (VES) */}
+                {companyConfig.metodos_pago_activos.includes('biopago') && (
                 <div className="space-y-2 border-t border-slate-200 pt-2">
                   <label className="text-[10px] text-purple-750 block font-bold font-sans">Biopago (Bs VES)</label>
                   <input
@@ -1632,9 +1662,10 @@ export default function CajaPOS({
                     className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
                   />
                 </div>
+                )}
 
                 {/* Client Credit limit option */}
-                {selectedClient.limite_credito > 0 && (
+                {companyConfig.metodos_pago_activos.includes('credito') && selectedClient.limite_credito > 0 && (
                   <div className="border-t border-slate-200 pt-2 space-y-1">
                     <label className="text-[10px] text-red-500 block font-bold font-sans">Financiar a Crédito ($ USD)</label>
                     <input
@@ -2500,6 +2531,31 @@ export default function CajaPOS({
 
                 <button
                   onClick={() => {
+                    if (cierreResult) {
+                      onCerrarCaja(cierreResult.realUsd, cierreResult.realVes, {
+                        ventasEfectivoUsd: cierreResult.ventasEfectivoUsd,
+                        abonoClientesUsd: cierreResult.abonoClientesUsd,
+                        entradaEfectivoUsd: cierreResult.entradaEfectivoUsd,
+                        salidaEfectivoUsd: cierreResult.salidaEfectivoUsd,
+                        devolucionEfectivoUsd: cierreResult.devolucionEfectivoUsd,
+                        dineroEnCajaExpected: cierreResult.dineroEnCajaExpected,
+                        ventasTotalesUsd: cierreResult.ventasTotalesUsd,
+                        descuentosUsd: cierreResult.descuentosUsd,
+                        ventaBrutaUsd: cierreResult.ventaBrutaUsd,
+                        pagosEfectivoUsd: cierreResult.pagosEfectivoUsd,
+                        pagosEfectivoBsUsd: cierreResult.pagosEfectivoBsUsd,
+                        pagosEfectivoBsVes: cierreResult.pagosEfectivoBsVes,
+                        pagosBiopagoUsd: cierreResult.pagosBiopagoUsd,
+                        pagosBiopagoVes: cierreResult.pagosBiopagoVes,
+                        pagosPuntoUsd: cierreResult.pagosPuntoUsd,
+                        pagosPuntoVes: cierreResult.pagosPuntoVes,
+                        pagosTarjetaUsd: cierreResult.pagosTarjetaUsd,
+                        pagosCreditoUsd: cierreResult.pagosCreditoUsd,
+                        pagosPuntosUsd: cierreResult.pagosPuntosUsd,
+                        devolucionVentasUsd: cierreResult.devolucionVentasUsd,
+                        ventaTotalUsd: cierreResult.ventaTotalUsd
+                      });
+                    }
                     setShowCierreModal(false);
                     setCierreResult(null);
                     window.location.reload(); 

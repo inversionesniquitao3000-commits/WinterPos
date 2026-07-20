@@ -1,18 +1,41 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Sale, CierreCaja } from '../types';
-import { History, Printer, ShieldAlert, ShoppingCart, Eye } from 'lucide-react';
+import { Sale, CierreCaja, User } from '../types';
+import { History, Printer, ShieldAlert, ShoppingCart, Eye, Edit } from 'lucide-react';
 import { formatNumberToWordsUSD } from '../utils';
 
 interface VentasHistoricoProps {
   sales: Sale[];
   cierres: CierreCaja[];
   onReprintTicket: (sale: Sale) => void;
+  currentUser: User;
+  onUpdateCierre: (cierreId: number, updatedData: any) => Promise<boolean>;
 }
 
-export default function VentasHistorico({ sales, cierres, onReprintTicket }: VentasHistoricoProps) {
+export default function VentasHistorico({ sales, cierres, onReprintTicket, currentUser, onUpdateCierre }: VentasHistoricoProps) {
   const [activeSubTab, setActiveSubTab] = useState<'ventas' | 'cierres'>('ventas');
   const [selectedCierre, setSelectedCierre] = useState<CierreCaja | null>(null);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+
+  const isAdmin = currentUser?.rol?.toLowerCase() === 'administrador';
+
+  // Edit Cierre Modal State
+  const [editingCierre, setEditingCierre] = useState<CierreCaja | null>(null);
+  const [editAperturaUsd, setEditAperturaUsd] = useState('');
+  const [editAperturaVes, setEditAperturaVes] = useState('');
+  const [editRealUsd, setEditRealUsd] = useState('');
+  const [editRealVes, setEditRealVes] = useState('');
+  const [editEntradaUsd, setEditEntradaUsd] = useState('');
+  const [editSalidaUsd, setEditSalidaUsd] = useState('');
+
+  const handleStartEditCierre = (c: CierreCaja) => {
+    setEditingCierre(c);
+    setEditAperturaUsd(String(c.aperturaUsd ?? 0));
+    setEditAperturaVes(String(c.aperturaVes ?? 0));
+    setEditRealUsd(String(c.realUsd ?? 0));
+    setEditRealVes(String(c.realVes ?? 0));
+    setEditEntradaUsd(String(c.entradaEfectivoUsd ?? 0));
+    setEditSalidaUsd(String(c.salidaEfectivoUsd ?? 0));
+  };
 
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
@@ -72,6 +95,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
       if (e.key === 'Escape') {
         setSelectedCierre(null);
         setSelectedSale(null);
+        setEditingCierre(null);
       }
     };
     window.addEventListener('keydown', handleEsc);
@@ -666,14 +690,26 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
                           ${utilidadUsd.toFixed(2)}
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <button
-                            onClick={() => setSelectedCierre(c)}
-                            className="bg-slate-55 border border-slate-200 text-slate-600 p-1.5 rounded hover:bg-slate-100 hover:text-slate-800 transition-all shadow-sm flex items-center gap-1 font-sans mx-auto text-[10px]"
-                            title="Ver Comprobante de Cierre Completo"
-                          >
-                            <Eye className="w-3.5 h-3.5 text-winter-blueBtn" />
-                            Ver Cierre
-                          </button>
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              onClick={() => setSelectedCierre(c)}
+                              className="bg-slate-55 border border-slate-200 text-slate-600 px-2 py-1 rounded hover:bg-slate-100 hover:text-slate-800 transition-all shadow-sm flex items-center gap-1 font-sans text-[10px]"
+                              title="Ver Comprobante de Cierre Completo"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-winter-blueBtn" />
+                              Ver
+                            </button>
+                            {isAdmin && (
+                              <button
+                                onClick={() => handleStartEditCierre(c)}
+                                className="bg-amber-50 border border-amber-200 text-amber-700 px-2 py-1 rounded hover:bg-amber-100 hover:text-amber-800 transition-all shadow-sm flex items-center gap-1 font-sans text-[10px]"
+                                title="Corregir Apertura, Recibidos y Movimientos"
+                              >
+                                <Edit className="w-3.5 h-3.5 text-amber-600" />
+                                Editar
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1077,6 +1113,176 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket }: Ven
                 </div>
 
               </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* EDIT CIERRE MODAL (ADMIN ONLY) */}
+      {editingCierre && isAdmin && (() => {
+        const handleSaveEditCierre = async (e: React.FormEvent) => {
+          e.preventDefault();
+          const newAperturaUsd = parseFloat(editAperturaUsd) || 0;
+          const newAperturaVes = parseFloat(editAperturaVes) || 0;
+          const newRealUsd = parseFloat(editRealUsd) || 0;
+          const newRealVes = parseFloat(editRealVes) || 0;
+          const newEntradaUsd = parseFloat(editEntradaUsd) || 0;
+          const newSalidaUsd = parseFloat(editSalidaUsd) || 0;
+
+          const oldAperturaUsd = editingCierre.aperturaUsd ?? 0;
+          const oldEntradaUsd = editingCierre.entradaEfectivoUsd ?? 0;
+          const oldSalidaUsd = editingCierre.salidaEfectivoUsd ?? 0;
+          
+          const oldExpectedUsd = editingCierre.dineroEnCajaExpected ?? (editingCierre as any).expectedUsd ?? 0;
+          const newExpectedUsd = oldExpectedUsd - oldAperturaUsd - oldEntradaUsd + oldSalidaUsd + newAperturaUsd + newEntradaUsd - newSalidaUsd;
+          
+          const oldAperturaVes = editingCierre.aperturaVes ?? 0;
+          const oldExpectedVes = editingCierre.expectedVes ?? 0;
+          const newExpectedVes = oldExpectedVes - oldAperturaVes + newAperturaVes;
+
+          const updatedCierre = {
+            ...editingCierre,
+            aperturaUsd: newAperturaUsd,
+            aperturaVes: newAperturaVes,
+            realUsd: newRealUsd,
+            realVes: newRealVes,
+            entradaEfectivoUsd: newEntradaUsd,
+            salidaEfectivoUsd: newSalidaUsd,
+            dineroEnCajaExpected: newExpectedUsd,
+            expectedUsd: newExpectedUsd,
+            expectedVes: newExpectedVes
+          };
+
+          const success = await onUpdateCierre(editingCierre.id, updatedCierre);
+          if (success) {
+            alert("Cierre de caja corregido y guardado exitosamente por el administrador.");
+            setEditingCierre(null);
+          } else {
+            alert("Ocurrió un error al guardar la actualización del cierre en el servidor.");
+          }
+        };
+
+        return (
+          <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-slate-800">
+            <div className="bg-white border border-amber-300 rounded-xl overflow-hidden w-full max-w-md shadow-2xl flex flex-col">
+              
+              {/* Header Title Bar */}
+              <div className="bg-amber-600 text-white px-5 py-3.5 flex items-center justify-between">
+                <h3 className="text-sm font-extrabold flex items-center gap-1.5 font-sans uppercase">
+                  <ShieldAlert className="w-4 h-4 text-white" />
+                  CORREGIR REGISTRO DE CIERRE (ADMIN)
+                </h3>
+                <button 
+                  onClick={() => setEditingCierre(null)} 
+                  className="text-white opacity-70 hover:opacity-100 text-xs font-sans"
+                >
+                  ✕ Cancelar
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveEditCierre} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto bg-slate-50 text-xs">
+                <div className="bg-amber-50 border border-amber-200 text-amber-800 p-3 rounded text-[10px] leading-relaxed font-sans font-medium">
+                  ⚠️ ADVERTENCIA: Esta herramienta administrativa permite sobrescribir los valores inmutables reportados originalmente para auditar discrepancias. Úsela con responsabilidad.
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold">APERTURA USD ($)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      required
+                      value={editAperturaUsd}
+                      onChange={(e) => setEditAperturaUsd(e.target.value)}
+                      className="w-full bg-white border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold">APERTURA VES (Bs)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      required
+                      value={editAperturaVes}
+                      onChange={(e) => setEditAperturaVes(e.target.value)}
+                      className="w-full bg-white border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold">EFECTIVO USD FISICO ($)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      required
+                      value={editRealUsd}
+                      onChange={(e) => setEditRealUsd(e.target.value)}
+                      className="w-full bg-white border border-slate-300 rounded p-2 text-xs font-bold font-mono text-emerald-600 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold">EFECTIVO VES FISICO (Bs)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      required
+                      value={editRealVes}
+                      onChange={(e) => setEditRealVes(e.target.value)}
+                      className="w-full bg-white border border-slate-300 rounded p-2 text-xs font-bold font-mono text-purple-700 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold">ENTRADAS EFECTIVO ($)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      required
+                      value={editEntradaUsd}
+                      onChange={(e) => setEditEntradaUsd(e.target.value)}
+                      className="w-full bg-white border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold">SALIDAS EFECTIVO ($)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      required
+                      value={editSalidaUsd}
+                      onChange={(e) => setEditSalidaUsd(e.target.value)}
+                      className="w-full bg-white border border-slate-300 rounded p-2 text-xs font-bold font-mono text-red-600 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingCierre(null)}
+                    className="w-1/2 bg-slate-200 hover:bg-slate-300 text-slate-700 py-3 rounded-lg font-bold font-sans text-xs transition-all"
+                  >
+                    CANCELAR
+                  </button>
+                  <button
+                    type="submit"
+                    className="w-1/2 bg-amber-600 hover:bg-amber-700 text-white py-3 rounded-lg font-bold font-sans text-xs tracking-wider transition-all shadow"
+                  >
+                    GUARDAR CAMBIOS
+                  </button>
+                </div>
+              </form>
+
             </div>
           </div>
         );

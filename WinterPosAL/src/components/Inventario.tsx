@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Product, InventoryMovement, PriceAdjustmentHistory, User } from '../types';
-import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit } from 'lucide-react';
+import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2 } from 'lucide-react';
 
 interface InventarioProps {
   products: Product[];
@@ -32,6 +32,12 @@ export default function Inventario({
   };
 
   const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'movimientos' | 'precios'>('catalogo');
+  const [successMsg, setSuccessMsg] = useState('');
+
+  const showToast = (msg: string) => {
+    setSuccessMsg(msg);
+    setTimeout(() => setSuccessMsg(''), 4000);
+  };
   const [searchTerm, setSearchTerm] = useState('');
   
   // Filter states
@@ -204,7 +210,7 @@ export default function Inventario({
     if (success) {
       setShowEditProdModal(false);
       setSelectedProduct(null);
-      alert('Producto actualizado con éxito.');
+      showToast('Producto actualizado con éxito.');
     }
   };
 
@@ -548,6 +554,14 @@ export default function Inventario({
   return (
     <div className="space-y-6 text-slate-800 font-mono text-xs">
       
+      {/* TOAST DE ÉXITO */}
+      {successMsg && (
+        <div className="bg-emerald-50 border border-emerald-250 text-emerald-700 px-4 py-3 rounded-lg text-xs flex items-center gap-2 font-sans transition-all animate-pulse">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+          <span>{successMsg}</span>
+        </div>
+      )}
+
       {/* HEADER SECTION */}
       <div className="border-b border-slate-200 pb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>

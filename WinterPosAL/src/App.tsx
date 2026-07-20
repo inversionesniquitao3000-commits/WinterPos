@@ -1123,6 +1123,24 @@ export default function App() {
               sales={sales}
               cierres={cierres}
               onReprintTicket={handleReprint}
+              currentUser={currentUser}
+              onUpdateCierre={async (cierreId: number, updatedData: any) => {
+                try {
+                  const res = await fetch(getApiUrl(`/cajas/cierres/${cierreId}`), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updatedData)
+                  });
+                  if (res.ok) {
+                    const saved = await res.json();
+                    setCierres(prev => prev.map(c => c.id === cierreId ? saved : c));
+                    return true;
+                  }
+                } catch (e) {
+                  console.error('Error actualizando cierre:', e);
+                }
+                return false;
+              }}
             />
           )}
 

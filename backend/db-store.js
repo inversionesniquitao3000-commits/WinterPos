@@ -184,7 +184,7 @@ export async function getUsers() {
           rol: r.rol,
           estado: r.estado,
           clave: r.clave || 'admin',
-          permisos: r.permisos ? JSON.parse(r.permisos) : (r.rol === 'administrador' ? defaultPermsAdmin : defaultPermsUser)
+          permisos: r.permisos ? JSON.parse(r.permisos) : (r.rol?.toLowerCase() === 'administrador' ? defaultPermsAdmin : defaultPermsUser)
         }));
       }
     } catch (err) {
@@ -194,7 +194,7 @@ export async function getUsers() {
   const localUsers = readJsonFile('users.json', mockUsers);
   return localUsers.map(u => ({
     clave: 'admin',
-    permisos: u.permisos || (u.rol === 'administrador' ? defaultPermsAdmin : defaultPermsUser),
+    permisos: u.permisos || (u.rol?.toLowerCase() === 'administrador' ? defaultPermsAdmin : defaultPermsUser),
     ...u
   }));
 }
@@ -1364,6 +1364,55 @@ export async function cerrarCaja(cierre) {
   activeCheck.abierta = false;
   writeJsonFile('caja_activa.json', activeCheck);
   return true;
+}
+
+export async function updateCierre(id, updated) {
+  if (usePostgres) {
+    try {
+      const cierreId = parseInt(id);
+      const detallesJson = JSON.stringify(updated);
+      await pool.query(
+        `UPDATE Cajas_Apertura_Cierre SET 
+          monto_apertura_usd = $1, 
+          monto_apertura_ves = $2, 
+          monto_cierre_real_usd = $3, 
+          monto_cierre_real_ves = $4,
+          monto_cierre_esperado_usd = $5,
+          monto_cierre_esperado_ves = $6,
+          venta_total_usd = $7,
+          utilidad_usd = $8,
+          detalles_json = $9
+         WHERE id = $10`,
+        [
+          updated.aperturaUsd, 
+          updated.aperturaVes, 
+          updated.realUsd, 
+          updated.realVes,
+          updated.expectedUsd || updated.dineroEnCajaExpected,
+          updated.expectedVes,
+          updated.ventaTotalUsd || updated.ventasTotalesUsd,
+          updated.utilidadUsd,
+          detallesJson,
+          cierreId
+        ]
+      );
+      return updated;
+    } catch (err) {
+      console.error('Error en updateCierre (Postgres):', err.message);
+    }
+  }
+  const cierres = readJsonFile('cierres.json', []);
+  const idx = cierres.findIndex(c => String(c.id) === String(id));
+  if (idx !== -1) {
+    cierres[idx] = {
+      ...cierres[idx],
+      ...updated,
+      id: cierres[idx].id
+    };
+    writeJsonFile('cierres.json', cierres);
+    return cierres[idx];
+  }
+  return null;
 }
 
 export async function getCajaEstado() {

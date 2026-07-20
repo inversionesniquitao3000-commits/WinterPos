@@ -5,7 +5,7 @@ import {
   getCompanyConfig, saveCompanyConfig, getUsers, getProducts, saveProduct,
   updateProductStock, updateProductPrices, getClients, saveClient, registerAbono,
   getTasaHistory, saveTasa, getMovements, saveMovement, getPriceHistory, savePriceHistory,
-  getSales, saveSale, getCierres, abrirCaja, cerrarCaja, getCajaEstado, registrarCajaMovimiento,
+  getSales, saveSale, getCierres, abrirCaja, cerrarCaja, getCajaEstado, registrarCajaMovimiento, updateCierre,
   updateClient, deleteClient, getAbonos, deleteProduct, updateProduct,
   saveUser, updateUser, deleteUser, getRoles, saveRole, updateRole, deleteRole, wipeDatabase, backupDatabase, restoreDatabase,
   readJsonFile, writeJsonFile
@@ -36,6 +36,11 @@ app.get('/api/config', async (req, res) => {
 });
 
 app.post('/api/config', async (req, res) => {
+  const saved = await saveCompanyConfig(req.body);
+  res.json(saved);
+});
+
+app.put('/api/config', async (req, res) => {
   const saved = await saveCompanyConfig(req.body);
   res.json(saved);
 });
@@ -198,6 +203,19 @@ app.post('/api/cajas/movimiento', async (req, res) => {
 app.get('/api/cajas/cierres', async (req, res) => {
   const cierres = await getCierres();
   res.json(cierres);
+});
+
+app.put('/api/cajas/cierres/:id', async (req, res) => {
+  try {
+    const updated = await updateCierre(req.params.id, req.body);
+    if (updated) {
+      res.json(updated);
+    } else {
+      res.status(404).json({ error: 'Cierre de caja no encontrado' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 // USER CRUD ENDPOINTS
 app.post('/api/users', async (req, res) => {

@@ -123,6 +123,18 @@ export default function ConfiguracionEmpresa({
     }
   }, [activeTab]);
 
+  // Listener for Escape key to close modals
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowUserModal(false);
+        setShowRoleModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // Initial clean permissions matrix
   const getEmptyPerms = () => {
     const p: any = {};
@@ -147,9 +159,24 @@ export default function ConfiguracionEmpresa({
     });
   };
 
-  const handleSaveEmpresa = (e: React.FormEvent) => {
+  const handleSaveEmpresa = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSaveConfig(formData);
+    try {
+      const res = await fetch(getApiUrl('/config'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData)
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        onSaveConfig(saved);
+      } else {
+        onSaveConfig(formData);
+      }
+    } catch {
+      // Sin conexión al backend: guardar localmente igual
+      onSaveConfig(formData);
+    }
     showToast('Configuración comercial actualizada correctamente.');
   };
 
@@ -169,10 +196,14 @@ export default function ConfiguracionEmpresa({
 
   const handleOpenEditUser = (u: User) => {
     setEditingUser(u);
+    let rolVal = u.rol;
+    if (u.rol.toLowerCase() === 'administrador') rolVal = 'Administrador';
+    if (u.rol.toLowerCase() === 'vendedor' || u.rol.toLowerCase() === 'cajero / vendedor') rolVal = 'Cajero / Vendedor';
+
     setUserForm({
       usuario: u.usuario,
       nombre: u.nombre,
-      rol: u.rol,
+      rol: rolVal,
       clave: u.clave || 'admin',
       estado: u.estado,
       permisos: u.permisos || getEmptyPerms()
@@ -309,7 +340,11 @@ export default function ConfiguracionEmpresa({
   };
 
   const handleApplyRolePermissions = (roleName: string) => {
-    const role = roleList.find(r => r.nombre === roleName);
+    const role = roleList.find(r => 
+      r.nombre.toLowerCase() === roleName.toLowerCase() ||
+      (roleName.toLowerCase() === 'cajero / vendedor' && r.nombre.toLowerCase() === 'vendedor') ||
+      (roleName.toLowerCase() === 'vendedor' && r.nombre.toLowerCase() === 'cajero / vendedor')
+    );
     if (role) {
       setUserForm(prev => ({
         ...prev,
@@ -1227,7 +1262,7 @@ export default function ConfiguracionEmpresa({
                   <option value="">Seleccione...</option>
                   <option value="Administrador">Administrador</option>
                   <option value="Cajero / Vendedor">Cajero / Vendedor</option>
-                  {roleList.filter(r => r.nombre !== 'Administrador' && r.nombre !== 'Cajero / Vendedor').map(r => (
+                  {roleList.filter(r => r.nombre?.toLowerCase() !== 'administrador' && r.nombre?.toLowerCase() !== 'cajero / vendedor' && r.nombre?.toLowerCase() !== 'vendedor').map(r => (
                     <option key={r.id} value={r.nombre}>{r.nombre}</option>
                   ))}
                 </select>
@@ -1272,10 +1307,11 @@ export default function ConfiguracionEmpresa({
                                 onClick={() => {
                                   setUserForm(prev => {
                                     const nextPerms = { ...prev.permisos };
-                                    if (!nextPerms[mod.id]) {
-                                      nextPerms[mod.id] = { ver: false, crear: false, editar: false, eliminar: false };
-                                    }
-                                    nextPerms[mod.id][act.id] = !nextPerms[mod.id][act.id];
+                                    const currentModPerms = nextPerms[mod.id] || { ver: false, crear: false, editar: false, eliminar: false };
+                                    nextPerms[mod.id] = {
+                                      ...currentModPerms,
+                                      [act.id]: !currentModPerms[act.id]
+                                    };
                                     return { ...prev, permisos: nextPerms };
                                   });
                                 }}
@@ -1370,10 +1406,11 @@ export default function ConfiguracionEmpresa({
                                 onClick={() => {
                                   setRoleForm(prev => {
                                     const nextPerms = { ...prev.permisos };
-                                    if (!nextPerms[mod.id]) {
-                                      nextPerms[mod.id] = { ver: false, crear: false, editar: false, eliminar: false };
-                                    }
-                                    nextPerms[mod.id][act.id] = !nextPerms[mod.id][act.id];
+                                    const currentModPerms = nextPerms[mod.id] || { ver: false, crear: false, editar: false, eliminar: false };
+                                    nextPerms[mod.id] = {
+                                      ...currentModPerms,
+                                      [act.id]: !currentModPerms[act.id]
+                                    };
                                     return { ...prev, permisos: nextPerms };
                                   });
                                 }}
