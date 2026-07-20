@@ -726,7 +726,7 @@ export default function Clientes({
         {/* Totals & PDF export button */}
         <div className="flex items-center gap-4 self-end md:self-auto">
           <div className="text-right text-[10px] font-sans text-slate-600">
-            <div><span className="font-semibold text-slate-500">Total Saldo Pendiente :</span> <span className="font-mono text-xs font-extrabold text-red-655">${totalDeuda.toFixed(2)}</span></div>
+            <div><span className="font-semibold text-slate-500">Total Saldo Pendiente :</span> <span className="font-mono text-xs font-extrabold text-red-600">${totalDeuda.toFixed(2)}</span></div>
             <div><span className="font-semibold text-slate-500">Total Clientes :</span> <span className="font-mono text-xs font-bold text-slate-700">{totalClients}</span></div>
           </div>
 

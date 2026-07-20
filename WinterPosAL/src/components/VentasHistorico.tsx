@@ -582,43 +582,62 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                     </td>
                   </tr>
                 ) : (
-                  [...filteredSales].reverse().map(sale => (
-                    <tr key={sale.factura_nro} className="hover:bg-slate-50/50">
-                      <td className="px-4 py-3 font-mono">{sale.fecha}</td>
-                      <td className="px-4 py-3 font-bold font-mono text-slate-600">{sale.factura_nro}</td>
-                      <td className="px-4 py-3 font-sans font-medium">{sale.client.nombre}</td>
-                      <td className="px-4 py-3 font-sans">{sale.usuario}</td>
-                      <td className="px-4 py-3 text-right font-mono font-bold text-emerald-600">${(sale.totalUSD ?? 0).toFixed(2)}</td>
-                      <td className="px-4 py-3 text-right font-mono font-bold text-slate-505">Bs {(sale.totalVES ?? 0).toFixed(2)}</td>
-                      <td className="px-4 py-3 font-sans">
-                        <div className="flex flex-wrap gap-1">
-                          {(sale.pagos ?? []).map((p, idx) => (
-                            <span key={idx} className="bg-slate-100 border border-slate-200 text-slate-600 px-1.5 py-0.5 rounded text-[9px]">
-                              {p.metodo}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <button
-                            onClick={() => setSelectedSale(sale)}
-                            className="bg-slate-55 border border-slate-200 text-slate-600 p-1.5 rounded hover:bg-slate-100 hover:text-slate-800 transition-all shadow-sm flex items-center gap-1 text-[10px]"
-                            title="Ver Detalle de Venta y Utilidad"
-                          >
-                            <Eye className="w-3.5 h-3.5 text-winter-blueBtn" />
-                          </button>
-                          <button
-                            onClick={() => onReprintTicket(sale)}
-                            className="bg-slate-55 border border-slate-200 text-slate-600 p-1.5 rounded hover:bg-slate-100 hover:text-slate-800 transition-all shadow-sm"
-                            title="Reimprimir ticket fiscal"
-                          >
-                            <Printer className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                  [...filteredSales].reverse().map(sale => {
+                    const isDev = sale.factura_nro.startsWith('DEV-');
+                    return (
+                      <tr key={sale.factura_nro} className={`hover:bg-slate-50/50 ${isDev ? 'bg-rose-50/20' : ''}`}>
+                        <td className="px-4 py-3 font-mono">{sale.fecha}</td>
+                        <td className={`px-4 py-3 font-bold font-mono ${isDev ? 'text-rose-700' : 'text-slate-600'}`}>
+                          {sale.factura_nro}
+                        </td>
+                        <td className="px-4 py-3 font-sans font-medium">{sale.client.nombre}</td>
+                        <td className="px-4 py-3 font-sans">{sale.usuario}</td>
+                        <td className={`px-4 py-3 text-right font-mono font-bold ${isDev ? 'text-rose-600' : 'text-emerald-600'}`}>
+                          {isDev ? '-' : ''}${Math.abs(sale.totalUSD ?? 0).toFixed(2)}
+                        </td>
+                        <td className={`px-4 py-3 text-right font-mono font-bold ${isDev ? 'text-rose-500' : 'text-slate-505'}`}>
+                          {isDev ? '-' : ''}Bs {Math.abs(sale.totalVES ?? 0).toFixed(2)}
+                        </td>
+                        <td className="px-4 py-3 font-sans">
+                          <div className="flex flex-wrap gap-1">
+                            {(sale.pagos ?? []).map((p, idx) => (
+                              <span key={idx} className={`border px-1.5 py-0.5 rounded text-[9px] ${
+                                isDev 
+                                  ? 'bg-rose-50 border-rose-200 text-rose-700' 
+                                  : 'bg-slate-100 border-slate-200 text-slate-600'
+                              }`}>
+                                {p.metodo === 'Efectivo$' && isDev ? 'Reembolso $' : p.metodo}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              onClick={() => setSelectedSale(sale)}
+                              className={`border p-1.5 rounded transition-all shadow-sm flex items-center gap-1 text-[10px] ${
+                                isDev 
+                                  ? 'bg-rose-50 border-rose-200 text-rose-750 hover:bg-rose-100 hover:text-rose-800' 
+                                  : 'bg-slate-55 border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
+                              }`}
+                              title={isDev ? 'Ver Detalle de Devolución' : 'Ver Detalle de Venta y Utilidad'}
+                            >
+                              <Eye className={`w-3.5 h-3.5 ${isDev ? 'text-rose-600' : 'text-winter-blueBtn'}`} />
+                            </button>
+                            {!isDev && (
+                              <button
+                                onClick={() => onReprintTicket(sale)}
+                                className="bg-slate-55 border border-slate-200 text-slate-600 p-1.5 rounded hover:bg-slate-100 hover:text-slate-800 transition-all shadow-sm"
+                                title="Reimprimir ticket fiscal"
+                              >
+                                <Printer className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -683,7 +702,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                           <div>${realUsd.toFixed(2)}</div>
                           <div className="text-[9px] text-purple-650">Bs {realVes.toFixed(2)}</div>
                         </td>
-                        <td className={`px-4 py-3 text-right font-mono font-bold ${diffUsd >= 0 ? 'text-green-600' : 'text-red-655'}`}>
+                        <td className={`px-4 py-3 text-right font-mono font-bold ${diffUsd >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                           ${diffUsd.toFixed(2)}
                         </td>
                         <td className="px-4 py-3 text-right font-mono text-emerald-600 font-extrabold">
@@ -916,7 +935,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                     <div className="flex justify-between"><span>Recibido Real:</span> <span className="text-emerald-700 font-bold">${realUsd.toFixed(2)}</span></div>
                     <div className="flex justify-between border-t border-dashed border-slate-300 pt-1 font-bold text-slate-800">
                       <span>Diferencia:</span>
-                      <span className={diffUsd >= 0 ? 'text-green-600' : 'text-red-655'}>
+                      <span className={diffUsd >= 0 ? 'text-green-600' : 'text-red-600'}>
                         ${diffUsd.toFixed(2)}
                       </span>
                     </div>
@@ -928,7 +947,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                     <div className="flex justify-between"><span>Recibido Real:</span> <span className="text-purple-755 font-bold">Bs {realVes.toFixed(2)}</span></div>
                     <div className="flex justify-between border-t border-dashed border-slate-300 pt-1 font-bold text-slate-800">
                       <span>Diferencia:</span>
-                      <span className={realVes - expectedVes >= 0 ? 'text-green-600' : 'text-red-655'}>
+                      <span className={realVes - expectedVes >= 0 ? 'text-green-600' : 'text-red-600'}>
                         Bs {(realVes - expectedVes).toFixed(2)}
                       </span>
                     </div>
@@ -973,16 +992,17 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         });
         
         const totalProfit = totalUSD - totalCost;
+        const isDev = selectedSale.factura_nro.startsWith('DEV-');
 
         return (
-          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-slate-800">
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-slate-800 animate-fade-in">
             <div className="bg-white border border-slate-355 rounded-xl overflow-hidden w-full max-w-2xl shadow-2xl flex flex-col">
               
               {/* Header Title Bar */}
-              <div className="bg-winter-header text-white px-5 py-3 flex items-center justify-between">
+              <div className={`${isDev ? 'bg-rose-900' : 'bg-winter-header'} text-white px-5 py-3 flex items-center justify-between`}>
                 <h3 className="text-sm font-extrabold flex items-center gap-1.5 font-sans">
                   <ShoppingCart className="w-4 h-4 text-winter-blueBtn" />
-                  DETALLE DE FACTURA / VENTA
+                  {isDev ? 'DETALLE DE DEVOLUCIÓN' : 'DETALLE DE FACTURA / VENTA'}
                 </h3>
                 <button 
                   onClick={() => setSelectedSale(null)} 
@@ -997,7 +1017,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                 {/* Meta details row */}
                 <div className="grid grid-cols-2 gap-4 bg-white border border-slate-200 p-4 rounded-lg shadow-sm font-sans">
                   <div>
-                    <span className="text-slate-400 block text-[9px] uppercase">Factura Nro</span>
+                    <span className="text-slate-400 block text-[9px] uppercase">{isDev ? 'Devolución Nro' : 'Factura Nro'}</span>
                     <strong className="text-slate-800 text-xs block font-mono font-extrabold">{selectedSale.factura_nro}</strong>
                   </div>
                   <div>
@@ -1019,25 +1039,29 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                   <table className="w-full border-collapse text-left">
                     <thead className="bg-slate-50 border-b border-slate-200">
                       <tr className="text-slate-500 font-sans uppercase text-[8px] font-black font-semibold">
-                        <th className="px-3 py-2.5">PRODUCTO</th>
+                        <th className="px-3 py-2.5">{isDev ? 'PRODUCTO DEVUELTO' : 'PRODUCTO'}</th>
                         <th className="px-3 py-2.5 text-center">CANT</th>
-                        <th className="px-3 py-2.5 text-right">UNIT VENTA</th>
+                        <th className="px-3 py-2.5 text-right">{isDev ? 'PRECIO REF' : 'UNIT VENTA'}</th>
                         <th className="px-3 py-2.5 text-right">UNIT COSTO</th>
-                        <th className="px-3 py-2.5 text-right">TOTAL VENTA</th>
-                        <th className="px-3 py-2.5 text-right text-emerald-700">UTILIDAD</th>
+                        <th className="px-3 py-2.5 text-right">TOTAL {isDev ? 'DEVUELTO' : 'VENTA'}</th>
+                        {!isDev && <th className="px-3 py-2.5 text-right text-emerald-700">UTILIDAD</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-[10px] text-slate-700 font-mono">
                       {itemsWithProfit.map((item, idx) => (
                         <tr key={idx} className="hover:bg-slate-50/50">
                           <td className="px-3 py-2 font-sans font-medium uppercase">{item.product.description}</td>
-                          <td className="px-3 py-2 text-center font-bold text-slate-800">{item.qty}</td>
+                          <td className={`px-3 py-2 text-center font-bold ${isDev ? 'text-rose-700' : 'text-slate-800'}`}>{isDev ? '-' : ''}{item.qty}</td>
                           <td className="px-3 py-2 text-right text-slate-600">${item.priceUSD.toFixed(2)}</td>
                           <td className="px-3 py-2 text-right text-slate-500">${item.cost.toFixed(2)}</td>
-                          <td className="px-3 py-2 text-right text-slate-900 font-bold">${item.totalSale.toFixed(2)}</td>
-                          <td className={`px-3 py-2 text-right font-bold ${item.profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                            ${item.profit.toFixed(2)}
+                          <td className={`px-3 py-2 text-right font-bold ${isDev ? 'text-rose-600' : 'text-slate-900'}`}>
+                            {isDev ? '-' : ''}${Math.abs(item.totalSale).toFixed(2)}
                           </td>
+                          {!isDev && (
+                            <td className={`px-3 py-2 text-right font-bold ${item.profit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                              ${item.profit.toFixed(2)}
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
@@ -1048,14 +1072,14 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   
                   {/* Totals & Payments */}
-                  <div className="bg-white border border-slate-200 p-4 rounded-lg space-y-2 shadow-sm">
+                  <div className={`bg-white border border-slate-200 p-4 rounded-lg space-y-2 shadow-sm ${isDev ? 'md:col-span-2' : ''}`}>
                     <div className="font-bold text-[9px] text-slate-500 uppercase border-b border-slate-100 pb-1 font-sans">
-                      Montos y Pagos
+                      {isDev ? 'Montos y Reembolso' : 'Montos y Pagos'}
                     </div>
                     <div className="space-y-1">
                       <div className="flex justify-between">
-                        <span>Subtotal USD:</span>
-                        <span>$ {subtotal.toFixed(2)}</span>
+                        <span>{isDev ? 'Subtotal Devuelto:' : 'Subtotal USD:'}</span>
+                        <span>{isDev ? '-' : ''}$ {Math.abs(subtotal).toFixed(2)}</span>
                       </div>
                       {iva > 0 && (
                         <div className="flex justify-between text-slate-700">
@@ -1063,21 +1087,27 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                           <span>$ {iva.toFixed(2)}</span>
                         </div>
                       )}
-                      <div className="flex justify-between text-red-500">
-                        <span>Descuentos USD:</span>
-                        <span>- $ {descuento.toFixed(2)}</span>
-                      </div>
+                      {descuento > 0 && (
+                        <div className="flex justify-between text-red-500">
+                          <span>Descuentos USD:</span>
+                          <span>- $ {descuento.toFixed(2)}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between font-black text-slate-900 border-t border-dashed border-slate-200 pt-1 font-sans text-xs">
-                        <span>TOTAL FACTURADO:</span>
-                        <span className="text-winter-blueBtn font-mono font-bold">$ {totalUSD.toFixed(2)}</span>
+                        <span>{isDev ? 'TOTAL REEMBOLSADO (USD):' : 'TOTAL FACTURADO:'}</span>
+                        <span className={`${isDev ? 'text-rose-600' : 'text-winter-blueBtn'} font-mono font-bold`}>
+                          {isDev ? '-' : ''}$ {Math.abs(totalUSD).toFixed(2)}
+                        </span>
                       </div>
                     </div>
                     <div className="pt-2 border-t border-slate-100">
-                      <div className="text-[8px] uppercase text-slate-400 font-bold mb-1 font-sans">Métodos Aplicados</div>
+                      <div className="text-[8px] uppercase text-slate-400 font-bold mb-1 font-sans">
+                        {isDev ? 'Método de Reembolso' : 'Métodos Aplicados'}
+                      </div>
                       <div className="flex flex-wrap gap-1 font-sans">
                         {(selectedSale.pagos ?? []).map((p, idx) => (
-                          <span key={idx} className="bg-slate-100 border border-slate-200 text-slate-600 px-1.5 py-0.5 rounded text-[8px] font-semibold">
-                            {p.metodo}: ${p.monto.toFixed(2)}
+                          <span key={idx} className="bg-slate-100 border border-slate-200 text-slate-650 px-1.5 py-0.5 rounded text-[8px] font-semibold">
+                            {p.metodo === 'Efectivo$' && isDev ? 'Reembolso $' : p.metodo}: ${Math.abs(p.monto).toFixed(2)}
                           </span>
                         ))}
                       </div>
@@ -1085,30 +1115,32 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                   </div>
 
                   {/* Profitability Panel */}
-                  <div className="bg-emerald-50/50 border border-emerald-100 p-4 rounded-lg space-y-3 shadow-sm flex flex-col justify-between">
-                    <div>
-                      <div className="font-bold text-[9px] text-emerald-855 uppercase border-b border-emerald-250/60 pb-1 font-sans">
-                        Rentabilidad de la Venta
-                      </div>
-                      <div className="space-y-1.5 pt-2">
-                        <div className="flex justify-between">
-                          <span>Ingreso Neto Venta:</span>
-                          <span className="font-bold text-slate-800">$ {totalUSD.toFixed(2)}</span>
+                  {!isDev && (
+                    <div className="bg-emerald-50/50 border border-emerald-100 p-4 rounded-lg space-y-3 shadow-sm flex flex-col justify-between">
+                      <div>
+                        <div className="font-bold text-[9px] text-emerald-855 uppercase border-b border-emerald-250/60 pb-1 font-sans">
+                          Rentabilidad de la Venta
                         </div>
-                        <div className="flex justify-between">
-                          <span>Costo Mercancía:</span>
-                          <span className="font-bold text-red-600">- $ {totalCost.toFixed(2)}</span>
+                        <div className="space-y-1.5 pt-2">
+                          <div className="flex justify-between">
+                            <span>Ingreso Neto Venta:</span>
+                            <span className="font-bold text-slate-800">$ {totalUSD.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Costo Mercancía:</span>
+                            <span className="font-bold text-red-600">- $ {totalCost.toFixed(2)}</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="border-t border-emerald-300 pt-2 font-bold font-sans">
-                      <div className="flex justify-between text-xs text-emerald-800 font-extrabold items-baseline">
-                        <span className="uppercase text-[9px]">UTILIDAD NETA:</span>
-                        <span className="text-lg text-emerald-600 font-mono font-black">$ {totalProfit.toFixed(2)}</span>
+                      <div className="border-t border-emerald-300 pt-2 font-bold font-sans">
+                        <div className="flex justify-between text-xs text-emerald-800 font-extrabold items-baseline">
+                          <span className="uppercase text-[9px]">UTILIDAD NETA:</span>
+                          <span className="text-lg text-emerald-600 font-mono font-black">$ {totalProfit.toFixed(2)}</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
 
                 </div>
 

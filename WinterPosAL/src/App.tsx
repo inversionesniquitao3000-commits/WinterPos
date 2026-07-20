@@ -114,6 +114,9 @@ export default function App() {
   const [shiftSalidasUsd, setShiftSalidasUsd] = useState<number>(() => {
     return parseFloat(localStorage.getItem('pos_shift_salidas') || '0');
   });
+  const [shiftDevolucionesUsd, setShiftDevolucionesUsd] = useState<number>(() => {
+    return parseFloat(localStorage.getItem('pos_shift_devoluciones') || '0');
+  });
 
   const [lanIP, setLanIP] = useState('192.168.1.100');
   const [dbMode, setDbMode] = useState('local');
@@ -449,21 +452,21 @@ export default function App() {
 
   const handleUpdateProductStock = async (
     prodId: number,
-    type: 'Entrada' | 'Salida' | 'Merma' | 'Devolucion' | 'Entrada Rápida',
+    type: 'Entrada' | 'Salida' | 'Merma' | 'Devolucion' | 'Entrada Rápida' | 'Devolución',
     qty: number,
     reason: string
   ) => {
-    let nextStock = 0;
-    let barcode = '';
-    let description = '';
+    const product = products.find(p => p.id === prodId);
+    if (!product) return;
+
+    const normalizedType = type === 'Devolución' ? 'Devolucion' : type;
+    const isAdd = normalizedType === 'Entrada' || normalizedType === 'Devolucion' || normalizedType === 'Entrada Rápida';
+    const multiplier = isAdd ? 1 : -1;
+    const nextStock = Math.max(0, product.stock_actual + qty * multiplier);
     
     setProducts(prev =>
       prev.map(p => {
         if (p.id === prodId) {
-          const multiplier = (type === 'Entrada' || type === 'Devolucion' || type === 'Entrada Rápida') ? 1 : -1;
-          nextStock = Math.max(0, p.stock_actual + qty * multiplier);
-          barcode = p.barcode;
-          description = p.description;
           return {
             ...p,
             stock_actual: nextStock
@@ -473,15 +476,14 @@ export default function App() {
       })
     );
 
-    const multiplier = (type === 'Entrada' || type === 'Devolucion' || type === 'Entrada Rápida') ? 1 : -1;
     const newMov: InventoryMovement = {
       id: Date.now(),
       date: getLocalISODateString(),
-      productCode: barcode,
-      productDescription: description,
-      type,
+      productCode: product.barcode,
+      productDescription: product.description,
+      type: normalizedType,
       qty: qty * multiplier,
-      stock_anterior: nextStock - (qty * multiplier),
+      stock_anterior: product.stock_actual,
       stock_posterior: nextStock,
       motivo: reason,
       usuario: currentUser?.nombre || 'SISTEMA'
@@ -788,10 +790,12 @@ export default function App() {
     setShiftAbonosUsd(0);
     setShiftEntradasUsd(0);
     setShiftSalidasUsd(0);
+    setShiftDevolucionesUsd(0);
     localStorage.removeItem('pos_shift_sales');
     localStorage.removeItem('pos_shift_abonos');
     localStorage.removeItem('pos_shift_entradas');
     localStorage.removeItem('pos_shift_salidas');
+    localStorage.removeItem('pos_shift_devoluciones');
 
     localStorage.removeItem('pos_caja_abierta');
     localStorage.removeItem('pos_apertura_usd');
@@ -806,7 +810,7 @@ export default function App() {
     return newCierre;
   };
 
-  const handleRegisterCajaMovement = async (type: 'Entrada' | 'Salida', description: string, usd: number, ves: number) => {
+  const handleRegisterCajaMovement = async (type: 'Entrada' | 'Salida' | 'Devolucion', description: string, usd: number, ves: number) => {
     const mult = type === 'Entrada' ? 1 : -1;
     const nextUsd = cajaMovimientosUsd + usd * mult;
     const nextVes = cajaMovimientosVes + ves * mult;
@@ -822,8 +826,14 @@ export default function App() {
       } else {
         setShiftEntradasUsd(prev => prev + usd);
       }
-    } else {
+    } else if (type === 'Salida') {
       setShiftSalidasUsd(prev => prev + usd);
+    } else if (type === 'Devolucion') {
+      setShiftDevolucionesUsd(prev => {
+        const next = prev + usd;
+        localStorage.setItem('pos_shift_devoluciones', next.toString());
+        return next;
+      });
     }
 
     await postApiData('/cajas/movimiento', { tipo: type, descripcion: description, usd, ves });
@@ -841,32 +851,35 @@ export default function App() {
     vueltoUSD: number;
     vueltoVES: number;
   }) => {
-    // 1. Decrement products stock and log Kardex
-    setProducts(prevProds =>
-      prevProds.map(p => {
-        const item = sale.items.find(i => i.product.id === p.id);
-        if (item) {
-          const nextStock = Math.max(0, p.stock_actual - item.qty);
-          
-          const newMov: InventoryMovement = {
-            id: Math.random(),
-            date: getLocalISODateString(),
-            productCode: p.barcode,
-            productDescription: p.description,
-            type: 'Venta',
-            qty: -item.qty,
-            stock_anterior: p.stock_actual,
-            stock_posterior: nextStock,
-            motivo: `Venta Facturada: ${sale.factura_nro}`,
-            usuario: currentUser?.nombre || 'SISTEMA'
-          };
-          setMovements(prevMovs => [...prevMovs, newMov]);
+    // 1. Decrement products stock and log Kardex (only for regular sales, not returns)
+    const isDev = sale.factura_nro.startsWith('DEV-');
+    if (!isDev) {
+      setProducts(prevProds =>
+        prevProds.map(p => {
+          const item = sale.items.find(i => i.product.id === p.id);
+          if (item) {
+            const nextStock = Math.max(0, p.stock_actual - item.qty);
+            
+            const newMov: InventoryMovement = {
+              id: Math.random(),
+              date: getLocalISODateString(),
+              productCode: p.barcode,
+              productDescription: p.description,
+              type: 'Venta',
+              qty: -item.qty,
+              stock_anterior: p.stock_actual,
+              stock_posterior: nextStock,
+              motivo: `Venta Facturada: ${sale.factura_nro}`,
+              usuario: currentUser?.nombre || 'SISTEMA'
+            };
+            setMovements(prevMovs => [...prevMovs, newMov]);
 
-          return { ...p, stock_actual: nextStock };
-        }
-        return p;
-      })
-    );
+            return { ...p, stock_actual: nextStock };
+          }
+          return p;
+        })
+      );
+    }
 
     // 2. Increment client pending balance if Credit was used
     const creditPayment = sale.pagos.find(p => p.metodo === 'CreditoCliente');
@@ -1099,8 +1112,10 @@ export default function App() {
               shiftAbonosUsd={shiftAbonosUsd}
               shiftEntradasUsd={shiftEntradasUsd}
               shiftSalidasUsd={shiftSalidasUsd}
+              shiftDevolucionesUsd={shiftDevolucionesUsd}
               onUpdateProductStock={handleUpdateProductStock}
               onRegisterAbono={handleRegisterAbono}
+              getApiUrl={getApiUrl}
             />
           )}
 

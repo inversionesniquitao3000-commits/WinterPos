@@ -32,6 +32,7 @@ export default function Inventario({
   };
 
   const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'movimientos' | 'precios'>('catalogo');
+  const [selectedMovementDetail, setSelectedMovementDetail] = useState<any>(null);
   const [successMsg, setSuccessMsg] = useState('');
 
   const showToast = (msg: string) => {
@@ -902,7 +903,7 @@ export default function Inventario({
 
           <div className="flex-grow overflow-y-auto">
             <table className="w-full border-collapse text-left">
-              <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 text-slate-550">
+              <thead className="sticky top-0 bg-slate-55 border-b border-slate-200 text-slate-550">
                 <tr>
                   <th className="px-4 py-3 font-sans uppercase">Fecha/Hora</th>
                   <th className="px-4 py-3 font-sans uppercase">Código</th>
@@ -913,12 +914,13 @@ export default function Inventario({
                   <th className="px-4 py-3 text-right font-sans uppercase">Stock Post.</th>
                   <th className="px-4 py-3 font-sans uppercase">Justificación / Motivo</th>
                   <th className="px-4 py-3 font-sans uppercase">Operador</th>
+                  <th className="px-4 py-3 text-center font-sans uppercase">Detalle</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-[11px] text-slate-700">
                 {movements.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="text-center py-8 text-slate-400 font-sans">
+                    <td colSpan={10} className="text-center py-8 text-slate-400 font-sans">
                       No se han registrado movimientos de inventario.
                     </td>
                   </tr>
@@ -928,10 +930,10 @@ export default function Inventario({
                     if (m.type === 'Entrada') typeColor = 'text-green-700 bg-green-50 border-green-200';
                     if (m.type === 'Salida') typeColor = 'text-orange-700 bg-orange-50 border-orange-200';
                     if (m.type === 'Merma') typeColor = 'text-red-700 bg-red-50 border-red-200 font-bold';
-                    if (m.type === 'Devolucion') typeColor = 'text-purple-750 bg-purple-50 border-purple-200';
+                    if (m.type === 'Devolucion' || m.type === 'Devolución') typeColor = 'text-yellow-700 bg-yellow-50 border-yellow-250 font-bold';
 
                     return (
-                      <tr key={m.id} className="hover:bg-slate-50/50">
+                      <tr key={m.id} className="hover:bg-slate-55/50">
                         <td className="px-4 py-2.5 font-mono text-slate-450">{m.date}</td>
                         <td className="px-4 py-2.5 font-mono font-bold text-slate-500">{m.productCode}</td>
                         <td className="px-4 py-2.5 font-sans">{m.productDescription}</td>
@@ -940,13 +942,22 @@ export default function Inventario({
                             {m.type}
                           </span>
                         </td>
-                        <td className={`px-4 py-2.5 text-right font-black font-mono ${m.qty > 0 ? 'text-green-600' : 'text-red-650'}`}>
+                        <td className={`px-4 py-2.5 text-right font-black font-mono ${m.qty > 0 ? 'text-green-600' : 'text-red-600'}`}>
                           {m.qty > 0 ? `+${m.qty}` : m.qty}
                         </td>
                         <td className="px-4 py-2.5 text-right font-mono text-slate-450">{m.stock_anterior}</td>
                         <td className="px-4 py-2.5 text-right font-mono text-slate-600">{m.stock_posterior}</td>
                         <td className="px-4 py-2.5 text-slate-655 italic font-sans">{m.motivo}</td>
                         <td className="px-4 py-2.5 font-sans">{m.usuario}</td>
+                        <td className="px-4 py-2.5 text-center">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedMovementDetail(m)}
+                            className="text-sky-600 hover:text-sky-850 hover:underline font-bold font-sans text-[10px]"
+                          >
+                            Ver
+                          </button>
+                        </td>
                       </tr>
                     );
                   })
@@ -1663,6 +1674,76 @@ export default function Inventario({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: DETALLE DE MOVIMIENTO */}
+      {selectedMovementDetail && (
+        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 z-50 font-mono text-slate-800">
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-md shadow-2xl flex flex-col">
+            <div className="bg-slate-50 border-b border-slate-150 px-5 py-3.5 flex justify-between items-center">
+              <span className="text-xs font-bold text-slate-700 tracking-wider uppercase">Detalle del Movimiento</span>
+              <button onClick={() => setSelectedMovementDetail(null)} className="text-slate-400 hover:text-slate-700 font-sans">✕</button>
+            </div>
+            
+            <div className="p-5 space-y-3.5 text-xs">
+              <div className="grid grid-cols-3 border-b border-slate-100 pb-2">
+                <span className="text-slate-400 font-sans">Fecha / Hora:</span>
+                <span className="col-span-2 font-bold text-slate-700">{selectedMovementDetail.date}</span>
+              </div>
+              <div className="grid grid-cols-3 border-b border-slate-100 pb-2">
+                <span className="text-slate-400 font-sans">Producto:</span>
+                <span className="col-span-2 font-bold text-slate-700 uppercase">
+                  {selectedMovementDetail.productDescription} 
+                  <span className="block text-[10px] text-slate-450 font-mono mt-0.5">({selectedMovementDetail.productCode})</span>
+                </span>
+              </div>
+              <div className="grid grid-cols-3 border-b border-slate-100 pb-2">
+                <span className="text-slate-400 font-sans">Tipo:</span>
+                <span className="col-span-2">
+                  <span className={`px-2 py-0.5 rounded border text-[9px] font-bold ${
+                    selectedMovementDetail.type === 'Entrada' || selectedMovementDetail.type === 'Entrada Rápida' ? 'text-green-700 bg-green-50 border-green-200' :
+                    selectedMovementDetail.type === 'Salida' ? 'text-orange-700 bg-orange-50 border-orange-200' :
+                    selectedMovementDetail.type === 'Merma' ? 'text-red-700 bg-red-50 border-red-200 font-bold' :
+                    selectedMovementDetail.type.includes('Devoluc') ? 'text-yellow-700 bg-yellow-50 border-yellow-250 font-bold' :
+                    'text-blue-700 bg-blue-50 border-blue-200'
+                  }`}>
+                    {selectedMovementDetail.type}
+                  </span>
+                </span>
+              </div>
+              <div className="grid grid-cols-3 border-b border-slate-100 pb-2">
+                <span className="text-slate-400 font-sans">Cantidad:</span>
+                <span className={`col-span-2 font-black font-mono ${selectedMovementDetail.qty > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {selectedMovementDetail.qty > 0 ? `+${selectedMovementDetail.qty}` : selectedMovementDetail.qty}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 border-b border-slate-100 pb-2">
+                <span className="text-slate-400 font-sans">Stock Ant / Post:</span>
+                <span className="col-span-2 font-mono text-slate-700">
+                  {selectedMovementDetail.stock_anterior} ➜ {selectedMovementDetail.stock_posterior}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 border-b border-slate-100 pb-2">
+                <span className="text-slate-400 font-sans">Motivo:</span>
+                <span className="col-span-2 text-slate-800 italic font-sans">{selectedMovementDetail.motivo || 'N/A'}</span>
+              </div>
+              <div className="grid grid-cols-3">
+                <span className="text-slate-400 font-sans">Operador:</span>
+                <span className="col-span-2 font-bold text-slate-700 uppercase">{selectedMovementDetail.usuario}</span>
+              </div>
+            </div>
+            
+            <div className="bg-slate-50 px-5 py-3.5 border-t border-slate-150 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setSelectedMovementDetail(null)}
+                className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded text-xs font-sans font-bold transition-all"
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
         </div>
       )}

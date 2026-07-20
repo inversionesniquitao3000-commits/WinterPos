@@ -4,7 +4,7 @@ import {
   ShoppingBag, Search, Trash2, 
   XCircle, ArrowUpRight, 
   Calculator, CheckCircle2, Ticket,
-  Clock, ListOrdered, Plus, AlertCircle, DollarSign
+  Clock, ListOrdered, Plus, AlertCircle, DollarSign, RotateCcw
 } from 'lucide-react';
 import { formatNumberToWordsUSD } from '../utils';
 
@@ -27,7 +27,7 @@ interface CajaPOSProps {
     vueltoUSD: number;
     vueltoVES: number;
   }) => void;
-  onRegisterCajaMovement: (type: 'Entrada' | 'Salida', description: string, usd: number, ves: number) => void;
+  onRegisterCajaMovement: (type: 'Entrada' | 'Salida' | 'Devolucion', description: string, usd: number, ves: number) => void;
   cajaAbierta: boolean;
   montoAperturaUsd: number;
   montoAperturaVes: number;
@@ -63,13 +63,15 @@ interface CajaPOSProps {
   shiftAbonosUsd: number;
   shiftEntradasUsd: number;
   shiftSalidasUsd: number;
+  shiftDevolucionesUsd: number;
   onUpdateProductStock: (
     prodId: number,
-    type: 'Entrada' | 'Salida' | 'Merma' | 'Devolucion' | 'Entrada Rápida',
+    type: 'Entrada' | 'Salida' | 'Merma' | 'Devolucion' | 'Entrada Rápida' | 'Devolución',
     qty: number,
     reason: string
   ) => Promise<void>;
   onRegisterAbono: (clientId: number, amountUSD: number) => void;
+  getApiUrl: (path: string) => string;
 }
 
 export default function CajaPOS({
@@ -90,8 +92,10 @@ export default function CajaPOS({
   shiftAbonosUsd,
   shiftEntradasUsd,
   shiftSalidasUsd,
+  shiftDevolucionesUsd,
   onUpdateProductStock,
-  onRegisterAbono
+  onRegisterAbono,
+  getApiUrl
 }: CajaPOSProps) {
   // Opening/Closing state
   const [showAperturaModal, setShowAperturaModal] = useState(!cajaAbierta);
@@ -109,6 +113,166 @@ export default function CajaPOS({
   const [movDesc, setMovDesc] = useState('');
   const [movUsd, setMovUsd] = useState('');
   const [movVes, setMovVes] = useState('');
+
+  // Devolución state variables
+  const [showDevolucionModal, setShowDevolucionModal] = useState(false);
+  const [devSearchTerm, setDevSearchTerm] = useState('');
+  const [allSalesList, setAllSalesList] = useState<Sale[]>([]);
+  const [devSelectedSale, setDevSelectedSale] = useState<Sale | null>(null);
+  const [devItems, setDevItems] = useState<Array<{ product: Product; qty: number; priceUSD: number; returnQty: number }>>([]);
+  const [devMotivo, setDevMotivo] = useState('');
+  const [showDevConfirmModal, setShowDevConfirmModal] = useState(false);
+
+  // ESC key listener to close modals
+  useEffect(() => {
+    const handleEscKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowDevConfirmModal(false);
+        setShowDevolucionModal(false);
+        if (typeof setShowEntradaRapidaModal === 'function') {
+          setShowEntradaRapidaModal(false);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleEscKey);
+    return () => window.removeEventListener('keydown', handleEscKey);
+  }, []);
+
+  const handleOpenDevolucion = async () => {
+    try {
+      const res = await fetch(getApiUrl('/sales'));
+      if (res.ok) {
+        const data = await res.json();
+        setAllSalesList(data);
+      }
+    } catch (e) {
+      console.error('Error fetching sales for devolucion:', e);
+    }
+    setDevSelectedSale(null);
+    setDevItems([]);
+    setDevMotivo('');
+    setDevSearchTerm('');
+    setShowDevolucionModal(true);
+  };
+
+  const filteredDevSales = useMemo(() => {
+    const sortedSales = [...allSalesList].sort((a, b) => b.id - a.id);
+    if (devSearchTerm.trim() === '') return sortedSales;
+    const term = devSearchTerm.toLowerCase();
+    return sortedSales.filter(sale => 
+      sale.factura_nro?.toLowerCase().includes(term) ||
+      sale.client?.nombre?.toLowerCase().includes(term) ||
+      sale.client?.cedula_rif?.toLowerCase().includes(term)
+    );
+  }, [devSearchTerm, allSalesList]);
+
+  const handleSelectDevSale = (sale: Sale) => {
+    setDevSelectedSale(sale);
+    setDevMotivo('');
+    const items = (sale.items || []).map(item => {
+      const barcode = item?.product?.barcode || '';
+      const description = item?.product?.description || 'Producto sin descripción';
+      const price = parseFloat(item?.precio_unitario_usd || item?.priceUSD || item?.product?.precio_detalle_usd || 0);
+      const qty = parseFloat(item?.qty || 0);
+
+      const fullProd = products.find(p => p.barcode === barcode) || {
+        id: item?.product?.id || Date.now() + Math.random(),
+        barcode: barcode,
+        description: description,
+        precio_costo_usd: item?.product?.precio_costo_usd || 0
+      } as Product;
+      
+      return {
+        product: fullProd,
+        qty: qty,
+        priceUSD: price,
+        returnQty: 0
+      };
+    });
+    setDevItems(items);
+  };
+
+  const handleUpdateDevQty = (index: number, val: number) => {
+    setDevItems(prev => prev.map((item, idx) => {
+      if (idx === index) {
+        const clampedVal = Math.max(0, Math.min(item.qty, val));
+        return { ...item, returnQty: clampedVal };
+      }
+      return item;
+    }));
+  };
+
+  const handleSelectAllForDev = () => {
+    setDevItems(prev => prev.map(item => ({
+      ...item,
+      returnQty: item.qty
+    })));
+  };
+
+  const devRefundTotal = useMemo(() => {
+    return devItems.reduce((acc, item) => acc + (item.returnQty * item.priceUSD), 0);
+  }, [devItems]);
+
+  const handleProcessDevolucion = () => {
+    if (!devSelectedSale || devRefundTotal === 0 || !devMotivo.trim()) return;
+    setShowDevConfirmModal(true);
+  };
+
+  const executeDevolucionProcess = async () => {
+    setShowDevConfirmModal(false);
+    try {
+      // 1. Update product stock (for each returned item, increase stock)
+      for (const item of devItems) {
+        if (item.returnQty > 0) {
+          await onUpdateProductStock(
+            item.product.id,
+            'Devolución',
+            item.returnQty,
+            `Devolución FAC: ${devSelectedSale.factura_nro} - ${devMotivo}`
+          );
+        }
+      }
+
+      // 2. Register manual cash movement of type Devolucion
+      onRegisterCajaMovement(
+        'Devolucion',
+        `Devolución de Efectivo FAC: ${devSelectedSale.factura_nro} - Motivo: ${devMotivo}`,
+        devRefundTotal,
+        0
+      );
+
+      // 3. Register the return as a Sale record in the Ventas history (negative sales)
+      const returnSaleResult = {
+        factura_nro: `DEV-${devSelectedSale.factura_nro.replace('FAC-', '')}`,
+        client: devSelectedSale.client,
+        items: devItems.filter(i => i.returnQty > 0).map(i => ({
+          product: i.product,
+          qty: i.returnQty,
+          priceType: 'Detalle' as const,
+          priceUSD: i.priceUSD,
+          totalUSD: -(i.returnQty * i.priceUSD)
+        })),
+        subtotal: -devRefundTotal,
+        descuento: 0,
+        totalUSD: -devRefundTotal,
+        totalVES: -(devRefundTotal * tasaDia),
+        pagos: [{ metodo: 'Efectivo$' as const, monto: -devRefundTotal, montoUSD: -devRefundTotal }],
+        vueltoUSD: 0,
+        vueltoVES: 0
+      };
+
+      await onRegisterSale(returnSaleResult);
+
+      showToast(`Devolución de $${devRefundTotal.toFixed(2)} USD procesada con éxito. El inventario y la caja han sido actualizados.`, 'success');
+      setShowDevolucionModal(false);
+      setDevSelectedSale(null);
+      setDevItems([]);
+      setDevMotivo('');
+    } catch (e) {
+      console.error(e);
+      showToast("Error al registrar la devolución de mercancía en inventario.", "error");
+    }
+  };
 
   // POS State
   const [selectedClient, setSelectedClient] = useState<Client>(() => {
@@ -441,6 +605,7 @@ export default function CajaPOS({
         setShowQtyEditModal(false);
         setShowOnHoldModal(false);
         setCierreResult(null);
+        setShowDevolucionModal(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -979,52 +1144,75 @@ export default function CajaPOS({
     const realVes = parseFloat(cierreRealVes) || 0;
 
     // Detailed metrics calculation
+    const cajaVentasVes = parseFloat(localStorage.getItem('pos_ventas_ves') || '0');
+    const cajaMovimientosVes = parseFloat(localStorage.getItem('pos_movimientos_ves') || '0');
     const aperturaUsd = _montoAperturaUsd;
     const aperturaVes = _montoAperturaVes;
     const ventasEfectivoUsd = shiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro.startsWith('DEV-')) return acc;
       const cashPay = sale.pagos.find(p => p.metodo === 'Efectivo$');
       return acc + (cashPay ? cashPay.monto : 0);
     }, 0);
     const abonoClientesUsd = shiftAbonosUsd;
     const entradaEfectivoUsd = shiftEntradasUsd;
     const salidaEfectivoUsd = shiftSalidasUsd;
-    const devolucionEfectivoUsd = 0;
-    const dineroEnCajaExpected = aperturaUsd + ventasEfectivoUsd + abonoClientesUsd + entradaEfectivoUsd - salidaEfectivoUsd;
+    const devolucionEfectivoUsd = shiftDevolucionesUsd;
+    const dineroEnCajaExpected = aperturaUsd + ventasEfectivoUsd + abonoClientesUsd + entradaEfectivoUsd - salidaEfectivoUsd - devolucionEfectivoUsd;
     const expectedVes = aperturaVes + cajaVentasVes + cajaMovimientosVes;
     
-    const ventasTotalesUsd = shiftSales.reduce((acc, sale) => acc + sale.totalUSD, 0);
-    const descuentosUsd = shiftSales.reduce((acc, sale) => acc + sale.descuento, 0);
+    const ventasTotalesUsd = shiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      return acc + sale.totalUSD;
+    }, 0);
+    const descuentosUsd = shiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      return acc + sale.descuento;
+    }, 0);
     const ventaBrutaUsd = ventasTotalesUsd + descuentosUsd;
     
     const pagosEfectivoUsd = shiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro.startsWith('DEV-')) return acc;
       return acc + sale.pagos.reduce((a, p) => p.metodo === 'Efectivo$' ? a + p.montoUSD : a, 0);
     }, 0);
     const pagosEfectivoBsUsd = shiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro.startsWith('DEV-')) return acc;
       return acc + sale.pagos.reduce((a, p) => p.metodo === 'EfectivoBs' ? a + p.montoUSD : a, 0);
     }, 0);
     const pagosEfectivoBsVes = shiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro.startsWith('DEV-')) return acc;
       return acc + sale.pagos.reduce((a, p) => p.metodo === 'EfectivoBs' ? a + p.monto : a, 0);
     }, 0);
     const pagosBiopagoUsd = shiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro.startsWith('DEV-')) return acc;
       return acc + sale.pagos.reduce((a, p) => p.metodo === 'Biopago' ? a + p.montoUSD : a, 0);
     }, 0);
     const pagosBiopagoVes = shiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro.startsWith('DEV-')) return acc;
       return acc + sale.pagos.reduce((a, p) => p.metodo === 'Biopago' ? a + p.monto : a, 0);
     }, 0);
     const pagosPuntoUsd = shiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro.startsWith('DEV-')) return acc;
       return acc + sale.pagos.reduce((a, p) => (p.metodo === 'Tarjeta$' || p.metodo === 'PagoMovil' || p.metodo === 'TarjetaBs') ? a + p.montoUSD : a, 0);
     }, 0);
     const pagosPuntoVes = shiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro.startsWith('DEV-')) return acc;
       return acc + sale.pagos.reduce((a, p) => (p.metodo === 'Tarjeta$' || p.metodo === 'PagoMovil' || p.metodo === 'TarjetaBs') ? a + p.monto : a, 0);
     }, 0);
     
     const pagosTarjetaUsd = pagosEfectivoBsUsd; 
     const pagosCreditoUsd = shiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro.startsWith('DEV-')) return acc;
       return acc + sale.pagos.reduce((a, p) => p.metodo === 'CreditoCliente' ? a + p.montoUSD : a, 0);
     }, 0);
     const pagosPuntosUsd = pagosBiopagoUsd; 
-    const devolucionVentasUsd = 0;
-    const ventaTotalUsd = ventasTotalesUsd;
+    
+    const devolucionVentasUsd = shiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro.startsWith('DEV-')) {
+        return acc + Math.abs(sale.totalUSD);
+      }
+      return acc;
+    }, 0);
+    const ventaTotalUsd = ventasTotalesUsd - devolucionVentasUsd;
 
     const costoTotalUsd = shiftSales.reduce((acc, sale) => {
       return acc + (sale.items || []).reduce((itemAcc, item) => {
@@ -1434,6 +1622,16 @@ export default function CajaPOS({
           >
             <DollarSign className="w-4 h-4 text-emerald-600" />
             Abono Cliente
+          </button>
+
+          <button
+            onClick={handleOpenDevolucion}
+            disabled={!cajaAbierta}
+            className="col-span-2 flex items-center justify-center p-3 bg-white border border-slate-200 rounded-lg hover:border-slate-350 hover:bg-slate-50 transition-all gap-1.5 text-center text-[10px] text-slate-550 shadow-sm disabled:opacity-40 font-sans font-bold"
+            title="Registrar devolución de algún producto vendido"
+          >
+            <RotateCcw className="w-4 h-4 text-rose-500" />
+            Devolución de Producto (Ticket)
           </button>
 
         </div>
@@ -2515,10 +2713,10 @@ export default function CajaPOS({
                   <div className="flex justify-between font-extrabold text-[11px] text-slate-800 font-mono">
                     <span>DIFERENCIA USD / VES:</span>
                     <div className="text-right space-y-0.5">
-                      <span className={parseFloat(cierreRealUsd) - cierreResult.dineroEnCajaExpected >= 0 ? 'text-green-600' : 'text-red-650'}>
+                      <span className={parseFloat(cierreRealUsd) - cierreResult.dineroEnCajaExpected >= 0 ? 'text-green-600' : 'text-red-600'}>
                         USD: ${(parseFloat(cierreRealUsd) - cierreResult.dineroEnCajaExpected).toFixed(2)}
                       </span>
-                      <span className={`block ${parseFloat(cierreRealVes) - cierreResult.expectedVes >= 0 ? 'text-green-600' : 'text-red-650'}`}>
+                      <span className={`block ${parseFloat(cierreRealVes) - cierreResult.expectedVes >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                         VES: Bs {(parseFloat(cierreRealVes) - cierreResult.expectedVes).toFixed(2)}
                       </span>
                     </div>
@@ -2828,6 +3026,271 @@ export default function CajaPOS({
 
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: DEVOLUCIÓN DE PRODUCTOS (TICKET) */}
+      {showDevolucionModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-slate-800 animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-4xl shadow-2xl flex flex-col max-h-[90vh]">
+            
+            <div className="bg-rose-50 border-b border-rose-100 px-6 py-4 flex justify-between items-center">
+              <span className="text-xs font-black text-rose-700 tracking-widest uppercase flex items-center gap-1.5">
+                <RotateCcw className="w-4 h-4 text-rose-600" />
+                MÓDULO DE DEVOLUCIONES DE INVENTARIO Y CAJA
+              </span>
+              <button 
+                onClick={() => {
+                  setShowDevolucionModal(false);
+                  setDevSelectedSale(null);
+                  setDevSearchTerm('');
+                }} 
+                className="text-slate-400 hover:text-slate-700 font-sans"
+              >
+                ✕ Cerrar [ESC]
+              </button>
+            </div>
+
+            <div className="flex-grow overflow-hidden flex flex-col md:flex-row min-h-[500px]">
+              
+              {/* Left Column: Search & Find Ticket */}
+              <div className="w-full md:w-2/5 border-r border-slate-200 p-5 flex flex-col space-y-4">
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-1.5 font-sans font-bold uppercase">Buscar Ticket Vendido</label>
+                  <input
+                    type="text"
+                    placeholder="N° Factura, Nombre Cliente, Cédula..."
+                    value={devSearchTerm}
+                    onChange={(e) => setDevSearchTerm(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs focus:bg-white focus:ring-2 focus:ring-rose-500 focus:border-transparent focus:outline-none"
+                    autoFocus
+                  />
+                </div>
+
+                <div className="flex-grow overflow-y-auto space-y-2 pr-1 max-h-[350px]">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block border-b pb-1">Resultados Coincidentes</span>
+                  {filteredDevSales.length === 0 ? (
+                    <div className="text-center py-8 text-slate-400 text-[10px] font-sans">
+                      No se encontraron facturas registradas.
+                    </div>
+                  ) : (
+                    filteredDevSales.map(sale => (
+                      <button
+                        key={sale.id}
+                        onClick={() => handleSelectDevSale(sale)}
+                        className={`w-full text-left p-3 rounded-lg border transition-all flex flex-col gap-1 ${
+                          devSelectedSale?.id === sale.id
+                            ? 'bg-rose-50 border-rose-250 text-rose-900 shadow-sm'
+                            : 'bg-white border-slate-150 hover:bg-slate-50 text-slate-750'
+                        }`}
+                      >
+                        <div className="flex justify-between font-mono font-bold text-[10px]">
+                          <span>{sale.factura_nro}</span>
+                          <span>${sale.totalUSD.toFixed(2)}</span>
+                        </div>
+                        <div className="text-[9px] uppercase font-sans text-slate-500 flex justify-between">
+                          <span className="truncate max-w-[130px]">{sale.client.nombre}</span>
+                          <span>{sale.fecha}</span>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Right Column: Return Items and Refund Details */}
+              <div className="w-full md:w-3/5 p-5 flex flex-col justify-between bg-slate-50 overflow-y-auto">
+                {devSelectedSale ? (
+                  <div className="space-y-4 flex-grow flex flex-col justify-between">
+                    <div className="space-y-4">
+                      {/* Ticket header info banner */}
+                      <div className="bg-white border border-slate-200 p-3 rounded-lg flex justify-between items-center text-xs font-sans shadow-xs">
+                        <div>
+                          <span className="text-[9px] text-slate-400 block uppercase">Cliente</span>
+                          <strong className="text-slate-800 block uppercase">{devSelectedSale.client.nombre} ({devSelectedSale.client.cedula_rif})</strong>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[9px] text-slate-400 block uppercase">Total Original</span>
+                          <strong className="text-slate-800 block font-mono">${devSelectedSale.totalUSD.toFixed(2)}</strong>
+                        </div>
+                      </div>
+
+                      {/* Método de Pago Original */}
+                      <div className="bg-slate-100 border border-slate-200 px-3 py-2 rounded-lg text-[10px] font-sans flex flex-col gap-1 shadow-xs">
+                        <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Forma de Pago Original:</span>
+                        <div className="flex flex-wrap gap-2.5 font-semibold text-slate-700">
+                          {devSelectedSale.pagos?.map((p, pIdx) => {
+                            let label = p.metodo;
+                            if (p.metodo === 'Efectivo$') label = 'Efectivo $';
+                            else if (p.metodo === 'EfectivoBs') label = 'Efectivo Bs';
+                            else if (p.metodo === 'TarjetaBs') label = 'Tarjeta Bs';
+                            else if (p.metodo === 'PagoMovil') label = 'Pago Móvil Bs';
+                            else if (p.metodo === 'Biopago') label = 'Biopago Bs';
+                            else if (p.metodo === 'CreditoCliente') label = 'Crédito';
+                            
+                            const currency = p.metodo.includes('$') || p.metodo === 'CreditoCliente' ? '$' : 'Bs';
+                            const formattedMonto = currency === '$' ? `$${p.monto.toFixed(2)}` : `Bs ${p.monto.toFixed(2)}`;
+                            
+                            return (
+                              <div key={pIdx} className="bg-white border border-slate-200 px-2 py-0.5 rounded shadow-xs text-[9px] flex items-center gap-1">
+                                <span className="text-[8px] text-sky-700 font-bold uppercase">{label}:</span>
+                                <span className="font-mono font-bold text-slate-800">{formattedMonto}</span>
+                                {p.reference && <span className="text-[8px] text-slate-400 font-mono">Ref: {p.reference}</span>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {/* Display vuelto (change) if any */}
+                        {((devSelectedSale.vueltoUSD || 0) > 0 || (devSelectedSale.vueltoVES || 0) > 0) && (
+                          <div className="text-[8px] text-slate-500 italic mt-0.5 flex gap-2 font-mono border-t border-slate-200/60 pt-1">
+                            <span>Vuelto entregado:</span>
+                            {(devSelectedSale.vueltoUSD || 0) > 0 && <span>${(devSelectedSale.vueltoUSD || 0).toFixed(2)} USD</span>}
+                            {(devSelectedSale.vueltoVES || 0) > 0 && <span>Bs {(devSelectedSale.vueltoVES || 0).toFixed(2)} VES</span>}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex justify-between items-center border-b border-slate-200 pb-1">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block font-mono">Modificar Cantidades a Devolver</span>
+                        <button
+                          type="button"
+                          onClick={handleSelectAllForDev}
+                          className="text-[9px] text-rose-700 hover:text-white font-bold font-sans bg-rose-50 hover:bg-rose-600 border border-rose-200 hover:border-transparent px-2.5 py-0.5 rounded transition-all flex items-center gap-1 shadow-xs"
+                        >
+                          <RotateCcw className="w-2.5 h-2.5" />
+                          Devolver Factura Completa
+                        </button>
+                      </div>
+
+                      {/* Items list to return */}
+                      <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                        {devItems.map((item, idx) => (
+                          <div key={idx} className="bg-white border border-slate-200 p-3 rounded-lg flex items-center justify-between text-xs gap-4 shadow-sm">
+                            <div className="flex-grow min-w-0">
+                              <span className="font-bold text-slate-800 uppercase block truncate">{item.product.description}</span>
+                              <span className="text-[10px] text-slate-500 font-mono">Precio Unit: ${item.priceUSD.toFixed(2)} | Comprado: {item.qty}</span>
+                            </div>
+                            
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <label className="text-[9px] text-slate-400 uppercase block font-sans">Devolver:</label>
+                              <div className="flex items-center border border-slate-300 rounded overflow-hidden">
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateDevQty(idx, item.returnQty - 1)}
+                                  className="bg-slate-100 hover:bg-slate-200 px-2.5 py-1 text-slate-600 font-bold"
+                                >
+                                  -
+                                </button>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max={item.qty}
+                                  value={item.returnQty === 0 ? '' : item.returnQty}
+                                  placeholder="0"
+                                  onChange={(e) => handleUpdateDevQty(idx, parseInt(e.target.value) || 0)}
+                                  className="w-10 text-center font-bold font-mono text-xs focus:outline-none"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateDevQty(idx, item.returnQty + 1)}
+                                  className="bg-slate-100 hover:bg-slate-200 px-2.5 py-1 text-slate-600 font-bold"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Refund Summary and Action Form */}
+                    <div className="border-t border-slate-200 pt-4 mt-4 space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold">Concepto / Motivo de Devolución</label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="ej. Producto defectuoso, cambio de talla..."
+                            value={devMotivo}
+                            onChange={(e) => setDevMotivo(e.target.value)}
+                            className="w-full bg-white border border-slate-350 rounded p-2 text-xs text-slate-800 focus:outline-none"
+                          />
+                        </div>
+                        <div className="bg-rose-50 border border-rose-100 p-3 rounded-lg flex flex-col justify-center items-end font-mono">
+                          <span className="text-[9px] text-rose-800 font-bold uppercase font-sans">Total Reembolso</span>
+                          <span className="text-xl font-black text-rose-700">${devRefundTotal.toFixed(2)} USD</span>
+                          <span className="text-[9px] text-rose-500 mt-0.5">Bs {(devRefundTotal * tasaDia).toFixed(2)} VES</span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={handleProcessDevolucion}
+                        disabled={devRefundTotal === 0 || !devMotivo.trim()}
+                        className="w-full bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 disabled:text-slate-500 text-white py-3.5 rounded-lg font-bold font-sans text-xs tracking-wider transition-all shadow-md flex items-center justify-center gap-1.5"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        PROCESAR DEVOLUCIÓN Y REEMBOLSAR EFECTIVO
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex-grow flex flex-col items-center justify-center text-slate-400 text-[11px] font-sans gap-2">
+                    <RotateCcw className="w-8 h-8 text-slate-300" />
+                    <span>Seleccione un ticket vendido a la izquierda para iniciar la devolución.</span>
+                  </div>
+                )}
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CUSTOM CONFIRM MODAL FOR DEVOLUCION */}
+      {showDevConfirmModal && (
+        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 z-[99] font-mono text-slate-800">
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-sm shadow-2xl flex flex-col transform transition-all animate-scale-in">
+            <div className="bg-rose-50 border-b border-rose-100 px-5 py-4 flex items-center gap-2">
+              <RotateCcw className="w-5 h-5 text-rose-600 animate-spin-reverse" />
+              <span className="text-xs font-bold text-rose-800 tracking-wider uppercase font-sans">Confirmar Reembolso</span>
+            </div>
+            
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-slate-700 leading-relaxed font-sans">
+                ¿Está seguro de procesar la devolución de <strong className="text-rose-700 font-mono font-black">${devRefundTotal.toFixed(2)} USD</strong> (Bs {(devRefundTotal * tasaDia).toFixed(2)} VES) y reintegrar el dinero al cliente?
+              </p>
+              
+              <div className="bg-slate-55 border border-slate-200 rounded-lg p-3 text-[10px] space-y-1 text-slate-600">
+                <div className="flex justify-between">
+                  <span>Factura de origen:</span>
+                  <strong className="font-mono text-slate-800">{devSelectedSale?.factura_nro}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span>Motivo:</span>
+                  <span className="italic text-slate-700 truncate max-w-[180px] font-sans">{devMotivo}</span>
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-slate-50 px-5 py-3.5 border-t border-slate-150 flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setShowDevConfirmModal(false)}
+                className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded text-xs font-sans font-bold transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={executeDevolucionProcess}
+                className="bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded text-xs font-sans font-bold transition-all shadow-md animate-pulse"
+              >
+                Confirmar Registro
+              </button>
+            </div>
           </div>
         </div>
       )}
