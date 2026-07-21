@@ -331,6 +331,8 @@ export default function CajaPOS({
   const [entradaQty, setEntradaQty] = useState('1');
   const [matchedProduct, setMatchedProduct] = useState<Product | null>(null);
 
+
+
   // Search autocomplete dropdown visibility for Entrada Rápida
   const showEntradaDropdown = entradaBarcode.trim() !== "" && (!matchedProduct || matchedProduct.barcode !== entradaBarcode);
 
@@ -1308,6 +1310,36 @@ export default function CajaPOS({
                 placeholder="Escriba código o descripción..."
                 value={searchProdTerm}
                 onChange={(e) => setSearchProdTerm(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const term = searchProdTerm.trim();
+                    if (!term) return;
+
+                    // Search for exact barcode/code match first
+                    let matched = products.find(p => p.barcode.toUpperCase() === term.toUpperCase() || p.id.toString() === term);
+
+                    // If no exact match, try the first product in the filtered list
+                    if (!matched) {
+                      const filtered = products.filter(p => 
+                        p.description.toLowerCase().includes(term.toLowerCase()) || 
+                        p.barcode.toLowerCase().includes(term.toLowerCase())
+                      );
+                      if (filtered.length === 1) {
+                        matched = filtered[0];
+                      }
+                    }
+
+                    if (matched) {
+                      handleAddProduct(matched);
+                      setSearchProdTerm('');
+                    } else {
+                      showToast(`Código "${term}" no registrado o inexistente en el inventario.`, 'error');
+                      setSearchProdTerm('');
+                    }
+                  }
+                }}
                 className="w-full bg-slate-50 border border-slate-350 rounded p-2 pl-9 outline-none text-slate-800 focus:bg-white focus:border-winter-blueBtn font-sans"
               />
               
@@ -3297,20 +3329,27 @@ export default function CajaPOS({
 
       {/* Toast Alert overlay */}
       {toast && (
-        <div className="fixed bottom-6 right-6 z-[100] animate-fade-in font-mono">
-          <div className={`flex items-center gap-3 px-5 py-4 rounded-xl border shadow-2xl text-xs font-bold font-sans ${
-            toast.type === 'success' ? 'bg-emerald-50 border-emerald-250 text-emerald-800 ring-4 ring-emerald-500/10' :
-            toast.type === 'error' ? 'bg-red-55 border-red-250 text-red-800 ring-4 ring-red-500/10' :
-            'bg-sky-50 border-sky-250 text-sky-850 ring-4 ring-sky-500/10'
-          }`}>
-            {toast.type === 'success' ? (
-              <CheckCircle2 className="w-5 h-5 text-emerald-600 animate-bounce" />
-            ) : (
-              <AlertCircle className="w-5 h-5 text-red-500 animate-bounce" />
-            )}
-            <span>{toast.text}</span>
+        toast.type === 'error' ? (
+          <div className="fixed inset-0 flex items-center justify-center z-[110] pointer-events-none animate-fade-in font-mono">
+            <div className="bg-red-50 border-2 border-red-300 text-red-900 px-8 py-6 rounded-2xl shadow-2xl flex flex-col items-center gap-3 max-w-sm text-center ring-8 ring-red-500/10 pointer-events-auto">
+              <AlertCircle className="w-12 h-12 text-red-600 animate-bounce" />
+              <div className="space-y-1">
+                <span className="block text-xs font-black text-red-650 uppercase font-sans tracking-wide">Error de Lectura</span>
+                <span className="block text-sm font-extrabold font-sans leading-snug">{toast.text}</span>
+              </div>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="fixed bottom-6 right-6 z-[100] animate-fade-in font-mono">
+            <div className={`flex items-center gap-3 px-5 py-4 rounded-xl border shadow-2xl text-xs font-bold font-sans ${
+              toast.type === 'success' ? 'bg-emerald-50 border-emerald-250 text-emerald-800 ring-4 ring-emerald-500/10' :
+              'bg-sky-50 border-sky-250 text-sky-850 ring-4 ring-sky-500/10'
+            }`}>
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 animate-bounce" />
+              <span>{toast.text}</span>
+            </div>
+          </div>
+        )
       )}
 
     </div>

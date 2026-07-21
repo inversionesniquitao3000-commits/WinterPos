@@ -1279,9 +1279,10 @@ export default function Clientes({
                     type="number"
                     min="0"
                     max="100"
+                    disabled={newPrecioCosto}
                     value={newDiscount}
                     onChange={(e) => setNewDiscount(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-slate-500 focus:outline-none font-mono text-center"
+                    className={`w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-slate-500 focus:outline-none font-mono text-center ${newPrecioCosto ? 'opacity-50 cursor-not-allowed bg-slate-100' : ''}`}
                   />
                 </div>
               </div>
@@ -1292,7 +1293,12 @@ export default function Clientes({
                   <input
                     type="checkbox"
                     checked={newPrecioCosto}
-                    onChange={(e) => setNewPrecioCosto(e.target.checked)}
+                    onChange={(e) => {
+                      setNewPrecioCosto(e.target.checked);
+                      if (e.target.checked) {
+                        setNewDiscount('0');
+                      }
+                    }}
                     className="sr-only peer"
                   />
                   <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
@@ -1412,9 +1418,10 @@ export default function Clientes({
                     type="number"
                     min="0"
                     max="100"
+                    disabled={editPrecioCosto}
                     value={editDiscount}
                     onChange={(e) => setEditDiscount(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-sky-500 focus:outline-none font-mono text-center"
+                    className={`w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-sky-500 focus:outline-none font-mono text-center ${editPrecioCosto ? 'opacity-50 cursor-not-allowed bg-slate-100' : ''}`}
                   />
                 </div>
               </div>
@@ -1431,7 +1438,12 @@ export default function Clientes({
                   <input
                     type="checkbox"
                     checked={editPrecioCosto}
-                    onChange={(e) => setEditPrecioCosto(e.target.checked)}
+                    onChange={(e) => {
+                      setEditPrecioCosto(e.target.checked);
+                      if (e.target.checked) {
+                        setEditDiscount('0');
+                      }
+                    }}
                     className="sr-only peer"
                   />
                   <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
