@@ -171,7 +171,9 @@ export interface CierreCaja {
   ventasEfectivoUsd: number;
   abonoClientesUsd: number;
   entradaEfectivoUsd: number;
+  entradaEfectivoVes?: number;
   salidaEfectivoUsd: number;
+  salidaEfectivoVes?: number;
   devolucionEfectivoUsd: number;
   dineroEnCajaExpected: number;
   realUsd: number; 

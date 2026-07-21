@@ -39,7 +39,9 @@ interface CajaPOSProps {
       ventasEfectivoUsd: number;
       abonoClientesUsd: number;
       entradaEfectivoUsd: number;
+      entradaEfectivoVes?: number;
       salidaEfectivoUsd: number;
+      salidaEfectivoVes?: number;
       devolucionEfectivoUsd: number;
       dineroEnCajaExpected: number;
       ventasTotalesUsd: number;
@@ -62,7 +64,9 @@ interface CajaPOSProps {
   shiftSales: Sale[];
   shiftAbonosUsd: number;
   shiftEntradasUsd: number;
+  shiftEntradasVes: number;
   shiftSalidasUsd: number;
+  shiftSalidasVes: number;
   shiftDevolucionesUsd: number;
   onUpdateProductStock: (
     prodId: number,
@@ -72,6 +76,7 @@ interface CajaPOSProps {
   ) => Promise<void>;
   onRegisterAbono: (clientId: number, amountUSD: number) => void;
   getApiUrl: (path: string) => string;
+  nextInvoiceNumber: string;
 }
 
 export default function CajaPOS({
@@ -91,11 +96,14 @@ export default function CajaPOS({
   shiftSales,
   shiftAbonosUsd,
   shiftEntradasUsd,
+  shiftEntradasVes,
   shiftSalidasUsd,
+  shiftSalidasVes,
   shiftDevolucionesUsd,
   onUpdateProductStock,
   onRegisterAbono,
-  getApiUrl
+  getApiUrl,
+  nextInvoiceNumber
 }: CajaPOSProps) {
   // Opening/Closing state
   const [showAperturaModal, setShowAperturaModal] = useState(!cajaAbierta);
@@ -768,21 +776,21 @@ export default function CajaPOS({
   }, [cajaAbierta]);
 
   // Compute Totals
-  const subtotalUSD = saleItems.reduce((acc, item) => acc + item.totalUSD, 0);
-  const discountAmountUSD = subtotalUSD * (discountPct / 100);
+  const subtotalUSD = Math.round(saleItems.reduce((acc, item) => acc + item.totalUSD, 0) * 100) / 100;
+  const discountAmountUSD = Math.round((subtotalUSD * (discountPct / 100)) * 100) / 100;
 
   // Tax calculations: Standard IVA (16%) is applied only to non-exempt (taxable) items
-  const taxableSubtotal = saleItems.reduce((acc, item) => {
+  const taxableSubtotal = Math.round(saleItems.reduce((acc, item) => {
     return acc + (item.product.exento_impuesto ? 0 : item.totalUSD);
-  }, 0);
-  const exemptSubtotal = subtotalUSD - taxableSubtotal;
+  }, 0) * 100) / 100;
+  const exemptSubtotal = Math.round((subtotalUSD - taxableSubtotal) * 100) / 100;
 
   const discountFactor = (1 - discountPct / 100);
   const discountedTaxableSubtotal = taxableSubtotal * discountFactor;
-  const ivaAmount = discountedTaxableSubtotal * 0.16;
+  const ivaAmount = Math.round((discountedTaxableSubtotal * 0.16) * 100) / 100;
 
-  const totalUSD = Math.max(0, (taxableSubtotal + exemptSubtotal) * discountFactor + ivaAmount);
-  const totalVES = totalUSD * tasaDia;
+  const totalUSD = Math.round((Math.max(0, (taxableSubtotal + exemptSubtotal) * discountFactor + ivaAmount)) * 100) / 100;
+  const totalVES = Math.round((totalUSD * tasaDia) * 100) / 100;
 
   const executeAddProduct = (prod: Product, finalQty: number) => {
     setSaleItems(prev => {
@@ -965,17 +973,19 @@ export default function CajaPOS({
   const biopagoVESVal = parseFloat(payBiopagoVES) || 0;
   const creditUSDVal = parseFloat(payCreditUSD) || 0;
 
-  const totalPaidUSD =
+  // Round paid USD calculation to 2 decimals to avoid floating-point issues
+  const totalPaidUSD = Math.round((
     cashUSDVal +
     (cashVESVal / tasaDia) +
     (cardVESVal / tasaDia) +
     (pagoMovilVESVal / tasaDia) +
     (biopagoVESVal / tasaDia) +
-    creditUSDVal;
+    creditUSDVal
+  ) * 100) / 100;
 
-  const remainingUSD = Math.max(0, totalUSD - totalPaidUSD);
-  const changeUSD = Math.max(0, totalPaidUSD - totalUSD);
-  const changeVES = changeUSD * tasaVuelto;
+  const remainingUSD = Math.max(0, Math.round((totalUSD - totalPaidUSD) * 100) / 100);
+  const changeUSD = Math.max(0, Math.round((totalPaidUSD - totalUSD) * 100) / 100);
+  const changeVES = Math.round((changeUSD * tasaVuelto) * 100) / 100;
 
   const isPagoMovilValid = pagoMovilVESVal === 0 || (refPagoMovil.trim().length >= 4 && bankPagoMovil !== '');
   const isBiopagoValid = true;
@@ -1036,7 +1046,7 @@ export default function CajaPOS({
       pagos.push({ metodo: 'CreditoCliente', monto: creditUSDVal, montoUSD: creditUSDVal });
     }
 
-    const factura_nro = `FAC-${Math.floor(100000 + Math.random() * 900000)}`;
+    const factura_nro = nextInvoiceNumber;
 
     const saleResult = {
       factura_nro,
@@ -1157,10 +1167,12 @@ export default function CajaPOS({
     }, 0);
     const abonoClientesUsd = shiftAbonosUsd;
     const entradaEfectivoUsd = shiftEntradasUsd;
+    const entradaEfectivoVes = shiftEntradasVes;
     const salidaEfectivoUsd = shiftSalidasUsd;
+    const salidaEfectivoVes = shiftSalidasVes;
     const devolucionEfectivoUsd = shiftDevolucionesUsd;
     const dineroEnCajaExpected = aperturaUsd + ventasEfectivoUsd + abonoClientesUsd + entradaEfectivoUsd - salidaEfectivoUsd - devolucionEfectivoUsd;
-    const expectedVes = aperturaVes + cajaVentasVes + cajaMovimientosVes;
+    const expectedVes = aperturaVes + cajaVentasVes + entradaEfectivoVes - salidaEfectivoVes;
     
     const ventasTotalesUsd = shiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
@@ -1239,7 +1251,9 @@ export default function CajaPOS({
       ventasEfectivoUsd,
       abonoClientesUsd,
       entradaEfectivoUsd,
+      entradaEfectivoVes,
       salidaEfectivoUsd,
+      salidaEfectivoVes,
       devolucionEfectivoUsd,
       dineroEnCajaExpected,
       ventasTotalesUsd,
@@ -1549,36 +1563,41 @@ export default function CajaPOS({
       </div>
 
       {/* RIGHT SIDEBAR: FINANCIALS & CONTROL BUTTONS */}
-      <div className="space-y-4">
+      <div className="space-y-2.5 flex flex-col xl:h-[calc(100vh-180px)] xl:overflow-y-auto pr-1 pb-1">
         
         {/* TOTALS CARD - Light Mode */}
-        <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-sm">
-          <div className="flex justify-between items-center text-[10px] text-slate-400 border-b border-slate-100 pb-2">
-            <span className="font-sans">SUCURSAL NIQUITAO 3000</span>
-            <span className="text-winter-blueBtn font-bold">MONEDA: USD</span>
+        <div className="bg-white border border-slate-200 rounded-xl p-3.5 space-y-2.5 shadow-sm">
+          <div className="flex justify-between items-center text-[10.5px] border-b border-slate-100 pb-1.5">
+            <div className="flex flex-col gap-0.5">
+              <span className="font-sans text-slate-400 uppercase tracking-tight">SUCURSAL NIQUITAO 3000</span>
+              <span className="text-[11.5px] font-mono font-extrabold text-slate-800 tracking-wider">
+                PRÓX. FACTURA: {nextInvoiceNumber}
+              </span>
+            </div>
+            <span className="text-winter-blueBtn font-black uppercase text-[10px]">MONEDA: USD</span>
           </div>
 
-          <div className="space-y-2">
-            <div className="flex justify-between text-slate-600 text-xs">
+          <div className="space-y-1.5">
+            <div className="flex justify-between text-slate-600 text-[11px]">
               <span className="font-sans">Subtotal</span>
               <span className="font-mono">${subtotalUSD.toFixed(2)}</span>
             </div>
 
             {taxableSubtotal > 0 && (
-              <div className="flex justify-between text-slate-500 text-[11px]">
+              <div className="flex justify-between text-slate-500 text-[10.5px]">
                 <span className="font-sans">Base Imponible (Gravable)</span>
                 <span className="font-mono">${taxableSubtotal.toFixed(2)}</span>
               </div>
             )}
 
             {ivaAmount > 0 && (
-              <div className="flex justify-between text-slate-600 text-xs">
+              <div className="flex justify-between text-slate-600 text-[11px]">
                 <span className="font-sans text-slate-700 font-bold">IVA (16%)</span>
                 <span className="font-mono text-slate-750 font-bold">${ivaAmount.toFixed(2)}</span>
               </div>
             )}
             
-            <div className="flex justify-between items-center text-slate-655 text-xs">
+            <div className="flex justify-between items-center text-slate-655 text-[11px]">
               <span className="flex items-center gap-1 font-sans">
                 Descuento
                 <input
@@ -1587,43 +1606,49 @@ export default function CajaPOS({
                   max="100"
                   value={discountPct}
                   onChange={(e) => setDiscountPct(Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))}
-                  className="bg-slate-50 border border-slate-300 w-12 text-center rounded p-0.5 font-bold font-mono text-emerald-700 text-[11px]"
+                  disabled={selectedClient && selectedClient.porcentaje_descuento > 0}
+                  className={`w-12 text-center rounded p-0.5 font-bold font-mono text-[10px] transition-all ${
+                    selectedClient && selectedClient.porcentaje_descuento > 0
+                      ? 'bg-slate-150 border-slate-300 text-slate-400 cursor-not-allowed opacity-80'
+                      : 'bg-slate-50 border-slate-300 text-emerald-700'
+                  }`}
+                  title={selectedClient && selectedClient.porcentaje_descuento > 0 ? "Descuento preestablecido en ficha de cliente (bloqueado)" : "Descuento manual"}
                 />
                 %
               </span>
               <span className="text-red-500 font-mono">-${discountAmountUSD.toFixed(2)}</span>
             </div>
 
-            <div className="border-t border-slate-150 pt-3 flex justify-between items-baseline">
-              <span className="font-extrabold text-slate-700 font-sans">TOTAL USD:</span>
-              <span className="text-2xl font-black text-emerald-600 font-mono">${totalUSD.toFixed(2)}</span>
+            <div className="border-t border-slate-150 pt-2 flex justify-between items-baseline">
+              <span className="font-extrabold text-slate-700 text-xs font-sans">TOTAL USD:</span>
+              <span className="text-xl font-black text-emerald-600 font-mono">${totalUSD.toFixed(2)}</span>
             </div>
 
-            <div className="flex justify-between items-baseline text-slate-500 border-t border-dashed border-slate-200 pt-2">
-              <span className="text-[10px] font-sans uppercase">Ref VES (Tasa {tasaDia.toFixed(2)}):</span>
-              <span className="text-sm font-bold font-mono">Bs {totalVES.toFixed(2)}</span>
+            <div className="flex justify-between items-baseline text-slate-500 border-t border-dashed border-slate-200 pt-1.5">
+              <span className="text-[9.5px] font-sans uppercase">Ref VES (Tasa {tasaDia.toFixed(2)}):</span>
+              <span className="text-xs font-bold font-mono">Bs {totalVES.toFixed(2)}</span>
             </div>
           </div>
         </div>
 
         {/* CONTROLS BUTTONS GRID */}
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-1.5">
           
           <button
             onClick={() => setShowMovementsModal(true)}
             disabled={!cajaAbierta}
-            className="flex flex-col items-center justify-center p-3 bg-white border border-slate-200 rounded-lg hover:border-slate-350 hover:bg-slate-50 transition-all gap-1.5 text-center text-[10px] text-slate-550 shadow-sm disabled:opacity-40"
+            className="flex flex-col items-center justify-center py-2.5 px-2 bg-white border border-slate-200 rounded-lg hover:border-slate-350 hover:bg-slate-50 transition-all gap-1.5 text-center text-[11.5px] font-sans font-bold text-slate-700 shadow-sm disabled:opacity-40"
           >
-            <ArrowUpRight className="w-4 h-4 text-green-600" />
+            <ArrowUpRight className="w-[17px] h-[17px] text-green-600" />
             Movimiento Caja
           </button>
 
           <button
             onClick={() => setShowCierreModal(true)}
             disabled={!cajaAbierta}
-            className="flex flex-col items-center justify-center p-3 bg-white border border-slate-200 rounded-lg hover:border-slate-350 hover:bg-slate-50 transition-all gap-1.5 text-center text-[10px] text-slate-550 shadow-sm disabled:opacity-40"
+            className="flex flex-col items-center justify-center py-2.5 px-2 bg-white border border-slate-200 rounded-lg hover:border-slate-350 hover:bg-slate-50 transition-all gap-1.5 text-center text-[11.5px] font-sans font-bold text-slate-700 shadow-sm disabled:opacity-40"
           >
-            <XCircle className="w-4 h-4 text-red-500" />
+            <XCircle className="w-[17px] h-[17px] text-red-500" />
             Cierre de Caja
           </button>
 
@@ -1634,10 +1659,10 @@ export default function CajaPOS({
               setShowEntradaRapidaModal(true);
             }}
             disabled={!cajaAbierta}
-            className="flex flex-col items-center justify-center p-3 bg-white border border-slate-200 rounded-lg hover:border-slate-350 hover:bg-slate-50 transition-all gap-1.5 text-center text-[10px] text-slate-550 shadow-sm disabled:opacity-40 font-sans"
+            className="flex flex-col items-center justify-center py-2.5 px-2 bg-white border border-slate-200 rounded-lg hover:border-slate-350 hover:bg-slate-50 transition-all gap-1.5 text-center text-[11.5px] font-sans font-bold text-slate-700 shadow-sm disabled:opacity-40"
             title="Ingreso rápido de mercancía a inventario"
           >
-            <Plus className="w-4 h-4 text-sky-500" />
+            <Plus className="w-[17px] h-[17px] text-sky-500" />
             Entrada Rápida
           </button>
 
@@ -1649,20 +1674,20 @@ export default function CajaPOS({
               setShowCajaAbonoModal(true);
             }}
             disabled={!cajaAbierta}
-            className="flex flex-col items-center justify-center p-3 bg-white border border-slate-200 rounded-lg hover:border-slate-350 hover:bg-slate-50 transition-all gap-1.5 text-center text-[10px] text-slate-550 shadow-sm disabled:opacity-40 font-sans"
+            className="flex flex-col items-center justify-center py-2.5 px-2 bg-white border border-slate-200 rounded-lg hover:border-slate-350 hover:bg-slate-50 transition-all gap-1.5 text-center text-[11.5px] font-sans font-bold text-slate-700 shadow-sm disabled:opacity-40"
             title="Registrar abono de deuda de un cliente"
           >
-            <DollarSign className="w-4 h-4 text-emerald-600" />
+            <DollarSign className="w-[17px] h-[17px] text-emerald-600" />
             Abono Cliente
           </button>
 
           <button
             onClick={handleOpenDevolucion}
             disabled={!cajaAbierta}
-            className="col-span-2 flex items-center justify-center p-3 bg-white border border-slate-200 rounded-lg hover:border-slate-350 hover:bg-slate-50 transition-all gap-1.5 text-center text-[10px] text-slate-550 shadow-sm disabled:opacity-40 font-sans font-bold"
+            className="col-span-2 flex items-center justify-center py-2.5 px-3 bg-white border border-slate-200 rounded-lg hover:border-slate-350 hover:bg-slate-50 transition-all gap-1.5 text-center text-[11.5px] font-sans font-bold text-slate-700 shadow-sm disabled:opacity-40"
             title="Registrar devolución de algún producto vendido"
           >
-            <RotateCcw className="w-4 h-4 text-rose-500" />
+            <RotateCcw className="w-[17px] h-[17px] text-rose-500" />
             Devolución de Producto (Ticket)
           </button>
 
@@ -1672,18 +1697,18 @@ export default function CajaPOS({
         <button
           onClick={handleOpenCheckout}
           disabled={saleItems.length === 0 || !cajaAbierta}
-          className="w-full bg-winter-blueBtn hover:bg-winter-blueBtnHover disabled:bg-slate-300 disabled:text-slate-500 text-white font-black text-sm tracking-wider py-4 rounded-xl transition-all shadow-[0_4px_12px_rgba(11,95,165,0.2)] flex items-center justify-center gap-2 select-none font-sans"
+          className="w-full bg-winter-blueBtn hover:bg-winter-blueBtnHover disabled:bg-slate-300 disabled:text-slate-500 text-white font-black text-xs tracking-wider py-2.5 rounded-xl transition-all shadow-[0_4px_12px_rgba(11,95,165,0.2)] flex items-center justify-center gap-2 select-none font-sans"
         >
-          <ShoppingBag className="w-5 h-5" />
+          <ShoppingBag className="w-4 h-4" />
           COBRAR (F12)
         </button>
 
         {/* TICKETS EN ESPERA CONTROLS */}
-        <div className="space-y-2 pt-2 border-t border-slate-200 mt-2 flex flex-col gap-1.5">
+        <div className="space-y-1.5 pt-1.5 border-t border-slate-200 mt-1 flex flex-col gap-1">
           {saleItems.length > 0 && (
             <button
               onClick={handlePutOnHold}
-              className="w-full bg-amber-500 hover:bg-amber-600 text-white py-2 rounded-lg text-xs font-sans font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm"
+              className="w-full bg-amber-500 hover:bg-amber-600 text-white py-1.5 rounded-lg text-xs font-sans font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm"
               title="Poner venta actual en espera"
             >
               <Clock className="w-3.5 h-3.5" />
@@ -1694,7 +1719,7 @@ export default function CajaPOS({
           {ticketsOnHold.length > 0 && (
             <button
               onClick={() => setShowOnHoldModal(true)}
-              className="w-full bg-slate-700 hover:bg-slate-800 text-white py-2 rounded-lg text-xs font-sans font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm relative"
+              className="w-full bg-slate-700 hover:bg-slate-800 text-white py-1.5 rounded-lg text-xs font-sans font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm relative"
               title="Ver ventas en espera"
             >
               <ListOrdered className="w-3.5 h-3.5 text-sky-400" />
@@ -1708,7 +1733,7 @@ export default function CajaPOS({
           {saleItems.length > 0 && (
             <button
               onClick={handleClearSale}
-              className="w-full bg-white border border-slate-200 text-red-500 hover:text-red-750 hover:bg-red-50 py-2 rounded-lg text-xs font-sans transition-all flex items-center justify-center gap-1.5 shadow-sm"
+              className="w-full bg-white border border-slate-200 text-red-500 hover:text-red-750 hover:bg-red-50 py-1.5 rounded-lg text-xs font-sans transition-all flex items-center justify-center gap-1.5 shadow-sm"
             >
               <Trash2 className="w-3.5 h-3.5" />
               Cancelar Venta
@@ -1895,17 +1920,52 @@ export default function CajaPOS({
                 )}
 
                 {/* Client Credit limit option */}
-                {companyConfig.metodos_pago_activos.includes('credito') && selectedClient.limite_credito > 0 && (
+                {companyConfig.metodos_pago_activos.includes('credito') && selectedClient && selectedClient.limite_credito > 0 && (
                   <div className="border-t border-slate-200 pt-2 space-y-1">
                     <label className="text-[10px] text-red-500 block font-bold font-sans">Financiar a Crédito ($ USD)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      placeholder={`Máximo $${selectedClient.credito_disponible.toFixed(2)}`}
-                      value={payCreditUSD}
-                      onChange={(e) => setPayCreditUSD(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-red-550 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
-                    />
+                    <div className="flex gap-1.5">
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder={`Máximo $${selectedClient.credito_disponible.toFixed(2)}`}
+                        value={payCreditUSD}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          let numVal = parseFloat(val);
+                          const totalPaidExcludingCreditUSD =
+                            (parseFloat(payCashUSD) || 0) +
+                            ((parseFloat(payCashVES) || 0) / tasaDia) +
+                            ((parseFloat(payCardVES) || 0) / tasaDia) +
+                            ((parseFloat(payPagoMovilVES) || 0) / tasaDia) +
+                            ((parseFloat(payBiopagoVES) || 0) / tasaDia);
+                          const remainingToPay = Math.max(0, totalUSD - totalPaidExcludingCreditUSD);
+                          
+                          if (!isNaN(numVal) && numVal > remainingToPay) {
+                            setPayCreditUSD(remainingToPay.toFixed(2));
+                          } else {
+                            setPayCreditUSD(val);
+                          }
+                        }}
+                        className="flex-grow bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-red-550 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const totalPaidExcludingCreditUSD =
+                            (parseFloat(payCashUSD) || 0) +
+                            ((parseFloat(payCashVES) || 0) / tasaDia) +
+                            ((parseFloat(payCardVES) || 0) / tasaDia) +
+                            ((parseFloat(payPagoMovilVES) || 0) / tasaDia) +
+                            ((parseFloat(payBiopagoVES) || 0) / tasaDia);
+                          const remainingToPay = Math.max(0, totalUSD - totalPaidExcludingCreditUSD);
+                          setPayCreditUSD(remainingToPay.toFixed(2));
+                        }}
+                        className="bg-red-50 border border-red-200 hover:bg-red-100 text-red-650 px-2.5 rounded font-bold font-sans text-[10px] tracking-wider transition-all whitespace-nowrap flex items-center justify-center"
+                        title="Completar el saldo restante con crédito"
+                      >
+                        Completar
+                      </button>
+                    </div>
                     {!isCreditValid && (
                       <span className="text-[9px] text-red-550 font-bold block mt-1 font-sans">
                         * Límite de crédito excedido (máx: ${selectedClient.credito_disponible.toFixed(2)} USD)
@@ -1925,8 +1985,8 @@ export default function CajaPOS({
                 <div className="bg-slate-50 border border-slate-200 p-5 rounded-xl space-y-4">
                   
                   {/* CLIENT INFO BANNER FOR OPERATOR CHECK */}
-                  <div className="bg-sky-50 border border-sky-100 p-3 rounded-lg flex flex-col font-sans text-xs leading-tight">
-                    <span className="text-[9px] text-sky-800 font-bold uppercase tracking-wider mb-1">Cliente Facturación</span>
+                  <div className="bg-sky-50 border border-sky-100 py-1.5 px-3 rounded-lg flex flex-col font-sans text-xs leading-tight">
+                    <span className="text-[9px] text-sky-800 font-bold uppercase tracking-wider mb-0.5">Cliente Facturación</span>
                     <span className="font-black text-slate-850 uppercase">{selectedClient.nombre}</span>
                     <span className="font-mono font-bold text-slate-550 text-[10px] mt-0.5">{selectedClient.cedula_rif}</span>
                   </div>
@@ -1958,13 +2018,17 @@ export default function CajaPOS({
                         <span className="font-bold font-mono">-${discountAmountUSD.toFixed(2)}</span>
                       </div>
                     )}
-                    <div className="flex justify-between border-t border-slate-200 pt-2 font-extrabold text-slate-800">
-                      <span className="font-sans text-sm">TOTAL USD:</span>
-                      <span className="font-mono text-base">${totalUSD.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-550 font-sans">TOTAL VES:</span>
-                      <span className="font-bold text-slate-600 font-mono">Bs {totalVES.toFixed(2)}</span>
+
+                    {/* HIGHLIGHTED TOTALS BOX */}
+                    <div className="bg-slate-100 border border-slate-250 p-2.5 rounded-lg my-1.5 space-y-1.5">
+                      <div className="flex justify-between items-baseline text-slate-900">
+                        <span className="font-sans font-black text-xs uppercase tracking-wide">TOTAL USD:</span>
+                        <span className="font-mono text-xl font-black text-emerald-700">${totalUSD.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between items-baseline text-slate-700">
+                        <span className="font-sans font-bold text-[10px] uppercase tracking-wide">TOTAL VES:</span>
+                        <span className="font-mono text-sm font-extrabold text-slate-800">Bs {totalVES.toFixed(2)}</span>
+                      </div>
                     </div>
                     
                     <div className="border-t border-slate-200 pt-2 flex justify-between text-emerald-700 font-bold">
@@ -1986,16 +2050,18 @@ export default function CajaPOS({
                       </div>
                     </div>
 
-                    <div className="border-t border-dashed border-slate-200 pt-3">
-                      <span className="text-[10px] text-slate-500 block font-sans">Diferencia / Cambio (Vuelto):</span>
-                      <div className="flex justify-between items-baseline mt-1 font-mono">
-                        <span className="text-purple-750 font-black text-lg">
+                    {/* HIGHLIGHTED CHANGE / VUELTO BOX */}
+                    <div className="border-t border-dashed border-slate-250 pt-3">
+                      <span className="text-[10px] text-slate-500 block font-sans uppercase tracking-wider font-bold">Diferencia / Cambio (Vuelto):</span>
+                      <div className="flex justify-between items-center mt-1.5 bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-lg font-mono">
+                        <span className="text-purple-700 font-black text-lg">
                           Bs {changeVES.toFixed(2)}
                         </span>
-                        <span className="text-slate-500 text-xs">
+                        <span className="text-purple-800 font-extrabold text-xs">
                           (${changeUSD.toFixed(2)} USD)
                         </span>
                       </div>
+                    </div>
 
                       {/* MIXED CHANGE HELPER CALCULATOR */}
                       {changeUSD > 0 && (
@@ -2082,7 +2148,6 @@ export default function CajaPOS({
             </div>
 
           </div>
-        </div>
       )}
 
       {/* MODAL: EDITAR CANTIDAD DE ITEM */}
@@ -2539,8 +2604,8 @@ export default function CajaPOS({
 
       {/* MODAL: CIERRE DE CAJA - Light Styled */}
       {showCierreModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-slate-800">
-          <div className={`bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xl p-6 space-y-4 transition-all ${cierreResult ? 'max-w-2xl w-full' : 'max-w-md w-full'}`}>
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-slate-800 animate-fade-in">
+          <div className={`bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xl p-6 space-y-4 transition-all ${cierreResult ? 'max-w-4xl w-full' : 'max-w-md w-full'}`}>
             
             <div className="flex justify-between items-center border-b border-slate-200 pb-3">
               <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
@@ -2552,12 +2617,12 @@ export default function CajaPOS({
 
             {!cierreResult ? (
               <form onSubmit={handleSaveCierre} className="space-y-4">
-                <p className="text-[10px] text-slate-500 font-sans leading-relaxed">
+                <p className="text-[12px] text-slate-500 font-sans leading-relaxed">
                   Ingrese el saldo físico real disponible en la gaveta de caja en dólares y bolívares para realizar el balance y auditoría final.
                 </p>
 
                 <div>
-                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Efectivo en Caja Real ($ USD)</label>
+                  <label className="text-[11px] text-slate-500 block mb-1 font-sans">Efectivo en Caja Real ($ USD)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -2570,7 +2635,7 @@ export default function CajaPOS({
                 </div>
 
                 <div>
-                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Efectivo en Caja Real (Bs VES)</label>
+                  <label className="text-[11px] text-slate-500 block mb-1 font-sans">Efectivo en Caja Real (Bs VES)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -2590,28 +2655,28 @@ export default function CajaPOS({
                 </button>
               </form>
             ) : (
-              <div className="space-y-4 max-w-2xl w-full">
+              <div className="space-y-4 w-full">
                 
                 {/* BLUE HEADER TICKET STYLE */}
                 <div className="bg-winter-header text-white px-4 py-2 flex items-center justify-between rounded-t-lg">
                   <h3 className="text-sm font-extrabold flex items-center gap-1.5 font-sans">
                     Cierre de Caja
                   </h3>
-                  <span className="text-[9px] opacity-75 font-mono">{new Date().toLocaleDateString()}</span>
+                  <span className="text-[11px] opacity-75 font-mono">{new Date().toLocaleDateString()}</span>
                 </div>
 
-                <div className="bg-white border border-slate-250 p-5 rounded-b-lg grid grid-cols-1 md:grid-cols-2 gap-6 text-[10px] text-slate-700 leading-relaxed shadow-inner">
+                <div className="bg-white border border-slate-250 p-5 rounded-b-lg grid grid-cols-1 md:grid-cols-2 gap-6 text-[13px] text-slate-700 leading-relaxed shadow-inner">
                   
                   {/* Left Column: Cash Drawer Arqueo */}
-                  <div className="space-y-2.5">
+                  <div className="space-y-3">
                     <div>
-                      <span className="text-slate-500 font-sans block text-[9px] uppercase">Usuario</span>
-                      <strong className="text-slate-850 text-xs block truncate uppercase">
-                        {currentUser.usuario.toUpperCase()} - {currentUser.nombre}
+                      <span className="text-slate-500 font-sans block text-[11px] font-bold uppercase">Usuario</span>
+                      <strong className="text-slate-850 text-sm block truncate uppercase">
+                        {currentUser.usuario.toUpperCase()} - {currentUser.nombre} (Estación: {localStorage.getItem('pos_terminal_name') || 'CAJA_01'})
                       </strong>
                     </div>
 
-                    <div className="space-y-1.5 border-t border-slate-100 pt-2 font-mono">
+                    <div className="space-y-2 border-t border-slate-100 pt-2 font-mono">
                       <div className="flex justify-between">
                         <span>Apertura de Caja :</span>
                         <span className="font-bold text-slate-800">$ {cierreResult.aperturaUsd.toFixed(2)} / Bs {cierreResult.aperturaVes.toFixed(2)}</span>
@@ -2628,38 +2693,50 @@ export default function CajaPOS({
                       </div>
 
                       <div className="flex justify-between">
-                        <span>Entrada Efectivo :</span>
+                        <span>Entrada Efectivo ($) :</span>
                         <span className="font-bold text-slate-800">$ {cierreResult.entradaEfectivoUsd.toFixed(2)}</span>
                       </div>
 
-                      <div className="flex justify-between text-red-500 font-bold">
-                        <span>Salida Efectivo :</span>
+                      <div className="flex justify-between">
+                        <span>Entrada Efectivo (Bs) :</span>
+                        <span className="font-bold text-slate-800">Bs {(cierreResult.entradaEfectivoVes ?? 0).toFixed(2)}</span>
+                      </div>
+
+                      <div className="flex justify-between text-red-555 font-bold">
+                        <span>Salida Efectivo ($) :</span>
                         <span>- $ {cierreResult.salidaEfectivoUsd.toFixed(2)}</span>
                       </div>
 
-                      <div className="flex justify-between text-red-550">
+                      <div className="flex justify-between text-red-555 font-bold">
+                        <span>Salida Efectivo (Bs) :</span>
+                        <span>- Bs {(cierreResult.salidaEfectivoVes ?? 0).toFixed(2)}</span>
+                      </div>
+
+                      <div className="flex justify-between text-red-555">
                         <span>Devolución Efectivo :</span>
-                        <span>- $ {cierreResult.devolucionEfectivoUsd.toFixed(2)}</span>
+                        <span>
+                          - $ {cierreResult.devolucionEfectivoUsd.toFixed(2)} {tasaDia > 0 ? `(Bs ${(cierreResult.devolucionEfectivoUsd * tasaDia).toFixed(2)})` : ''}
+                        </span>
                       </div>
                     </div>
 
                     {/* Dinero en Caja Expected Footer */}
                     <div className="border-t border-slate-300 pt-2.5 space-y-0.5">
-                      <div className="flex justify-between text-sm font-black text-slate-900">
-                        <span className="font-sans uppercase text-[10px]">Dinero en Caja :</span>
-                        <span className="text-base text-winter-blueBtn font-mono">
+                      <div className="flex justify-between text-sm font-black text-slate-900 items-baseline">
+                        <span className="font-sans uppercase text-[11px] font-extrabold text-slate-600">Dinero en Caja :</span>
+                        <span className="text-xl text-winter-blueBtn font-mono font-black">
                           $ {cierreResult.dineroEnCajaExpected.toFixed(2)}
                         </span>
                       </div>
-                      <div className="text-[7.5px] text-slate-450 italic font-sans font-medium uppercase tracking-tighter text-right">
+                      <div className="text-[8.5px] text-slate-450 italic font-mono font-medium uppercase tracking-tighter text-right">
                         {formatNumberToWordsUSD(cierreResult.dineroEnCajaExpected)}
                       </div>
                     </div>
                   </div>
 
                   {/* Right Column: Sales Performance & Payment breakdown */}
-                  <div className="space-y-2.5 border-t md:border-t-0 md:border-l border-slate-200 md:pl-6">
-                    <div className="space-y-1.5 font-mono">
+                  <div className="space-y-3 border-t md:border-t-0 md:border-l border-slate-200 md:pl-6">
+                    <div className="space-y-2 font-mono">
                       <div className="flex justify-between">
                         <span>Ventas Totales :</span>
                         <span className="font-bold text-slate-800">$ {cierreResult.ventasTotalesUsd.toFixed(2)}</span>
@@ -2669,12 +2746,12 @@ export default function CajaPOS({
                         <span className="font-bold text-slate-800">$ {cierreResult.descuentosUsd.toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between font-bold text-slate-900 border-b border-dashed border-slate-200 pb-1.5">
-                        <span className="font-sans text-[9px] uppercase">Venta Bruta :</span>
+                        <span className="font-sans text-[11px] font-bold text-slate-500 uppercase">Venta Bruta :</span>
                         <span>$ {cierreResult.ventaBrutaUsd.toFixed(2)}</span>
                       </div>
                     </div>
 
-                    <div className="space-y-1.5 pt-1 font-mono text-[9px]">
+                    <div className="space-y-2 pt-1 font-mono text-[13px]">
                       <div className="flex justify-between">
                         <span>Efectivo $ :</span>
                         <span className="font-bold text-slate-800">$ {cierreResult.pagosEfectivoUsd.toFixed(2)}</span>
@@ -2700,7 +2777,7 @@ export default function CajaPOS({
                         <span className="font-bold text-slate-800">$ {cierreResult.pagosCreditoUsd.toFixed(2)}</span>
                       </div>
 
-                      <div className="flex justify-between text-red-500">
+                      <div className="flex justify-between text-red-550 font-bold">
                         <span>Devolución Ventas :</span>
                         <span>- $ {cierreResult.devolucionVentasUsd.toFixed(2)}</span>
                       </div>
@@ -2708,13 +2785,13 @@ export default function CajaPOS({
 
                     {/* Venta Total Footer */}
                     <div className="border-t border-slate-300 pt-2.5 space-y-0.5">
-                      <div className="flex justify-between text-sm font-black text-slate-900">
-                        <span className="font-sans uppercase text-[10px]">Venta Total :</span>
-                        <span className="text-base text-winter-blueBtn font-mono">
+                      <div className="flex justify-between text-sm font-black text-slate-900 items-baseline">
+                        <span className="font-sans uppercase text-[11px] font-extrabold text-slate-600">Venta Total :</span>
+                        <span className="text-xl text-winter-blueBtn font-mono font-black">
                           $ {cierreResult.ventaTotalUsd.toFixed(2)}
                         </span>
                       </div>
-                      <div className="text-[7.5px] text-slate-450 italic font-sans font-medium uppercase tracking-tighter text-right">
+                      <div className="text-[8.5px] text-slate-450 italic font-mono font-medium uppercase tracking-tighter text-right">
                         {formatNumberToWordsUSD(cierreResult.ventaTotalUsd)}
                       </div>
                     </div>
@@ -2723,39 +2800,39 @@ export default function CajaPOS({
                 </div>
 
                 {/* Arqueo Audit differences table */}
-                <div className="bg-slate-50 p-4 border border-slate-200 rounded-lg text-xs space-y-2.5 font-sans shadow-sm">
-                  <div className="font-bold text-center text-slate-600 border-b border-slate-100 pb-1.5">
+                <div className="bg-slate-50 p-5 border border-slate-200 rounded-lg text-sm space-y-3.5 font-sans shadow-sm">
+                  <div className="font-extrabold text-center text-slate-800 border-b border-slate-100 pb-2 uppercase text-xs tracking-wider">
                     RECONCILIACIÓN DE EFECTIVO ENTREGADO
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-slate-500 font-medium">
+                  <div className="grid grid-cols-3 gap-2 text-slate-500 font-bold text-[11.5px] uppercase tracking-wide">
                     <span>Efectivo</span>
                     <span className="text-right">Gaveta Esperado</span>
                     <span className="text-right">Físico Recibido</span>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 font-mono font-bold text-slate-700">
+                  <div className="grid grid-cols-3 gap-2 font-mono font-bold text-slate-750 text-[13px]">
                     <span className="text-emerald-700">Dólares USD:</span>
                     <span className="text-right">${cierreResult.dineroEnCajaExpected.toFixed(2)}</span>
                     <span className="text-right text-emerald-600">${parseFloat(cierreRealUsd).toFixed(2)}</span>
                   </div>
-                  <div className="grid grid-cols-3 gap-2 font-mono font-bold text-slate-700 border-b border-slate-205 pb-2">
+                  <div className="grid grid-cols-3 gap-2 font-mono font-bold text-slate-750 text-[13px] border-b border-slate-205 pb-2">
                     <span className="text-purple-750">Bolívares Bs:</span>
                     <span className="text-right">Bs {cierreResult.expectedVes.toFixed(2)}</span>
                     <span className="text-right text-purple-600">Bs {parseFloat(cierreRealVes).toFixed(2)}</span>
                   </div>
-                  <div className="flex justify-between font-extrabold text-[11px] text-slate-800 font-mono">
+                  <div className="flex justify-between font-extrabold text-[12.5px] text-slate-800 font-mono">
                     <span>DIFERENCIA USD / VES:</span>
                     <div className="text-right space-y-0.5">
-                      <span className={parseFloat(cierreRealUsd) - cierreResult.dineroEnCajaExpected >= 0 ? 'text-green-600' : 'text-red-600'}>
+                      <span className={parseFloat(cierreRealUsd) - cierreResult.dineroEnCajaExpected >= 0 ? 'text-green-600' : 'text-red-650'}>
                         USD: ${(parseFloat(cierreRealUsd) - cierreResult.dineroEnCajaExpected).toFixed(2)}
                       </span>
-                      <span className={`block ${parseFloat(cierreRealVes) - cierreResult.expectedVes >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      <span className={`block ${parseFloat(cierreRealVes) - cierreResult.expectedVes >= 0 ? 'text-green-600' : 'text-red-650'}`}>
                         VES: Bs {(parseFloat(cierreRealVes) - cierreResult.expectedVes).toFixed(2)}
                       </span>
                     </div>
                   </div>
                 </div>
 
-                <div className="bg-red-50 border border-red-200 p-3 rounded text-[10px] text-red-750 leading-relaxed font-sans font-medium">
+                <div className="bg-red-50 border border-red-200 p-4 rounded text-[11.5px] text-red-750 leading-relaxed font-sans font-medium">
                   ⚠️ NOTA: Al confirmar, se guardará el registro inmutable en el historial de arqueos y se cerrará su sesión de trabajo automáticamente.
                 </div>
 
@@ -2766,7 +2843,9 @@ export default function CajaPOS({
                         ventasEfectivoUsd: cierreResult.ventasEfectivoUsd,
                         abonoClientesUsd: cierreResult.abonoClientesUsd,
                         entradaEfectivoUsd: cierreResult.entradaEfectivoUsd,
+                        entradaEfectivoVes: cierreResult.entradaEfectivoVes,
                         salidaEfectivoUsd: cierreResult.salidaEfectivoUsd,
+                        salidaEfectivoVes: cierreResult.salidaEfectivoVes,
                         devolucionEfectivoUsd: cierreResult.devolucionEfectivoUsd,
                         dineroEnCajaExpected: cierreResult.dineroEnCajaExpected,
                         ventasTotalesUsd: cierreResult.ventasTotalesUsd,
@@ -2790,7 +2869,7 @@ export default function CajaPOS({
                     setCierreResult(null);
                     window.location.reload(); 
                   }}
-                  className="w-full bg-winter-blueBtn hover:bg-winter-blueBtnHover text-white py-3 rounded-lg font-bold font-sans text-xs tracking-wider transition-all shadow"
+                  className="w-full bg-winter-blueBtn hover:bg-winter-blueBtnHover text-white py-3.5 rounded-lg font-sans text-[13px] font-black uppercase tracking-wider transition-all shadow"
                 >
                   CONFIRMAR REGISTRO Y REINICIAR TERMINAL
                 </button>

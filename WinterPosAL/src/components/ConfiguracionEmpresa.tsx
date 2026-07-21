@@ -389,6 +389,33 @@ export default function ConfiguracionEmpresa({
       });
 
       if (res.ok) {
+        if (mode === 'inventory' || mode === 'all') {
+          localStorage.removeItem('pos_products');
+          localStorage.removeItem('pos_price_history');
+        }
+        if (mode === 'sales' || mode === 'all') {
+          localStorage.removeItem('pos_sales_log');
+          localStorage.removeItem('pos_abonos');
+          localStorage.removeItem('pos_shift_sales');
+          localStorage.removeItem('pos_shift_abonos');
+          localStorage.removeItem('pos_shift_entradas');
+          localStorage.removeItem('pos_shift_entradas_ves');
+          localStorage.removeItem('pos_shift_salidas');
+          localStorage.removeItem('pos_shift_salidas_ves');
+          localStorage.removeItem('pos_shift_devoluciones');
+          localStorage.removeItem('pos_caja_abierta');
+          localStorage.removeItem('pos_apertura_usd');
+          localStorage.removeItem('pos_apertura_ves');
+          localStorage.removeItem('pos_ventas_usd');
+          localStorage.removeItem('pos_ventas_ves');
+          localStorage.removeItem('pos_movimientos_usd');
+          localStorage.removeItem('pos_movimientos_ves');
+          localStorage.removeItem('pos_apertura_fecha');
+        }
+        if (mode === 'clients' || mode === 'all') {
+          localStorage.removeItem('pos_clients');
+        }
+
         showToast('Limpieza de base de datos ejecutada exitosamente. Se aplicaron los cambios.');
         setDbConfirmWord('');
         // Force reload page to sync clean database arrays

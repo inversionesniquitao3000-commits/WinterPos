@@ -6,7 +6,7 @@ import {
   updateProductStock, updateProductPrices, getClients, saveClient, registerAbono,
   getTasaHistory, saveTasa, getMovements, saveMovement, getPriceHistory, savePriceHistory,
   getSales, saveSale, getCierres, abrirCaja, cerrarCaja, getCajaEstado, registrarCajaMovimiento, updateCierre,
-  updateClient, deleteClient, getAbonos, deleteProduct, updateProduct,
+  updateClient, deleteClient, getAbonos, deleteProduct, updateProduct, saveProductsBulk,
   saveUser, updateUser, deleteUser, getRoles, saveRole, updateRole, deleteRole, wipeDatabase, backupDatabase, restoreDatabase,
   readJsonFile, writeJsonFile
 } from './db-store.js';
@@ -58,6 +58,20 @@ app.get('/api/productos', async (req, res) => {
 app.post('/api/productos', async (req, res) => {
   const saved = await saveProduct(req.body);
   res.json(saved);
+});
+
+app.post('/api/productos/bulk', async (req, res) => {
+  try {
+    const products = req.body;
+    if (!Array.isArray(products)) {
+      return res.status(400).json({ error: 'El cuerpo de la solicitud debe ser un arreglo de productos.' });
+    }
+    const saved = await saveProductsBulk(products);
+    res.json({ success: true, count: saved.length, products: saved });
+  } catch (err) {
+    console.error('Error en /api/productos/bulk:', err.message);
+    res.status(500).json({ error: 'Error interno al cargar productos de forma masiva.' });
+  }
 });
 
 app.post('/api/productos/stock', async (req, res) => {
@@ -184,8 +198,8 @@ app.get('/api/cajas/estado', async (req, res) => {
 });
 
 app.post('/api/cajas/abrir', async (req, res) => {
-  const { usd, ves } = req.body;
-  const id = await abrirCaja(usd, ves);
+  const { usd, ves, usuarioId, terminal } = req.body;
+  const id = await abrirCaja(usd, ves, usuarioId, terminal);
   res.json({ success: true, id });
 });
 
@@ -195,8 +209,8 @@ app.post('/api/cajas/cerrar', async (req, res) => {
 });
 
 app.post('/api/cajas/movimiento', async (req, res) => {
-  const { tipo, descripcion, usd, ves } = req.body;
-  const success = await registrarCajaMovimiento(tipo, descripcion, usd, ves);
+  const { tipo, descripcion, usd, ves, terminal } = req.body;
+  const success = await registrarCajaMovimiento(tipo, descripcion, usd, ves, terminal);
   res.json({ success });
 });
 

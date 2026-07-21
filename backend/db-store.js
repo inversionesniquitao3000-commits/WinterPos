@@ -50,6 +50,11 @@ try {
     ALTER TABLE Ventas_Detalle DROP CONSTRAINT IF EXISTS ventas_detalle_tipo_precio_check;
     ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS clave VARCHAR(100) DEFAULT 'admin';
     ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS permisos TEXT;
+    ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS estacion_nombre VARCHAR(50) DEFAULT 'CAJA_PRINCIPAL';
+    ALTER TABLE Movimientos_Caja ADD COLUMN IF NOT EXISTS estacion_nombre VARCHAR(50) DEFAULT 'CAJA_PRINCIPAL';
+    ALTER TABLE Productos ADD COLUMN IF NOT EXISTS a_granel BOOLEAN DEFAULT FALSE;
+    ALTER TABLE Productos ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(50);
+    ALTER TABLE Productos ADD COLUMN IF NOT EXISTS porcentaje_impuesto NUMERIC DEFAULT 0;
     CREATE TABLE IF NOT EXISTS Roles (
       id SERIAL PRIMARY KEY,
       nombre VARCHAR(100) UNIQUE,
@@ -216,7 +221,10 @@ export async function getProducts() {
         cantidad_mayorista: r.cantidad_mayorista,
         exento_impuesto: r.exento_impuesto,
         imagen_url: r.imagen_url || '',
-        estado: r.estado
+        estado: r.estado,
+        a_granel: r.a_granel,
+        fecha_vencimiento: r.fecha_vencimiento,
+        porcentaje_impuesto: parseFloat(r.porcentaje_impuesto || 0)
       }));
     } catch (err) {
       console.error('Error en getProducts (Postgres):', err.message);
@@ -229,9 +237,9 @@ export async function saveProduct(p) {
   if (usePostgres) {
     try {
       const res = await pool.query(
-        `INSERT INTO Productos (codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, precio_costo_usd, precio_detalle_usd, precio_mayor_usd, cantidad_mayorista, exento_impuesto, imagen_url, estado)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
-        [p.barcode, p.description, p.category, p.stock_actual, p.stock_minimo, p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.cantidad_mayorista, p.exento_impuesto, p.imagen_url, p.estado]
+        `INSERT INTO Productos (codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, precio_costo_usd, precio_detalle_usd, precio_mayor_usd, cantidad_mayorista, exento_impuesto, imagen_url, estado, a_granel, fecha_vencimiento, porcentaje_impuesto)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id`,
+        [p.barcode, p.description, p.category, p.stock_actual || 0, p.stock_minimo || 0, p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.cantidad_mayorista || 12, p.exento_impuesto, p.imagen_url, p.estado, p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
       );
       return { ...p, id: res.rows[0].id };
     } catch (err) {
@@ -250,9 +258,9 @@ export async function updateProduct(p) {
     try {
       await pool.query(
         `UPDATE Productos 
-         SET codigo_barras_clave = $1, descripcion = $2, categoria = $3, stock_minimo = $4, precio_costo_usd = $5, precio_detalle_usd = $6, precio_mayor_usd = $7, cantidad_mayorista = $8, exento_impuesto = $9, imagen_url = $10, estado = $11
-         WHERE id = $12`,
-        [p.barcode, p.description, p.category, p.stock_minimo, p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.cantidad_mayorista, p.exento_impuesto, p.imagen_url, p.estado, p.id]
+         SET codigo_barras_clave = $1, descripcion = $2, categoria = $3, stock_minimo = $4, precio_costo_usd = $5, precio_detalle_usd = $6, precio_mayor_usd = $7, cantidad_mayorista = $8, exento_impuesto = $9, imagen_url = $10, estado = $11, a_granel = $12, fecha_vencimiento = $13, porcentaje_impuesto = $14
+         WHERE id = $15`,
+        [p.barcode, p.description, p.category, p.stock_minimo || 0, p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.cantidad_mayorista || 12, p.exento_impuesto, p.imagen_url, p.estado, p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0, p.id]
       );
       return p;
     } catch (err) {
@@ -746,19 +754,31 @@ export async function deleteRole(id) {
 }
 
 export async function wipeDatabase(options) {
+  const isFullWipe = options.wipeInventory && options.wipeSales && options.wipeClients;
+
   if (usePostgres) {
     try {
       if (options.wipeInventory) {
         await pool.query('TRUNCATE TABLE Productos, Movimientos_Inventario, Historial_Precios RESTART IDENTITY CASCADE');
       }
       if (options.wipeSales) {
-        await pool.query('TRUNCATE TABLE Ventas, Ventas_Detalle, Abonos RESTART IDENTITY CASCADE');
-        // Reset Caja shifts
-        await pool.query('TRUNCATE TABLE Cajas_Apertura_Cierre RESTART IDENTITY CASCADE');
+        await pool.query('TRUNCATE TABLE Ventas, Ventas_Detalle, Pagos_Venta, Abonos RESTART IDENTITY CASCADE');
+        await pool.query('TRUNCATE TABLE Cajas_Apertura_Cierre, Movimientos_Caja RESTART IDENTITY CASCADE');
+        await pool.query('TRUNCATE TABLE Tasas_Cambio RESTART IDENTITY CASCADE');
       }
       if (options.wipeClients) {
         await pool.query("DELETE FROM Clientes WHERE cedula_rif <> 'V-00000000'");
         await pool.query("UPDATE Clientes SET limite_credito = 0, credito_disponible = 0, saldo_pendiente = 0");
+      }
+      if (isFullWipe) {
+        // Clear users except admin
+        await pool.query("DELETE FROM Usuarios WHERE usuario <> 'admin'");
+        // Clear perfiles/roles except Administrador
+        await pool.query("DELETE FROM Roles WHERE LOWER(nombre) <> 'administrador'");
+        // Clear basic and fiscal data
+        await pool.query(`UPDATE Configuracion_Empresa SET 
+          rif = '', nombre_comercio = '', direccion = '', telefono = '', 
+          correo = '', mensaje_pie_ticket = '', metodos_pago_activos = '[]'::jsonb`);
       }
       return true;
     } catch (err) {
@@ -772,17 +792,58 @@ export async function wipeDatabase(options) {
     writeJsonFile('products.json', []);
     writeJsonFile('movements.json', []);
     writeJsonFile('price-history.json', []);
+    writeJsonFile('price_history.json', []);
   }
   if (options.wipeSales) {
     writeJsonFile('sales.json', []);
     writeJsonFile('abonos.json', []);
     writeJsonFile('cierres.json', []);
-    // Close active shift
-    fs.writeFileSync(path.join(DATA_DIR, 'caja_estado.json'), JSON.stringify({ abierta: false, id: null, monto_usd: 0, monto_ves: 0 }));
+    writeJsonFile('tasa_history.json', []);
+    writeJsonFile('caja_activa.json', { abierta: false, id: null, monto_usd: 0, monto_ves: 0 });
+    // Also write fallback file just in case
+    writeJsonFile('caja_estado.json', { abierta: false, id: null, monto_usd: 0, monto_ves: 0 });
   }
   if (options.wipeClients) {
-    const genericClient = mockClients.filter(c => c.cedula_rif === 'V-00000000');
-    writeJsonFile('clients.json', genericClient);
+    const clients = readJsonFile('clients.json', mockClients);
+    const genericClients = clients.filter(c => c.cedula_rif === 'V-00000000');
+    writeJsonFile('clients.json', genericClients);
+  }
+  if (isFullWipe) {
+    // Clear users except admin
+    const users = readJsonFile('users.json', mockUsers);
+    const adminUsers = users.filter(u => u.usuario === 'admin');
+    writeJsonFile('users.json', adminUsers);
+
+    // Clear perfiles/roles except Administrador
+    const roles = readJsonFile('roles.json', []);
+    const rolesSource = roles.length > 0 ? roles : [
+      {
+        id: 1,
+        nombre: "Administrador",
+        permisos: {
+          caja: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+          inventario: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+          ventas: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+          clientes: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+          tasa: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+          config: { ver: true, crear: true, editar: true, eliminar: true, admin: true }
+        }
+      }
+    ];
+    const adminRoles = rolesSource.filter(r => r.nombre.toLowerCase() === 'administrador');
+    writeJsonFile('roles.json', adminRoles);
+
+    // Clear basic and fiscal data
+    writeJsonFile('config.json', {
+      rif: '',
+      nombre_comercio: '',
+      direccion: '',
+      telefono: '',
+      correo: '',
+      moneda_base: 'USD',
+      mensaje_pie_ticket: '',
+      metodos_pago_activos: []
+    });
   }
   return true;
 }
@@ -1055,7 +1116,7 @@ export async function getSales() {
       // Join clients and payments details
       const salesRes = await pool.query(`
         SELECT v.id, v.factura_nro, v.fecha, v.subtotal_usd, v.descuento_usd, v.total_usd, v.total_ves, v.con_ticket,
-               c.cedula_rif as "clientDoc", c.nombre as "clientName", u.nombre as usuario
+               v.estacion_nombre as terminal, c.cedula_rif as "clientDoc", c.nombre as "clientName", u.nombre as usuario
         FROM Ventas v
         LEFT JOIN Clientes c ON v.cliente_id = c.id
         LEFT JOIN Usuarios u ON v.usuario_id = u.id
@@ -1114,7 +1175,8 @@ export async function getSales() {
           })),
           vueltoUSD: 0,
           vueltoVES: 0,
-          usuario: row.usuario
+          usuario: row.usuario,
+          terminal: row.terminal
         });
       }
       return salesList;
@@ -1133,18 +1195,30 @@ export async function saveSale(s) {
       
       // Get IDs
       const clientRes = await clientTarget.query('SELECT id FROM Clientes WHERE cedula_rif = $1', [s.client.cedula_rif]);
-      const userRes = await clientTarget.query('SELECT id FROM Usuarios LIMIT 1');
       const activeCaja = await clientTarget.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
       
+      let userId = 1;
+      if (s.usuario) {
+        const userLookup = await clientTarget.query('SELECT id FROM Usuarios WHERE nombre = $1 OR usuario = $2 LIMIT 1', [s.usuario, s.usuario]);
+        if (userLookup.rowCount > 0) {
+          userId = userLookup.rows[0].id;
+        } else {
+          const userRes = await clientTarget.query('SELECT id FROM Usuarios LIMIT 1');
+          userId = userRes.rowCount > 0 ? userRes.rows[0].id : 1;
+        }
+      } else {
+        const userRes = await clientTarget.query('SELECT id FROM Usuarios LIMIT 1');
+        userId = userRes.rowCount > 0 ? userRes.rows[0].id : 1;
+      }
+
       const clientId = clientRes.rowCount > 0 ? clientRes.rows[0].id : 1;
-      const userId = userRes.rowCount > 0 ? userRes.rows[0].id : 1;
       const cajaId = activeCaja.rowCount > 0 ? activeCaja.rows[0].id : 1;
       
       // Insert Sale
       const saleRes = await clientTarget.query(
-        `INSERT INTO Ventas (factura_nro, cliente_id, usuario_id, caja_id, subtotal_usd, descuento_usd, total_usd, total_ves)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, fecha`,
-        [s.factura_nro, clientId, userId, cajaId, s.subtotal, s.descuento, s.totalUSD, s.totalVES]
+        `INSERT INTO Ventas (factura_nro, cliente_id, usuario_id, caja_id, subtotal_usd, descuento_usd, total_usd, total_ves, estacion_nombre)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, fecha`,
+        [s.factura_nro, clientId, userId, cajaId, s.subtotal, s.descuento, s.totalUSD, s.totalVES, s.terminal || 'CAJA_PRINCIPAL']
       );
       
       const saleId = saleRes.rows[0].id;
@@ -1231,7 +1305,7 @@ export async function getCierres() {
         SELECT c.id, c.fecha_apertura, c.fecha_cierre, c.monto_apertura_usd, c.monto_apertura_ves,
                c.monto_cierre_real_usd, c.monto_cierre_real_ves, c.monto_cierre_esperado_usd, c.monto_cierre_esperado_ves,
                c.venta_total_usd, c.utilidad_usd, c.detalles_json,
-               u.nombre as usuario, c.estatus
+               u.nombre as usuario, c.estatus, c.estacion_nombre as terminal
         FROM Cajas_Apertura_Cierre c
         LEFT JOIN Usuarios u ON c.usuario_id = u.id
         ORDER BY c.id DESC
@@ -1258,6 +1332,7 @@ export async function getCierres() {
           ventaTotalUsd: r.venta_total_usd ? parseFloat(r.venta_total_usd) : 0,
           utilidadUsd: r.utilidad_usd ? parseFloat(r.utilidad_usd) : 0,
           usuario: r.usuario,
+          terminal: r.terminal,
           status: r.estatus === 'Abierta' ? 'Abierta' : 'Cerrada',
           ...parsedDetails
         };
@@ -1269,16 +1344,14 @@ export async function getCierres() {
   return readJsonFile('cierres.json', []);
 }
 
-export async function abrirCaja(usd, ves) {
+export async function abrirCaja(usd, ves, usuarioId, terminal) {
   if (usePostgres) {
     try {
-      const userRes = await pool.query('SELECT id FROM Usuarios LIMIT 1');
-      const userId = userRes.rowCount > 0 ? userRes.rows[0].id : 1;
-      
+      const userId = usuarioId || 1;
       const res = await pool.query(
         `INSERT INTO Cajas_Apertura_Cierre (usuario_id, estacion_nombre, monto_apertura_usd, monto_apertura_ves, estatus)
          VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-        [userId, 'TERMINAL_01', usd, ves, 'Abierta']
+        [userId, terminal || 'CAJA_PRINCIPAL', usd, ves, 'Abierta']
       );
       return res.rows[0].id;
     } catch (err) {
@@ -1427,7 +1500,7 @@ export async function getCajaEstado() {
       
       const salesRes = await pool.query(`
         SELECT v.id, v.factura_nro, v.fecha, v.subtotal_usd, v.descuento_usd, v.total_usd, v.total_ves, v.con_ticket,
-               c.cedula_rif as "clientDoc", c.nombre as "clientName", u.nombre as usuario
+               v.estacion_nombre as terminal, c.cedula_rif as "clientDoc", c.nombre as "clientName", u.nombre as usuario
         FROM Ventas v
         LEFT JOIN Clientes c ON v.cliente_id = c.id
         LEFT JOIN Usuarios u ON v.usuario_id = u.id
@@ -1496,7 +1569,8 @@ export async function getCajaEstado() {
           pagos,
           vueltoUSD: vUSD,
           vueltoVES: vVES,
-          usuario: row.usuario
+          usuario: row.usuario,
+          terminal: row.terminal
         });
       }
       
@@ -1607,16 +1681,18 @@ export async function getCajaEstado() {
   };
 }
 
-export async function registrarCajaMovimiento(tipo, descripcion, usd, ves) {
+export async function registrarCajaMovimiento(tipo, descripcion, usd, ves, terminal) {
   if (usePostgres) {
     try {
       const activeCaja = await pool.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
       if (activeCaja.rowCount > 0) {
         const cajaId = activeCaja.rows[0].id;
+        // In Postgres we allow 'Devolucion' check constraint
+        const typeDb = (tipo === 'Entrada' || tipo === 'Salida' || tipo === 'Devolucion') ? tipo : 'Salida';
         await pool.query(
-          `INSERT INTO Movimientos_Caja (caja_id, tipo, descripcion, monto_usd, monto_ves)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [cajaId, tipo === 'Entrada' ? 'Entrada' : 'Salida', descripcion, usd, ves]
+          `INSERT INTO Movimientos_Caja (caja_id, tipo, descripcion, monto_usd, monto_ves, estacion_nombre)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [cajaId, typeDb, descripcion, usd, ves, terminal || 'CAJA_PRINCIPAL']
         );
         return true;
       }
@@ -1629,7 +1705,7 @@ export async function registrarCajaMovimiento(tipo, descripcion, usd, ves) {
     if (!activeCheck.movimientos) {
       activeCheck.movimientos = [];
     }
-    activeCheck.movimientos.push({ tipo, descripcion, usd, ves });
+    activeCheck.movimientos.push({ tipo, descripcion, usd, ves, terminal });
     const mult = tipo === 'Entrada' ? 1 : -1;
     activeCheck.movimientosUsd += usd * mult;
     activeCheck.movimientosVes += ves * mult;
@@ -1677,4 +1753,58 @@ export async function deleteProduct(id) {
     return true;
   }
   return false;
+}
+
+export async function saveProductsBulk(products) {
+  if (usePostgres) {
+    try {
+      const savedList = [];
+      for (const p of products) {
+        const res = await pool.query(
+          `INSERT INTO Productos (codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, precio_costo_usd, precio_detalle_usd, precio_mayor_usd, cantidad_mayorista, exento_impuesto, imagen_url, estado, a_granel, fecha_vencimiento, porcentaje_impuesto)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+           ON CONFLICT (codigo_barras_clave) 
+           DO UPDATE SET 
+             descripcion = EXCLUDED.descripcion,
+             categoria = EXCLUDED.categoria,
+             stock_actual = EXCLUDED.stock_actual,
+             stock_minimo = EXCLUDED.stock_minimo,
+             precio_costo_usd = EXCLUDED.precio_costo_usd,
+             precio_detalle_usd = EXCLUDED.precio_detalle_usd,
+             precio_mayor_usd = EXCLUDED.precio_mayor_usd,
+             cantidad_mayorista = EXCLUDED.cantidad_mayorista,
+             exento_impuesto = EXCLUDED.exento_impuesto,
+             estado = EXCLUDED.estado,
+             a_granel = EXCLUDED.a_granel,
+             fecha_vencimiento = EXCLUDED.fecha_vencimiento,
+             porcentaje_impuesto = EXCLUDED.porcentaje_impuesto
+           RETURNING id`,
+          [p.barcode, p.description, p.category || '', p.stock_actual || 0, p.stock_minimo || 0, p.precio_costo_usd || 0, p.precio_detalle_usd || 0, p.precio_mayor_usd || 0, p.cantidad_mayorista || 12, p.exento_impuesto || false, p.imagen_url || '', p.estado || 'Activo', p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
+        );
+        savedList.push({ ...p, id: res.rows[0].id });
+      }
+      return savedList;
+    } catch (err) {
+      console.error('Error en saveProductsBulk (Postgres):', err.message);
+      throw err;
+    }
+  }
+  
+  // JSON fallback
+  const allProducts = readJsonFile('products.json', mockProducts);
+  const savedList = [];
+  for (const p of products) {
+    const idx = allProducts.findIndex(item => item.barcode === p.barcode);
+    if (idx !== -1) {
+      const updated = { ...allProducts[idx], ...p };
+      allProducts[idx] = updated;
+      savedList.push(updated);
+    } else {
+      const newProduct = { ...p, id: Date.now() + Math.floor(Math.random() * 1000) };
+      allProducts.push(newProduct);
+      savedList.push(newProduct);
+    }
+  }
+  writeJsonFile('products.json', allProducts);
+  return savedList;
 }

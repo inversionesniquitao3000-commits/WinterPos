@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   mockUsers, mockProducts, mockClients, mockTasaHistory, 
   mockConfig, mockMovements 
@@ -29,6 +29,14 @@ import {
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [terminalName] = useState<string>(() => {
+    const saved = localStorage.getItem('pos_terminal_name');
+    if (saved) return saved;
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const name = isLocal ? 'CAJA_01' : `CAJA_${window.location.hostname.replace(/\./g, '_')}`;
+    localStorage.setItem('pos_terminal_name', name);
+    return name;
+  });
   
   // App States populated from mock data / local storage
   const [products, setProducts] = useState<Product[]>(() => {
@@ -65,6 +73,17 @@ export default function App() {
     const saved = localStorage.getItem('pos_sales_log');
     return saved ? JSON.parse(saved) : [];
   });
+
+  const nextInvoiceNumber = useMemo(() => {
+    const numbers = sales
+      .map(s => {
+        const match = s.factura_nro ? s.factura_nro.match(/^FAC-(\d+)$/) : null;
+        return match ? parseInt(match[1], 10) : 0;
+      })
+      .filter(n => n > 0);
+    const maxNum = numbers.length > 0 ? Math.max(...numbers) : 0;
+    return `FAC-${String(maxNum + 1).padStart(6, '0')}`;
+  }, [sales]);
 
   const [abonos, setAbonos] = useState<Abono[]>(() => {
     const saved = localStorage.getItem('pos_abonos');
@@ -111,8 +130,14 @@ export default function App() {
   const [shiftEntradasUsd, setShiftEntradasUsd] = useState<number>(() => {
     return parseFloat(localStorage.getItem('pos_shift_entradas') || '0');
   });
+  const [shiftEntradasVes, setShiftEntradasVes] = useState<number>(() => {
+    return parseFloat(localStorage.getItem('pos_shift_entradas_ves') || '0');
+  });
   const [shiftSalidasUsd, setShiftSalidasUsd] = useState<number>(() => {
     return parseFloat(localStorage.getItem('pos_shift_salidas') || '0');
+  });
+  const [shiftSalidasVes, setShiftSalidasVes] = useState<number>(() => {
+    return parseFloat(localStorage.getItem('pos_shift_salidas_ves') || '0');
   });
   const [shiftDevolucionesUsd, setShiftDevolucionesUsd] = useState<number>(() => {
     return parseFloat(localStorage.getItem('pos_shift_devoluciones') || '0');
@@ -177,8 +202,16 @@ export default function App() {
   }, [shiftEntradasUsd]);
 
   useEffect(() => {
+    localStorage.setItem('pos_shift_entradas_ves', shiftEntradasVes.toString());
+  }, [shiftEntradasVes]);
+
+  useEffect(() => {
     localStorage.setItem('pos_shift_salidas', shiftSalidasUsd.toString());
   }, [shiftSalidasUsd]);
+
+  useEffect(() => {
+    localStorage.setItem('pos_shift_salidas_ves', shiftSalidasVes.toString());
+  }, [shiftSalidasVes]);
 
   useEffect(() => {
     const ip = localStorage.getItem('pos_lan_ip') || '192.168.1.100';
@@ -404,6 +437,30 @@ export default function App() {
       setProducts(prev => [...prev, saved]);
     } else {
       setProducts(prev => [...prev, prod]);
+    }
+  };
+
+  const handleAddProductsBulk = async (productsArray: any[]) => {
+    try {
+      const res = await fetch(getApiUrl('/productos/bulk'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(productsArray)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        localStorage.removeItem('pos_products');
+        return data.count;
+      } else {
+        const errData = await res.json();
+        alert(`Error al importar productos: ${errData.error || 'No se pudo guardar'}`);
+        return null;
+      }
+    } catch (err: any) {
+      alert(`Error de conexión con el servidor: ${err.message}`);
+      return null;
     }
   };
 
@@ -693,7 +750,7 @@ export default function App() {
     localStorage.setItem('pos_movimientos_ves', '0');
     localStorage.setItem('pos_apertura_fecha', getLocalISODateString());
 
-    await postApiData('/cajas/abrir', { usd, ves });
+    await postApiData('/cajas/abrir', { usd, ves, usuarioId: currentUser?.id, terminal: terminalName });
   };
 
   const handleCerrarCaja = (
@@ -789,12 +846,16 @@ export default function App() {
     setShiftSales([]);
     setShiftAbonosUsd(0);
     setShiftEntradasUsd(0);
+    setShiftEntradasVes(0);
     setShiftSalidasUsd(0);
+    setShiftSalidasVes(0);
     setShiftDevolucionesUsd(0);
     localStorage.removeItem('pos_shift_sales');
     localStorage.removeItem('pos_shift_abonos');
     localStorage.removeItem('pos_shift_entradas');
+    localStorage.removeItem('pos_shift_entradas_ves');
     localStorage.removeItem('pos_shift_salidas');
+    localStorage.removeItem('pos_shift_salidas_ves');
     localStorage.removeItem('pos_shift_devoluciones');
 
     localStorage.removeItem('pos_caja_abierta');
@@ -825,9 +886,11 @@ export default function App() {
         setShiftAbonosUsd(prev => prev + usd);
       } else {
         setShiftEntradasUsd(prev => prev + usd);
+        setShiftEntradasVes(prev => prev + ves);
       }
     } else if (type === 'Salida') {
       setShiftSalidasUsd(prev => prev + usd);
+      setShiftSalidasVes(prev => prev + ves);
     } else if (type === 'Devolucion') {
       setShiftDevolucionesUsd(prev => {
         const next = prev + usd;
@@ -836,7 +899,7 @@ export default function App() {
       });
     }
 
-    await postApiData('/cajas/movimiento', { tipo: type, descripcion: description, usd, ves });
+    await postApiData('/cajas/movimiento', { tipo: type, descripcion: description, usd, ves, terminal: terminalName });
   };
 
   const handleRegisterSale = async (sale: {
@@ -902,7 +965,8 @@ export default function App() {
     const newSaleObj: Sale = {
       ...sale,
       fecha: getLocalISODateString(),
-      usuario: currentUser?.nombre || 'SISTEMA'
+      usuario: currentUser?.nombre || 'SISTEMA',
+      terminal: terminalName
     };
     setSales(prev => [...prev, newSaleObj]);
     setShiftSales(prev => [...prev, newSaleObj]);
@@ -952,10 +1016,10 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-winter-bg text-slate-800 flex flex-col font-mono selection:bg-winter-blueBtn selection:text-white">
+    <div className="h-screen bg-winter-bg text-slate-800 flex flex-col overflow-hidden font-mono selection:bg-winter-blueBtn selection:text-white">
       
       {/* HEADER SECTION - WinterPOS Colors */}
-      <header className="bg-winter-header border-b border-slate-700/20 px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 select-none relative z-20 shadow-md text-white">
+      <header className="bg-winter-header border-b border-slate-700/20 px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 select-none relative z-20 shadow-md text-white flex-shrink-0">
         
         {/* Left operator info */}
         <div className="flex items-center gap-3">
@@ -965,7 +1029,7 @@ export default function App() {
           <div>
             <span className="text-slate-100 font-bold block">{currentUser.nombre.toUpperCase()}</span>
             <span className="text-[10px] text-slate-400 block uppercase font-sans tracking-wide">
-              Rol: {currentUser.rol} | Estación: CAJA_01
+              Rol: {currentUser.rol} | Estación: {terminalName}
             </span>
           </div>
         </div>
@@ -1004,7 +1068,7 @@ export default function App() {
       </header>
 
       {/* TABS BAR - WinterPOS Colors */}
-      <nav className="bg-winter-tabBar border-b border-slate-900/40 px-6 py-2 select-none flex flex-wrap gap-1.5 z-10 text-slate-300">
+      <nav className="bg-winter-tabBar border-b border-slate-900/40 px-6 py-2 select-none flex flex-wrap gap-1.5 z-10 text-slate-300 flex-shrink-0">
         {hasModulePermission('caja', 'ver') && (
           <button
             onClick={() => setActiveTab('caja')}
@@ -1091,8 +1155,8 @@ export default function App() {
       </nav>
 
       {/* MAIN CONTENT AREA */}
-      <main className="flex-grow p-6 overflow-y-auto max-h-[calc(100vh-130px)]">
-        <div className="max-w-[1600px] mx-auto">
+      <main className="flex-grow p-6 overflow-y-auto min-h-0">
+        <div className="w-full">
           {activeTab === 'caja' && (
             <CajaPOS
               products={products}
@@ -1111,11 +1175,14 @@ export default function App() {
               shiftSales={shiftSales}
               shiftAbonosUsd={shiftAbonosUsd}
               shiftEntradasUsd={shiftEntradasUsd}
+              shiftEntradasVes={shiftEntradasVes}
               shiftSalidasUsd={shiftSalidasUsd}
+              shiftSalidasVes={shiftSalidasVes}
               shiftDevolucionesUsd={shiftDevolucionesUsd}
               onUpdateProductStock={handleUpdateProductStock}
               onRegisterAbono={handleRegisterAbono}
               getApiUrl={getApiUrl}
+              nextInvoiceNumber={nextInvoiceNumber}
             />
           )}
 
@@ -1126,6 +1193,7 @@ export default function App() {
               priceHistory={priceHistory}
               currentUser={currentUser}
               onAddProduct={handleAddProduct}
+              onAddProductsBulk={handleAddProductsBulk}
               onUpdateProductStock={handleUpdateProductStock}
               onUpdateProductPrices={handleUpdateProductPrices}
               onDeleteProduct={handleDeleteProduct}
@@ -1205,7 +1273,7 @@ export default function App() {
       </main>
 
       {/* FOOTER BAR */}
-      <footer className="bg-slate-900 border-t border-slate-800 py-3 px-6 select-none flex justify-between items-center text-[9px] text-slate-450 text-white">
+      <footer className="bg-slate-900 border-t border-slate-800 py-3 px-6 select-none flex justify-between items-center text-[9px] text-slate-450 text-white flex-shrink-0">
         <span>Licencia activa para Inversiones Niquitao 3000 C.A.</span>
         <span>Operador: {currentUser.nombre} (Turno Activo)</span>
         <span>SISTEMA WINTERPOS-AL v4.0.0</span>

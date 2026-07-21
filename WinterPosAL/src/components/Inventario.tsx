@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Product, InventoryMovement, PriceAdjustmentHistory, User } from '../types';
-import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2 } from 'lucide-react';
+import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload } from 'lucide-react';
 
 interface InventarioProps {
   products: Product[];
@@ -8,6 +8,7 @@ interface InventarioProps {
   priceHistory: PriceAdjustmentHistory[];
   currentUser: User;
   onAddProduct: (prod: Product) => void;
+  onAddProductsBulk: (productsArray: any[]) => Promise<number | null>;
   onUpdateProductStock: (prodId: number, type: 'Entrada' | 'Salida' | 'Merma' | 'Devolucion', qty: number, reason: string) => void;
   onUpdateProductPrices: (prodId: number, prices: { cost: number; detail: number; mayor: number }, reason: string) => void;
   onDeleteProduct: (prodId: number) => Promise<boolean>;
@@ -20,6 +21,7 @@ export default function Inventario({
   priceHistory,
   currentUser: _currentUser,
   onAddProduct,
+  onAddProductsBulk,
   onUpdateProductStock,
   onUpdateProductPrices,
   onDeleteProduct,
@@ -86,6 +88,7 @@ export default function Inventario({
   const [showAdjustModal, setShowAdjustModal] = useState(false);
   const [showPriceModal, setShowPriceModal] = useState(false);
   const [showNewProdModal, setShowNewProdModal] = useState(false);
+  const [showBulkModal, setShowBulkModal] = useState(false);
 
   // Escape key listener to close modals
   useEffect(() => {
@@ -95,11 +98,242 @@ export default function Inventario({
         setShowPriceModal(false);
         setShowNewProdModal(false);
         setShowEditProdModal(false);
+        setShowBulkModal(false);
       }
     };
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
   }, []);
+
+  // Bulk Upload state
+  const [bulkFile, setBulkFile] = useState<File | null>(null);
+  const [bulkPreview, setBulkPreview] = useState<any[]>([]);
+  const [bulkErrors, setBulkErrors] = useState<string[]>([]);
+  const [importStatus, setImportStatus] = useState<'idle' | 'parsing' | 'validating' | 'importing' | 'success'>('idle');
+
+  const downloadTemplate = () => {
+    const headers = [
+      'codigo_barras_clave',
+      'descripcion',
+      'categoria',
+      'stock_actual',
+      'stock_minimo',
+      'precio_costo_usd',
+      'precio_detalle_usd',
+      'precio_mayor_usd',
+      'cantidad_mayorista',
+      'exento_impuesto',
+      'a_granel'
+    ];
+    const sampleRow1 = [
+      '75010001',
+      'Coca Cola 1.5L',
+      'BEBIDAS',
+      '100',
+      '10',
+      '1.20',
+      '1.80',
+      '1.50',
+      '6',
+      'NO',
+      'NO'
+    ];
+    const sampleRow2 = [
+      '1000200',
+      'Jamon Ahumado Especial',
+      'CHARCUTERIA',
+      '25.5',
+      '5',
+      '4.50',
+      '6.80',
+      '5.90',
+      '3',
+      'NO',
+      'SI'
+    ];
+    const csvContent = "\uFEFF" + [headers.join(';'), sampleRow1.join(';'), sampleRow2.join(';')].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", "plantilla_carga_masiva_productos.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBulkFile(file);
+    setBulkErrors([]);
+    setImportStatus('parsing');
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        if (!text) {
+          setBulkErrors(['El archivo está vacío.']);
+          setImportStatus('idle');
+          return;
+        }
+
+        const lines = text.split(/\r?\n/).map(line => line.trim()).filter(line => line.length > 0);
+        if (lines.length < 2) {
+          setBulkErrors(['El archivo debe contener al menos la cabecera y una fila de datos.']);
+          setImportStatus('idle');
+          return;
+        }
+
+        const firstLine = lines[0];
+        let separator = ',';
+        if (firstLine.includes(';')) {
+          separator = ';';
+        }
+
+        const parseRow = (rowText: string) => {
+          const result: string[] = [];
+          let current = '';
+          let inQuotes = false;
+          for (let i = 0; i < rowText.length; i++) {
+            const char = rowText[i];
+            if (char === '"') {
+              inQuotes = !inQuotes;
+            } else if (char === separator && !inQuotes) {
+              result.push(current.trim());
+              current = '';
+            } else {
+              current += char;
+            }
+          }
+          result.push(current.trim());
+          return result.map(val => val.replace(/^"|"$/g, '').trim());
+        };
+
+        const headers = parseRow(lines[0]);
+        const expectedHeaders = [
+          'codigo_barras_clave',
+          'descripcion',
+          'categoria',
+          'stock_actual',
+          'stock_minimo',
+          'precio_costo_usd',
+          'precio_detalle_usd',
+          'precio_mayor_usd',
+          'cantidad_mayorista',
+          'exento_impuesto',
+          'a_granel'
+        ];
+
+        const headerIndices: { [key: string]: number } = {};
+        expectedHeaders.forEach(expected => {
+          const index = headers.findIndex(h => h.toLowerCase() === expected.toLowerCase() || h.toLowerCase().replace(/[\s_]+/g, '') === expected.toLowerCase().replace(/[\s_]+/g, ''));
+          headerIndices[expected] = index;
+        });
+
+        const missingCritical = ['codigo_barras_clave', 'descripcion', 'precio_costo_usd', 'precio_detalle_usd'].filter(
+          h => headerIndices[h] === -1
+        );
+
+        if (missingCritical.length > 0) {
+          setBulkErrors([`Cabeceras obligatorias faltantes: ${missingCritical.join(', ')}`]);
+          setImportStatus('idle');
+          return;
+        }
+
+        const parsedProducts: any[] = [];
+        const errors: string[] = [];
+
+        for (let i = 1; i < lines.length; i++) {
+          const row = parseRow(lines[i]);
+          if (row.length === 0 || (row.length === 1 && row[0] === '')) continue;
+
+          const getValue = (headerKey: string, defaultValue: string = '') => {
+            const idx = headerIndices[headerKey];
+            return idx !== -1 && idx < row.length ? row[idx] : defaultValue;
+          };
+
+          const barcode = getValue('codigo_barras_clave');
+          const description = getValue('descripcion');
+          const category = getValue('categoria', 'ALIMENTOS').toUpperCase();
+          
+          const cleanFloat = (val: string) => val.replace(/,/g, '.');
+
+          const stock_actual = parseFloat(cleanFloat(getValue('stock_actual', '0'))) || 0;
+          const stock_minimo = parseFloat(cleanFloat(getValue('stock_minimo', '0'))) || 0;
+          const precio_costo_usd = parseFloat(cleanFloat(getValue('precio_costo_usd'))) || 0;
+          const precio_detalle_usd = parseFloat(cleanFloat(getValue('precio_detalle_usd'))) || 0;
+          const precio_mayor_usd = parseFloat(cleanFloat(getValue('precio_mayor_usd'))) || 0;
+          const cantidad_mayorista = parseInt(cleanFloat(getValue('cantidad_mayorista', '12')), 10) || 12;
+          
+          const exentoStr = getValue('exento_impuesto', 'NO').toUpperCase();
+          const exento_impuesto = exentoStr === 'SI' || exentoStr === 'YES' || exentoStr === 'TRUE' || exentoStr === '1';
+
+          const granelStr = getValue('a_granel', 'NO').toUpperCase();
+          const a_granel = granelStr === 'SI' || granelStr === 'YES' || granelStr === 'TRUE' || granelStr === '1';
+
+          if (!barcode) {
+            errors.push(`Fila ${i + 1}: El código de barras o clave es obligatorio.`);
+          }
+          if (!description) {
+            errors.push(`Fila ${i + 1}: La descripción es obligatoria.`);
+          }
+          if (precio_costo_usd < 0 || precio_detalle_usd < 0 || precio_mayor_usd < 0) {
+            errors.push(`Fila ${i + 1}: Los precios no pueden ser negativos.`);
+          }
+
+          parsedProducts.push({
+            barcode,
+            description,
+            category,
+            stock_actual,
+            stock_minimo,
+            precio_costo_usd,
+            precio_detalle_usd,
+            precio_mayor_usd,
+            cantidad_mayorista,
+            exento_impuesto,
+            a_granel,
+            estado: 'Activo',
+            imagen_url: ''
+          });
+        }
+
+        setBulkPreview(parsedProducts);
+        setBulkErrors(errors);
+        setImportStatus(errors.length > 0 ? 'idle' : 'validating');
+      } catch (err: any) {
+        setBulkErrors([`Error al procesar el archivo: ${err.message}`]);
+        setImportStatus('idle');
+      }
+    };
+    reader.onerror = () => {
+      setBulkErrors(['Error al leer el archivo.']);
+      setImportStatus('idle');
+    };
+    reader.readAsText(file);
+  };
+
+  const handleExecuteBulkImport = async () => {
+    if (bulkPreview.length === 0 || bulkErrors.length > 0) return;
+    setImportStatus('importing');
+    try {
+      const count = await onAddProductsBulk(bulkPreview);
+      if (count !== null) {
+        setImportStatus('success');
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      } else {
+        setBulkErrors(['Error al procesar la carga masiva en el servidor.']);
+        setImportStatus('idle');
+      }
+    } catch (err: any) {
+      setBulkErrors([`Error de red: ${err.message}`]);
+      setImportStatus('idle');
+    }
+  };
   
   // Stock Adjustment form state
   const [adjustType, setAdjustType] = useState<'Entrada' | 'Salida' | 'Merma' | 'Devolucion'>('Entrada');
@@ -615,14 +849,14 @@ export default function Inventario({
         <div className="space-y-4">
           
           {/* INVENTORY METRICS PANEL */}
-          <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm grid grid-cols-1 md:grid-cols-3 gap-4 text-slate-800 font-mono text-xs">
-            <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-100 pb-2 md:pb-0 md:pr-4">
+          <div className="bg-white border border-slate-200 rounded-xl py-2 px-4 shadow-sm grid grid-cols-1 md:grid-cols-3 gap-3 text-slate-800 font-mono text-xs">
+            <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-100 pb-1.5 md:pb-0 md:pr-4">
               <span className="text-slate-500 font-sans">Precio 1 del Inventario :</span>
               <span className="font-extrabold text-slate-900 text-sm">
                 {products.reduce((acc, p) => acc + p.precio_detalle_usd * p.stock_actual, 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
             </div>
-            <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-105 pb-2 md:pb-0 md:px-4">
+            <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-105 pb-1.5 md:pb-0 md:px-4">
               <span className="text-slate-500 font-sans">Costo del Inventario :</span>
               <span className="font-extrabold text-slate-900 text-sm">
                 {products.reduce((acc, p) => acc + p.precio_costo_usd * p.stock_actual, 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -635,7 +869,7 @@ export default function Inventario({
               </span>
             </div>
           </div>
-          <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center justify-between bg-slate-50 border border-slate-200 rounded-xl p-4 shadow-sm">
+          <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between bg-slate-50 border border-slate-200 rounded-xl py-2 px-4 shadow-sm">
             {/* Search Input */}
             <div className="relative flex-grow max-w-md">
               <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
@@ -646,14 +880,14 @@ export default function Inventario({
                 placeholder="Buscar por código o descripción..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full bg-white border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-800 focus:border-winter-inventarioStart font-sans focus:outline-none"
+                className="w-full bg-white border border-slate-300 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-800 focus:border-winter-inventarioStart font-sans focus:outline-none"
               />
             </div>
             
             <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={handlePrintReport}
-                className="bg-slate-700 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-xs font-bold font-sans transition-all flex items-center gap-1.5 shadow-sm"
+                className="bg-slate-700 hover:bg-slate-800 text-white px-4 py-1.5 rounded-lg text-xs font-bold font-sans transition-all flex items-center gap-1.5 shadow-sm"
               >
                 <Printer className="w-4 h-4" />
                 Imprimir Reporte
@@ -662,14 +896,14 @@ export default function Inventario({
           </div>
 
           {/* FILTER CONTROLS */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50/50 border border-slate-200/60 rounded-xl p-3 shadow-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 bg-slate-50/50 border border-slate-200/60 rounded-xl py-1.5 px-3 shadow-sm">
             {/* Category Filter */}
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-0.5">
               <label className="text-[10px] font-bold text-slate-500 font-sans uppercase">Categoría</label>
               <select
                 value={filterCategory}
                 onChange={(e) => setFilterCategory(e.target.value)}
-                className="bg-white border border-slate-300 rounded-lg p-2 text-xs text-slate-800 font-sans focus:border-winter-inventarioStart focus:outline-none"
+                className="bg-white border border-slate-300 rounded-lg py-1 px-2 text-xs text-slate-800 font-sans focus:border-winter-inventarioStart focus:outline-none"
               >
                 <option value="TODAS">TODAS LAS CATEGORÍAS</option>
                 {categories.map(cat => (
@@ -679,12 +913,12 @@ export default function Inventario({
             </div>
 
             {/* Stock Existence Filter */}
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-0.5">
               <label className="text-[10px] font-bold text-slate-500 font-sans uppercase">Existencia (Stock)</label>
               <select
                 value={filterStock}
                 onChange={(e) => setFilterStock(e.target.value as any)}
-                className="bg-white border border-slate-300 rounded-lg p-2 text-xs text-slate-800 font-sans focus:border-winter-inventarioStart focus:outline-none"
+                className="bg-white border border-slate-300 rounded-lg py-1 px-2 text-xs text-slate-800 font-sans focus:border-winter-inventarioStart focus:outline-none"
               >
                 <option value="todos">TODOS LOS PRODUCTOS</option>
                 <option value="con_existencia">CON EXISTENCIA (&gt; 0)</option>
@@ -693,12 +927,12 @@ export default function Inventario({
             </div>
 
             {/* Min Stock Warning Filter */}
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-0.5">
               <label className="text-[10px] font-bold text-slate-500 font-sans uppercase">Alertas de Stock</label>
               <select
                 value={filterMinStock}
                 onChange={(e) => setFilterMinStock(e.target.value as any)}
-                className="bg-white border border-slate-300 rounded-lg p-2 text-xs text-slate-800 font-sans focus:border-winter-inventarioStart focus:outline-none"
+                className="bg-white border border-slate-300 rounded-lg py-1 px-2 text-xs text-slate-800 font-sans focus:border-winter-inventarioStart focus:outline-none"
               >
                 <option value="todos">MOSTRAR TODO EL STOCK</option>
                 <option value="bajo_minimo">BAJO STOCK MÍNIMO (ALERTA)</option>
@@ -714,23 +948,23 @@ export default function Inventario({
                 <table className="w-full border-collapse text-xs text-left">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr className="text-slate-550 border-b border-slate-200">
-                      <th className="px-2.5 py-2 font-sans uppercase">Código</th>
-                      <th className="px-2.5 py-2 font-sans uppercase">
+                      <th className="px-2 py-1.5 font-sans uppercase">Código</th>
+                      <th className="px-2 py-1.5 font-sans uppercase">
                         {renderSortHeader('Descripción', 'descripcion')}
                       </th>
-                      <th className="px-2.5 py-2 font-sans uppercase">
+                      <th className="px-2 py-1.5 font-sans uppercase">
                         {renderSortHeader('Categoría', 'categoria')}
                       </th>
-                      <th className="px-2.5 py-2 text-right font-sans uppercase">Stock Mínimo</th>
-                      <th className="px-2.5 py-2 text-right text-slate-800 font-sans uppercase">
+                      <th className="px-2 py-1.5 text-right font-sans uppercase">Stock Mínimo</th>
+                      <th className="px-2 py-1.5 text-right text-slate-800 font-sans uppercase">
                         {renderSortHeader('Existencia', 'existencia', 'right')}
                       </th>
-                      <th className="px-2.5 py-2 text-right font-sans uppercase">P. Costo</th>
-                      <th className="px-2.5 py-2 text-right text-emerald-600 font-sans uppercase">P. Detalle</th>
-                      <th className="px-2.5 py-2 text-right font-sans uppercase">P. Mayor</th>
+                      <th className="px-2 py-1.5 text-right font-sans uppercase">P. Costo</th>
+                      <th className="px-2 py-1.5 text-right text-emerald-600 font-sans uppercase">P. Detalle</th>
+                      <th className="px-2 py-1.5 text-right font-sans uppercase">P. Mayor</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                  <tbody className="divide-y divide-slate-100 text-slate-700 text-[11px]">
                     {sortedProducts.length === 0 ? (
                       <tr>
                         <td colSpan={8} className="text-center py-8 text-slate-400 font-sans">
@@ -750,30 +984,32 @@ export default function Inventario({
                                 : ''
                             }`}
                           >
-                            <td className="px-2.5 py-2 font-mono font-bold text-slate-450">{p.barcode}</td>
-                            <td className="px-2.5 py-2 font-sans select-text">
-                              <div className="font-bold text-slate-850">{p.description}</div>
-                              <div className="flex gap-1.5 mt-0.5 text-[9px]">
-                                {p.a_granel && (
-                                  <span className="bg-amber-50 border border-amber-250 text-amber-700 px-1 py-0.2 rounded font-bold uppercase font-sans">A Granel</span>
-                                )}
-                                {p.fecha_vencimiento && (
-                                  <span className="bg-red-50 border border-red-250 text-red-700 px-1 py-0.2 rounded font-bold font-sans">
-                                    Vence: {p.fecha_vencimiento}
-                                  </span>
-                                )}
-                              </div>
+                            <td className="px-2 py-1 font-mono font-bold text-slate-450">{p.barcode}</td>
+                            <td className="px-2 py-1 font-sans select-text">
+                              <div className="font-bold text-slate-850 text-[11px] leading-tight">{p.description}</div>
+                              {(p.a_granel || p.fecha_vencimiento) && (
+                                <div className="flex gap-1.5 mt-0.5 text-[8px] leading-none">
+                                  {p.a_granel && (
+                                    <span className="bg-amber-50 border border-amber-250 text-amber-700 px-1 py-0.2 rounded font-bold uppercase font-sans">A Granel</span>
+                                  )}
+                                  {p.fecha_vencimiento && (
+                                    <span className="bg-red-50 border border-red-250 text-red-700 px-1 py-0.2 rounded font-bold font-sans">
+                                      Vence: {p.fecha_vencimiento}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                             </td>
-                            <td className="px-2.5 py-2 font-sans">{p.category}</td>
-                            <td className="px-2.5 py-2 text-right font-mono text-slate-500">{p.stock_minimo}</td>
-                            <td className={`px-2.5 py-2 text-right font-black font-mono ${isLowStock ? 'text-red-500 animate-pulse font-bold' : 'text-slate-800'}`}>
+                            <td className="px-2 py-1 font-sans">{p.category}</td>
+                            <td className="px-2 py-1 text-right font-mono text-slate-500">{p.stock_minimo}</td>
+                            <td className={`px-2 py-1 text-right font-black font-mono ${isLowStock ? 'text-red-500 animate-pulse font-bold' : 'text-slate-800'}`}>
                               {p.stock_actual}
                             </td>
-                            <td className="px-2.5 py-2 text-right font-mono text-slate-600">${p.precio_costo_usd.toFixed(2)}</td>
-                            <td className="px-2.5 py-2 text-right font-mono text-emerald-600 font-bold">${p.precio_detalle_usd.toFixed(2)}</td>
-                            <td className="px-2.5 py-2 text-right font-mono text-slate-600">
+                            <td className="px-2 py-1 text-right font-mono text-slate-600">${p.precio_costo_usd.toFixed(2)}</td>
+                            <td className="px-2 py-1 text-right font-mono text-emerald-600 font-bold">${p.precio_detalle_usd.toFixed(2)}</td>
+                            <td className="px-2 py-1 text-right font-mono text-slate-600">
                               ${p.precio_mayor_usd.toFixed(2)}
-                              <span className="text-[9px] text-slate-400 block font-sans">x{p.cantidad_mayorista}</span>
+                              <span className="text-[8px] text-slate-400 block font-sans">x{p.cantidad_mayorista}</span>
                             </td>
                           </tr>
                         );
@@ -813,6 +1049,17 @@ export default function Inventario({
                     >
                       <Plus className="w-4 h-4 bg-emerald-700/50 rounded-full p-0.5" />
                       <span>Agregar</span>
+                    </button>
+                  )}
+
+                  {/* BUTTON: IMPORTAR MASIVO */}
+                  {hasPermission('crear') && (
+                    <button
+                      onClick={() => setShowBulkModal(true)}
+                      className="w-full bg-indigo-650 hover:bg-indigo-700 text-white border border-indigo-750 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all active:scale-95"
+                    >
+                      <Upload className="w-4 h-4 bg-indigo-700/50 rounded-full p-0.5" />
+                      <span>Carga Masiva</span>
                     </button>
                   )}
 
@@ -1744,6 +1991,170 @@ export default function Inventario({
                 Cerrar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CARGA MASIVA DE PRODUCTOS */}
+      {showBulkModal && (
+        <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 text-slate-800">
+          <div className="bg-white border border-indigo-200 rounded-xl overflow-hidden w-full max-w-4xl shadow-2xl flex flex-col max-h-[85vh]">
+            
+            {/* Header */}
+            <div className="bg-indigo-650 text-white px-6 py-4 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <Upload className="w-5 h-5" />
+                <h3 className="text-sm font-black font-sans uppercase tracking-wider">Carga Masiva de Productos</h3>
+              </div>
+              <button 
+                onClick={() => {
+                  setShowBulkModal(false);
+                  setBulkFile(null);
+                  setBulkPreview([]);
+                  setBulkErrors([]);
+                  setImportStatus('idle');
+                }} 
+                className="text-white hover:text-indigo-200 text-lg font-bold font-sans"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Content Area */}
+            <div className="p-6 overflow-y-auto space-y-5 flex-grow">
+              
+              {/* Instructions and Template download */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                <div className="md:col-span-2 space-y-2 bg-indigo-50 border border-indigo-150 p-4 rounded-lg text-xs leading-relaxed text-indigo-900">
+                  <h4 className="font-bold text-[13px] text-indigo-900 font-sans uppercase mb-1">📋 Instrucciones de Importación</h4>
+                  <p>1. Descarga la plantilla oficial en formato CSV haciendo clic en el botón de la derecha.</p>
+                  <p>2. Abre el archivo en Microsoft Excel o cualquier editor y rellena las columnas con tus productos.</p>
+                  <p>3. Los campos <strong className="text-red-700">Obligatorios</strong> son: <strong>Código/Clave</strong>, <strong>Descripción</strong>, <strong>Costo</strong> y <strong>Precio Venta</strong>.</p>
+                  <p>4. Valores válidos para <strong>Exento Impuesto</strong> y <strong>A Granel</strong>: escribe <code className="bg-white px-1.5 py-0.5 rounded border border-indigo-200 font-bold font-mono">SI</code> o <code className="bg-white px-1.5 py-0.5 rounded border border-indigo-200 font-bold font-mono">NO</code>.</p>
+                  <p>5. Sube el archivo completado en el selector inferior y presiona <strong>Procesar Importación</strong>.</p>
+                </div>
+                
+                <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg flex flex-col justify-center items-center text-center space-y-3">
+                  <span className="text-[11px] font-sans font-bold text-slate-500 uppercase tracking-tight">Formato Oficial</span>
+                  <button
+                    type="button"
+                    onClick={downloadTemplate}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-sans font-bold text-xs py-3 px-4 rounded-lg shadow transition-all active:scale-95 flex items-center gap-2 uppercase tracking-wide"
+                  >
+                    Descargar Plantilla
+                  </button>
+                  <span className="text-[9px] text-slate-400 font-sans">Compatible con Excel (CSV UTF-8)</span>
+                </div>
+              </div>
+
+              {/* Upload Input */}
+              <div className="border-2 border-dashed border-slate-300 rounded-lg p-5 flex flex-col justify-center items-center text-center bg-slate-50 hover:bg-slate-100/50 transition-all relative">
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={handleCsvUpload}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  disabled={importStatus === 'importing'}
+                />
+                <Upload className="w-8 h-8 text-slate-400 mb-2" />
+                <span className="text-xs font-sans font-bold text-slate-700">
+                  {bulkFile ? `Archivo seleccionado: ${bulkFile.name}` : 'Seleccione o arrastre el archivo CSV con la lista de productos aquí'}
+                </span>
+                <span className="text-[10px] text-slate-450 font-sans mt-1">Límite máximo recomendado: 1000 productos por carga</span>
+              </div>
+
+              {/* Errors Display */}
+              {bulkErrors.length > 0 && (
+                <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-lg text-[11px] space-y-1 font-sans">
+                  <h5 className="font-extrabold uppercase text-red-900">⚠️ Errores de Validación Encontrados:</h5>
+                  <div className="max-h-24 overflow-y-auto space-y-0.5">
+                    {bulkErrors.map((err, idx) => (
+                      <div key={idx} className="font-mono">{err}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Preview Table */}
+              {bulkPreview.length > 0 && bulkErrors.length === 0 && (
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-sans font-bold text-slate-655 uppercase">Vista Previa de Productos a Importar ({bulkPreview.length}):</span>
+                    <span className="text-emerald-700 font-bold bg-emerald-50 border border-emerald-255 px-2 py-0.5 rounded text-[10px] uppercase font-sans">Listo para procesar</span>
+                  </div>
+                  <div className="border border-slate-200 rounded-lg overflow-hidden max-h-56 overflow-y-auto">
+                    <table className="w-full text-left border-collapse text-[10.5px]">
+                      <thead>
+                        <tr className="bg-slate-100 border-b border-slate-200 text-slate-700 uppercase font-sans font-bold">
+                          <th className="p-2 font-mono">Código</th>
+                          <th className="p-2">Descripción</th>
+                          <th className="p-2">Categoría</th>
+                          <th className="p-2 text-right">Existencia</th>
+                          <th className="p-2 text-right">Min. Stock</th>
+                          <th className="p-2 text-right">Costo</th>
+                          <th className="p-2 text-right">Venta Detalle</th>
+                          <th className="p-2 text-right">Venta Mayor</th>
+                          <th className="p-2 text-center">Mayorista</th>
+                          <th className="p-2 text-center">A Granel</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {bulkPreview.map((p, idx) => (
+                          <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50/50">
+                            <td className="p-2 font-mono font-bold text-slate-600">{p.barcode}</td>
+                            <td className="p-2 font-bold text-slate-800 uppercase">{p.description}</td>
+                            <td className="p-2 text-slate-500">{p.category}</td>
+                            <td className="p-2 text-right font-mono font-bold text-slate-700">{p.stock_actual}</td>
+                            <td className="p-2 text-right font-mono text-slate-500">{p.stock_minimo}</td>
+                            <td className="p-2 text-right font-mono text-slate-600">${p.precio_costo_usd.toFixed(2)}</td>
+                            <td className="p-2 text-right font-mono font-bold text-emerald-600">${p.precio_detalle_usd.toFixed(2)}</td>
+                            <td className="p-2 text-right font-mono text-slate-600">${p.precio_mayor_usd.toFixed(2)}</td>
+                            <td className="p-2 text-center font-sans text-slate-500 font-bold">{p.cantidad_mayorista} un.</td>
+                            <td className="p-2 text-center">
+                              {p.a_granel ? (
+                                <span className="bg-amber-50 text-amber-700 border border-amber-200 rounded px-1.5 py-0.2 text-[9px] font-bold uppercase">SI</span>
+                              ) : (
+                                <span className="text-slate-400">NO</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+            </div>
+
+            {/* Footer */}
+            <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex justify-between items-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowBulkModal(false);
+                  setBulkFile(null);
+                  setBulkPreview([]);
+                  setBulkErrors([]);
+                  setImportStatus('idle');
+                }}
+                className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-5 py-2.5 rounded-lg text-xs font-sans font-bold transition-all"
+                disabled={importStatus === 'importing'}
+              >
+                Cerrar
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExecuteBulkImport}
+                disabled={bulkPreview.length === 0 || bulkErrors.length > 0 || importStatus === 'importing' || importStatus === 'success'}
+                className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-sans font-bold text-xs py-2.5 px-6 rounded-lg shadow-sm uppercase tracking-wide transition-all active:scale-95"
+              >
+                {importStatus === 'importing' ? 'Procesando Carga...' :
+                 importStatus === 'success' ? '✓ ¡Importado con Éxito!' : 'Procesar Importación'}
+              </button>
+            </div>
+
           </div>
         </div>
       )}

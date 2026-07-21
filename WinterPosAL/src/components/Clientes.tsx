@@ -84,6 +84,20 @@ export default function Clientes({
     }
   };
 
+  // Sorting state (Créditos / Abonos)
+  type CreditSortField = 'tipo' | 'fecha' | 'ref' | 'nombre' | 'cedula_rif' | 'monto';
+  const [creditSortField, setCreditSortField] = useState<CreditSortField>('fecha');
+  const [creditSortDir, setCreditSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const handleCreditSort = (field: CreditSortField) => {
+    if (creditSortField === field) {
+      setCreditSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setCreditSortField(field);
+      setCreditSortDir(field === 'fecha' ? 'desc' : 'asc');
+    }
+  };
+
   // Escape key to close modals
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -132,6 +146,14 @@ export default function Clientes({
   const SortIcon = ({ field }: { field: SortField }) => {
     if (sortField !== field) return <ChevronsUpDown className="inline w-3 h-3 ml-0.5 opacity-30" />;
     return sortDir === 'asc'
+      ? <ChevronUp className="inline w-3 h-3 ml-0.5 text-blue-500" />
+      : <ChevronDown className="inline w-3 h-3 ml-0.5 text-blue-500" />;
+  };
+
+  // Credit Sorting Icon helper
+  const CreditSortIcon = ({ field }: { field: CreditSortField }) => {
+    if (creditSortField !== field) return <ChevronsUpDown className="inline w-3 h-3 ml-0.5 opacity-30" />;
+    return creditSortDir === 'asc'
       ? <ChevronUp className="inline w-3 h-3 ml-0.5 text-blue-500" />
       : <ChevronDown className="inline w-3 h-3 ml-0.5 text-blue-500" />;
   };
@@ -209,11 +231,33 @@ export default function Clientes({
     return list.sort((a, b) => b.fecha.localeCompare(a.fecha));
   }, [sales, abonos]);
 
-  // Filter credit & abonos by selected client
+  // Filter credit & abonos by selected client, search term, and apply interactive sorting
   const filteredCreditAbonoList = useMemo(() => {
-    if (!selectedRowClient) return creditAbonoList;
-    return creditAbonoList.filter(item => item.cedula_rif === selectedRowClient.cedula_rif);
-  }, [creditAbonoList, selectedRowClient]);
+    let list = creditAbonoList;
+    if (selectedRowClient) {
+      list = list.filter(item => item.cedula_rif === selectedRowClient.cedula_rif);
+    }
+    if (searchTerm.trim() !== '') {
+      const term = searchTerm.toLowerCase();
+      list = list.filter(item => 
+        (item.tipo || '').toLowerCase().includes(term) ||
+        (item.fecha || '').toLowerCase().includes(term) ||
+        (item.ref || '').toLowerCase().includes(term) ||
+        (item.nombre || '').toLowerCase().includes(term) ||
+        (item.cedula_rif || '').toLowerCase().includes(term)
+      );
+    }
+    return [...list].sort((a, b) => {
+      const va = a[creditSortField];
+      const vb = b[creditSortField];
+      if (creditSortField === 'monto') {
+        return creditSortDir === 'asc' ? va - vb : vb - va;
+      }
+      return creditSortDir === 'asc'
+        ? String(va).localeCompare(String(vb))
+        : String(vb).localeCompare(String(va));
+    });
+  }, [creditAbonoList, selectedRowClient, searchTerm, creditSortField, creditSortDir]);
 
   // 3. Client sales history list
   const clientSalesHistory = useMemo(() => {
@@ -1050,12 +1094,42 @@ export default function Clientes({
                 <table className="w-full border-collapse text-[11px] text-left">
                   <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
                     <tr>
-                      <th className="px-4 py-2 font-sans uppercase w-28">Tipo Movimiento</th>
-                      <th className="px-4 py-2 font-sans uppercase">Fecha / Hora</th>
-                      <th className="px-4 py-2 font-sans uppercase">Referencia / Factura</th>
-                      <th className="px-4 py-2 font-sans uppercase">Cliente</th>
-                      <th className="px-4 py-2 font-sans uppercase">Identificación (ID)</th>
-                      <th className="px-4 py-2 text-right font-sans uppercase">Monto ($ USD)</th>
+                      <th className="px-4 py-2 font-sans uppercase w-28 cursor-pointer select-none" onClick={() => handleCreditSort('tipo')}>
+                        <div className="flex items-center gap-1">
+                          <span>Tipo Movimiento</span>
+                          <CreditSortIcon field="tipo" />
+                        </div>
+                      </th>
+                      <th className="px-4 py-2 font-sans uppercase cursor-pointer select-none" onClick={() => handleCreditSort('fecha')}>
+                        <div className="flex items-center gap-1">
+                          <span>Fecha / Hora</span>
+                          <CreditSortIcon field="fecha" />
+                        </div>
+                      </th>
+                      <th className="px-4 py-2 font-sans uppercase cursor-pointer select-none" onClick={() => handleCreditSort('ref')}>
+                        <div className="flex items-center gap-1">
+                          <span>Referencia / Factura</span>
+                          <CreditSortIcon field="ref" />
+                        </div>
+                      </th>
+                      <th className="px-4 py-2 font-sans uppercase cursor-pointer select-none" onClick={() => handleCreditSort('nombre')}>
+                        <div className="flex items-center gap-1">
+                          <span>Cliente</span>
+                          <CreditSortIcon field="nombre" />
+                        </div>
+                      </th>
+                      <th className="px-4 py-2 font-sans uppercase cursor-pointer select-none" onClick={() => handleCreditSort('cedula_rif')}>
+                        <div className="flex items-center gap-1">
+                          <span>Identificación (ID)</span>
+                          <CreditSortIcon field="cedula_rif" />
+                        </div>
+                      </th>
+                      <th className="px-4 py-2 text-right font-sans uppercase cursor-pointer select-none" onClick={() => handleCreditSort('monto')}>
+                        <div className="flex items-center justify-end gap-1">
+                          <span>Monto ($ USD)</span>
+                          <CreditSortIcon field="monto" />
+                        </div>
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
