@@ -142,6 +142,9 @@ export default function App() {
   const [shiftDevolucionesUsd, setShiftDevolucionesUsd] = useState<number>(() => {
     return parseFloat(localStorage.getItem('pos_shift_devoluciones') || '0');
   });
+  const [shiftDevolucionesVes, setShiftDevolucionesVes] = useState<number>(() => {
+    return parseFloat(localStorage.getItem('pos_shift_devoluciones_ves') || '0');
+  });
 
   const [lanIP, setLanIP] = useState('192.168.1.100');
   const [dbMode, setDbMode] = useState('local');
@@ -212,6 +215,14 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('pos_shift_salidas_ves', shiftSalidasVes.toString());
   }, [shiftSalidasVes]);
+
+  useEffect(() => {
+    localStorage.setItem('pos_shift_devoluciones', shiftDevolucionesUsd.toString());
+  }, [shiftDevolucionesUsd]);
+
+  useEffect(() => {
+    localStorage.setItem('pos_shift_devoluciones_ves', shiftDevolucionesVes.toString());
+  }, [shiftDevolucionesVes]);
 
   useEffect(() => {
     const ip = localStorage.getItem('pos_lan_ip') || '192.168.1.100';
@@ -753,7 +764,7 @@ export default function App() {
     await postApiData('/cajas/abrir', { usd, ves, usuarioId: currentUser?.id, terminal: terminalName });
   };
 
-  const handleCerrarCaja = (
+  const handleCerrarCaja = async (
     realUsd: number, 
     realVes: number,
     details?: {
@@ -811,7 +822,8 @@ export default function App() {
       abonoClientesUsd: details?.abonoClientesUsd ?? shiftAbonosUsd,
       entradaEfectivoUsd: details?.entradaEfectivoUsd ?? shiftEntradasUsd,
       salidaEfectivoUsd: details?.salidaEfectivoUsd ?? shiftSalidasUsd,
-      devolucionEfectivoUsd: details?.devolucionEfectivoUsd ?? 0,
+      devolucionEfectivoUsd: details?.devolucionEfectivoUsd ?? shiftDevolucionesUsd,
+      devolucionEfectivoVes: details?.devolucionEfectivoVes ?? shiftDevolucionesVes,
       dineroEnCajaExpected: details?.dineroEnCajaExpected ?? expectedUsd,
       
       // Detailed sales metrics
@@ -829,6 +841,7 @@ export default function App() {
       pagosCreditoUsd: details?.pagosCreditoUsd ?? 0,
       pagosPuntosUsd: details?.pagosPuntosUsd ?? 0,
       devolucionVentasUsd: details?.devolucionVentasUsd ?? 0,
+      devolucionVentasVes: details?.devolucionVentasVes ?? 0,
       ventaTotalUsd,
     };
     
@@ -850,6 +863,7 @@ export default function App() {
     setShiftSalidasUsd(0);
     setShiftSalidasVes(0);
     setShiftDevolucionesUsd(0);
+    setShiftDevolucionesVes(0);
     localStorage.removeItem('pos_shift_sales');
     localStorage.removeItem('pos_shift_abonos');
     localStorage.removeItem('pos_shift_entradas');
@@ -857,6 +871,7 @@ export default function App() {
     localStorage.removeItem('pos_shift_salidas');
     localStorage.removeItem('pos_shift_salidas_ves');
     localStorage.removeItem('pos_shift_devoluciones');
+    localStorage.removeItem('pos_shift_devoluciones_ves');
 
     localStorage.removeItem('pos_caja_abierta');
     localStorage.removeItem('pos_apertura_usd');
@@ -867,7 +882,7 @@ export default function App() {
     localStorage.removeItem('pos_movimientos_ves');
     localStorage.removeItem('pos_apertura_fecha');
 
-    postApiData('/cajas/cerrar', newCierre);
+    await postApiData('/cajas/cerrar', newCierre);
     return newCierre;
   };
 
@@ -892,11 +907,20 @@ export default function App() {
       setShiftSalidasUsd(prev => prev + usd);
       setShiftSalidasVes(prev => prev + ves);
     } else if (type === 'Devolucion') {
-      setShiftDevolucionesUsd(prev => {
-        const next = prev + usd;
-        localStorage.setItem('pos_shift_devoluciones', next.toString());
-        return next;
-      });
+      if (usd > 0) {
+        setShiftDevolucionesUsd(prev => {
+          const next = prev + usd;
+          localStorage.setItem('pos_shift_devoluciones', next.toString());
+          return next;
+        });
+      }
+      if (ves > 0) {
+        setShiftDevolucionesVes(prev => {
+          const next = prev + ves;
+          localStorage.setItem('pos_shift_devoluciones_ves', next.toString());
+          return next;
+        });
+      }
     }
 
     await postApiData('/cajas/movimiento', { tipo: type, descripcion: description, usd, ves, terminal: terminalName });
@@ -1179,6 +1203,7 @@ export default function App() {
               shiftSalidasUsd={shiftSalidasUsd}
               shiftSalidasVes={shiftSalidasVes}
               shiftDevolucionesUsd={shiftDevolucionesUsd}
+              shiftDevolucionesVes={shiftDevolucionesVes}
               onUpdateProductStock={handleUpdateProductStock}
               onRegisterAbono={handleRegisterAbono}
               getApiUrl={getApiUrl}

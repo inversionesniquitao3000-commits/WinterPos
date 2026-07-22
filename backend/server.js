@@ -10,6 +10,9 @@ import {
   saveUser, updateUser, deleteUser, getRoles, saveRole, updateRole, deleteRole, wipeDatabase, backupDatabase, restoreDatabase,
   readJsonFile, writeJsonFile
 } from './db-store.js';
+import { 
+  initWhatsAppClient, getWhatsAppStatus, saveWhatsAppConfig, sendCierreReport 
+} from './whatsapp-service.js';
 
 dotenv.config();
 
@@ -392,8 +395,46 @@ setInterval(runBackupTask, 3600000);
 // Check once at startup after 5 seconds
 setTimeout(runBackupTask, 5000);
 
+// WHATSAPP INTEGRATION ENDPOINTS
+app.get('/api/whatsapp/status', (req, res) => {
+  try {
+    const status = getWhatsAppStatus();
+    res.json(status);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/whatsapp/config', (req, res) => {
+  try {
+    const saved = saveWhatsAppConfig(req.body);
+    res.json(saved);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/whatsapp/send-cierre', async (req, res) => {
+  try {
+    const { imageBase64, textSummary } = req.body;
+    if (!imageBase64) {
+      return res.status(400).json({ error: 'La imagen en Base64 es requerida.' });
+    }
+    const result = await sendCierreReport(imageBase64, textSummary || 'Cierre de caja');
+    res.json(result);
+  } catch (err) {
+    console.error('Error en /api/whatsapp/send-cierre:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Start Server
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Servidor API de WinterPosAL corriendo en http://localhost:${PORT}`);
-  console.log(`Expueto en red LAN para recibir conexiones de otras terminales.`);
+  console.log(`Expuesto en red LAN para recibir conexiones de otras terminales.`);
+  
+  // Initialize WhatsApp connection at startup if enabled
+  setTimeout(() => {
+    initWhatsAppClient();
+  }, 1000);
 });

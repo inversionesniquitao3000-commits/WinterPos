@@ -175,6 +175,7 @@ export interface CierreCaja {
   salidaEfectivoUsd: number;
   salidaEfectivoVes?: number;
   devolucionEfectivoUsd: number;
+  devolucionEfectivoVes?: number;
   dineroEnCajaExpected: number;
   realUsd: number; 
   
@@ -193,6 +194,7 @@ export interface CierreCaja {
   pagosCreditoUsd: number;
   pagosPuntosUsd: number;
   devolucionVentasUsd: number;
+  devolucionVentasVes?: number;
   ventaTotalUsd: number;
   realVes: number;
   expectedVes: number;

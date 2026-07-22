@@ -61,7 +61,7 @@ interface CajaPOSProps {
       devolucionVentasUsd: number;
       ventaTotalUsd: number;
     }
-  ) => CierreCaja;
+  ) => Promise<CierreCaja>;
   shiftSales: Sale[];
   shiftAbonosUsd: number;
   shiftEntradasUsd: number;
@@ -69,6 +69,7 @@ interface CajaPOSProps {
   shiftSalidasUsd: number;
   shiftSalidasVes: number;
   shiftDevolucionesUsd: number;
+  shiftDevolucionesVes: number;
   onUpdateProductStock: (
     prodId: number,
     type: 'Entrada' | 'Salida' | 'Merma' | 'Devolucion' | 'Entrada Rápida' | 'Devolución',
@@ -101,6 +102,7 @@ export default function CajaPOS({
   shiftSalidasUsd,
   shiftSalidasVes,
   shiftDevolucionesUsd,
+  shiftDevolucionesVes,
   onUpdateProductStock,
   onRegisterAbono,
   getApiUrl,
@@ -119,6 +121,37 @@ export default function CajaPOS({
 
   // Manual movements state
   const [showMovementsModal, setShowMovementsModal] = useState(false);
+
+  // WhatsApp Cierre State
+  const [waCierreStatus, setWaCierreStatus] = useState({
+    status: 'DISCONNECTED',
+    enabled: false,
+    groupId: ''
+  });
+  const [sendToWhatsApp, setSendToWhatsApp] = useState(true);
+  const [isSendingWa, setIsSendingWa] = useState(false);
+
+  const fetchWaCierreStatus = async () => {
+    try {
+      const res = await fetch(getApiUrl('/whatsapp/status'));
+      if (res.ok) {
+        const data = await res.json();
+        setWaCierreStatus({
+          status: data.status,
+          enabled: data.config?.enabled || false,
+          groupId: data.config?.groupId || ''
+        });
+      }
+    } catch (err) {
+      console.error('Error fetching WhatsApp status for closeout:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (showCierreModal) {
+      fetchWaCierreStatus();
+    }
+  }, [showCierreModal]);
   const [movType, setMovType] = useState<'Entrada' | 'Salida'>('Entrada');
   const [movDesc, setMovDesc] = useState('');
   const [movUsd, setMovUsd] = useState('');
@@ -243,12 +276,19 @@ export default function CajaPOS({
         }
       }
 
+      // Determine if original ticket was paid in Bs (e.g. cash, debit, pagomovil, biopago)
+      const paidInBs = devSelectedSale.pagos.some(p => p.metodo !== 'Efectivo$' && p.metodo !== 'CreditoCliente');
+      
+      const refundCurrency = paidInBs ? 'EfectivoBs' : 'Efectivo$';
+      const refundUsd = refundCurrency === 'Efectivo$' ? devRefundTotal : 0;
+      const refundVes = refundCurrency === 'EfectivoBs' ? devRefundTotal * tasaDia : 0;
+
       // 2. Register manual cash movement of type Devolucion
       onRegisterCajaMovement(
         'Devolucion',
         `Devolución de Efectivo FAC: ${devSelectedSale.factura_nro} - Motivo: ${devMotivo}`,
-        devRefundTotal,
-        0
+        refundUsd,
+        refundVes
       );
 
       // 3. Register the return as a Sale record in the Ventas history (negative sales)
@@ -266,7 +306,11 @@ export default function CajaPOS({
         descuento: 0,
         totalUSD: -devRefundTotal,
         totalVES: -(devRefundTotal * tasaDia),
-        pagos: [{ metodo: 'Efectivo$' as const, monto: -devRefundTotal, montoUSD: -devRefundTotal }],
+        pagos: [{ 
+          metodo: refundCurrency as any, 
+          monto: refundCurrency === 'Efectivo$' ? -devRefundTotal : -(devRefundTotal * tasaDia), 
+          montoUSD: -devRefundTotal 
+        }],
         vueltoUSD: 0,
         vueltoVES: 0
       };
@@ -1190,8 +1234,9 @@ export default function CajaPOS({
     const salidaEfectivoUsd = shiftSalidasUsd;
     const salidaEfectivoVes = shiftSalidasVes;
     const devolucionEfectivoUsd = shiftDevolucionesUsd;
+    const devolucionEfectivoVes = shiftDevolucionesVes;
     const dineroEnCajaExpected = aperturaUsd + ventasEfectivoUsd + abonoClientesUsd + entradaEfectivoUsd - salidaEfectivoUsd - devolucionEfectivoUsd;
-    const expectedVes = aperturaVes + cajaVentasVes + entradaEfectivoVes - salidaEfectivoVes;
+    const expectedVes = aperturaVes + cajaVentasVes + entradaEfectivoVes - salidaEfectivoVes - devolucionEfectivoVes;
     
     const ventasTotalesUsd = shiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
@@ -1245,6 +1290,12 @@ export default function CajaPOS({
       }
       return acc;
     }, 0);
+    const devolucionVentasVes = shiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro.startsWith('DEV-')) {
+        return acc + Math.abs(sale.totalVES);
+      }
+      return acc;
+    }, 0);
     const ventaTotalUsd = ventasTotalesUsd - devolucionVentasUsd;
 
     const costoTotalUsd = shiftSales.reduce((acc, sale) => {
@@ -1274,6 +1325,7 @@ export default function CajaPOS({
       salidaEfectivoUsd,
       salidaEfectivoVes,
       devolucionEfectivoUsd,
+      devolucionEfectivoVes,
       dineroEnCajaExpected,
       ventasTotalesUsd,
       descuentosUsd,
@@ -1289,10 +1341,136 @@ export default function CajaPOS({
       pagosCreditoUsd,
       pagosPuntosUsd,
       devolucionVentasUsd,
+      devolucionVentasVes,
       ventaTotalUsd
     };
 
     setCierreResult(localCierreResult);
+  };
+
+  const handleConfirmCierre = async () => {
+    if (!cierreResult) return;
+    setIsSendingWa(true);
+
+    const realUsd = parseFloat(cierreRealUsd) || 0;
+    const realVes = parseFloat(cierreRealVes) || 0;
+    const diffUsd = realUsd - cierreResult.dineroEnCajaExpected;
+    const diffVes = realVes - cierreResult.expectedVes;
+
+    const summaryText = 
+      `📊 *REPORTE DE ARQUEO Y CIERRE DE CAJA*\n\n` +
+      `📅 *Fecha:* ${cierreResult.fechaCierre}\n` +
+      `👤 *Cajero:* ${cierreResult.usuario.toUpperCase()}\n` +
+      `🖥️ *Terminal:* ${localStorage.getItem('pos_terminal_name') || 'CAJA_01'}\n\n` +
+      `💵 *EFECTIVO ESPERADO EN GAVETA:*\n` +
+      `• Dólares (USD): $${cierreResult.dineroEnCajaExpected.toFixed(2)}\n` +
+      `• Bolívares (VES): Bs ${cierreResult.expectedVes.toFixed(2)}\n\n` +
+      `📥 *EFECTIVO FÍSICO RECIBIDO:*\n` +
+      `• Dólares (USD): $${realUsd.toFixed(2)}\n` +
+      `• Bolívares (VES): Bs ${realVes.toFixed(2)}\n\n` +
+      `⚖️ *DIFERENCIA (BALANCE):*\n` +
+      `• Dólares (USD): ${diffUsd >= 0 ? `+$${diffUsd.toFixed(2)} (Sobrante)` : `-$${Math.abs(diffUsd).toFixed(2)} (Faltante)`}\n` +
+      `• Bolívares (VES): ${diffVes >= 0 ? `+Bs ${diffVes.toFixed(2)} (Sobrante)` : `-Bs ${Math.abs(diffVes).toFixed(2)} (Faltante)`}\n\n` +
+      `🛍️ *VENTAS TOTALES DEL TURNO:* $${cierreResult.ventaTotalUsd.toFixed(2)} USD\n` +
+      `📉 *DESCUENTOS APLICADOS:* $${cierreResult.descuentosUsd.toFixed(2)} USD\n\n` +
+      `*WinterPosAL Cloud System*`;
+
+    let waSuccess = false;
+    let fallbackTriggered = false;
+    let imageBase64 = '';
+
+    if (waCierreStatus.enabled && sendToWhatsApp) {
+      try {
+        const htmlToImage = await import(/* @vite-ignore */ 'html-to-image');
+        const element = document.getElementById('cierre-arqueo-card');
+        
+        if (element) {
+          imageBase64 = await htmlToImage.toPng(element, { backgroundColor: '#ffffff', quality: 0.95 });
+        }
+
+        const res = await fetch(getApiUrl('/whatsapp/send-cierre'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            imageBase64: imageBase64 || 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+            textSummary: summaryText
+          })
+        });
+
+        if (res.ok) {
+          waSuccess = true;
+        } else {
+          const errData = await res.json();
+          console.warn('Failed to send closure to WhatsApp server:', errData.error);
+        }
+      } catch (err) {
+        console.error('Error generating/sending WhatsApp cierre:', err);
+      }
+
+      if (!waSuccess) {
+        fallbackTriggered = true;
+        try {
+          if (imageBase64) {
+            const resBlob = await fetch(imageBase64);
+            const blob = await resBlob.blob();
+            await navigator.clipboard.write([
+              new ClipboardItem({ [blob.type]: blob })
+            ]);
+          } else {
+            await navigator.clipboard.writeText(summaryText);
+          }
+        } catch (clipErr) {
+          console.warn('Failed to copy to clipboard:', clipErr);
+        }
+      }
+    }
+
+    await onCerrarCaja(cierreResult.realUsd, cierreResult.realVes, {
+      ventasEfectivoUsd: cierreResult.ventasEfectivoUsd,
+      abonoClientesUsd: cierreResult.abonoClientesUsd,
+      entradaEfectivoUsd: cierreResult.entradaEfectivoUsd,
+      entradaEfectivoVes: cierreResult.entradaEfectivoVes,
+      salidaEfectivoUsd: cierreResult.salidaEfectivoUsd,
+      salidaEfectivoVes: cierreResult.salidaEfectivoVes,
+      devolucionEfectivoUsd: cierreResult.devolucionEfectivoUsd,
+      devolucionEfectivoVes: cierreResult.devolucionEfectivoVes,
+      dineroEnCajaExpected: cierreResult.dineroEnCajaExpected,
+      ventasTotalesUsd: cierreResult.ventasTotalesUsd,
+      descuentosUsd: cierreResult.descuentosUsd,
+      ventaBrutaUsd: cierreResult.ventaBrutaUsd,
+      pagosEfectivoUsd: cierreResult.pagosEfectivoUsd,
+      pagosEfectivoBsUsd: cierreResult.pagosEfectivoBsUsd,
+      pagosEfectivoBsVes: cierreResult.pagosEfectivoBsVes,
+      pagosBiopagoUsd: cierreResult.pagosBiopagoUsd,
+      pagosBiopagoVes: cierreResult.pagosBiopagoVes,
+      pagosPuntoUsd: cierreResult.pagosPuntoUsd,
+      pagosPuntoVes: cierreResult.pagosPuntoVes,
+      pagosTarjetaUsd: cierreResult.pagosTarjetaUsd,
+      pagosCreditoUsd: cierreResult.pagosCreditoUsd,
+      pagosPuntosUsd: cierreResult.pagosPuntosUsd,
+      devolucionVentasUsd: cierreResult.devolucionVentasUsd,
+      devolucionVentasVes: cierreResult.devolucionVentasVes,
+      ventaTotalUsd: cierreResult.ventaTotalUsd
+    });
+
+    setIsSendingWa(false);
+    setShowCierreModal(false);
+    setCierreResult(null);
+
+    if (waCierreStatus.enabled && sendToWhatsApp && fallbackTriggered) {
+      showAlert(
+        '⚠️ El reporte no pudo enviarse automáticamente por WhatsApp (sin conexión o bot inactivo).\n\n' +
+        'El cierre se guardó con éxito en el sistema. Hemos copiado la imagen/información al portapapeles para que la pegues (Ctrl+V) manualmente en su grupo.',
+        'Cierre Guardado con Alerta',
+        'warning'
+      );
+      setTimeout(() => window.location.reload(), 3000);
+    } else if (waCierreStatus.enabled && sendToWhatsApp && waSuccess) {
+      showAlert('¡Cierre registrado y notificado exitosamente por WhatsApp al grupo!', 'Cierre Exitoso', 'success');
+      setTimeout(() => window.location.reload(), 1500);
+    } else {
+      window.location.reload();
+    }
   };
 
   const handleSaveCajaMovement = (e: React.FormEvent) => {
@@ -2624,9 +2802,9 @@ export default function CajaPOS({
       {/* MODAL: CIERRE DE CAJA - Light Styled */}
       {showCierreModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-slate-800 animate-fade-in">
-          <div className={`bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xl p-6 space-y-4 transition-all ${cierreResult ? 'max-w-4xl w-full' : 'max-w-md w-full'}`}>
+          <div className={`bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xl p-5 space-y-3.5 transition-all max-h-[96vh] flex flex-col ${cierreResult ? 'max-w-4xl w-full' : 'max-w-md w-full'}`}>
             
-            <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+            <div className="flex justify-between items-center border-b border-slate-200 pb-2.5 flex-shrink-0">
               <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
                 <XCircle className="w-4 h-4 text-red-500" />
                 CONCILIACIÓN Y ARQUEO DE CAJA
@@ -2634,7 +2812,8 @@ export default function CajaPOS({
               <button onClick={() => { setShowCierreModal(false); setCierreResult(null); }} className="text-slate-400 hover:text-slate-655">✕ Cerrar [ESC]</button>
             </div>
 
-            {!cierreResult ? (
+            <div className="overflow-y-auto flex-grow pr-1.5 space-y-3.5 max-h-[82vh] scrollbar-thin">
+              {!cierreResult ? (
               <form onSubmit={handleSaveCierre} className="space-y-4">
                 <p className="text-[12px] text-slate-500 font-sans leading-relaxed">
                   Ingrese el saldo físico real disponible en la gaveta de caja en dólares y bolívares para realizar el balance y auditoría final.
@@ -2674,7 +2853,7 @@ export default function CajaPOS({
                 </button>
               </form>
             ) : (
-              <div className="space-y-4 w-full">
+              <div id="cierre-arqueo-card" className="space-y-4 w-full bg-white p-4 rounded-xl border border-slate-150 shadow-sm">
                 
                 {/* BLUE HEADER TICKET STYLE */}
                 <div className="bg-winter-header text-white px-4 py-2 flex items-center justify-between rounded-t-lg">
@@ -2684,7 +2863,7 @@ export default function CajaPOS({
                   <span className="text-[11px] opacity-75 font-mono">{new Date().toLocaleDateString()}</span>
                 </div>
 
-                <div className="bg-white border border-slate-250 p-5 rounded-b-lg grid grid-cols-1 md:grid-cols-2 gap-6 text-[13px] text-slate-700 leading-relaxed shadow-inner">
+                <div className="bg-white border border-slate-250 p-3.5 rounded-b-lg grid grid-cols-1 md:grid-cols-2 gap-4 text-[12px] text-slate-700 leading-relaxed shadow-inner">
                   
                   {/* Left Column: Cash Drawer Arqueo */}
                   <div className="space-y-3">
@@ -2731,11 +2910,14 @@ export default function CajaPOS({
                         <span>- Bs {(cierreResult.salidaEfectivoVes ?? 0).toFixed(2)}</span>
                       </div>
 
-                      <div className="flex justify-between text-red-555">
-                        <span>Devolución Efectivo :</span>
-                        <span>
-                          - $ {cierreResult.devolucionEfectivoUsd.toFixed(2)} {tasaDia > 0 ? `(Bs ${(cierreResult.devolucionEfectivoUsd * tasaDia).toFixed(2)})` : ''}
-                        </span>
+                      <div className="flex justify-between text-red-555 font-bold">
+                        <span>Devolución Efectivo ($) :</span>
+                        <span>- $ {cierreResult.devolucionEfectivoUsd.toFixed(2)}</span>
+                      </div>
+
+                      <div className="flex justify-between text-red-555 font-bold">
+                        <span>Devolución Efectivo (Bs) :</span>
+                        <span>- Bs {(cierreResult.devolucionEfectivoVes ?? 0).toFixed(2)}</span>
                       </div>
                     </div>
 
@@ -2778,17 +2960,17 @@ export default function CajaPOS({
                       
                       <div className="flex justify-between">
                         <span>Efectivo Bs :</span>
-                        <span className="font-bold text-slate-800">$ {cierreResult.pagosEfectivoBsUsd.toFixed(2)} (Bs {cierreResult.pagosEfectivoBsVes.toFixed(2)})</span>
+                        <span className="font-bold text-slate-800">Bs {cierreResult.pagosEfectivoBsVes.toFixed(2)}</span>
                       </div>
 
                       <div className="flex justify-between">
                         <span>Biopago :</span>
-                        <span className="font-bold text-slate-800">$ {cierreResult.pagosBiopagoUsd.toFixed(2)} (Bs {cierreResult.pagosBiopagoVes.toFixed(2)})</span>
+                        <span className="font-bold text-slate-800">Bs {cierreResult.pagosBiopagoVes.toFixed(2)}</span>
                       </div>
 
                       <div className="flex justify-between">
                         <span>Punto / Tarjeta :</span>
-                        <span className="font-bold text-slate-800">$ {cierreResult.pagosPuntoUsd.toFixed(2)} (Bs {cierreResult.pagosPuntoVes.toFixed(2)})</span>
+                        <span className="font-bold text-slate-800">Bs {cierreResult.pagosPuntoVes.toFixed(2)}</span>
                       </div>
 
                       <div className="flex justify-between">
@@ -2797,8 +2979,13 @@ export default function CajaPOS({
                       </div>
 
                       <div className="flex justify-between text-red-550 font-bold">
-                        <span>Devolución Ventas :</span>
+                        <span>Devolución Ventas ($) :</span>
                         <span>- $ {cierreResult.devolucionVentasUsd.toFixed(2)}</span>
+                      </div>
+
+                      <div className="flex justify-between text-red-550 font-bold">
+                        <span>Devolución Ventas (Bs) :</span>
+                        <span>- Bs {(cierreResult.devolucionVentasVes ?? 0).toFixed(2)}</span>
                       </div>
                     </div>
 
@@ -2819,81 +3006,96 @@ export default function CajaPOS({
                 </div>
 
                 {/* Arqueo Audit differences table */}
-                <div className="bg-slate-50 p-5 border border-slate-200 rounded-lg text-sm space-y-3.5 font-sans shadow-sm">
-                  <div className="font-extrabold text-center text-slate-800 border-b border-slate-100 pb-2 uppercase text-xs tracking-wider">
-                    RECONCILIACIÓN DE EFECTIVO ENTREGADO
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 text-slate-500 font-bold text-[11.5px] uppercase tracking-wide">
-                    <span>Efectivo</span>
-                    <span className="text-right">Gaveta Esperado</span>
-                    <span className="text-right">Físico Recibido</span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 font-mono font-bold text-slate-750 text-[13px]">
-                    <span className="text-emerald-700">Dólares USD:</span>
-                    <span className="text-right">${cierreResult.dineroEnCajaExpected.toFixed(2)}</span>
-                    <span className="text-right text-emerald-600">${parseFloat(cierreRealUsd).toFixed(2)}</span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 font-mono font-bold text-slate-750 text-[13px] border-b border-slate-205 pb-2">
-                    <span className="text-purple-750">Bolívares Bs:</span>
-                    <span className="text-right">Bs {cierreResult.expectedVes.toFixed(2)}</span>
-                    <span className="text-right text-purple-600">Bs {parseFloat(cierreRealVes).toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between font-extrabold text-[12.5px] text-slate-800 font-mono">
-                    <span>DIFERENCIA USD / VES:</span>
-                    <div className="text-right space-y-0.5">
-                      <span className={parseFloat(cierreRealUsd) - cierreResult.dineroEnCajaExpected >= 0 ? 'text-green-600' : 'text-red-650'}>
-                        USD: ${(parseFloat(cierreRealUsd) - cierreResult.dineroEnCajaExpected).toFixed(2)}
-                      </span>
-                      <span className={`block ${parseFloat(cierreRealVes) - cierreResult.expectedVes >= 0 ? 'text-green-600' : 'text-red-650'}`}>
-                        VES: Bs {(parseFloat(cierreRealVes) - cierreResult.expectedVes).toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
+                {(() => {
+                  const diffUsd = parseFloat(cierreRealUsd) - cierreResult.dineroEnCajaExpected;
+                  const diffVes = parseFloat(cierreRealVes) - cierreResult.expectedVes;
+                  const hasLoss = diffUsd < -0.01 || diffVes < -0.01;
+                  const hasGain = diffUsd > 0.01 || diffVes > 0.01;
+                  
+                  let boxBgClass = 'bg-slate-50 border-slate-200';
+                  let titleClass = 'text-slate-800 border-slate-100';
+                  
+                  if (hasLoss) {
+                    boxBgClass = 'bg-rose-50 border-rose-200 ring-2 ring-rose-500/10';
+                    titleClass = 'text-rose-900 border-rose-150';
+                  } else if (hasGain) {
+                    boxBgClass = 'bg-emerald-50/70 border-emerald-200';
+                    titleClass = 'text-emerald-900 border-emerald-150';
+                  }
 
-                <div className="bg-red-50 border border-red-200 p-4 rounded text-[11.5px] text-red-750 leading-relaxed font-sans font-medium">
+                  return (
+                    <div className={`${boxBgClass} p-3.5 border rounded-lg text-[12px] space-y-2.5 font-sans shadow-sm transition-all`}>
+                      <div className={`font-extrabold text-center border-b pb-1.5 uppercase text-xs tracking-wider ${titleClass}`}>
+                        RECONCILIACIÓN DE EFECTIVO ENTREGADO
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-slate-500 font-bold text-[10px] uppercase tracking-wide">
+                        <span>Efectivo</span>
+                        <span className="text-right">Gaveta Esperado</span>
+                        <span className="text-right">Físico Recibido</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 font-mono font-bold text-slate-750 text-[12px]">
+                        <span className="text-emerald-700">Dólares USD:</span>
+                        <span className="text-right">${cierreResult.dineroEnCajaExpected.toFixed(2)}</span>
+                        <span className="text-right text-emerald-600">${parseFloat(cierreRealUsd).toFixed(2)}</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 font-mono font-bold text-slate-750 text-[12px] border-b border-slate-205 pb-1.5">
+                        <span className="text-purple-750">Bolívares Bs:</span>
+                        <span className="text-right">Bs {cierreResult.expectedVes.toFixed(2)}</span>
+                        <span className="text-right text-purple-600">Bs {parseFloat(cierreRealVes).toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between font-extrabold text-[12px] text-slate-800 font-mono">
+                        <span>DIFERENCIA USD / VES:</span>
+                        <div className="text-right space-y-0.5">
+                          <span className={diffUsd >= 0 ? 'text-emerald-600' : 'text-rose-600 font-black'}>
+                            USD: ${diffUsd.toFixed(2)}
+                          </span>
+                          <span className={`block ${diffVes >= 0 ? 'text-emerald-600' : 'text-rose-600 font-black'}`}>
+                            VES: Bs {diffVes.toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div className="bg-red-50 border border-red-200 p-3 rounded text-[11px] text-red-750 leading-relaxed font-sans font-medium">
                   ⚠️ NOTA: Al confirmar, se guardará el registro inmutable en el historial de arqueos y se cerrará su sesión de trabajo automáticamente.
                 </div>
 
+                {/* Option to send via WhatsApp (only if bot is enabled) */}
+                {waCierreStatus.enabled && (
+                  <label className="flex items-center gap-2 bg-indigo-50/50 border border-indigo-150 rounded-lg p-3 text-xs cursor-pointer select-none hover:bg-indigo-50 transition-all font-sans">
+                    <input
+                      type="checkbox"
+                      checked={sendToWhatsApp}
+                      onChange={(e) => setSendToWhatsApp(e.target.checked)}
+                      disabled={isSendingWa}
+                      className="w-4 h-4 text-indigo-650 rounded border-slate-350 focus:ring-indigo-550"
+                    />
+                    <div className="flex flex-col">
+                      <span className="font-bold text-indigo-900">Enviar arqueo automáticamente a WhatsApp</span>
+                      <span className="text-[9px] text-slate-500">Se enviará el ticket gráfico y el resumen en texto al grupo.</span>
+                    </div>
+                  </label>
+                )}
+
                 <button
-                  onClick={() => {
-                    if (cierreResult) {
-                      onCerrarCaja(cierreResult.realUsd, cierreResult.realVes, {
-                        ventasEfectivoUsd: cierreResult.ventasEfectivoUsd,
-                        abonoClientesUsd: cierreResult.abonoClientesUsd,
-                        entradaEfectivoUsd: cierreResult.entradaEfectivoUsd,
-                        entradaEfectivoVes: cierreResult.entradaEfectivoVes,
-                        salidaEfectivoUsd: cierreResult.salidaEfectivoUsd,
-                        salidaEfectivoVes: cierreResult.salidaEfectivoVes,
-                        devolucionEfectivoUsd: cierreResult.devolucionEfectivoUsd,
-                        dineroEnCajaExpected: cierreResult.dineroEnCajaExpected,
-                        ventasTotalesUsd: cierreResult.ventasTotalesUsd,
-                        descuentosUsd: cierreResult.descuentosUsd,
-                        ventaBrutaUsd: cierreResult.ventaBrutaUsd,
-                        pagosEfectivoUsd: cierreResult.pagosEfectivoUsd,
-                        pagosEfectivoBsUsd: cierreResult.pagosEfectivoBsUsd,
-                        pagosEfectivoBsVes: cierreResult.pagosEfectivoBsVes,
-                        pagosBiopagoUsd: cierreResult.pagosBiopagoUsd,
-                        pagosBiopagoVes: cierreResult.pagosBiopagoVes,
-                        pagosPuntoUsd: cierreResult.pagosPuntoUsd,
-                        pagosPuntoVes: cierreResult.pagosPuntoVes,
-                        pagosTarjetaUsd: cierreResult.pagosTarjetaUsd,
-                        pagosCreditoUsd: cierreResult.pagosCreditoUsd,
-                        pagosPuntosUsd: cierreResult.pagosPuntosUsd,
-                        devolucionVentasUsd: cierreResult.devolucionVentasUsd,
-                        ventaTotalUsd: cierreResult.ventaTotalUsd
-                      });
-                    }
-                    setShowCierreModal(false);
-                    setCierreResult(null);
-                    window.location.reload(); 
-                  }}
-                  className="w-full bg-winter-blueBtn hover:bg-winter-blueBtnHover text-white py-3.5 rounded-lg font-sans text-[13px] font-black uppercase tracking-wider transition-all shadow"
+                  onClick={handleConfirmCierre}
+                  disabled={isSendingWa}
+                  className="w-full bg-winter-blueBtn hover:bg-winter-blueBtnHover disabled:bg-slate-300 text-white py-3.5 rounded-lg font-sans text-[13px] font-black uppercase tracking-wider transition-all shadow flex items-center justify-center gap-2"
                 >
-                  CONFIRMAR REGISTRO Y REINICIAR TERMINAL
+                  {isSendingWa ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                      <span>PROCESANDO Y ENVIANDO...</span>
+                    </>
+                  ) : (
+                    <span>CONFIRMAR REGISTRO Y REINICIAR TERMINAL</span>
+                  )}
                 </button>
               </div>
             )}
+            </div>
           </div>
         </div>
       )}

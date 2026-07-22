@@ -1013,6 +1013,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         const salidaEfectivoUsd = selectedCierre.salidaEfectivoUsd ?? 0;
         const salidaEfectivoVes = selectedCierre.salidaEfectivoVes ?? 0;
         const devolucionEfectivoUsd = selectedCierre.devolucionEfectivoUsd ?? 0;
+        const devolucionEfectivoVes = selectedCierre.devolucionEfectivoVes ?? 0;
         
         const ventasTotalesUsd = selectedCierre.ventasTotalesUsd ?? 0;
         const descuentosUsd = selectedCierre.descuentosUsd ?? 0;
@@ -1027,6 +1028,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         const pagosPuntoVes = (selectedCierre as any).pagosPuntoVes ?? 0;
         const pagosCreditoUsd = selectedCierre.pagosCreditoUsd ?? 0;
         const devolucionVentasUsd = selectedCierre.devolucionVentasUsd ?? 0;
+        const devolucionVentasVes = selectedCierre.devolucionVentasVes ?? 0;
         const ventaTotalUsd = selectedCierre.ventaTotalUsd ?? 0;
         
         const expectedVes = selectedCierre.expectedVes ?? 0;
@@ -1104,11 +1106,14 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                       <span>- Bs {salidaEfectivoVes.toFixed(2)}</span>
                     </div>
 
-                    <div className="flex justify-between text-red-555">
-                      <span>Devolución Efectivo :</span>
-                      <span>
-                        - $ {devolucionEfectivoUsd.toFixed(2)} {tasa > 0 ? `(Bs ${(devolucionEfectivoUsd * tasa).toFixed(2)})` : ''}
-                      </span>
+                    <div className="flex justify-between text-red-555 font-bold">
+                      <span>Devolución Efectivo ($) :</span>
+                      <span>- $ {devolucionEfectivoUsd.toFixed(2)}</span>
+                    </div>
+
+                    <div className="flex justify-between text-red-555 font-bold">
+                      <span>Devolución Efectivo (Bs) :</span>
+                      <span>- Bs {devolucionEfectivoVes.toFixed(2)}</span>
                     </div>
                   </div>
 
@@ -1148,17 +1153,17 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                     
                     <div className="flex justify-between">
                       <span>Efectivo Bs :</span>
-                      <span className="font-bold text-slate-800">$ {pagosEfectivoBsUsd.toFixed(2)} (Bs {pagosEfectivoBsVes.toFixed(2)})</span>
+                      <span className="font-bold text-slate-800">Bs {pagosEfectivoBsVes.toFixed(2)}</span>
                     </div>
 
                     <div className="flex justify-between">
                       <span>Biopago :</span>
-                      <span className="font-bold text-slate-800">$ {pagosBiopagoUsd.toFixed(2)} (Bs {pagosBiopagoVes.toFixed(2)})</span>
+                      <span className="font-bold text-slate-800">Bs {pagosBiopagoVes.toFixed(2)}</span>
                     </div>
 
                     <div className="flex justify-between">
                       <span>Punto / Tarjeta :</span>
-                      <span className="font-bold text-slate-800">$ {pagosPuntoUsd.toFixed(2)} (Bs {pagosPuntoVes.toFixed(2)})</span>
+                      <span className="font-bold text-slate-800">Bs {pagosPuntoVes.toFixed(2)}</span>
                     </div>
 
                     <div className="flex justify-between">
@@ -1167,8 +1172,13 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                     </div>
 
                     <div className="flex justify-between text-red-550 font-bold">
-                      <span>Devolución Ventas :</span>
+                      <span>Devolución Ventas ($) :</span>
                       <span>- $ {devolucionVentasUsd.toFixed(2)}</span>
+                    </div>
+
+                    <div className="flex justify-between text-red-550 font-bold">
+                      <span>Devolución Ventas (Bs) :</span>
+                      <span>- Bs {devolucionVentasVes.toFixed(2)}</span>
                     </div>
                   </div>
 
@@ -1210,29 +1220,48 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                   DISCREPANCIAS EN ARQUEO FÍSICO
                 </div>
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg text-sm font-mono select-text space-y-1">
-                    <div className="text-slate-600 font-sans text-[12px] mb-1.5 font-bold uppercase tracking-wide">Dólares USD:</div>
-                    <div className="flex justify-between"><span>Gaveta Esperado:</span> <span>${dineroEnCajaExpected.toFixed(2)}</span></div>
-                    <div className="flex justify-between"><span>Recibido Real:</span> <span className="text-emerald-700 font-bold">${realUsd.toFixed(2)}</span></div>
-                    <div className="flex justify-between border-t border-dashed border-slate-300 pt-1.5 font-bold text-slate-800">
-                      <span>Diferencia:</span>
-                      <span className={diffUsd >= 0 ? 'text-green-600' : 'text-red-650'}>
-                        ${diffUsd.toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
+                  {(() => {
+                    const boxBgClass = diffUsd < -0.01 
+                      ? 'bg-rose-50 border-rose-200 ring-2 ring-rose-500/10' 
+                      : diffUsd > 0.01 
+                        ? 'bg-emerald-50/70 border-emerald-200' 
+                        : 'bg-slate-50 border-slate-200';
+                    return (
+                      <div className={`p-4 ${boxBgClass} border rounded-lg text-sm font-mono select-text space-y-1 transition-all`}>
+                        <div className="text-slate-600 font-sans text-[12px] mb-1.5 font-bold uppercase tracking-wide">Dólares USD:</div>
+                        <div className="flex justify-between"><span>Gaveta Esperado:</span> <span>${dineroEnCajaExpected.toFixed(2)}</span></div>
+                        <div className="flex justify-between"><span>Recibido Real:</span> <span className="text-emerald-700 font-bold">${realUsd.toFixed(2)}</span></div>
+                        <div className="flex justify-between border-t border-dashed border-slate-300 pt-1.5 font-bold text-slate-800">
+                          <span>Diferencia:</span>
+                          <span className={diffUsd >= 0 ? 'text-emerald-600' : 'text-rose-600 font-black'}>
+                            ${diffUsd.toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
-                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg text-sm font-mono select-text space-y-1">
-                    <div className="text-slate-600 font-sans text-[12px] mb-1.5 font-bold uppercase tracking-wide">Bolívares Bs:</div>
-                    <div className="flex justify-between"><span>Gaveta Esperado:</span> <span>Bs {expectedVes.toFixed(2)}</span></div>
-                    <div className="flex justify-between"><span>Recibido Real:</span> <span className="text-purple-755 font-bold">Bs {realVes.toFixed(2)}</span></div>
-                    <div className="flex justify-between border-t border-dashed border-slate-300 pt-1.5 font-bold text-slate-800">
-                      <span>Diferencia:</span>
-                      <span className={realVes - expectedVes >= 0 ? 'text-green-600' : 'text-red-650'}>
-                        Bs {(realVes - expectedVes).toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
+                  {(() => {
+                    const diffVes = realVes - expectedVes;
+                    const boxBgClass = diffVes < -0.01 
+                      ? 'bg-rose-50 border-rose-200 ring-2 ring-rose-500/10' 
+                      : diffVes > 0.01 
+                        ? 'bg-emerald-50/70 border-emerald-200' 
+                        : 'bg-slate-50 border-slate-200';
+                    return (
+                      <div className={`p-4 ${boxBgClass} border rounded-lg text-sm font-mono select-text space-y-1 transition-all`}>
+                        <div className="text-slate-600 font-sans text-[12px] mb-1.5 font-bold uppercase tracking-wide">Bolívares Bs:</div>
+                        <div className="flex justify-between"><span>Gaveta Esperado:</span> <span>Bs {expectedVes.toFixed(2)}</span></div>
+                        <div className="flex justify-between"><span>Recibido Real:</span> <span className="text-purple-755 font-bold">Bs {realVes.toFixed(2)}</span></div>
+                        <div className="flex justify-between border-t border-dashed border-slate-300 pt-1.5 font-bold text-slate-800">
+                          <span>Diferencia:</span>
+                          <span className={diffVes >= 0 ? 'text-emerald-600' : 'text-rose-600 font-black'}>
+                            Bs {diffVes.toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
                 <button
                   onClick={() => setSelectedCierre(null)}

@@ -3,7 +3,7 @@ import { CompanyConfig, User, Role, PrinterConfig, ScaleConfig } from '../types'
 import { 
   Save, CheckCircle2, Users, HardDrive, Cpu, 
   Trash2, Edit, Plus, Download, Upload, ShieldAlert,
-  Settings, CheckSquare, Square
+  Settings, CheckSquare, Square, Globe
 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 
@@ -40,8 +40,21 @@ export default function ConfiguracionEmpresa({
 }: ConfiguracionEmpresaProps) {
   const { showAlert, showConfirm } = useDialog();
   // Navigation tabs
-  const [activeTab, setActiveTab] = useState<'empresa' | 'usuarios' | 'perifericos' | 'db'>('empresa');
+  const [activeTab, setActiveTab] = useState<'empresa' | 'usuarios' | 'perifericos' | 'db' | 'whatsapp'>('empresa');
   const [subTabUsers, setSubTabUsers] = useState<'users' | 'roles'>('users');
+  
+  // WhatsApp bot states
+  const [waConfig, setWaConfig] = useState({
+    enabled: false,
+    groupId: '',
+    groupName: 'Grupo de Cierres POS'
+  });
+  const [waStatus, setWaStatus] = useState<any>({
+    status: 'DISCONNECTED',
+    qr: '',
+    isMock: false
+  });
+  const [isWaLoading, setIsWaLoading] = useState(false);
   
   // Success states
   const [successMsg, setSuccessMsg] = useState('');
@@ -130,6 +143,86 @@ export default function ConfiguracionEmpresa({
       fetchUsersAndRoles();
     }
   }, [activeTab]);
+
+  const fetchWaStatus = async () => {
+    try {
+      const res = await fetch(getApiUrl('/whatsapp/status'));
+      if (res.ok) {
+        const data = await res.json();
+        setWaStatus(data);
+        if (data.config) {
+          setWaConfig(data.config);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching WhatsApp status:', err);
+    }
+  };
+
+  const fetchWaStatusOnly = async () => {
+    try {
+      const res = await fetch(getApiUrl('/whatsapp/status'));
+      if (res.ok) {
+        const data = await res.json();
+        setWaStatus(data);
+      }
+    } catch (err) {
+      console.error('Error fetching WhatsApp status:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'whatsapp') {
+      fetchWaStatus();
+      const interval = setInterval(fetchWaStatusOnly, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [activeTab]);
+
+  const handleSaveWaConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsWaLoading(true);
+    try {
+      const res = await fetch(getApiUrl('/whatsapp/config'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(waConfig)
+      });
+      if (res.ok) {
+        showToast('Configuración de WhatsApp guardada con éxito.');
+        fetchWaStatus();
+      } else {
+        showAlert('Error al guardar configuración de WhatsApp en el servidor.', 'Error', 'error');
+      }
+    } catch (err) {
+      console.error(err);
+      showAlert('Error de conexión con el servidor.', 'Error de Conexión', 'error');
+    } finally {
+      setIsWaLoading(false);
+    }
+  };
+
+  const handleSendTestMessage = async () => {
+    try {
+      const testMsg = `🧪 *WinterPosAL - Mensaje de Prueba*\n\nConexión de WhatsApp activa.\n\n*Fecha:* ${new Date().toLocaleDateString()}\n*Hora:* ${new Date().toLocaleTimeString()}\n*Usuario:* ${currentUser.nombre}`;
+      const res = await fetch(getApiUrl('/whatsapp/send-cierre'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', // 1px transparent png
+          textSummary: testMsg
+        })
+      });
+      if (res.ok) {
+        showAlert('Mensaje de prueba enviado con éxito al grupo.', 'Mensaje Enviado', 'success');
+      } else {
+        const data = await res.json();
+        showAlert(`Error al enviar mensaje de prueba: ${data.error || 'Falla desconocida'}`, 'Error al Enviar', 'error');
+      }
+    } catch (err: any) {
+      showAlert(`Error de red: ${err.message}`, 'Error de Conexión', 'error');
+    }
+  };
 
   // Listener for Escape key to close modals
   useEffect(() => {
@@ -605,16 +698,28 @@ export default function ConfiguracionEmpresa({
           Básculas e Impresoras
         </button>
         {isAdmin && (
-          <button
-            onClick={() => setActiveTab('db')}
-            className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all ${
-              activeTab === 'db'
-                ? 'bg-white border-slate-200 text-winter-configStart font-sans'
-                : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
-            }`}
-          >
-            Base de Datos
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setActiveTab('db')}
+              className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all ${
+                activeTab === 'db'
+                  ? 'bg-white border-slate-200 text-winter-configStart font-sans'
+                  : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
+              }`}
+            >
+              Base de Datos
+            </button>
+            <button
+              onClick={() => setActiveTab('whatsapp')}
+              className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all ${
+                activeTab === 'whatsapp'
+                  ? 'bg-white border-slate-200 text-winter-configStart font-sans'
+                  : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
+              }`}
+            >
+              Integración WhatsApp
+            </button>
+          </div>
         )}
       </div>
 
@@ -1340,6 +1445,187 @@ export default function ConfiguracionEmpresa({
                   <HardDrive className="w-3.5 h-3.5" />
                   Guardar Programación
                 </button>
+              </div>
+            </div>
+
+          </div>
+        )}
+
+        {/* TAB 5: WHATSAPP INTEGRATION */}
+        {activeTab === 'whatsapp' && isAdmin && (
+          <div className="space-y-6 max-w-4xl mx-auto animate-fade-in">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              
+              {/* WhatsApp Connection status */}
+              <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4 md:col-span-1 flex flex-col justify-between">
+                <div className="space-y-4">
+                  <h3 className="text-xs font-bold text-slate-700 uppercase flex items-center gap-1.5 font-sans">
+                    <Globe className="w-4 h-4 text-indigo-650" />
+                    Estado del Servicio
+                  </h3>
+                  
+                  <div className="p-4 rounded-lg bg-slate-50 border border-slate-150 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-3 h-3 rounded-full animate-pulse ${
+                        waStatus.status === 'CONNECTED' ? 'bg-emerald-500' :
+                        waStatus.status === 'QR_READY' ? 'bg-amber-500' :
+                        waStatus.status === 'AUTHENTICATING' ? 'bg-sky-500' : 'bg-red-500'
+                      }`} />
+                      <span className="text-xs font-extrabold uppercase font-sans text-slate-700">
+                        {waStatus.status === 'CONNECTED' ? '🟢 Conectado' :
+                         waStatus.status === 'QR_READY' ? '🟡 Esperando Escaneo' :
+                         waStatus.status === 'AUTHENTICATING' ? '🔵 Autenticando...' : '🔴 Desconectado'}
+                      </span>
+                    </div>
+                    
+                    <p className="text-[10px] text-slate-500 leading-normal font-sans">
+                      {waStatus.status === 'CONNECTED' ? 'El servidor central tiene una sesión activa vinculada. Los reportes se enviarán de forma automática.' :
+                       waStatus.status === 'QR_READY' ? 'Requiere vincular una cuenta. Escanee el código QR de la derecha con la cámara de su WhatsApp.' :
+                       waStatus.status === 'AUTHENTICATING' ? 'Conectando con los servidores de WhatsApp. Por favor espere...' : 
+                       'La integración está inactiva o requiere habilitarse en el panel.'}
+                    </p>
+
+                    {waStatus.isMock && (
+                      <span className="inline-block bg-indigo-50 border border-indigo-200 text-indigo-700 text-[9px] font-bold px-2 py-0.5 rounded uppercase font-sans">
+                        Modo Simulación Activo
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {waStatus.status === 'CONNECTED' && (
+                  <button
+                    type="button"
+                    onClick={handleSendTestMessage}
+                    className="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 py-2.5 rounded-lg text-xs font-bold font-sans transition-all active:scale-95 flex items-center justify-center gap-1.5 mt-4"
+                  >
+                    <span>🧪 Enviar Mensaje de Prueba</span>
+                  </button>
+                )}
+              </div>
+
+              {/* QR Code display or Connected state info */}
+              <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4 md:col-span-2 flex flex-col items-center justify-center text-center min-h-[300px]">
+                {waStatus.status === 'QR_READY' && waStatus.qr ? (
+                  <div className="space-y-4 flex flex-col items-center">
+                    <span className="text-[11px] font-bold font-sans text-slate-600 uppercase tracking-wide">Código QR de Vinculación</span>
+                    <div className="p-3 bg-white border-2 border-slate-100 rounded-xl shadow-inner">
+                      <img src={waStatus.qr} alt="Código QR de WhatsApp" className="w-48 h-48" />
+                    </div>
+                    <div className="max-w-md space-y-1">
+                      <p className="text-[11px] font-sans font-bold text-indigo-900 uppercase">¿Cómo escanear?</p>
+                      <p className="text-[10px] text-slate-500 font-sans leading-relaxed">
+                        Abra WhatsApp en su teléfono &gt; Menú o Configuración &gt; Dispositivos vinculados &gt; Vincular un dispositivo &gt; Escanee este código QR.
+                      </p>
+                    </div>
+                  </div>
+                ) : waStatus.status === 'CONNECTED' ? (
+                  <div className="space-y-3">
+                    <div className="w-16 h-16 bg-emerald-50 border border-emerald-200 rounded-full flex items-center justify-center mx-auto text-emerald-500 text-2xl">
+                      ✓
+                    </div>
+                    <h4 className="text-sm font-black text-slate-800 uppercase font-sans tracking-wide">¡Sesión Activa y Vinculada!</h4>
+                    <p className="text-xs text-slate-500 max-w-md mx-auto font-sans leading-relaxed">
+                      El bot de WhatsApp está conectado. Los arqueos de caja se notificarán de forma automatizada al grupo especificado en la configuración.
+                    </p>
+                  </div>
+                ) : waStatus.status === 'AUTHENTICATING' ? (
+                  <div className="space-y-3">
+                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-650 mx-auto" />
+                    <p className="text-xs text-slate-500 font-sans">Estableciendo conexión y generando código QR. Un momento...</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2 text-slate-400">
+                    <span className="text-4xl block">🔌</span>
+                    <p className="text-xs font-sans font-bold">Servicio deshabilitado</p>
+                    <p className="text-[10px] max-w-xs font-sans">Active la casilla "Habilitar Integración de WhatsApp" en la sección inferior para iniciar el servicio.</p>
+                  </div>
+                )}
+              </div>
+
+            </div>
+
+            {/* Config Form Card */}
+            <form onSubmit={handleSaveWaConfig} className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-5">
+              <h3 className="text-xs font-bold text-slate-700 uppercase flex items-center gap-1.5 font-sans border-b border-slate-100 pb-2">
+                <Settings className="w-4 h-4 text-indigo-650" />
+                Configuración del Grupo & Notificaciones
+              </h3>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {/* Enable checkbox */}
+                <div className="flex flex-col gap-1.5 justify-center">
+                  <label className="text-[10px] font-bold font-sans uppercase text-slate-500 tracking-wide">Estado de la Integración</label>
+                  <label className="flex items-center gap-2.5 bg-slate-50 border border-slate-300 rounded-lg p-3 text-xs select-none cursor-pointer hover:bg-slate-100/50 transition-all">
+                    <input
+                      type="checkbox"
+                      checked={waConfig.enabled}
+                      onChange={(e) => setWaConfig(prev => ({ ...prev, enabled: e.target.checked }))}
+                      className="w-4 h-4 rounded text-indigo-600 border-slate-350 focus:ring-indigo-500"
+                    />
+                    <span className="font-sans font-bold text-slate-750">Habilitar Integración de WhatsApp</span>
+                  </label>
+                  <p className="text-[9px] text-slate-400 font-sans">Activa el bot en segundo plano del servidor local.</p>
+                </div>
+
+                {/* Group ID / Invite Link */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-bold font-sans uppercase text-slate-500 tracking-wide">Grupo de Destino (Link de Invitación / ID)</label>
+                  <input
+                    type="text"
+                    value={waConfig.groupId}
+                    onChange={(e) => setWaConfig(prev => ({ ...prev, groupId: e.target.value }))}
+                    placeholder="https://chat.whatsapp.com/..."
+                    required={waConfig.enabled}
+                    disabled={!waConfig.enabled}
+                    className="bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 focus:bg-white focus:border-indigo-500 focus:outline-none font-sans w-full disabled:opacity-50"
+                  />
+                  <p className="text-[9px] text-slate-400 font-sans leading-relaxed">
+                    Copie y pegue el enlace de invitación de su grupo de WhatsApp. El bot se unirá automáticamente para mandar los arqueos.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+                <button
+                  type="submit"
+                  disabled={isWaLoading}
+                  className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-bold font-sans text-xs px-6 py-2.5 rounded-lg transition-all shadow-sm flex items-center gap-1.5"
+                >
+                  {isWaLoading ? 'Guardando...' : 'Guardar Configuración'}
+                </button>
+              </div>
+            </form>
+
+            {/* GUIA DE RESOLUCION DE PROBLEMAS (TROUBLESHOOTING) */}
+            <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4 font-sans text-xs">
+              <h3 className="text-xs font-bold text-slate-700 uppercase flex items-center gap-1.5 font-sans border-b border-slate-100 pb-2 text-indigo-700">
+                <ShieldAlert className="w-4 h-4 text-indigo-650" />
+                Guía de Resolución de Problemas y Diagnóstico de WhatsApp
+              </h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-[11px] leading-relaxed text-slate-600">
+                <div className="space-y-3">
+                  <h4 className="font-extrabold text-slate-800 uppercase tracking-wide text-[10.5px]">⚠️ El Bot no genera el código QR</h4>
+                  <ul className="list-disc pl-4 space-y-1.5">
+                    <li><strong>Falta de Chromium en el servidor:</strong> Si estás ejecutando en Linux/Ubuntu, asegúrate de instalar las dependencias necesarias de Chrome ejecutando: <code className="bg-slate-100 text-red-600 px-1 rounded font-mono">sudo apt install -y chromium-browser</code>.</li>
+                    <li><strong>Primer inicio lento:</strong> La primera inicialización del bot puede tardar hasta 1-2 minutos mientras descarga o configura Puppeteer en segundo plano. Refresque la pestaña tras unos instantes.</li>
+                    <li><strong>Bloqueo de Sesiones:</strong> Si la vinculación está colgada, intenta limpiar las credenciales almacenadas eliminando la carpeta <code className="bg-slate-100 text-indigo-700 px-1 rounded font-mono">.wwebjs_auth</code> en el servidor backend.</li>
+                  </ul>
+                </div>
+
+                <div className="space-y-3">
+                  <h4 className="font-extrabold text-slate-800 uppercase tracking-wide text-[10.5px]">🔌 Desconexiones o Falla de Envío</h4>
+                  <ul className="list-disc pl-4 space-y-1.5">
+                    <li><strong>Sin Conexión a Internet:</strong> Si la computadora local pierde el acceso a internet, la vinculación fallará. No te preocupes: el POS local guardará tu Cierre normalmente y podrás copiar el resumen al portapapeles.</li>
+                    <li><strong>Celular del Administrador Desconectado:</strong> Asegúrese de que el celular con la sesión vinculada permanezca encendido y con internet activo.</li>
+                    <li><strong>Enlace de Invitación de Grupo:</strong> Asegúrese de escribir el enlace de invitación de grupo de WhatsApp completo y válido (<code className="bg-slate-100 text-indigo-700 px-1 rounded font-mono">https://chat.whatsapp.com/...</code>) y que el bot sea miembro admitido.</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-[10.5px] text-slate-500 font-sans mt-2">
+                <strong>💡 Recomendación General:</strong> Si la casilla se destilda sola, asegúrate de haber ingresado un enlace de grupo de destino válido y de hacer clic en <strong>Guardar Configuración</strong>. Si el estado sigue en desconectado, desmarca la casilla, guarda, espera 5 segundos y vuelve a marcarla para forzar un reinicio limpio del servicio.
               </div>
             </div>
 
