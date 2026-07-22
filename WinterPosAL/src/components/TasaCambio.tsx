@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { TasaHistoryItem, User } from '../types';
 import { TrendingUp, Clock, Shuffle, FileDown, Search, Calendar } from 'lucide-react';
+import { useDialog } from '../hooks/useDialog';
 
 interface TasaCambioProps {
   tasaDia: number;
@@ -11,6 +12,7 @@ interface TasaCambioProps {
 }
 
 export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUser: _currentUser, onUpdateTasa }: TasaCambioProps) {
+  const { showAlert } = useDialog();
   const [inputDia, setInputDia] = useState(tasaDia > 0 ? tasaDia.toString() : '');
   const [inputVuelto, setInputVuelto] = useState(tasaVuelto > 0 ? tasaVuelto.toString() : '');
   const [errorMsg, setErrorMsg] = useState('');
@@ -72,7 +74,7 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
 
     const printWindow = window.open("", "_blank");
     if (!printWindow) {
-      alert("No se pudo abrir la ventana del reporte. Habilite las ventanas emergentes (popups) en su navegador.");
+      showAlert('No se pudo abrir la ventana del reporte. Habilite las ventanas emergentes (popups) en su navegador.', 'Popups Bloqueados', 'warning');
       return;
     }
 

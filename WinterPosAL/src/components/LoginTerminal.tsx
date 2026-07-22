@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Shield, Network, Eye, EyeOff } from 'lucide-react';
 import { User, CompanyConfig } from '../types';
+import { useDialog } from '../hooks/useDialog';
 
 interface LoginTerminalProps {
   onLoginSuccess: (user: User) => void;
@@ -9,6 +10,7 @@ interface LoginTerminalProps {
 }
 
 export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConfig }: LoginTerminalProps) {
+  const { showAlert } = useDialog();
   const [showConfig, setShowConfig] = useState(false);
   const [clickCount, setClickCount] = useState(0);
   const [serverIP, setServerIP] = useState(() => {
@@ -59,7 +61,11 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
     setShowConfig(false);
     
     console.log('Saved network config to config.json', { dbMode, serverIP, serverPort });
-    alert(`Redireccionando base de datos hacia: ${dbMode === 'local' ? 'localhost:5432' : `${serverIP}:${serverPort}`}`);
+    showAlert(
+      `Conexión de base de datos configurada correctamente hacia: ${dbMode === 'local' ? 'localhost (modo local)' : `${serverIP}:${serverPort}`}`,
+      'Configuración Guardada',
+      'success'
+    );
   };
 
   const handleSubmit = (e: React.FormEvent) => {

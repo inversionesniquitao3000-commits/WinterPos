@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Product, InventoryMovement, PriceAdjustmentHistory, User } from '../types';
-import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload } from 'lucide-react';
+import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download } from 'lucide-react';
+import { useDialog } from '../hooks/useDialog';
 
 interface InventarioProps {
   products: Product[];
@@ -27,6 +28,7 @@ export default function Inventario({
   onDeleteProduct,
   onUpdateProduct
 }: InventarioProps) {
+  const { showAlert, showConfirm } = useDialog();
   const hasPermission = (action: 'ver' | 'crear' | 'editar' | 'eliminar') => {
     if (_currentUser.rol.toLowerCase() === 'administrador') return true;
     if (!_currentUser.permisos) return true; // default fallback if none specified
@@ -157,6 +159,46 @@ export default function Inventario({
     const link = document.createElement("a");
     link.setAttribute("href", url);
     link.setAttribute("download", "plantilla_carga_masiva_productos.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const exportInventoryToCsv = () => {
+    const headers = [
+      'codigo_barras_clave',
+      'descripcion',
+      'categoria',
+      'stock_actual',
+      'stock_minimo',
+      'precio_costo_usd',
+      'precio_detalle_usd',
+      'precio_mayor_usd',
+      'cantidad_mayorista',
+      'exento_impuesto',
+      'a_granel'
+    ];
+    
+    const rows = products.map(p => [
+      p.barcode,
+      p.description,
+      p.category,
+      p.stock_actual.toString(),
+      p.stock_minimo.toString(),
+      p.precio_costo_usd.toString(),
+      p.precio_detalle_usd.toString(),
+      p.precio_mayor_usd.toString(),
+      p.cantidad_mayorista.toString(),
+      p.exento_impuesto ? 'SI' : 'NO',
+      p.a_granel ? 'SI' : 'NO'
+    ]);
+
+    const csvContent = "\uFEFF" + [headers.join(';'), ...rows.map(r => r.join(';'))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `respaldo_inventario_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -349,11 +391,16 @@ export default function Inventario({
   const handleDeleteProductClick = async () => {
     if (!selectedProduct) return;
     if (selectedProduct.stock_actual > 0) {
-      alert("No se puede eliminar un producto con existencia mayor a 0");
+      showAlert('No se puede eliminar un producto con existencia mayor a 0. Ajuste el stock a cero primero.', 'Operación No Permitida', 'error');
       return;
     }
     
-    if (window.confirm(`¿Está seguro de que desea eliminar el producto "${selectedProduct.description}" permanentemente del sistema? Esta acción no se puede deshacer.`)) {
+    const ok = await showConfirm(
+      `¿Está seguro de que desea eliminar el producto "${selectedProduct.description}" permanentemente del sistema? Esta acción no se puede deshacer.`,
+      'Eliminar Producto',
+      { confirmLabel: 'Eliminar', isDanger: true }
+    );
+    if (ok) {
       const success = await onDeleteProduct(selectedProduct.id);
       if (success) {
         setSelectedProduct(null);
@@ -561,12 +608,12 @@ export default function Inventario({
     
     const qty = parseInt(adjustQty);
     if (isNaN(qty) || qty <= 0) {
-      alert('Por favor ingrese una cantidad válida mayor a cero.');
+      showAlert('Por favor ingrese una cantidad válida mayor a cero.', 'Cantidad Inválida', 'warning');
       return;
     }
 
     if (!adjustReason.trim()) {
-      alert('Debe especificar un motivo/justificación de manera obligatoria.');
+      showAlert('Debe especificar un motivo/justificación de manera obligatoria.', 'Justificación Requerida', 'warning');
       return;
     }
 
@@ -584,12 +631,12 @@ export default function Inventario({
     const mayor = parseFloat(inputMayor);
 
     if (isNaN(cost) || cost < 0 || isNaN(detail) || detail < 0 || isNaN(mayor) || mayor < 0) {
-      alert('Los precios ingresados deben ser valores numéricos no negativos.');
+      showAlert('Los precios ingresados deben ser valores numéricos no negativos.', 'Precios Inválidos', 'warning');
       return;
     }
 
     if (!priceReason.trim()) {
-      alert('Debe especificar una justificación obligatoria para la actualización de precios.');
+      showAlert('Debe especificar una justificación obligatoria para la actualización de precios.', 'Justificación Requerida', 'warning');
       return;
     }
 
@@ -601,7 +648,7 @@ export default function Inventario({
   const handleCreateProduct = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newClave.trim() || !newDesc.trim()) {
-      alert('Clave del producto y descripción son obligatorios.');
+      showAlert('Clave del producto y descripción son obligatorios.', 'Campos Requeridos', 'warning');
       return;
     }
 
@@ -609,7 +656,7 @@ export default function Inventario({
     const barcodeVal = newBarcode.trim() !== '' ? newBarcode.trim() : newClave.trim();
 
     if (products.some(p => p.barcode === barcodeVal.toUpperCase())) {
-      alert('Ya existe un producto registrado con ese código de barras o clave.');
+      showAlert('Ya existe un producto registrado con ese código de barras o clave.', 'Código Duplicado', 'error');
       return;
     }
 
@@ -658,7 +705,7 @@ export default function Inventario({
   const handlePrintReport = () => {
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
-      alert('Por favor permita las ventanas emergentes para poder imprimir el reporte.');
+      showAlert('Por favor permita las ventanas emergentes para poder imprimir el reporte.', 'Popups Bloqueados', 'warning');
       return;
     }
 
@@ -1062,6 +1109,16 @@ export default function Inventario({
                       <span>Carga Masiva</span>
                     </button>
                   )}
+
+                  {/* BUTTON: EXPORTAR INVENTARIO (EXCEL/CSV) */}
+                  <button
+                    onClick={exportInventoryToCsv}
+                    className="w-full bg-slate-700 hover:bg-slate-800 text-white border border-slate-800 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all active:scale-95"
+                    title="Exportar catálogo completo de productos con stock y precios a un archivo CSV para Excel"
+                  >
+                    <Download className="w-4 h-4 bg-slate-800/50 rounded-full p-0.5" />
+                    <span>Resp. Inventario</span>
+                  </button>
 
                   {/* BUTTON 2: STOCK */}
                   <button
@@ -1534,12 +1591,12 @@ export default function Inventario({
                     </select>
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={async () => {
                         const newCatName = prompt("Ingrese el nombre de la nueva categoría:");
                         if (newCatName && newCatName.trim() !== "") {
                           const cleanName = newCatName.trim().toUpperCase();
                           if (categories.includes(cleanName)) {
-                            alert("La categoría ya existe.");
+                            showAlert('La categoría ya existe en el sistema.', 'Categoría Duplicada', 'warning');
                           } else {
                             setCategories(prev => [...prev, cleanName]);
                             setNewCat(cleanName);

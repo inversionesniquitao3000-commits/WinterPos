@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Sale, CierreCaja, User } from '../types';
 import { History, Printer, ShieldAlert, ShoppingCart, Eye, Edit, Search, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { formatNumberToWordsUSD } from '../utils';
+import { useDialog } from '../hooks/useDialog';
 
 interface VentasHistoricoProps {
   sales: Sale[];
@@ -12,6 +13,7 @@ interface VentasHistoricoProps {
 }
 
 export default function VentasHistorico({ sales, cierres, onReprintTicket, currentUser, onUpdateCierre }: VentasHistoricoProps) {
+  const { showAlert } = useDialog();
   const [activeSubTab, setActiveSubTab] = useState<'ventas' | 'cierres'>('ventas');
   const [selectedCierre, setSelectedCierre] = useState<CierreCaja | null>(null);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
@@ -301,7 +303,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
 
     const printWindow = window.open("", "_blank");
     if (!printWindow) {
-      alert("No se pudo abrir la ventana de impresión. Por favor habilite los popups.");
+      showAlert('No se pudo abrir la ventana de impresión. Por favor habilite los popups en su navegador.', 'Popups Bloqueados', 'warning');
       return;
     }
 
@@ -475,7 +477,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
 
     const printWindow = window.open("", "_blank");
     if (!printWindow) {
-      alert("No se pudo abrir la ventana de impresión. Por favor habilite los popups.");
+      showAlert('No se pudo abrir la ventana de impresión. Por favor habilite los popups en su navegador.', 'Popups Bloqueados', 'warning');
       return;
     }
 
@@ -1472,10 +1474,10 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
 
           const success = await onUpdateCierre(editingCierre.id, updatedCierre);
           if (success) {
-            alert("Cierre de caja corregido y guardado exitosamente por el administrador.");
+            showAlert('Cierre de caja corregido y guardado exitosamente por el administrador.', 'Cierre Actualizado', 'success');
             setEditingCierre(null);
           } else {
-            alert("Ocurrió un error al guardar la actualización del cierre en el servidor.");
+            showAlert('Ocurrió un error al guardar la actualización del cierre en el servidor.', 'Error al Guardar', 'error');
           }
         };
 

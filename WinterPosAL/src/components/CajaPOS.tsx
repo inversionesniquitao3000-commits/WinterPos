@@ -7,6 +7,7 @@ import {
   Clock, ListOrdered, Plus, AlertCircle, DollarSign, RotateCcw
 } from 'lucide-react';
 import { formatNumberToWordsUSD } from '../utils';
+import { useDialog } from '../hooks/useDialog';
 
 interface CajaPOSProps {
   products: Product[];
@@ -105,6 +106,7 @@ export default function CajaPOS({
   getApiUrl,
   nextInvoiceNumber
 }: CajaPOSProps) {
+  const { showAlert, showConfirm } = useDialog();
   // Opening/Closing state
   const [showAperturaModal, setShowAperturaModal] = useState(!cajaAbierta);
   const [aperturaUsdVal, setAperturaUsdVal] = useState('');
@@ -371,7 +373,7 @@ export default function CajaPOS({
     if (!matchedProduct) return;
     const qty = parseFloat(entradaQty);
     if (isNaN(qty) || qty <= 0) {
-      alert("Por favor ingrese una cantidad válida mayor a 0.");
+      showAlert('Por favor ingrese una cantidad válida mayor a 0.', 'Cantidad Inválida', 'warning');
       return;
     }
 
@@ -447,9 +449,13 @@ export default function CajaPOS({
 
 
 
-  const handleRetrieveHold = (hold: any) => {
+  const handleRetrieveHold = async (hold: any) => {
     if (saleItems.length > 0) {
-      const confirmReplace = window.confirm("Ya hay artículos en el carrito actual. ¿Desea reemplazarlos con el ticket recuperado?");
+      const confirmReplace = await showConfirm(
+        'Ya hay artículos en el carrito actual. ¿Desea reemplazarlos con el ticket recuperado?',
+        'Reemplazar Carrito',
+        { confirmLabel: 'Sí, Reemplazar' }
+      );
       if (!confirmReplace) return;
     }
 
@@ -461,8 +467,13 @@ export default function CajaPOS({
     setShowOnHoldModal(false);
   };
 
-  const handleRemoveHold = (holdId: number) => {
-    if (window.confirm("¿Está seguro de eliminar permanentemente este ticket en espera?")) {
+  const handleRemoveHold = async (holdId: number) => {
+    const ok = await showConfirm(
+      '¿Está seguro de eliminar permanentemente este ticket en espera?',
+      'Eliminar Ticket',
+      { confirmLabel: 'Eliminar', isDanger: true }
+    );
+    if (ok) {
       setTicketsOnHold(prev => prev.filter(h => h.id !== holdId));
     }
   };
@@ -905,7 +916,7 @@ export default function CajaPOS({
     }
 
     if (nextQty > prod.stock_actual) {
-      alert(`No hay disponibilidad suficiente. Stock máximo disponible: ${prod.stock_actual}`);
+      showAlert(`No hay disponibilidad suficiente. Stock máximo disponible: ${prod.stock_actual}`, 'Stock Insuficiente', 'warning');
       return;
     }
 
@@ -934,8 +945,13 @@ export default function CajaPOS({
     setSaleItems(prev => prev.filter(item => item.product.id !== prodId));
   };
 
-  const handleClearSale = () => {
-    if (window.confirm('¿Está seguro de cancelar la venta en curso? Se limpiarán todos los ítems.')) {
+  const handleClearSale = async () => {
+    const ok = await showConfirm(
+      '¿Está seguro de cancelar la venta en curso? Se limpiarán todos los ítems del carrito.',
+      'Cancelar Venta',
+      { confirmLabel: 'Sí, Cancelar', isDanger: true }
+    );
+    if (ok) {
       setSaleItems([]);
       setDiscountPct(0);
       const defaultClient = clients.find(c => c.cedula_rif === 'V-00000000') || clients[0];
@@ -995,18 +1011,18 @@ export default function CajaPOS({
 
   const handleConfirmCheckout = (shouldPrint: boolean = false) => {
     if (!canConfirmCheckout) {
-      alert('Información de cobro incompleta o inválida.');
+      showAlert('Información de cobro incompleta o inválida. Verifique los montos ingresados.', 'Pago Incompleto', 'warning');
       return;
     }
 
     // Reference validations (Pago Móvil)
     if (pagoMovilVESVal > 0) {
       if (!refPagoMovil.trim() || refPagoMovil.trim().length < 4) {
-        alert('La referencia bancaria es obligatoria y debe tener mínimo 4 caracteres para pagos por Pago Móvil.');
+        showAlert('La referencia bancaria es obligatoria y debe tener mínimo 4 caracteres para pagos por Pago Móvil.', 'Referencia Requerida', 'warning');
         return;
       }
       if (!bankPagoMovil) {
-        alert('Debe especificar el banco emisor para Pago Móvil.');
+        showAlert('Debe especificar el banco emisor para Pago Móvil.', 'Banco Requerido', 'warning');
         return;
       }
     }
@@ -1014,7 +1030,7 @@ export default function CajaPOS({
     // Limit credit validations
     if (creditUSDVal > 0) {
       if (creditUSDVal > selectedClient.credito_disponible) {
-        alert(`Crédito insuficiente. Límite disponible del cliente: $${selectedClient.credito_disponible.toFixed(2)} USD.`);
+        showAlert(`Crédito insuficiente. Límite disponible del cliente: $${selectedClient.credito_disponible.toFixed(2)} USD.`, 'Crédito Insuficiente', 'warning');
         return;
       }
     }
@@ -1131,15 +1147,18 @@ export default function CajaPOS({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [showCheckoutModal, canConfirmCheckout]);
 
-  const handleSaveApertura = (e: React.FormEvent) => {
+  const handleSaveApertura = async (e: React.FormEvent) => {
     e.preventDefault();
     const usdStr = aperturaUsdVal.trim();
     const vesStr = aperturaVesVal.trim();
 
     if (usdStr === "" && vesStr === "") {
-      const confirmZero = window.confirm("No ha ingresado montos de apertura. ¿Desea iniciar la caja en cero ($0.00 USD / Bs 0.00 VES)?");
+      const confirmZero = await showConfirm(
+        'No ha ingresado montos de apertura. ¿Desea iniciar la caja en cero ($0.00 USD / Bs 0.00 VES)?',
+        'Apertura en Cero',
+        { confirmLabel: 'Sí, Iniciar en Cero' }
+      );
       if (!confirmZero) {
-        // User clicked Cancel, stay in menu to edit data
         return;
       }
     }
@@ -1281,7 +1300,7 @@ export default function CajaPOS({
     const usd = parseFloat(movUsd) || 0;
     const ves = parseFloat(movVes) || 0;
     if (!movDesc.trim()) {
-      alert('Debe especificar una descripción.');
+      showAlert('Debe especificar una descripción para el movimiento de caja.', 'Descripción Requerida', 'warning');
       return;
     }
     onRegisterCajaMovement(movType, movDesc.trim(), usd, ves);
@@ -1289,7 +1308,7 @@ export default function CajaPOS({
     setMovDesc('');
     setMovUsd('');
     setMovVes('');
-    alert('Movimiento de caja registrado exitosamente.');
+    showToast('Movimiento de caja registrado exitosamente.', 'success');
   };
 
   const venezuelanBanks = [
@@ -2347,11 +2366,11 @@ export default function CajaPOS({
           if (!abonoClient) return;
           const val = parseFloat(abonoAmount);
           if (isNaN(val) || val <= 0) {
-            alert('Por favor ingrese un monto válido para el abono.');
+            showAlert('Por favor ingrese un monto válido para el abono.', 'Monto Inválido', 'warning');
             return;
           }
           if (val > abonoClient.saldo_pendiente + 0.01) {
-            alert(`El abono ($${val.toFixed(2)}) no puede ser mayor que el saldo pendiente ($${abonoClient.saldo_pendiente.toFixed(2)}).`);
+            showAlert(`El abono ($${val.toFixed(2)}) no puede ser mayor que el saldo pendiente ($${abonoClient.saldo_pendiente.toFixed(2)}).`, 'Abono Excedido', 'warning');
             return;
           }
 

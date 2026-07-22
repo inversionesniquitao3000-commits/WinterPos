@@ -761,6 +761,10 @@ export async function wipeDatabase(options) {
       if (options.wipeInventory) {
         await pool.query('TRUNCATE TABLE Productos, Movimientos_Inventario, Historial_Precios RESTART IDENTITY CASCADE');
       }
+      if (options.wipeStock) {
+        await pool.query('UPDATE Productos SET stock_actual = 0');
+        await pool.query('TRUNCATE TABLE Movimientos_Inventario RESTART IDENTITY CASCADE');
+      }
       if (options.wipeSales) {
         await pool.query('TRUNCATE TABLE Ventas, Ventas_Detalle, Pagos_Venta, Abonos RESTART IDENTITY CASCADE');
         await pool.query('TRUNCATE TABLE Cajas_Apertura_Cierre, Movimientos_Caja RESTART IDENTITY CASCADE');
@@ -793,6 +797,12 @@ export async function wipeDatabase(options) {
     writeJsonFile('movements.json', []);
     writeJsonFile('price-history.json', []);
     writeJsonFile('price_history.json', []);
+  }
+  if (options.wipeStock) {
+    const products = readJsonFile('products.json', []);
+    const updatedProducts = products.map(p => ({ ...p, stock_actual: 0 }));
+    writeJsonFile('products.json', updatedProducts);
+    writeJsonFile('movements.json', []);
   }
   if (options.wipeSales) {
     writeJsonFile('sales.json', []);

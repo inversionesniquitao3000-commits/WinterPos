@@ -5,6 +5,7 @@ import {
   ChevronsUpDown, Edit, Download, FileText, TrendingUp, 
   Info, AlertCircle, RefreshCw, MinusCircle, Settings
 } from 'lucide-react';
+import { useDialog } from '../hooks/useDialog';
 
 interface ClientesProps {
   clients: Client[];
@@ -27,6 +28,7 @@ export default function Clientes({
   sales,
   abonos
 }: ClientesProps) {
+  const { showAlert, showConfirm } = useDialog();
   const hasPermission = (action: 'ver' | 'crear' | 'editar' | 'eliminar') => {
     if (_currentUser.rol.toLowerCase() === 'administrador') return true;
     if (!_currentUser.permisos) return true; // fallback to true
@@ -272,35 +274,35 @@ export default function Clientes({
     setShowAbonoModal(true);
   };
 
-  const handleSaveAbono = (e: React.FormEvent) => {
+  const handleSaveAbono = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedRowClient) return;
 
     const val = parseFloat(abonoVal);
     if (isNaN(val) || val <= 0) {
-      alert('Por favor ingrese un monto válido para el abono.');
+      showAlert('Por favor ingrese un monto válido para el abono.', 'Monto Inválido', 'warning');
       return;
     }
 
     if (val > selectedRowClient.saldo_pendiente) {
-      alert(`El abono ($${val.toFixed(2)}) no puede ser mayor que el saldo pendiente ($${selectedRowClient.saldo_pendiente.toFixed(2)}).`);
+      showAlert(`El abono ($${val.toFixed(2)}) no puede ser mayor que el saldo pendiente ($${selectedRowClient.saldo_pendiente.toFixed(2)}).`, 'Abono Excedido', 'warning');
       return;
     }
 
     onRegisterAbono(selectedRowClient.id, val);
     setShowAbonoModal(false);
-    alert('Abono registrado con éxito. El crédito disponible del cliente ha sido restablecido.');
+    showAlert('Abono registrado con éxito. El crédito disponible del cliente ha sido restablecido.', 'Abono Registrado', 'success');
   };
 
   const handleCreateClient = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim() || !newDoc.trim()) {
-      alert('Cédula/RIF y Nombre son requeridos.');
+      showAlert('Cédula/RIF y Nombre son requeridos.', 'Campos Requeridos', 'warning');
       return;
     }
 
     if (clients.some(c => c.cedula_rif.toUpperCase() === newDoc.trim().toUpperCase())) {
-      alert('Ya existe un cliente registrado con esa Cédula o RIF.');
+      showAlert('Ya existe un cliente registrado con esa Cédula o RIF.', 'Documento Duplicado', 'error');
       return;
     }
 
@@ -352,12 +354,12 @@ export default function Clientes({
     if (!selectedRowClient) return;
 
     if (!editName.trim() || !editDoc.trim()) {
-      alert('Cédula/RIF y Nombre son requeridos.');
+      showAlert('Cédula/RIF y Nombre son requeridos.', 'Campos Requeridos', 'warning');
       return;
     }
 
     if (clients.some(c => c.cedula_rif.toUpperCase() === editDoc.trim().toUpperCase() && c.id !== selectedRowClient.id)) {
-      alert('Ya existe otro cliente registrado con esa Cédula o RIF.');
+      showAlert('Ya existe otro cliente registrado con esa Cédula o RIF.', 'Documento Duplicado', 'error');
       return;
     }
 
@@ -390,13 +392,16 @@ export default function Clientes({
     if (!selectedRowClient) return;
 
     if (selectedRowClient.saldo_pendiente > 0.01) {
-      alert('No se puede eliminar un cliente con deuda pendiente.');
+      showAlert('No se puede eliminar un cliente con deuda pendiente.', 'Eliminación No Permitida', 'error');
       return;
     }
 
-    if (!window.confirm(`¿Está seguro de que desea eliminar permanentemente al cliente "${selectedRowClient.nombre}" (ID: ${selectedRowClient.cedula_rif})?`)) {
-      return;
-    }
+    const ok = await showConfirm(
+      `¿Está seguro de que desea eliminar permanentemente al cliente "${selectedRowClient.nombre}" (ID: ${selectedRowClient.cedula_rif})? Esta acción no se puede deshacer.`,
+      'Eliminar Cliente',
+      { confirmLabel: 'Eliminar', isDanger: true }
+    );
+    if (!ok) return;
 
     if (onDeleteClient) {
       const success = await onDeleteClient(selectedRowClient.id);
@@ -415,7 +420,7 @@ export default function Clientes({
     if (activeSubTab === 'catalogo') {
       title = "Catálogo Maestro de Clientes";
       tableHtml = `
-        <table class="report-table">
+          <table class="report-table">
           <thead>
             <tr>
               <th>Nombre / Razón Social</th>
@@ -424,6 +429,8 @@ export default function Clientes({
               <th class="text-right">Límite Crédito</th>
               <th class="text-right">Crédito Disp.</th>
               <th class="text-right">Saldo Pendiente</th>
+              <th class="text-center">% Desc.</th>
+              <th class="text-center">P. Costo</th>
             </tr>
           </thead>
           <tbody>
@@ -435,6 +442,8 @@ export default function Clientes({
                 <td class="text-right">$${c.limite_credito.toFixed(2)}</td>
                 <td class="text-right">$${c.credito_disponible.toFixed(2)}</td>
                 <td class="text-right font-bold ${c.saldo_pendiente > 0.01 ? 'text-red' : ''}">$${c.saldo_pendiente.toFixed(2)}</td>
+                <td class="text-center">${c.porcentaje_descuento > 0 ? c.porcentaje_descuento + '%' : '—'}</td>
+                <td class="text-center">${c.aplica_precio_costo ? 'COSTO' : '—'}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -446,7 +455,7 @@ export default function Clientes({
       `;
     } else if (activeSubTab === 'historial') {
       if (!selectedRowClient) {
-        alert("Por favor seleccione un cliente en el Catálogo para generar su reporte.");
+        showAlert('Por favor seleccione un cliente en el Catálogo para generar su reporte.', 'Seleccione un Cliente', 'warning');
         return;
       }
       title = `Historial Detallado de Facturas`;
@@ -549,7 +558,7 @@ export default function Clientes({
 
     const printWindow = window.open("", "_blank");
     if (!printWindow) {
-      alert("No se pudo abrir la ventana de impresión. Por favor habilite los popups.");
+      showAlert('No se pudo abrir la ventana de impresión. Por favor habilite los popups en su navegador.', 'Popups Bloqueados', 'warning');
       return;
     }
 
@@ -834,13 +843,15 @@ export default function Clientes({
                           <SortIcon field="saldo_pendiente" />
                         </div>
                       </th>
+                      <th className="px-3 py-2 text-center font-sans uppercase font-bold">% Desc.</th>
+                      <th className="px-3 py-2 text-center font-sans uppercase font-bold">P. Costo</th>
                       <th className="px-3 py-2 text-center font-sans uppercase font-bold w-40">Ver Detalle</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
                     {filteredClients.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="px-3 py-8 text-center text-slate-400 font-sans italic">
+                        <td colSpan={9} className="px-3 py-8 text-center text-slate-400 font-sans italic">
                           No se encontraron clientes registrados que coincidan con la búsqueda.
                         </td>
                       </tr>
@@ -860,6 +871,28 @@ export default function Clientes({
                             <td className="px-3 py-2.5 text-right font-mono text-slate-600">${c.credito_disponible.toFixed(2)}</td>
                             <td className={`px-3 py-2.5 text-right font-mono font-extrabold ${c.saldo_pendiente > 0.01 ? 'text-red-550' : 'text-slate-400'}`}>
                               ${c.saldo_pendiente.toFixed(2)}
+                            </td>
+                            {/* Descuento */}
+                            <td className="px-3 py-2 text-center">
+                              {c.porcentaje_descuento > 0 ? (
+                                <span className="inline-flex items-center gap-0.5 bg-violet-100 text-violet-800 border border-violet-300 rounded-full px-2 py-0.5 text-[9px] font-black font-sans">
+                                  <span>%</span>
+                                  <span>{c.porcentaje_descuento}%</span>
+                                </span>
+                              ) : (
+                                <span className="text-slate-300 text-[9px] font-sans">—</span>
+                              )}
+                            </td>
+                            {/* Precio Costo */}
+                            <td className="px-3 py-2 text-center">
+                              {c.aplica_precio_costo ? (
+                                <span className="inline-flex items-center gap-0.5 bg-amber-100 text-amber-800 border border-amber-300 rounded-full px-2 py-0.5 text-[9px] font-black font-sans">
+                                  <span>✓</span>
+                                  <span>COSTO</span>
+                                </span>
+                              ) : (
+                                <span className="text-slate-300 text-[9px] font-sans">—</span>
+                              )}
                             </td>
                             {/* NEW NAVIGATION BUTTONS IN ROW TO DIRECTLY GO TO SUBMODULES */}
                             <td className="px-3 py-2">

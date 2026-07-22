@@ -5,6 +5,7 @@ import {
   Trash2, Edit, Plus, Download, Upload, ShieldAlert,
   Settings, CheckSquare, Square
 } from 'lucide-react';
+import { useDialog } from '../hooks/useDialog';
 
 interface ConfiguracionEmpresaProps {
   config: CompanyConfig;
@@ -37,6 +38,7 @@ export default function ConfiguracionEmpresa({
   getApiUrl, 
   onReloadUsers 
 }: ConfiguracionEmpresaProps) {
+  const { showAlert, showConfirm } = useDialog();
   // Navigation tabs
   const [activeTab, setActiveTab] = useState<'empresa' | 'usuarios' | 'perifericos' | 'db'>('empresa');
   const [subTabUsers, setSubTabUsers] = useState<'users' | 'roles'>('users');
@@ -97,6 +99,12 @@ export default function ConfiguracionEmpresa({
   const [dbConfirmWord, setDbConfirmWord] = useState('');
   const [dbBackupSchedule, setDbBackupSchedule] = useState(() => {
     return localStorage.getItem('pos_backup_schedule') || 'Diario';
+  });
+  const [backupHour, setBackupHour] = useState(() => {
+    return localStorage.getItem('pos_backup_hour') || '02:00';
+  });
+  const [backupSpecificDate, setBackupSpecificDate] = useState(() => {
+    return localStorage.getItem('pos_backup_specific_date') || '';
   });
 
   // Fetch users & roles list
@@ -254,10 +262,15 @@ export default function ConfiguracionEmpresa({
 
   const handleDeleteUser = async (id: number) => {
     if (id === currentUser.id) {
-      alert('No puedes eliminar tu propio usuario activo en sesión.');
+      showAlert('No puedes eliminar tu propio usuario activo en sesión.', 'Operación No Permitida', 'warning');
       return;
     }
-    if (!window.confirm('¿Está seguro de eliminar de forma definitiva este usuario del sistema?')) return;
+    const ok = await showConfirm(
+      '¿Está seguro de eliminar de forma definitiva este usuario del sistema?',
+      'Eliminar Usuario',
+      { confirmLabel: 'Eliminar', isDanger: true }
+    );
+    if (!ok) return;
 
     try {
       const res = await fetch(getApiUrl(`/users/${id}`), { method: 'DELETE' });
@@ -327,7 +340,12 @@ export default function ConfiguracionEmpresa({
   };
 
   const handleDeleteRole = async (id: number) => {
-    if (!window.confirm('¿Está seguro de eliminar este perfil de rol?')) return;
+    const ok = await showConfirm(
+      '¿Está seguro de eliminar este perfil de rol? Los usuarios asignados a este rol perderán sus permisos.',
+      'Eliminar Perfil de Rol',
+      { confirmLabel: 'Eliminar', isDanger: true }
+    );
+    if (!ok) return;
     try {
       const res = await fetch(getApiUrl(`/roles/${id}`), { method: 'DELETE' });
       if (res.ok) {
@@ -363,19 +381,21 @@ export default function ConfiguracionEmpresa({
   };
 
   // DB Admin Handlers
-  const handleWipeDb = async (mode: 'inventory' | 'sales' | 'clients' | 'all') => {
-    if (dbConfirmWord !== 'CONFIRMAR') {
-      alert('Debe escribir la palabra de seguridad "CONFIRMAR" para poder procesar la limpieza.');
+  const handleWipeDb = async (mode: 'inventory' | 'sales' | 'clients' | 'all' | 'stock') => {
+    if (!dbConfirmWord.trim().toUpperCase().includes('CONFIRMAR')) {
+      showAlert('Debe escribir la palabra de seguridad "CONFIRMAR" para poder procesar la limpieza.', 'Palabra de Seguridad Incorrecta', 'error');
       return;
     }
-
+    
     let confirmMsg = '';
     if (mode === 'inventory') confirmMsg = '¿ESTÁ TOTALMENTE SEGURO de vaciar TODO el inventario y catálogo de productos? Esta acción no se puede deshacer.';
+    else if (mode === 'stock') confirmMsg = '¿ESTÁ TOTALMENTE SEGURO de poner a cero las existencias (stock) de todos los productos? El catálogo de productos y precios se conservará.';
     else if (mode === 'sales') confirmMsg = '¿ESTÁ TOTALMENTE SEGURO de vaciar el historial de ventas, correlativos de facturas y cierres de caja?';
     else if (mode === 'clients') confirmMsg = '¿ESTÁ TOTALMENTE SEGURO de vaciar la lista de clientes registrados?';
     else if (mode === 'all') confirmMsg = '⚠️ ADVERTENCIA CRÍTICA: Se formateará e inicializará el sistema por completo. Todo quedará en blanco. ¿Continuar?';
 
-    if (!window.confirm(confirmMsg)) return;
+    const ok = await showConfirm(confirmMsg, 'Confirmar Limpieza del Sistema', { confirmLabel: 'Sí, Limpiar', isDanger: true });
+    if (!ok) return;
 
     try {
       const res = await fetch(getApiUrl('/db/wipe'), {
@@ -384,12 +404,13 @@ export default function ConfiguracionEmpresa({
         body: JSON.stringify({
           wipeInventory: mode === 'inventory' || mode === 'all',
           wipeSales: mode === 'sales' || mode === 'all',
-          wipeClients: mode === 'clients' || mode === 'all'
+          wipeClients: mode === 'clients' || mode === 'all',
+          wipeStock: mode === 'stock'
         })
       });
 
       if (res.ok) {
-        if (mode === 'inventory' || mode === 'all') {
+        if (mode === 'inventory' || mode === 'all' || mode === 'stock') {
           localStorage.removeItem('pos_products');
           localStorage.removeItem('pos_price_history');
         }
@@ -421,11 +442,10 @@ export default function ConfiguracionEmpresa({
         // Force reload page to sync clean database arrays
         setTimeout(() => window.location.reload(), 1500);
       } else {
-        alert('Error al realizar el formateo de base de datos.');
+        showAlert('Error al realizar el formateo de base de datos.', 'Error de Servidor', 'error');
       }
     } catch (err) {
-      console.error(err);
-      alert('Error de red al intentar conectar con el servidor central.');
+      showAlert('Error de red al intentar conectar con el servidor central.', 'Error de Conexión', 'error');
     }
   };
 
@@ -445,7 +465,7 @@ export default function ConfiguracionEmpresa({
       }
     } catch (err) {
       console.error(err);
-      alert('Error al generar copia de seguridad.');
+      showAlert('Error al generar copia de seguridad.', 'Error de Backup', 'error');
     }
   };
 
@@ -453,7 +473,12 @@ export default function ConfiguracionEmpresa({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!window.confirm('¿Está seguro de restaurar este respaldo? Se sobrescribirán todos los datos del sistema actual con los del archivo.')) return;
+    const ok = await showConfirm(
+      '¿Está seguro de restaurar este respaldo? Se sobrescribirán todos los datos del sistema actual con los del archivo.',
+      'Restaurar Backup',
+      { confirmLabel: 'Sí, Restaurar', isDanger: true }
+    );
+    if (!ok) return;
 
     const reader = new FileReader();
     reader.onload = async (evt) => {
@@ -469,31 +494,40 @@ export default function ConfiguracionEmpresa({
           showToast('Base de datos restaurada correctamente. Recargando sistema...');
           setTimeout(() => window.location.reload(), 1500);
         } else {
-          alert('El archivo no pudo ser importado de forma correcta por el servidor.');
+          showAlert('El archivo no pudo ser importado de forma correcta por el servidor.', 'Error de Importación', 'error');
         }
       } catch (err) {
-        alert('Formato de archivo inválido.');
+        showAlert('Formato de archivo inválido. Por favor utilice un archivo de respaldo válido exportado desde este sistema.', 'Archivo Inválido', 'error');
       }
     };
     reader.readAsText(file);
   };
 
   const handleSaveBackupSchedule = async () => {
+    if (dbBackupSchedule === 'Especifico' && !backupSpecificDate) {
+      showAlert('Debe seleccionar una fecha específica para el respaldo.', 'Fecha Requerida', 'warning');
+      return;
+    }
     localStorage.setItem('pos_backup_schedule', dbBackupSchedule);
+    localStorage.setItem('pos_backup_hour', backupHour);
+    localStorage.setItem('pos_backup_specific_date', backupSpecificDate);
     try {
       const res = await fetch(getApiUrl('/db/backup/schedule'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ schedule: dbBackupSchedule })
+        body: JSON.stringify({ schedule: dbBackupSchedule, hour: backupHour, specificDate: backupSpecificDate })
       });
       if (res.ok) {
-        showToast(`Frecuencia de backup automático programada a: ${dbBackupSchedule}`);
+        const scheduleLabel = dbBackupSchedule === 'Especifico'
+          ? `fecha ${backupSpecificDate} a las ${backupHour}`
+          : `${dbBackupSchedule} a las ${backupHour}`;
+        showToast(`✅ Respaldo automático programado: ${scheduleLabel}`);
       } else {
-        alert('Error al programar frecuencia en el servidor.');
+        showAlert('Error al programar frecuencia en el servidor.', 'Error de Programación', 'error');
       }
     } catch (e) {
       console.error(e);
-      alert('Error de conexión con el servidor.');
+      showAlert('Error de conexión con el servidor.', 'Error de Conexión', 'error');
     }
   };
 
@@ -1095,6 +1129,19 @@ export default function ConfiguracionEmpresa({
 
                 <div className="border border-slate-200 rounded-lg p-4 space-y-3 flex flex-col justify-between">
                   <div>
+                    <span className="font-bold text-slate-700 block">Vaciar Existencias (Poner a Cero Stock)</span>
+                    <p className="text-[10px] text-slate-500 font-sans">Establece el stock/existencia de todos los productos en cero (0), conservando sus nombres, códigos y precios.</p>
+                  </div>
+                  <button
+                    onClick={() => handleWipeDb('stock')}
+                    className="w-full bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 py-2 rounded font-bold font-sans text-xs transition-all"
+                  >
+                    Poner Existencias a Cero
+                  </button>
+                </div>
+
+                <div className="border border-slate-200 rounded-lg p-4 space-y-3 flex flex-col justify-between">
+                  <div>
                     <span className="font-bold text-slate-700 block">Vaciar Registro de Ventas y Facturas</span>
                     <p className="text-[10px] text-slate-500 font-sans">Elimina todas las transacciones históricas, reinicia los folios de factura a cero y limpia los cierres de caja.</p>
                   </div>
@@ -1188,7 +1235,7 @@ export default function ConfiguracionEmpresa({
             </div>
 
             {/* AUTOMATIC BACKUP SCHEDULER */}
-            <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4">
+            <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-5">
               <h3 className="text-xs font-bold text-slate-700 uppercase flex items-center gap-1.5 font-sans">
                 <HardDrive className="w-4 h-4 text-amber-600" />
                 Programación de Respaldo Automático
@@ -1196,23 +1243,102 @@ export default function ConfiguracionEmpresa({
               <p className="text-slate-500 font-sans text-xs">
                 Defina la frecuencia con la que el servidor local de la sucursal guardará de forma automática copias de seguridad de la base de datos en su carpeta de backups del disco duro.
               </p>
-              
-              <div className="flex flex-col sm:flex-row items-center gap-3">
-                <select
-                  value={dbBackupSchedule}
-                  onChange={(e) => setDbBackupSchedule(e.target.value)}
-                  className="bg-slate-50 border border-slate-300 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-configStart focus:outline-none font-sans flex-1"
-                >
-                  <option value="Diario">Cada 24 horas (Recomendado)</option>
-                  <option value="Semanal">Semanalmente (Cada Domingo)</option>
-                  <option value="Mensual">Mensualmente (Fin de Mes)</option>
-                  <option value="Desactivado">Desactivar respaldos automáticos</option>
-                </select>
+
+              {/* Row 1: Frecuencia + Hora */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Frecuencia */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-bold font-sans uppercase text-slate-500 tracking-wide">Frecuencia</label>
+                  <select
+                    value={dbBackupSchedule}
+                    onChange={(e) => setDbBackupSchedule(e.target.value)}
+                    className="bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 focus:bg-white focus:border-amber-500 focus:outline-none font-sans w-full"
+                  >
+                    <option value="Diario">🔁 Cada 24 horas (Recomendado)</option>
+                    <option value="Semanal">📅 Semanalmente (Cada Domingo)</option>
+                    <option value="Mensual">🗓️ Mensualmente (Fin de Mes)</option>
+                    <option value="Especifico">📌 Fecha específica (único respaldo)</option>
+                    <option value="Desactivado">⛔ Desactivar respaldos automáticos</option>
+                  </select>
+                </div>
+
+                {/* Hora del respaldo */}
+                {dbBackupSchedule !== 'Desactivado' && (
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold font-sans uppercase text-slate-500 tracking-wide">Hora del Respaldo</label>
+                    <div className="relative">
+                      <input
+                        type="time"
+                        value={backupHour}
+                        onChange={(e) => setBackupHour(e.target.value)}
+                        className="bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 focus:bg-white focus:border-amber-500 focus:outline-none font-mono w-full"
+                      />
+                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] font-sans pointer-events-none">24h</span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 font-sans">El servidor ejecutará el respaldo a esta hora local.</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Fecha específica (calendario) — solo cuando se elige "Especifico" */}
+              {dbBackupSchedule === 'Especifico' && (
+                <div className="border border-amber-200 bg-amber-50 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-amber-600 text-sm">📌</span>
+                    <span className="text-[11px] font-bold font-sans text-amber-800 uppercase tracking-wide">Seleccione la Fecha del Respaldo Único</span>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-4 items-start">
+                    <div className="flex flex-col gap-1.5 flex-1">
+                      <label className="text-[10px] font-bold font-sans uppercase text-amber-700 tracking-wide">Fecha</label>
+                      <input
+                        type="date"
+                        value={backupSpecificDate}
+                        min={new Date().toISOString().split('T')[0]}
+                        onChange={(e) => setBackupSpecificDate(e.target.value)}
+                        className="bg-white border border-amber-300 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:border-amber-500 font-sans w-full shadow-sm"
+                      />
+                    </div>
+                    {backupSpecificDate && (
+                      <div className="flex flex-col gap-1 justify-end pt-5">
+                        <div className="bg-amber-100 border border-amber-300 rounded-lg px-4 py-2.5 text-center">
+                          <p className="text-[10px] font-sans text-amber-700 uppercase font-bold">Respaldo programado para:</p>
+                          <p className="text-sm font-black font-sans text-amber-900 mt-0.5">
+                            {new Date(backupSpecificDate + 'T12:00:00').toLocaleDateString('es-VE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                          </p>
+                          <p className="text-xs font-bold font-mono text-amber-800 mt-0.5">a las {backupHour} hrs</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-amber-700 font-sans">
+                    ⚠️ Un respaldo de "Fecha Específica" se ejecuta una sola vez en la fecha y hora indicadas, luego queda desactivado automáticamente.
+                  </p>
+                </div>
+              )}
+
+              {/* Resumen de configuración actual */}
+              {dbBackupSchedule !== 'Desactivado' && dbBackupSchedule !== 'Especifico' && (
+                <div className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 flex items-center gap-2">
+                  <span className="text-slate-400 text-xs">🕐</span>
+                  <span className="text-[11px] font-sans text-slate-600">
+                    Configuración activa:
+                    <span className="font-bold text-slate-800 ml-1">
+                      {dbBackupSchedule === 'Diario' ? 'Cada día' : dbBackupSchedule === 'Semanal' ? 'Cada domingo' : 'Fin de cada mes'}
+                    </span>
+                    <span className="text-slate-500 ml-1">a las</span>
+                    <span className="font-black font-mono text-amber-600 ml-1">{backupHour} hrs</span>
+                  </span>
+                </div>
+              )}
+
+              {/* Action button */}
+              <div className="flex justify-end">
                 <button
                   onClick={handleSaveBackupSchedule}
-                  className="bg-amber-500 hover:bg-amber-600 text-white font-bold font-sans text-xs px-5 py-2.5 rounded-lg transition-all shadow-sm"
+                  className="bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-bold font-sans text-xs px-6 py-2.5 rounded-lg transition-all shadow-sm flex items-center gap-2"
                 >
-                  Programar Frecuencia
+                  <HardDrive className="w-3.5 h-3.5" />
+                  Guardar Programación
                 </button>
               </div>
             </div>
