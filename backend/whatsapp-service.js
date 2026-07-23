@@ -145,6 +145,7 @@ export async function initWhatsAppClient() {
 
   } catch (err) {
     console.warn('[WhatsApp] whatsapp-web.js no está instalado o falló la carga. Iniciando en Modo Simulación.');
+    console.error('[WhatsApp] Error detallado al inicializar:', err);
     isMockMode = true;
     startMockFlow();
   }
@@ -202,16 +203,18 @@ export async function sendCierreReport(imageBase64, textSummary) {
     let target = config.groupId.trim();
     if (target.includes('chat.whatsapp.com')) {
       // It's a group invite link, we can attempt to join first or extract code
-      const inviteCode = target.split('/').pop();
+      const urlParts = target.split('/');
+      const lastPart = urlParts[urlParts.length - 1];
+      const inviteCode = lastPart.split('?')[0];
       try {
         console.log(`[WhatsApp] Intentando unir al grupo usando código: ${inviteCode}`);
-        const groupChat = await client.acceptInvite(inviteCode);
-        target = groupChat.id._serialized;
+        const groupId = await client.acceptInvite(inviteCode);
+        target = groupId;
         // Save resolved group ID back
         config.groupId = target;
         saveWhatsAppConfig(config);
       } catch (errInvite) {
-        console.warn('[WhatsApp] No se pudo unir automáticamente al grupo:', errInvite.message);
+        console.warn('[WhatsApp] No se pudo unir automáticamente al grupo:', errInvite.message || errInvite);
       }
     }
 
