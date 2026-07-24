@@ -119,8 +119,17 @@ export default function Inventario({
 
   // History page filters
   const [historySearch, setHistorySearch] = useState('');
-  const [historyStartDate, setHistoryStartDate] = useState('');
-  const [historyEndDate, setHistoryEndDate] = useState('');
+
+  const getTodayLocalDateStr = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const [historyStartDate, setHistoryStartDate] = useState(getTodayLocalDateStr);
+  const [historyEndDate, setHistoryEndDate] = useState(getTodayLocalDateStr);
   const [historySortField, setHistorySortField] = useState<string>('date');
   const [historySortOrder, setHistorySortOrder] = useState<'asc' | 'desc'>('desc');
 
