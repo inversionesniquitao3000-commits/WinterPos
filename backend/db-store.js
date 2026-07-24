@@ -392,8 +392,9 @@ export async function updateProductPrices(prodId, prices) {
 
 export async function updateProductPricesBulk(updates) {
   if (usePostgres) {
-    const client = await pool.connect();
+    let client;
     try {
+      client = await pool.connect();
       await client.query('BEGIN');
       for (const update of updates) {
         await client.query(
@@ -404,11 +405,19 @@ export async function updateProductPricesBulk(updates) {
       await client.query('COMMIT');
       return true;
     } catch (err) {
-      await client.query('ROLLBACK');
+      if (client) {
+        try {
+          await client.query('ROLLBACK');
+        } catch (rollbackErr) {
+          console.error('Error al hacer ROLLBACK:', rollbackErr.message);
+        }
+      }
       console.error('Error en updateProductPricesBulk (Postgres):', err.message);
       return false;
     } finally {
-      client.release();
+      if (client) {
+        client.release();
+      }
     }
   } else {
     const products = readJsonFile('products.json', mockProducts);

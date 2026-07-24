@@ -682,6 +682,10 @@ export default function App() {
         body: JSON.stringify({ updates, historyLogs })
       });
       if (res.ok) {
+        const data = await res.json();
+        if (!data.success) {
+          return false;
+        }
         setProducts(prev =>
           prev.map(p => {
             const upd = updates.find(u => u.id === p.id);
