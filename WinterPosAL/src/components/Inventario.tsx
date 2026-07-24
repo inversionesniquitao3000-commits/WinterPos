@@ -1632,11 +1632,15 @@ export default function Inventario({
                       <td className="px-4 py-2.5 font-sans">{h.productDescription}</td>
                       <td className="px-4 py-2.5 text-center">
                         <span className="px-2 py-0.5 rounded border border-purple-200 text-purple-750 bg-purple-50 text-[9px] uppercase">
-                          {h.type}
+                          {(h as any).type || (h as any).priceType || 'Costo'}
                         </span>
                       </td>
-                      <td className="px-4 py-2.5 text-right font-mono text-red-550 font-bold">${h.precio_anterior.toFixed(2)}</td>
-                      <td className="px-4 py-2.5 text-right font-mono text-green-600 font-bold">${h.precio_nuevo.toFixed(2)}</td>
+                      <td className="px-4 py-2.5 text-right font-mono text-red-550 font-bold">
+                        ${(parseFloat((h as any).precio_anterior ?? (h as any).oldPrice ?? 0)).toFixed(2)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-mono text-green-600 font-bold">
+                        ${(parseFloat((h as any).precio_nuevo ?? (h as any).newPrice ?? 0)).toFixed(2)}
+                      </td>
                       <td className="px-4 py-2.5 text-slate-655 font-sans italic">{h.motivo}</td>
                       <td className="px-4 py-2.5 font-sans">{h.usuario}</td>
                     </tr>

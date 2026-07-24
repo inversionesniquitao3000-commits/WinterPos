@@ -335,7 +335,18 @@ export default function App() {
         const priceRes = await fetch(getApiUrl('/price-history'));
         if (priceRes.ok) {
           const priceData = await priceRes.json();
-          setPriceHistory(priceData);
+          const normalized = priceData.map((h: any) => ({
+            id: h.id,
+            date: h.date,
+            productCode: h.productCode,
+            productDescription: h.productDescription || '',
+            type: h.type || h.priceType || 'Costo',
+            precio_anterior: parseFloat(h.precio_anterior ?? h.oldPrice ?? 0),
+            precio_nuevo: parseFloat(h.precio_nuevo ?? h.newPrice ?? 0),
+            motivo: h.motivo || '',
+            usuario: h.usuario || 'SISTEMA'
+          }));
+          setPriceHistory(normalized);
         }
 
         // Fetch sales
@@ -702,12 +713,20 @@ export default function App() {
         );
         const adjDate = getLocalISODateString();
         const user = currentUser?.nombre || 'SISTEMA';
-        const formattedLogs = historyLogs.map(l => ({
-          ...l,
-          id: Math.random(),
-          date: adjDate,
-          usuario: user
-        }));
+        const formattedLogs = historyLogs.map(l => {
+          const matchedProd = products.find(p => p.barcode === l.productCode);
+          return {
+            id: Math.random(),
+            date: adjDate,
+            productCode: l.productCode,
+            productDescription: matchedProd ? matchedProd.description : '',
+            type: l.priceType || l.type || 'Costo',
+            precio_anterior: parseFloat(l.precio_anterior ?? l.oldPrice ?? 0),
+            precio_nuevo: parseFloat(l.precio_nuevo ?? l.newPrice ?? 0),
+            motivo: l.motivo || '',
+            usuario: user
+          };
+        });
         setPriceHistory(prev => [...prev, ...formattedLogs]);
         return true;
       }
