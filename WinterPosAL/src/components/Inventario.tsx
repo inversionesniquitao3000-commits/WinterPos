@@ -577,12 +577,12 @@ export default function Inventario({
     const detail = parseFloat(editDetail) || 0;
     const mayor = parseFloat(editMayor) || 0;
 
-    if (detail < cost) {
-      showAlert('El precio de venta al detalle no puede ser menor al precio de costo.', 'Precios Inválidos', 'warning');
+    if (detail <= cost) {
+      showAlert('El precio de venta al detalle debe ser mayor al precio de costo.', 'Precios Inválidos', 'warning');
       return;
     }
-    if (mayor < cost) {
-      showAlert('El precio de venta al mayor no puede ser menor al precio de costo.', 'Precios Inválidos', 'warning');
+    if (mayor <= cost) {
+      showAlert('El precio de venta al mayor debe ser mayor al precio de costo.', 'Precios Inválidos', 'warning');
       return;
     }
 
@@ -754,12 +754,12 @@ export default function Inventario({
       return;
     }
 
-    if (detail < cost) {
-      showAlert('El precio de venta al detalle no puede ser menor al precio de costo.', 'Precios Inválidos', 'warning');
+    if (detail <= cost) {
+      showAlert('El precio de venta al detalle debe ser mayor al precio de costo.', 'Precios Inválidos', 'warning');
       return;
     }
-    if (mayor < cost) {
-      showAlert('El precio de venta al mayor no puede ser menor al precio de costo.', 'Precios Inválidos', 'warning');
+    if (mayor <= cost) {
+      showAlert('El precio de venta al mayor debe ser mayor al precio de costo.', 'Precios Inválidos', 'warning');
       return;
     }
 
@@ -792,12 +792,12 @@ export default function Inventario({
     const detail = parseFloat(newDetail) || 0;
     const mayor = parseFloat(newMayor) || 0;
 
-    if (detail < cost) {
-      showAlert('El precio de venta al detalle no puede ser menor al precio de costo.', 'Precios Inválidos', 'warning');
+    if (detail <= cost) {
+      showAlert('El precio de venta al detalle debe ser mayor al precio de costo.', 'Precios Inválidos', 'warning');
       return;
     }
-    if (mayor < cost) {
-      showAlert('El precio de venta al mayor no puede ser menor al precio de costo.', 'Precios Inválidos', 'warning');
+    if (mayor <= cost) {
+      showAlert('El precio de venta al mayor debe ser mayor al precio de costo.', 'Precios Inválidos', 'warning');
       return;
     }
 
