@@ -404,14 +404,17 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
                 </button>
               </div>
 
-              <div className="bg-gradient-to-b from-sky-955 to-slate-900 text-white rounded-xl p-6 flex flex-col items-center justify-center flex-grow relative overflow-hidden border border-sky-900 shadow-inner my-2">
+              <div 
+                className="text-white rounded-xl p-6 flex flex-col items-center justify-center flex-grow relative overflow-hidden border border-blue-900/50 shadow-2xl my-2"
+                style={{ background: 'linear-gradient(135deg, #0a192f, #0d2b45)' }}
+              >
                 {/* BCV Header */}
                 <div className="flex flex-col items-center border-b border-white/10 pb-4 w-full mb-4 text-center">
-                  <div className="bg-white/95 rounded-full p-2 w-14 h-14 flex items-center justify-center mb-2 shadow-md">
-                    <span className="font-serif font-black text-sky-955 text-sm">BCV</span>
+                  <div className="bg-white rounded-full p-2 w-14 h-14 flex items-center justify-center mb-2 shadow-md">
+                    <span className="font-serif font-black text-[#0d2b45] text-sm">BCV</span>
                   </div>
-                  <span className="text-[11px] uppercase tracking-widest text-sky-200 font-black font-mono">Banco Central de Venezuela</span>
-                  <span className="text-[9px] uppercase tracking-wider text-slate-355 font-bold font-sans">Tipo de Cambio de Referencia</span>
+                  <span className="text-[11px] uppercase tracking-widest text-sky-300 font-black font-mono">Banco Central de Venezuela</span>
+                  <span className="text-[9px] uppercase tracking-wider text-slate-300 font-bold font-sans">Tipo de Cambio de Referencia</span>
                 </div>
 
                 {bcvError ? (
