@@ -1511,7 +1511,8 @@ export default function ConfiguracionEmpresa({
             </div>
           </div>
         </div>
-      )}
+      </div>
+    )}
         {/* TAB 5: WHATSAPP INTEGRATION */}
         {activeTab === 'whatsapp' && isAdmin && (
           <div className="space-y-6 w-full px-2 lg:px-4 mx-auto animate-fade-in">
