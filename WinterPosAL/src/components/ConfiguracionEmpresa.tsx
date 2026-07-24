@@ -1505,17 +1505,13 @@ export default function ConfiguracionEmpresa({
                   className="bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-bold font-sans text-xs px-6 py-2.5 rounded-lg transition-all shadow-sm flex items-center gap-2"
                 >
                   <HardDrive className="w-3.5 h-3.5" />
-                  Guardar Programación
+                  Guardar Programaci�n
                 </button>
               </div>
             </div>
-
           </div>
-        )}
-            </div>
-            </div>
-          </div>
-        )}
+        </div>
+      )}
         {/* TAB 5: WHATSAPP INTEGRATION */}
         {activeTab === 'whatsapp' && isAdmin && (
           <div className="space-y-6 w-full px-2 lg:px-4 mx-auto animate-fade-in">
