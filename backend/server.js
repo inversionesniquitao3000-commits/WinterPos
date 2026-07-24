@@ -406,6 +406,24 @@ app.get('/api/whatsapp/status', (req, res) => {
   }
 });
 
+app.post('/api/whatsapp/install-chromium', async (req, res) => {
+  console.log('[WhatsApp] Petición recibida para instalar/reparar Chromium para Puppeteer...');
+  try {
+    const { exec } = await import('child_process');
+    exec('npx puppeteer install', async (error, stdout, stderr) => {
+      if (error) {
+        console.error('[WhatsApp Error] Error al instalar Chromium:', error.message);
+        return res.status(500).json({ success: false, error: error.message, details: stderr });
+      }
+      console.log('[WhatsApp] Chromium instalado con éxito. Reiniciando cliente de WhatsApp...');
+      await initWhatsAppClient();
+      res.json({ success: true, message: 'Chromium instalado con éxito. Intentando reconexión...', output: stdout });
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post('/api/whatsapp/config', (req, res) => {
   try {
     const saved = saveWhatsAppConfig(req.body);

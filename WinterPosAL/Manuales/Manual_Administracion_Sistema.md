@@ -80,3 +80,33 @@ Si va a iniciar operaciones reales y desea borrar las pruebas previas, utilice l
   - **Semanal:** Cada Domingo.
   - **Mensual:** Al finalizar el mes.
 - **Ubicación:** Los respaldos se guardarán automáticamente en la carpeta `./backend/data/backups/` del servidor con el formato `backup_auto_[Fecha]_[Timestamp].json`.
+
+---
+
+### MÓDULO 4: INTEGRACIÓN Y SOLUCIÓN DE PROBLEMAS DE WHATSAPP
+
+El sistema permite vincular un número de WhatsApp para enviar automáticamente reportes en imagen y texto de los arqueos y cierres de caja a un grupo de supervisores.
+
+#### 1. Configuración Paso a Paso de la Integración
+1. Ingrese con un usuario de rol **Administrador** (ej. `admin`).
+2. Diríjase a **F10 Config.** > pestaña **Integración WhatsApp**.
+3. Marque la casilla **Habilitar Integración de WhatsApp**.
+4. En el campo **Enlace del Grupo de Destino**, ingrese el enlace de invitación de su grupo de WhatsApp (ej. `https://chat.whatsapp.com/L1abcD23fg...`).
+5. Haga clic en **Guardar Configuración de WhatsApp**.
+6. **Vinculación (QR):** 
+   - El servidor generará un **Código QR** en pantalla.
+   - Abra WhatsApp en su teléfono móvil > Menú (tres puntos) o Configuración > **Dispositivos Vinculados**.
+   - Presione **Vincular un dispositivo** y escanee el código QR que se muestra en la pantalla de la aplicación.
+   - Una vez escaneado, el estado del servicio cambiará a `🟢 Conectado` y aparecerá el botón **Enviar Mensaje de Prueba**.
+
+#### 2. Modo Simulación (Falta de Navegador Chrome/Puppeteer)
+Si el estado muestra **`Modo Simulación Activo`**, significa que el servidor no ha podido iniciar el navegador virtual (Chrome/Chromium) necesario para conectarse a WhatsApp Web.
+* **¿Qué hacer desde la interfaz?**
+  Bajo el estado del servicio, verá un recuadro de advertencia con el botón **`🔧 Instalar/Reparar Chrome (Puppeteer)`**. Haga clic en él para que el servidor descargue e instale automáticamente los componentes de Chrome necesarios. El proceso tomará un par de minutos y recargará la aplicación al finalizar para reconectarse.
+* **¿Qué hacer desde la terminal (si falla el botón)?**
+  Abra una consola en la carpeta `backend/` y ejecute:
+  ```bash
+  npx puppeteer install
+  ```
+  Reinicie el backend (`npm start`) para forzar la reconexión.
+

@@ -4,7 +4,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- 1. CONFIGURACIÓN CENTRAL DE LA EMPRESA
 -- ==========================================
 CREATE TABLE Configuracion_Empresa (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     rif VARCHAR(20) NOT NULL UNIQUE,
     nombre_comercio VARCHAR(150) NOT NULL,
     direccion TEXT NOT NULL,
@@ -21,7 +21,7 @@ CREATE TABLE Configuracion_Empresa (
 CREATE TYPE rol_usuario AS ENUM ('administrador', 'inventario', 'vendedor', 'inventario-vendedor');
 
 CREATE TABLE Usuarios (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     usuario VARCHAR(50) NOT NULL UNIQUE,
     clave VARCHAR(255) NOT NULL,
     nombre VARCHAR(100) NOT NULL,
@@ -34,11 +34,11 @@ CREATE TABLE Usuarios (
 -- 3. TASAS DE CAMBIO (AUDITORÍA DIARIA)
 -- ==========================================
 CREATE TABLE Tasas_Cambio (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     tasa_cobro NUMERIC(12, 4) NOT NULL CHECK (tasa_cobro > 0),
     tasa_vuelto NUMERIC(12, 4) NOT NULL CHECK (tasa_vuelto > 0),
     fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    usuario_id INT NOT NULL,
+    usuario_id BIGINT NOT NULL,
     CONSTRAINT fk_tasas_usuario FOREIGN KEY (usuario_id) REFERENCES Usuarios(id)
 );
 
@@ -46,7 +46,7 @@ CREATE TABLE Tasas_Cambio (
 -- 4. CLIENTES Y GESTIÓN DE CRÉDITO
 -- ==========================================
 CREATE TABLE Clientes (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     cedula_rif VARCHAR(20) NOT NULL UNIQUE,
     nombre VARCHAR(150) NOT NULL,
     telefono VARCHAR(50),
@@ -61,12 +61,12 @@ CREATE TABLE Clientes (
 -- 5. PRODUCTOS (INVENTARIO MAESTRO)
 -- ==========================================
 CREATE TABLE Productos (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     codigo_barras_clave VARCHAR(100) NOT NULL UNIQUE,
     descripcion VARCHAR(255) NOT NULL,
     categoria VARCHAR(100),
-    stock_actual INT DEFAULT 0 CHECK (stock_actual >= 0),
-    stock_minimo INT DEFAULT 0 CHECK (stock_minimo >= 0),
+    stock_actual NUMERIC(12, 3) DEFAULT 0.000 CHECK (stock_actual >= 0),
+    stock_minimo NUMERIC(12, 3) DEFAULT 0.000 CHECK (stock_minimo >= 0),
     precio_costo_usd NUMERIC(12, 2) NOT NULL CHECK (precio_costo_usd >= 0),
     precio_detalle_usd NUMERIC(12, 2) NOT NULL CHECK (precio_detalle_usd >= 0),
     precio_mayor_usd NUMERIC(12, 2) NOT NULL CHECK (precio_mayor_usd >= 0),
@@ -80,9 +80,9 @@ CREATE TABLE Productos (
 -- 6. CONTROL DE CAJA POR ESTACIÓN / TERMINAL
 -- ==========================================
 CREATE TABLE Cajas_Apertura_Cierre (
-    id SERIAL PRIMARY KEY,
-    usuario_id INT NOT NULL,
-    estacion_nombre VARCHAR(50) NOT NULL, -- Identifica la máquina física (ej. 'CAJA_01')
+    id BIGSERIAL PRIMARY KEY,
+    usuario_id BIGINT NOT NULL,
+    estacion_nombre VARCHAR(50) NOT NULL,
     fecha_apertura TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     monto_apertura_usd NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
     monto_apertura_ves NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
@@ -99,8 +99,8 @@ CREATE TABLE Cajas_Apertura_Cierre (
 -- 7. MOVIMIENTOS DE CAJA (FLUJO INTERNO)
 -- ==========================================
 CREATE TABLE Movimientos_Caja (
-    id SERIAL PRIMARY KEY,
-    caja_id INT NOT NULL,
+    id BIGSERIAL PRIMARY KEY,
+    caja_id BIGINT NOT NULL,
     tipo VARCHAR(15) NOT NULL CHECK (tipo IN ('Entrada', 'Salida', 'Devolucion', 'Bono')),
     descripcion TEXT NOT NULL,
     monto_usd NUMERIC(12, 2) DEFAULT 0.00,
@@ -113,11 +113,11 @@ CREATE TABLE Movimientos_Caja (
 -- 8. VENTAS (HISTÓRICO TRANSACCIONAL)
 -- ==========================================
 CREATE TABLE Ventas (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     factura_nro VARCHAR(50) NOT NULL UNIQUE,
-    cliente_id INT NOT NULL,
-    usuario_id INT NOT NULL,
-    caja_id INT NOT NULL,
+    cliente_id BIGINT NOT NULL,
+    usuario_id BIGINT NOT NULL,
+    caja_id BIGINT NOT NULL,
     fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     subtotal_usd NUMERIC(12, 2) NOT NULL,
     descuento_usd NUMERIC(12, 2) DEFAULT 0.00,
@@ -134,10 +134,10 @@ CREATE TABLE Ventas (
 -- 9. DETALLE DE VENTAS
 -- ==========================================
 CREATE TABLE Ventas_Detalle (
-    id SERIAL PRIMARY KEY,
-    venta_id INT NOT NULL,
-    producto_id INT NOT NULL,
-    cantidad INT NOT NULL CHECK (cantidad > 0),
+    id BIGSERIAL PRIMARY KEY,
+    venta_id BIGINT NOT NULL,
+    producto_id BIGINT NOT NULL,
+    cantidad NUMERIC(12, 3) NOT NULL CHECK (cantidad > 0),
     precio_unitario_usd NUMERIC(12, 2) NOT NULL,
     tipo_precio VARCHAR(10) CHECK (tipo_precio IN ('Detalle', 'Mayor')),
     total_fila_usd NUMERIC(12, 2) NOT NULL,
@@ -149,8 +149,8 @@ CREATE TABLE Ventas_Detalle (
 -- 10. PAGOS ASOCIADOS (PAGO MÓVIL Y BIOPAGO)
 -- ==========================================
 CREATE TABLE Pagos_Venta (
-    id SERIAL PRIMARY KEY,
-    venta_id INT NOT NULL,
+    id BIGSERIAL PRIMARY KEY,
+    venta_id BIGINT NOT NULL,
     metodo_pago VARCHAR(25) NOT NULL CHECK (
         metodo_pago IN ('Efectivo$', 'EfectivoBs', 'Tarjeta$', 'TarjetaBs', 'PagoMovil', 'Biopago', 'CreditoCliente')
     ),
@@ -170,13 +170,13 @@ CREATE TABLE Pagos_Venta (
 CREATE TYPE tipo_movimiento_inv AS ENUM ('Entrada', 'Salida', 'Merma', 'Venta', 'Devolucion', 'Entrada Rápida');
 
 CREATE TABLE Movimientos_Inventario (
-    id SERIAL PRIMARY KEY,
-    producto_id INT NOT NULL,
-    usuario_id INT NOT NULL,
+    id BIGSERIAL PRIMARY KEY,
+    producto_id BIGINT NOT NULL,
+    usuario_id BIGINT NOT NULL,
     tipo tipo_movimiento_inv NOT NULL,
-    cantidad INT NOT NULL CHECK (cantidad <> 0),
-    stock_anterior INT NOT NULL,
-    stock_posterior INT NOT NULL,
+    cantidad NUMERIC(12, 3) NOT NULL CHECK (cantidad <> 0),
+    stock_anterior NUMERIC(12, 3) NOT NULL,
+    stock_posterior NUMERIC(12, 3) NOT NULL,
     motivo VARCHAR(255) NOT NULL,
     fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_mov_inv_producto FOREIGN KEY (producto_id) REFERENCES Productos(id) ON DELETE CASCADE,
@@ -189,9 +189,9 @@ CREATE TABLE Movimientos_Inventario (
 CREATE TYPE tipo_precio_ajuste AS ENUM ('Costo', 'Detalle', 'Mayor');
 
 CREATE TABLE Historial_Precios (
-    id SERIAL PRIMARY KEY,
-    producto_id INT NOT NULL,
-    usuario_id INT NOT NULL,
+    id BIGSERIAL PRIMARY KEY,
+    producto_id BIGINT NOT NULL,
+    usuario_id BIGINT NOT NULL,
     tipo_precio tipo_precio_ajuste NOT NULL,
     precio_anterior NUMERIC(12, 2) NOT NULL,
     precio_nuevo NUMERIC(12, 2) NOT NULL,
@@ -200,24 +200,3 @@ CREATE TABLE Historial_Precios (
     CONSTRAINT fk_hist_precios_producto FOREIGN KEY (producto_id) REFERENCES Productos(id) ON DELETE CASCADE,
     CONSTRAINT fk_hist_precios_usuario FOREIGN KEY (usuario_id) REFERENCES Usuarios(id)
 );
-
--- =========================================================================
--- LOGICA TRANSACCIONAL DE AUDITORÍA Y CONCURRENCIA (ALGORITMOS MENCIONADOS)
--- =========================================================================
---
--- ALGORITMO ProcesarVentaSegura (Bloqueo Pesimista)
--- ------------------------------------------------
--- INICIAR TRANSACCION
---   FOR EACH item IN items:
---     SELECT stock_actual, descripcion FROM Productos WHERE id = item.productoId FOR UPDATE;
---     IF stock_actual < item.cantidad THEN
---       ROLLBACK;
---       RETURN Error("Stock insuficiente");
---     END IF;
---     UPDATE Productos SET stock_actual = stock_actual - item.cantidad WHERE id = item.productoId;
---     INSERT INTO Movimientos_Inventario(producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
---     VALUES (item.productoId, usuarioId, 'Venta', -item.cantidad, stock_anterior, stock_posterior, 'Venta Facturada');
---   END FOR;
---   ... registrar Ventas, Ventas_Detalle, Pagos_Venta
--- CONFIRMAR TRANSACCION
---

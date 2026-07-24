@@ -191,6 +191,28 @@ export async function getUsers() {
           clave: r.clave || 'admin',
           permisos: r.permisos ? JSON.parse(r.permisos) : (r.rol?.toLowerCase() === 'administrador' ? defaultPermsAdmin : defaultPermsUser)
         }));
+      } else {
+        console.log('Seeding default users to Postgres database...');
+        const localUsers = readJsonFile('users.json', mockUsers);
+        for (const u of localUsers) {
+          const clave = u.clave || 'admin';
+          const perms = u.permisos || (u.rol?.toLowerCase() === 'administrador' ? defaultPermsAdmin : defaultPermsUser);
+          await pool.query(
+            `INSERT INTO Usuarios (id, usuario, clave, nombre, rol, estado, permisos)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [u.id, u.usuario, clave, u.nombre, u.rol, u.estado || 'Activo', JSON.stringify(perms)]
+          );
+        }
+        const res2 = await pool.query('SELECT id, usuario, nombre, rol, estado, clave, permisos FROM Usuarios ORDER BY id ASC');
+        return res2.rows.map(r => ({
+          id: r.id,
+          usuario: r.usuario,
+          nombre: r.nombre,
+          rol: r.rol,
+          estado: r.estado,
+          clave: r.clave || 'admin',
+          permisos: r.permisos ? JSON.parse(r.permisos) : (r.rol?.toLowerCase() === 'administrador' ? defaultPermsAdmin : defaultPermsUser)
+        }));
       }
     } catch (err) {
       console.error('Error en getUsers (Postgres):', err.message);
@@ -208,24 +230,56 @@ export async function getProducts() {
   if (usePostgres) {
     try {
       const res = await pool.query('SELECT * FROM Productos ORDER BY id ASC');
-      return res.rows.map(r => ({
-        id: r.id,
-        barcode: r.codigo_barras_clave,
-        description: r.descripcion,
-        category: r.categoria,
-        stock_actual: r.stock_actual,
-        stock_minimo: r.stock_minimo,
-        precio_costo_usd: parseFloat(r.precio_costo_usd),
-        precio_detalle_usd: parseFloat(r.precio_detalle_usd),
-        precio_mayor_usd: parseFloat(r.precio_mayor_usd),
-        cantidad_mayorista: r.cantidad_mayorista,
-        exento_impuesto: r.exento_impuesto,
-        imagen_url: r.imagen_url || '',
-        estado: r.estado,
-        a_granel: r.a_granel,
-        fecha_vencimiento: r.fecha_vencimiento,
-        porcentaje_impuesto: parseFloat(r.porcentaje_impuesto || 0)
-      }));
+      if (res.rowCount > 0) {
+        return res.rows.map(r => ({
+          id: r.id,
+          barcode: r.codigo_barras_clave,
+          description: r.descripcion,
+          category: r.categoria,
+          stock_actual: r.stock_actual,
+          stock_minimo: r.stock_minimo,
+          precio_costo_usd: parseFloat(r.precio_costo_usd),
+          precio_detalle_usd: parseFloat(r.precio_detalle_usd),
+          precio_mayor_usd: parseFloat(r.precio_mayor_usd),
+          navigator: r.cantidad_mayorista,
+          cantidad_mayorista: r.cantidad_mayorista,
+          exento_impuesto: r.exento_impuesto,
+          imagen_url: r.imagen_url || '',
+          estado: r.estado,
+          a_granel: r.a_granel,
+          fecha_vencimiento: r.fecha_vencimiento,
+          porcentaje_impuesto: parseFloat(r.porcentaje_impuesto || 0)
+        }));
+      } else {
+        console.log('Seeding default products to Postgres database...');
+        const localProducts = readJsonFile('products.json', mockProducts);
+        for (const p of localProducts) {
+          await pool.query(
+            `INSERT INTO Productos (id, codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, precio_costo_usd, precio_detalle_usd, precio_mayor_usd, cantidad_mayorista, exento_impuesto, imagen_url, estado, a_granel, fecha_vencimiento, porcentaje_impuesto)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+            [p.id, p.barcode, p.description, p.category, p.stock_actual || 0, p.stock_minimo || 0, p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.cantidad_mayorista || 12, p.exento_impuesto, p.imagen_url, p.estado || 'Activo', p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
+          );
+        }
+        const res2 = await pool.query('SELECT * FROM Productos ORDER BY id ASC');
+        return res2.rows.map(r => ({
+          id: r.id,
+          barcode: r.codigo_barras_clave,
+          description: r.descripcion,
+          category: r.categoria,
+          stock_actual: r.stock_actual,
+          stock_minimo: r.stock_minimo,
+          precio_costo_usd: parseFloat(r.precio_costo_usd),
+          precio_detalle_usd: parseFloat(r.precio_detalle_usd),
+          precio_mayor_usd: parseFloat(r.precio_mayor_usd),
+          cantidad_mayorista: r.cantidad_mayorista,
+          exento_impuesto: r.exento_impuesto,
+          imagen_url: r.imagen_url || '',
+          estado: r.estado,
+          a_granel: r.a_granel,
+          fecha_vencimiento: r.fecha_vencimiento,
+          porcentaje_impuesto: parseFloat(r.porcentaje_impuesto || 0)
+        }));
+      }
     } catch (err) {
       console.error('Error en getProducts (Postgres):', err.message);
     }
@@ -324,19 +378,45 @@ export async function getClients() {
   if (usePostgres) {
     try {
       const res = await pool.query('SELECT * FROM Clientes ORDER BY id ASC');
-      return res.rows.map(r => ({
-        id: r.id,
-        cedula_rif: r.cedula_rif,
-        nombre: r.nombre,
-        telefono: r.telefono || '',
-        direccion: r.direccion || '',
-        limite_credito: parseFloat(r.limite_credito),
-        credito_disponible: parseFloat(r.credito_disponible),
-        porcentaje_descuento: parseFloat(r.porcentaje_descuento),
-        estado: r.estado,
-        aplica_precio_costo: !!r.aplica_precio_costo,
-        saldo_pendiente: parseFloat(r.limite_credito) - parseFloat(r.credito_disponible)
-      }));
+      if (res.rowCount > 0) {
+        return res.rows.map(r => ({
+          id: r.id,
+          cedula_rif: r.cedula_rif,
+          nombre: r.nombre,
+          telefono: r.telefono || '',
+          direccion: r.direccion || '',
+          limite_credito: parseFloat(r.limite_credito),
+          credito_disponible: parseFloat(r.credito_disponible),
+          porcentaje_descuento: parseFloat(r.porcentaje_descuento),
+          estado: r.estado,
+          aplica_precio_costo: !!r.aplica_precio_costo,
+          saldo_pendiente: parseFloat(r.limite_credito) - parseFloat(r.credito_disponible)
+        }));
+      } else {
+        console.log('Seeding default clients to Postgres database...');
+        const localClients = readJsonFile('clients.json', mockClients);
+        for (const c of localClients) {
+          await pool.query(
+            `INSERT INTO Clientes (id, cedula_rif, nombre, telefono, direccion, limite_credito, credito_disponible, porcentaje_descuento, estado, aplica_precio_costo)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            [c.id, c.cedula_rif, c.nombre, c.telefono || '', c.direccion || '', c.limite_credito || 0.00, c.credito_disponible || 0.00, c.porcentaje_descuento || 0.00, c.estado || 'Activo', !!c.aplica_precio_costo]
+          );
+        }
+        const res2 = await pool.query('SELECT * FROM Clientes ORDER BY id ASC');
+        return res2.rows.map(r => ({
+          id: r.id,
+          cedula_rif: r.cedula_rif,
+          nombre: r.nombre,
+          telefono: r.telefono || '',
+          direccion: r.direccion || '',
+          limite_credito: parseFloat(r.limite_credito),
+          credito_disponible: parseFloat(r.credito_disponible),
+          porcentaje_descuento: parseFloat(r.porcentaje_descuento),
+          estado: r.estado,
+          aplica_precio_costo: !!r.aplica_precio_costo,
+          saldo_pendiente: parseFloat(r.limite_credito) - parseFloat(r.credito_disponible)
+        }));
+      }
     } catch (err) {
       console.error('Error en getClients (Postgres):', err.message);
     }
@@ -766,9 +846,10 @@ export async function wipeDatabase(options) {
         await pool.query('TRUNCATE TABLE Movimientos_Inventario RESTART IDENTITY CASCADE');
       }
       if (options.wipeSales) {
-        await pool.query('TRUNCATE TABLE Ventas, Ventas_Detalle, Pagos_Venta, Abonos RESTART IDENTITY CASCADE');
+        await pool.query('TRUNCATE TABLE Ventas, Ventas_Detalle, Pagos_Venta RESTART IDENTITY CASCADE');
         await pool.query('TRUNCATE TABLE Cajas_Apertura_Cierre, Movimientos_Caja RESTART IDENTITY CASCADE');
         await pool.query('TRUNCATE TABLE Tasas_Cambio RESTART IDENTITY CASCADE');
+        writeJsonFile('abonos.json', []);
       }
       if (options.wipeClients) {
         await pool.query("DELETE FROM Clientes WHERE cedula_rif <> 'V-00000000'");
@@ -953,13 +1034,38 @@ export async function getTasaHistory() {
         LEFT JOIN Usuarios u ON t.usuario_id = u.id 
         ORDER BY t.id ASC
       `);
-      return res.rows.map(r => ({
-        id: r.id,
-        tasa_cobro: parseFloat(r.tasa_cobro),
-        tasa_vuelto: parseFloat(r.tasa_vuelto),
-        fecha_actualizacion: getLocalISODateString(new Date(r.fecha_actualizacion)),
-        usuario: r.usuario || 'SISTEMA'
-      }));
+      if (res.rowCount > 0) {
+        return res.rows.map(r => ({
+          id: r.id,
+          tasa_cobro: parseFloat(r.tasa_cobro),
+          tasa_vuelto: parseFloat(r.tasa_vuelto),
+          fecha_actualizacion: getLocalISODateString(new Date(r.fecha_actualizacion)),
+          usuario: r.usuario || 'SISTEMA'
+        }));
+      } else {
+        console.log('Seeding default exchange rates to Postgres database...');
+        const localTasas = readJsonFile('tasa_history.json', mockTasaHistory);
+        for (const t of localTasas) {
+          await pool.query(
+            `INSERT INTO Tasas_Cambio (id, tasa_cobro, tasa_vuelto, fecha_actualizacion, usuario_id)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [t.id, t.tasa_cobro, t.tasa_vuelto, new Date(), 1]
+          );
+        }
+        const res2 = await pool.query(`
+          SELECT t.id, t.tasa_cobro, t.tasa_vuelto, t.fecha_actualizacion, u.nombre as usuario 
+          FROM Tasas_Cambio t 
+          LEFT JOIN Usuarios u ON t.usuario_id = u.id 
+          ORDER BY t.id ASC
+        `);
+        return res2.rows.map(r => ({
+          id: r.id,
+          tasa_cobro: parseFloat(r.tasa_cobro),
+          tasa_vuelto: parseFloat(r.tasa_vuelto),
+          fecha_actualizacion: getLocalISODateString(new Date(r.fecha_actualizacion)),
+          usuario: r.usuario || 'SISTEMA'
+        }));
+      }
     } catch (err) {
       console.error('Error en getTasaHistory (Postgres):', err.message);
     }

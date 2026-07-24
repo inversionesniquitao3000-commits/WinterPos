@@ -31,6 +31,29 @@ const ACCIONES_PERMISOS = [
   { id: 'eliminar', label: 'Eliminar' }
 ];
 
+const DEFAULT_WA_TEMPLATE = `📊 *REPORTE DE ARQUEO Y CIERRE DE CAJA*
+
+📅 *Fecha:* {fecha}
+👤 *Cajero:* {usuario}
+🖥️ *Terminal:* {terminal}
+
+💵 *EFECTIVO ESPERADO EN GAVETA:*
+• Dólares (USD): $ {dineroEnCajaExpected}
+• Bolívares (VES): Bs {expectedVes}
+
+📥 *EFECTIVO FÍSICO RECIBIDO:*
+• Dólares (USD): $ {realUsd}
+• Bolívares (VES): Bs {realVes}
+
+⚖️ *DIFERENCIA (BALANCE):*
+• Dólares (USD): {diffUsd}
+• Bolívares (VES): {diffVes}
+
+🛍️ *VENTAS TOTALES DEL TURNO:* $ {ventaTotalUsd} USD
+📉 *DESCUENTOS APLICADOS:* $ {descuentosUsd} USD
+
+*WinterPosAL Cloud System*`;
+
 export default function ConfiguracionEmpresa({ 
   config, 
   onSaveConfig, 
@@ -47,7 +70,8 @@ export default function ConfiguracionEmpresa({
   const [waConfig, setWaConfig] = useState({
     enabled: false,
     groupId: '',
-    groupName: 'Grupo de Cierres POS'
+    groupName: 'Grupo de Cierres POS',
+    messageTemplate: ''
   });
   const [waStatus, setWaStatus] = useState<any>({
     status: 'DISCONNECTED',
@@ -55,6 +79,7 @@ export default function ConfiguracionEmpresa({
     isMock: false
   });
   const [isWaLoading, setIsWaLoading] = useState(false);
+  const [isInstallingChrome, setIsInstallingChrome] = useState(false);
   
   // Success states
   const [successMsg, setSuccessMsg] = useState('');
@@ -151,7 +176,10 @@ export default function ConfiguracionEmpresa({
         const data = await res.json();
         setWaStatus(data);
         if (data.config) {
-          setWaConfig(data.config);
+          setWaConfig({
+            ...data.config,
+            messageTemplate: data.config.messageTemplate || DEFAULT_WA_TEMPLATE
+          });
         }
       }
     } catch (err) {
@@ -639,6 +667,31 @@ export default function ConfiguracionEmpresa({
     { id: 'biopago', label: 'Biopago Bs' },
     { id: 'credito', label: 'Crédito Cliente $' }
   ];
+
+  const getTemplatePreview = (template: string) => {
+    if (!template) return '';
+    return template
+      .replace(/{fecha}/g, new Date().toLocaleString())
+      .replace(/{usuario}/g, (currentUser?.nombre || 'ANDERSON LAGUNA').toUpperCase())
+      .replace(/{terminal}/g, localStorage.getItem('pos_terminal_name') || 'CAJA_PRINCIPAL')
+      .replace(/{dineroEnCajaExpected}/g, '150.00')
+      .replace(/{expectedVes}/g, '129000.00')
+      .replace(/{realUsd}/g, '150.00')
+      .replace(/{realVes}/g, '129000.00')
+      .replace(/{diffUsd}/g, '+$0.00 (Sobrante)')
+      .replace(/{diffVes}/g, '+Bs 0.00 (Sobrante)')
+      .replace(/{ventaTotalUsd}/g, '350.50')
+      .replace(/{descuentosUsd}/g, '10.00');
+  };
+
+  const formatWhatsAppMessage = (text: string) => {
+    if (!text) return '';
+    let html = text.replace(/\*(.*?)\*/g, '<strong>$1</strong>');
+    html = html.replace(/_(.*?)_/g, '<em>$1</em>');
+    html = html.replace(/~(.*?)~/g, '<del>$1</del>');
+    html = html.replace(/\n/g, '<br/>');
+    return html;
+  };
 
   const isAdmin = currentUser.rol.toLowerCase() === 'administrador';
 
@@ -1486,9 +1539,38 @@ export default function ConfiguracionEmpresa({
                     </p>
 
                     {waStatus.isMock && (
-                      <span className="inline-block bg-indigo-50 border border-indigo-200 text-indigo-700 text-[9px] font-bold px-2 py-0.5 rounded uppercase font-sans">
-                        Modo Simulación Activo
-                      </span>
+                      <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg space-y-2">
+                        <p className="text-[10px] text-amber-800 leading-normal font-sans">
+                          ⚠️ <strong>Modo Simulación Activo:</strong> El motor de WhatsApp real (Chrome/Puppeteer) no está listo o falta instalarlo en el servidor.
+                        </p>
+                        <button
+                          type="button"
+                          disabled={isInstallingChrome}
+                          onClick={async () => {
+                            try {
+                              setIsInstallingChrome(true);
+                              showToast('Iniciando instalación de Chrome/Puppeteer en el servidor. Esto puede tomar unos minutos...');
+                              const res = await fetch(getApiUrl('/whatsapp/install-chromium'), { method: 'POST' });
+                              if (res.ok) {
+                                showAlert('Chrome/Puppeteer se instaló correctamente en el servidor. El servicio de WhatsApp se reiniciará.', 'Instalación Exitosa', 'success');
+                                window.location.reload();
+                              } else {
+                                const errData = await res.json();
+                                showAlert(`Error al instalar: ${errData.error || 'Desconocido'}`, 'Fallo de Instalación', 'error');
+                              }
+                            } catch (err: any) {
+                              showAlert(`Error de red: ${err.message}`, 'Error', 'error');
+                            } finally {
+                              setIsInstallingChrome(false);
+                            }
+                          }}
+                          className={`w-full text-[10px] font-bold py-1.5 px-3 rounded font-sans transition-all text-white ${
+                            isInstallingChrome ? 'bg-amber-400 cursor-not-allowed' : 'bg-amber-600 hover:bg-amber-700'
+                          }`}
+                        >
+                          {isInstallingChrome ? '⏳ Instalando Chrome...' : '🔧 Instalar/Reparar Chrome (Puppeteer)'}
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -1583,6 +1665,78 @@ export default function ConfiguracionEmpresa({
                   <p className="text-[9px] text-slate-400 font-sans leading-relaxed">
                     Copie y pegue el enlace de invitación de su grupo de WhatsApp. El bot se unirá automáticamente para mandar los arqueos.
                   </p>
+                </div>
+              </div>
+
+              {/* MESSAGE TEMPLATE & PREVIEW AREA */}
+              <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 border-t border-slate-100 pt-5">
+                {/* Template Editor */}
+                <div className="lg:col-span-3 space-y-4">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-bold font-sans uppercase text-slate-500 tracking-wide">Plantilla del Mensaje de Arqueo</label>
+                    <textarea
+                      value={waConfig.messageTemplate}
+                      onChange={(e) => setWaConfig(prev => ({ ...prev, messageTemplate: e.target.value }))}
+                      disabled={!waConfig.enabled}
+                      rows={14}
+                      className="bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 focus:bg-white focus:border-indigo-500 focus:outline-none font-mono w-full disabled:opacity-50"
+                      placeholder="Escriba la plantilla del mensaje de WhatsApp..."
+                    />
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+                    <span className="text-[9px] font-bold text-slate-600 uppercase font-sans tracking-wide block">Variables Disponibles (Reemplazo Dinámico)</span>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[9.5px] font-sans text-slate-500">
+                      <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{fecha}'}</code>: Fecha y hora</div>
+                      <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{usuario}'}</code>: Nombre del cajero</div>
+                      <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{terminal}'}</code>: Nombre de la terminal</div>
+                      <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{dineroEnCajaExpected}'}</code>: USD esperado</div>
+                      <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{expectedVes}'}</code>: VES esperado</div>
+                      <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{realUsd}'}</code>: USD real contado</div>
+                      <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{realVes}'}</code>: VES real contado</div>
+                      <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{diffUsd}'}</code>: Diferencia USD</div>
+                      <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{diffVes}'}</code>: Diferencia VES</div>
+                      <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{ventaTotalUsd}'}</code>: Venta neta total</div>
+                      <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{descuentosUsd}'}</code>: Descuentos total</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Live Preview */}
+                <div className="lg:col-span-2 flex flex-col">
+                  <span className="text-[10px] font-bold font-sans uppercase text-slate-500 tracking-wide mb-1.5">Vista Previa (Diseño WhatsApp)</span>
+                  <div className="flex-grow border border-slate-200 rounded-xl overflow-hidden shadow-md flex flex-col min-h-[450px]" style={{ backgroundColor: '#efeae2' }}>
+                    {/* Header preview bubble */}
+                    <div className="bg-[#075e54] px-4 py-2.5 flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-full bg-emerald-700/60 flex items-center justify-center text-white text-xs font-bold font-sans">
+                        🤖
+                      </div>
+                      <div className="flex flex-col text-left">
+                        <span className="text-white font-sans font-bold text-[11px] leading-tight">WinterPos Bot</span>
+                        <span className="text-emerald-100 font-sans text-[8.5px] leading-tight">en línea</span>
+                      </div>
+                    </div>
+
+                    {/* Chat Messages */}
+                    <div className="p-3 flex-grow flex flex-col justify-start space-y-3 overflow-y-auto max-h-[400px]">
+                      {/* Image preview mock */}
+                      <div className="bg-[#d9fdd3] p-1.5 rounded-lg shadow-sm border border-emerald-100/50 self-start max-w-[90%] flex flex-col">
+                        <div className="bg-slate-100/80 rounded flex items-center justify-center h-28 w-full text-slate-400 font-sans text-[10px] gap-1.5 flex-shrink-0">
+                          🖼️ <span>[Imagen del Cierre y Arqueo]</span>
+                        </div>
+                        {waConfig.messageTemplate ? (
+                          <div 
+                            className="p-2 text-slate-800 text-[10px] font-sans text-left leading-relaxed break-all select-text"
+                            dangerouslySetInnerHTML={{ __html: formatWhatsAppMessage(getTemplatePreview(waConfig.messageTemplate)) }}
+                          />
+                        ) : (
+                          <span className="p-2 text-slate-400 italic text-[10px] font-sans text-left">
+                            Sin plantilla definida. Se enviará el formato por defecto.
+                          </span>
+                        )}
+                        <span className="text-[8px] text-slate-400 text-right pr-1 pb-1 font-sans">{new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 

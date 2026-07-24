@@ -1208,6 +1208,7 @@ export default function App() {
               onRegisterAbono={handleRegisterAbono}
               getApiUrl={getApiUrl}
               nextInvoiceNumber={nextInvoiceNumber}
+              onLogout={handleLogout}
             />
           )}
 

@@ -157,12 +157,11 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
     
     finalFilteredSales.forEach(s => {
       const isDev = s.factura_nro.startsWith('DEV-');
-      const mult = isDev ? -1 : 1;
       
-      totalVentas += (s.totalUSD ?? 0) * mult;
+      totalVentas += (s.totalUSD ?? 0);
       (s.items ?? []).forEach(item => {
         const itemCost = item.product?.precio_costo_usd ?? 0;
-        totalCosto += itemCost * (item.qty ?? 0) * mult;
+        totalCosto += itemCost * (item.qty ?? 0) * (isDev ? -1 : 1);
       });
     });
     

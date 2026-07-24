@@ -79,6 +79,7 @@ interface CajaPOSProps {
   onRegisterAbono: (clientId: number, amountUSD: number) => void;
   getApiUrl: (path: string) => string;
   nextInvoiceNumber: string;
+  onLogout: () => void;
 }
 
 export default function CajaPOS({
@@ -106,7 +107,8 @@ export default function CajaPOS({
   onUpdateProductStock,
   onRegisterAbono,
   getApiUrl,
-  nextInvoiceNumber
+  nextInvoiceNumber,
+  onLogout
 }: CajaPOSProps) {
   const { showAlert, showConfirm } = useDialog();
   // Opening/Closing state
@@ -126,7 +128,8 @@ export default function CajaPOS({
   const [waCierreStatus, setWaCierreStatus] = useState({
     status: 'DISCONNECTED',
     enabled: false,
-    groupId: ''
+    groupId: '',
+    messageTemplate: ''
   });
   const [sendToWhatsApp, setSendToWhatsApp] = useState(true);
   const [isSendingWa, setIsSendingWa] = useState(false);
@@ -139,7 +142,8 @@ export default function CajaPOS({
         setWaCierreStatus({
           status: data.status,
           enabled: data.config?.enabled || false,
-          groupId: data.config?.groupId || ''
+          groupId: data.config?.groupId || '',
+          messageTemplate: data.config?.messageTemplate || ''
         });
       }
     } catch (err) {
@@ -164,12 +168,17 @@ export default function CajaPOS({
   const [devSelectedSale, setDevSelectedSale] = useState<Sale | null>(null);
   const [devItems, setDevItems] = useState<Array<{ product: Product; qty: number; priceUSD: number; returnQty: number }>>([]);
   const [devMotivo, setDevMotivo] = useState('');
+  const [devRefundCurrency, setDevRefundCurrency] = useState<'USD' | 'VES'>('USD');
   const [showDevConfirmModal, setShowDevConfirmModal] = useState(false);
 
   // ESC key listener to close modals
   useEffect(() => {
     const handleEscKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (showAperturaModal) {
+          onLogout();
+          return;
+        }
         setShowDevConfirmModal(false);
         setShowDevolucionModal(false);
         if (typeof setShowEntradaRapidaModal === 'function') {
@@ -179,7 +188,7 @@ export default function CajaPOS({
     };
     window.addEventListener('keydown', handleEscKey);
     return () => window.removeEventListener('keydown', handleEscKey);
-  }, []);
+  }, [showAperturaModal, onLogout]);
 
   const handleOpenDevolucion = async () => {
     try {
@@ -195,6 +204,7 @@ export default function CajaPOS({
     setDevItems([]);
     setDevMotivo('');
     setDevSearchTerm('');
+    setDevRefundCurrency('USD');
     setShowDevolucionModal(true);
   };
 
@@ -212,6 +222,8 @@ export default function CajaPOS({
   const handleSelectDevSale = (sale: Sale) => {
     setDevSelectedSale(sale);
     setDevMotivo('');
+    const paidInBs = (sale.pagos || []).some(p => p.metodo !== 'Efectivo$' && p.metodo !== 'CreditoCliente');
+    setDevRefundCurrency(paidInBs ? 'VES' : 'USD');
     const items = (sale.items || []).map(item => {
       const barcode = item?.product?.barcode || '';
       const description = item?.product?.description || 'Producto sin descripción';
@@ -276,12 +288,9 @@ export default function CajaPOS({
         }
       }
 
-      // Determine if original ticket was paid in Bs (e.g. cash, debit, pagomovil, biopago)
-      const paidInBs = devSelectedSale.pagos.some(p => p.metodo !== 'Efectivo$' && p.metodo !== 'CreditoCliente');
-      
-      const refundCurrency = paidInBs ? 'EfectivoBs' : 'Efectivo$';
-      const refundUsd = refundCurrency === 'Efectivo$' ? devRefundTotal : 0;
-      const refundVes = refundCurrency === 'EfectivoBs' ? devRefundTotal * tasaDia : 0;
+      const refundCurrency = devRefundCurrency === 'VES' ? 'EfectivoBs' : 'Efectivo$';
+      const refundUsd = devRefundCurrency === 'USD' ? devRefundTotal : 0;
+      const refundVes = devRefundCurrency === 'VES' ? devRefundTotal * tasaDia : 0;
 
       // 2. Register manual cash movement of type Devolucion
       onRegisterCajaMovement(
@@ -308,7 +317,7 @@ export default function CajaPOS({
         totalVES: -(devRefundTotal * tasaDia),
         pagos: [{ 
           metodo: refundCurrency as any, 
-          monto: refundCurrency === 'Efectivo$' ? -devRefundTotal : -(devRefundTotal * tasaDia), 
+          monto: devRefundCurrency === 'USD' ? -devRefundTotal : -(devRefundTotal * tasaDia), 
           montoUSD: -devRefundTotal 
         }],
         vueltoUSD: 0,
@@ -1286,21 +1295,25 @@ export default function CajaPOS({
     
     const devolucionVentasUsd = shiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) {
-        return acc + Math.abs(sale.totalUSD);
+        const cashUsdPay = sale.pagos.find(p => p.metodo === 'Efectivo$');
+        return acc + (cashUsdPay ? Math.abs(cashUsdPay.montoUSD) : 0);
       }
       return acc;
     }, 0);
     const devolucionVentasVes = shiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) {
-        return acc + Math.abs(sale.totalVES);
+        const cashVesPay = sale.pagos.find(p => p.metodo === 'EfectivoBs');
+        return acc + (cashVesPay ? Math.abs(cashVesPay.monto) : 0);
       }
       return acc;
     }, 0);
     const ventaTotalUsd = ventasTotalesUsd - devolucionVentasUsd;
 
     const costoTotalUsd = shiftSales.reduce((acc, sale) => {
+      const isDev = sale.factura_nro.startsWith('DEV-');
+      const mult = isDev ? -1 : 1;
       return acc + (sale.items || []).reduce((itemAcc, item) => {
-        return itemAcc + ((item.product.precio_costo_usd || 0) * item.qty);
+        return itemAcc + ((item.product.precio_costo_usd || 0) * item.qty * mult);
       }, 0);
     }, 0);
     const utilidadUsd = Math.max(0, ventaTotalUsd - costoTotalUsd);
@@ -1357,23 +1370,36 @@ export default function CajaPOS({
     const diffUsd = realUsd - cierreResult.dineroEnCajaExpected;
     const diffVes = realVes - cierreResult.expectedVes;
 
-    const summaryText = 
+    const template = waCierreStatus.messageTemplate || 
       `📊 *REPORTE DE ARQUEO Y CIERRE DE CAJA*\n\n` +
-      `📅 *Fecha:* ${cierreResult.fechaCierre}\n` +
-      `👤 *Cajero:* ${cierreResult.usuario.toUpperCase()}\n` +
-      `🖥️ *Terminal:* ${localStorage.getItem('pos_terminal_name') || 'CAJA_01'}\n\n` +
+      `📅 *Fecha:* {fecha}\n` +
+      `👤 *Cajero:* {usuario}\n` +
+      `🖥️ *Terminal:* {terminal}\n\n` +
       `💵 *EFECTIVO ESPERADO EN GAVETA:*\n` +
-      `• Dólares (USD): $${cierreResult.dineroEnCajaExpected.toFixed(2)}\n` +
-      `• Bolívares (VES): Bs ${cierreResult.expectedVes.toFixed(2)}\n\n` +
+      `• Dólares (USD): $ {dineroEnCajaExpected}\n` +
+      `• Bolívares (VES): Bs {expectedVes}\n\n` +
       `📥 *EFECTIVO FÍSICO RECIBIDO:*\n` +
-      `• Dólares (USD): $${realUsd.toFixed(2)}\n` +
-      `• Bolívares (VES): Bs ${realVes.toFixed(2)}\n\n` +
+      `• Dólares (USD): $ {realUsd}\n` +
+      `• Bolívares (VES): Bs {realVes}\n\n` +
       `⚖️ *DIFERENCIA (BALANCE):*\n` +
-      `• Dólares (USD): ${diffUsd >= 0 ? `+$${diffUsd.toFixed(2)} (Sobrante)` : `-$${Math.abs(diffUsd).toFixed(2)} (Faltante)`}\n` +
-      `• Bolívares (VES): ${diffVes >= 0 ? `+Bs ${diffVes.toFixed(2)} (Sobrante)` : `-Bs ${Math.abs(diffVes).toFixed(2)} (Faltante)`}\n\n` +
-      `🛍️ *VENTAS TOTALES DEL TURNO:* $${cierreResult.ventaTotalUsd.toFixed(2)} USD\n` +
-      `📉 *DESCUENTOS APLICADOS:* $${cierreResult.descuentosUsd.toFixed(2)} USD\n\n` +
+      `• Dólares (USD): {diffUsd}\n` +
+      `• Bolívares (VES): {diffVes}\n\n` +
+      `🛍️ *VENTAS TOTALES DEL TURNO:* $ {ventaTotalUsd} USD\n` +
+      `📉 *DESCUENTOS APLICADOS:* $ {descuentosUsd} USD\n\n` +
       `*WinterPosAL Cloud System*`;
+
+    const summaryText = template
+      .replace(/{fecha}/g, cierreResult.fechaCierre)
+      .replace(/{usuario}/g, cierreResult.usuario.toUpperCase())
+      .replace(/{terminal}/g, localStorage.getItem('pos_terminal_name') || 'CAJA_01')
+      .replace(/{dineroEnCajaExpected}/g, cierreResult.dineroEnCajaExpected.toFixed(2))
+      .replace(/{expectedVes}/g, cierreResult.expectedVes.toFixed(2))
+      .replace(/{realUsd}/g, realUsd.toFixed(2))
+      .replace(/{realVes}/g, realVes.toFixed(2))
+      .replace(/{diffUsd}/g, diffUsd >= 0 ? `+$${diffUsd.toFixed(2)} (Sobrante)` : `-$${Math.abs(diffUsd).toFixed(2)} (Faltante)`)
+      .replace(/{diffVes}/g, diffVes >= 0 ? `+Bs ${diffVes.toFixed(2)} (Sobrante)` : `-Bs ${Math.abs(diffVes).toFixed(2)} (Faltante)`)
+      .replace(/{ventaTotalUsd}/g, cierreResult.ventaTotalUsd.toFixed(2))
+      .replace(/{descuentosUsd}/g, cierreResult.descuentosUsd.toFixed(2));
 
     let waSuccess = false;
     let fallbackTriggered = false;
@@ -1605,7 +1631,7 @@ export default function CajaPOS({
             <select
               value={selectedClient.id}
               onChange={(e) => {
-                const cli = clients.find(c => c.id === parseInt(e.target.value));
+                const cli = clients.find(c => String(c.id) === String(e.target.value));
                 if (cli) {
                   setSelectedClient(cli);
                   setDiscountPct(cli.porcentaje_descuento);
@@ -1988,6 +2014,13 @@ export default function CajaPOS({
                 className="w-full bg-winter-blueBtn hover:bg-winter-blueBtnHover text-white py-3 rounded-lg font-bold font-sans text-xs tracking-wider transition-all"
               >
                 CONFIRMAR E INICIAR APERTURA
+              </button>
+              <button
+                type="button"
+                onClick={onLogout}
+                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-655 border border-slate-300 py-2.5 rounded-lg font-bold font-sans text-xs tracking-wider transition-all mt-2.5"
+              >
+                CANCELAR Y CERRAR SESIÓN
               </button>
             </form>
           </div>
@@ -3540,21 +3573,40 @@ export default function CajaPOS({
                     {/* Refund Summary and Action Form */}
                     <div className="border-t border-slate-200 pt-4 mt-4 space-y-4">
                       <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold">Concepto / Motivo de Devolución</label>
-                          <input
-                            type="text"
-                            required
-                            placeholder="ej. Producto defectuoso, cambio de talla..."
-                            value={devMotivo}
-                            onChange={(e) => setDevMotivo(e.target.value)}
-                            className="w-full bg-white border border-slate-350 rounded p-2 text-xs text-slate-800 focus:outline-none"
-                          />
+                        <div className="space-y-3">
+                          <div>
+                            <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold">Concepto / Motivo de Devolución</label>
+                            <input
+                              type="text"
+                              required
+                              placeholder="ej. Producto defectuoso, cambio de talla..."
+                              value={devMotivo}
+                              onChange={(e) => setDevMotivo(e.target.value)}
+                              className="w-full bg-white border border-slate-355 rounded p-2 text-xs text-slate-800 focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold">Moneda de Reembolso</label>
+                            <select
+                              value={devRefundCurrency}
+                              onChange={(e) => setDevRefundCurrency(e.target.value as 'USD' | 'VES')}
+                              className="w-full bg-white border border-slate-355 rounded p-2 text-xs text-slate-800 focus:outline-none font-sans"
+                            >
+                              <option value="USD">Dólares ($ USD)</option>
+                              <option value="VES">Bolívares (Bs VES)</option>
+                            </select>
+                          </div>
                         </div>
                         <div className="bg-rose-50 border border-rose-100 p-3 rounded-lg flex flex-col justify-center items-end font-mono">
                           <span className="text-[9px] text-rose-800 font-bold uppercase font-sans">Total Reembolso</span>
-                          <span className="text-xl font-black text-rose-700">${devRefundTotal.toFixed(2)} USD</span>
-                          <span className="text-[9px] text-rose-500 mt-0.5">Bs {(devRefundTotal * tasaDia).toFixed(2)} VES</span>
+                          {devRefundCurrency === 'USD' ? (
+                            <span className="text-xl font-black text-rose-700">${devRefundTotal.toFixed(2)} USD</span>
+                          ) : (
+                            <span className="text-xl font-black text-rose-700">Bs {(devRefundTotal * tasaDia).toFixed(2)} VES</span>
+                          )}
+                          <span className="text-[9px] text-slate-500 mt-1">
+                            Equivale a: {devRefundCurrency === 'USD' ? `Bs ${(devRefundTotal * tasaDia).toFixed(2)} VES` : `$${devRefundTotal.toFixed(2)} USD`}
+                          </span>
                         </div>
                       </div>
 
@@ -3592,7 +3644,11 @@ export default function CajaPOS({
             
             <div className="p-5 space-y-4">
               <p className="text-xs text-slate-700 leading-relaxed font-sans">
-                ¿Está seguro de procesar la devolución de <strong className="text-rose-700 font-mono font-black">${devRefundTotal.toFixed(2)} USD</strong> (Bs {(devRefundTotal * tasaDia).toFixed(2)} VES) y reintegrar el dinero al cliente?
+                ¿Está seguro de procesar la devolución de{' '}
+                <strong className="text-rose-700 font-mono font-black">
+                  {devRefundCurrency === 'USD' ? `$${devRefundTotal.toFixed(2)} USD` : `Bs ${(devRefundTotal * tasaDia).toFixed(2)} VES`}
+                </strong>{' '}
+                y reintegrar el dinero al cliente?
               </p>
               
               <div className="bg-slate-55 border border-slate-200 rounded-lg p-3 text-[10px] space-y-1 text-slate-600">
@@ -3603,6 +3659,10 @@ export default function CajaPOS({
                 <div className="flex justify-between">
                   <span>Motivo:</span>
                   <span className="italic text-slate-700 truncate max-w-[180px] font-sans">{devMotivo}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Reembolso en:</span>
+                  <strong className="text-slate-850 uppercase font-sans">{devRefundCurrency === 'USD' ? 'Dólares ($)' : 'Bolívares (Bs)'}</strong>
                 </div>
               </div>
             </div>

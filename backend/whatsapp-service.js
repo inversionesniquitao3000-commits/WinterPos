@@ -9,7 +9,29 @@ const CONFIG_FILE = 'whatsapp_config.json';
 const defaultConfig = {
   enabled: false,
   groupId: '',
-  groupName: 'Grupo de Cierres POS'
+  groupName: 'Grupo de Cierres POS',
+  messageTemplate: `📊 *REPORTE DE ARQUEO Y CIERRE DE CAJA*
+
+📅 *Fecha:* {fecha}
+👤 *Cajero:* {usuario}
+🖥️ *Terminal:* {terminal}
+
+💵 *EFECTIVO ESPERADO EN GAVETA:*
+• Dólares (USD): $ {dineroEnCajaExpected}
+• Bolívares (VES): Bs {expectedVes}
+
+📥 *EFECTIVO FÍSICO RECIBIDO:*
+• Dólares (USD): $ {realUsd}
+• Bolívares (VES): Bs {realVes}
+
+⚖️ *DIFERENCIA (BALANCE):*
+• Dólares (USD): {diffUsd}
+• Bolívares (VES): {diffVes}
+
+🛍️ *VENTAS TOTALES DEL TURNO:* $ {ventaTotalUsd} USD
+📉 *DESCUENTOS APLICADOS:* $ {descuentosUsd} USD
+
+*WinterPosAL Cloud System*`
 };
 
 // Global WhatsApp client state
