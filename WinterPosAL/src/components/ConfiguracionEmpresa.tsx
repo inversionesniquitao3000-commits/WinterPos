@@ -1259,7 +1259,12 @@ export default function ConfiguracionEmpresa({
 
         {/* TAB 4: DATABASE ADMIN */}
         {activeTab === 'db' && isAdmin && (
-          <div className="space-y-6 max-w-4xl mx-auto">
+          <div className="space-y-6 w-full px-2 lg:px-4 mx-auto animate-fade-in">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              
+              {/* LEFT COLUMN: DANGER ZONE */}
+              <div className="lg:col-span-6 space-y-6">
+          
             
             {/* WIPE SYSTEM */}
             <div className="bg-white border border-red-200 rounded-xl p-6 shadow-sm space-y-4">
@@ -1350,7 +1355,11 @@ export default function ConfiguracionEmpresa({
               </div>
             </div>
 
-            {/* BACKUPS & EXPORT/IMPORT */}
+              </div>
+
+              {/* RIGHT COLUMN: BACKUPS & AUTOMATIC BACKUP */}
+              <div className="lg:col-span-6 space-y-6">
+                {/* BACKUPS & EXPORT/IMPORT */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               
               <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4">
@@ -1503,7 +1512,10 @@ export default function ConfiguracionEmpresa({
 
           </div>
         )}
-
+            </div>
+            </div>
+          </div>
+        )}
         {/* TAB 5: WHATSAPP INTEGRATION */}
         {activeTab === 'whatsapp' && isAdmin && (
           <div className="space-y-6 w-full px-2 lg:px-4 mx-auto animate-fade-in">
