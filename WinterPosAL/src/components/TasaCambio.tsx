@@ -382,75 +382,79 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
               </div>
             </form>
           </div>
+        </div>
 
-          {/* BCV Reference Rates Card */}
-          <div className="bg-white border border-slate-200 p-5 rounded-xl space-y-4 shadow-sm">
-            <div className="flex justify-between items-center border-b border-slate-100 pb-2">
-              <h2 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2 font-sans">
-                <Layers className="w-4 h-4 text-blue-600" />
-                Referencia Oficial BCV
-              </h2>
-              <button
-                type="button"
-                onClick={loadBcvRates}
-                disabled={bcvLoading}
-                className="text-[10px] text-blue-600 hover:text-blue-700 font-sans font-bold flex items-center gap-1 active:scale-95 disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3 h-3 ${bcvLoading ? 'animate-spin' : ''}`} />
-                <span>{bcvLoading ? 'Cargando...' : 'Actualizar'}</span>
-              </button>
-            </div>
-
-            <div className="bg-gradient-to-b from-sky-950 to-slate-900 text-white rounded-xl p-4 flex flex-col items-center justify-center relative overflow-hidden border border-sky-900 shadow-inner">
-              {/* BCV Header */}
-              <div className="flex flex-col items-center border-b border-white/10 pb-3 w-full mb-3 text-center">
-                <div className="bg-white/95 rounded-full p-1.5 w-12 h-12 flex items-center justify-center mb-1.5 shadow-md">
-                  <span className="font-serif font-black text-sky-950 text-xs">BCV</span>
-                </div>
-                <span className="text-[9px] uppercase tracking-widest text-sky-200 font-black font-mono">Banco Central de Venezuela</span>
-                <span className="text-[7.5px] uppercase tracking-wider text-slate-355 font-bold font-sans">Tipo de Cambio de Referencia</span>
+        {/* Right Column: BCV Reference Card */}
+        <div className="lg:col-span-7">
+            {/* BCV Reference Rates Card */}
+            <div className="bg-white border border-slate-200 p-5 rounded-xl space-y-4 shadow-sm h-full flex flex-col justify-between">
+              <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                <h2 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2 font-sans">
+                  <Layers className="w-4 h-4 text-blue-600" />
+                  Referencia Oficial BCV
+                </h2>
+                <button
+                  type="button"
+                  onClick={loadBcvRates}
+                  disabled={bcvLoading}
+                  className="text-[10px] text-blue-600 hover:text-blue-700 font-sans font-bold flex items-center gap-1 active:scale-95 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3 h-3 ${bcvLoading ? 'animate-spin' : ''}`} />
+                  <span>{bcvLoading ? 'Cargando...' : 'Actualizar'}</span>
+                </button>
               </div>
 
-              {bcvError ? (
-                <div className="text-[10.5px] text-sky-200/80 font-sans text-center py-2 flex flex-col items-center gap-1">
-                  <span>{bcvError}</span>
-                  <span className="text-[8.5px] text-slate-400 italic">Se mantendrán las tasas locales sin interrupciones.</span>
+              <div className="bg-gradient-to-b from-sky-955 to-slate-900 text-white rounded-xl p-6 flex flex-col items-center justify-center flex-grow relative overflow-hidden border border-sky-900 shadow-inner my-2">
+                {/* BCV Header */}
+                <div className="flex flex-col items-center border-b border-white/10 pb-4 w-full mb-4 text-center">
+                  <div className="bg-white/95 rounded-full p-2 w-14 h-14 flex items-center justify-center mb-2 shadow-md">
+                    <span className="font-serif font-black text-sky-955 text-sm">BCV</span>
+                  </div>
+                  <span className="text-[11px] uppercase tracking-widest text-sky-200 font-black font-mono">Banco Central de Venezuela</span>
+                  <span className="text-[9px] uppercase tracking-wider text-slate-355 font-bold font-sans">Tipo de Cambio de Referencia</span>
                 </div>
-              ) : (
-                <div className="w-full space-y-2.5 font-sans">
-                  {/* EUR Rate */}
-                  <div className="flex justify-between items-center bg-white/5 rounded-lg px-4 py-2 border border-white/5 hover:bg-white/10 transition-all">
-                    <span className="text-[11px] font-extrabold flex items-center gap-2">
-                      <span className="text-amber-400 text-sm">€</span> EUR (Euro)
-                    </span>
-                    <span className="text-[13px] font-black font-mono tracking-wider text-sky-50">
-                      {bcvRates.eur ? parseFloat(bcvRates.eur).toFixed(4) : '—'}
-                    </span>
-                  </div>
-                  
-                  {/* USD Rate */}
-                  <div className="flex justify-between items-center bg-white/5 rounded-lg px-4 py-2 border border-white/5 hover:bg-white/10 transition-all">
-                    <span className="text-[11px] font-extrabold flex items-center gap-2">
-                      <span className="text-emerald-400 text-sm">$</span> USD (Dólar)
-                    </span>
-                    <span className="text-[13px] font-black font-mono tracking-wider text-sky-50">
-                      {bcvRates.usd ? parseFloat(bcvRates.usd).toFixed(4) : '—'}
-                    </span>
-                  </div>
 
-                  {/* Value Date */}
-                  <div className="text-center pt-2 text-[9px] text-slate-400 font-semibold border-t border-white/5">
-                    Fecha Valor: <span className="text-slate-300 font-mono font-bold">{bcvRates.fechaValor || 'No disponible'}</span>
+                {bcvError ? (
+                  <div className="text-xs text-sky-200/80 font-sans text-center py-4 flex flex-col items-center gap-2">
+                    <span>{bcvError}</span>
+                    <span className="text-[10px] text-slate-400 italic">Se mantendrán las tasas locales sin interrupciones.</span>
                   </div>
-                </div>
-              )}
+                ) : (
+                  <div className="w-full max-w-md space-y-3.5 font-sans">
+                    {/* EUR Rate */}
+                    <div className="flex justify-between items-center bg-white/5 rounded-lg px-5 py-2.5 border border-white/5 hover:bg-white/10 transition-all">
+                      <span className="text-xs font-extrabold flex items-center gap-2">
+                        <span className="text-amber-400 text-base">€</span> EUR (Euro)
+                      </span>
+                      <span className="text-[15px] font-black font-mono tracking-wider text-sky-50">
+                        {bcvRates.eur ? parseFloat(bcvRates.eur).toFixed(4) : '—'}
+                      </span>
+                    </div>
+                    
+                    {/* USD Rate */}
+                    <div className="flex justify-between items-center bg-white/5 rounded-lg px-5 py-2.5 border border-white/5 hover:bg-white/10 transition-all">
+                      <span className="text-xs font-extrabold flex items-center gap-2">
+                        <span className="text-emerald-400 text-base">$</span> USD (Dólar)
+                      </span>
+                      <span className="text-[15px] font-black font-mono tracking-wider text-sky-50">
+                        {bcvRates.usd ? parseFloat(bcvRates.usd).toFixed(4) : '—'}
+                      </span>
+                    </div>
+
+                    {/* Value Date */}
+                    <div className="text-center pt-2 text-[10px] text-slate-450 font-semibold border-t border-white/5">
+                      Fecha Valor: <span className="text-slate-300 font-mono font-bold">{bcvRates.fechaValor || 'No disponible'}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
-        </div>
+        </div> {/* Close first grid */}
 
-        {/* LOG HISTORY COLUMN */}
-        <div className="lg:col-span-7">
+        {/* LOG HISTORY FULL WIDTH SECTION */}
+        <div className="mt-8">
           <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col h-[500px]">
             <div className="bg-slate-50 px-5 py-4 border-b border-slate-200 flex items-center justify-between">
               <h2 className="text-xs font-bold text-slate-600 uppercase tracking-widest flex items-center gap-2 font-sans">
@@ -565,7 +569,5 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
         </div>
 
       </div>
-
-    </div>
-  );
-}
+    );
+  }
