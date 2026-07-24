@@ -671,6 +671,49 @@ export default function App() {
     await postApiData('/productos/precios', { id: prodId, cost: prices.cost, detail: prices.detail, mayor: prices.mayor });
   };
 
+  const handleUpdateProductPricesBulk = async (
+    updates: { id: number; cost: number; detail: number; mayor: number }[],
+    historyLogs: any[]
+  ) => {
+    try {
+      const res = await fetch(getApiUrl('/productos/precios/bulk'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates, historyLogs })
+      });
+      if (res.ok) {
+        setProducts(prev =>
+          prev.map(p => {
+            const upd = updates.find(u => u.id === p.id);
+            if (upd) {
+              return {
+                ...p,
+                precio_costo_usd: upd.cost,
+                precio_detalle_usd: upd.detail,
+                precio_mayor_usd: upd.mayor
+              };
+            }
+            return p;
+          })
+        );
+        const adjDate = getLocalISODateString();
+        const user = currentUser?.nombre || 'SISTEMA';
+        const formattedLogs = historyLogs.map(l => ({
+          ...l,
+          id: Math.random(),
+          date: adjDate,
+          usuario: user
+        }));
+        setPriceHistory(prev => [...prev, ...formattedLogs]);
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('Error al actualizar precios masivamente:', err);
+      return false;
+    }
+  };
+
   const handleAddClient = async (cli: Client) => {
     const saved = await postApiData('/clientes', cli);
     if (saved) {
@@ -1252,6 +1295,7 @@ export default function App() {
               onAddProductsBulk={handleAddProductsBulk}
               onUpdateProductStock={handleUpdateProductStock}
               onUpdateProductPrices={handleUpdateProductPrices}
+              onUpdateProductPricesBulk={handleUpdateProductPricesBulk}
               onDeleteProduct={handleDeleteProduct}
               onUpdateProduct={handleUpdateProduct}
             />

@@ -390,6 +390,41 @@ export async function updateProductPrices(prodId, prices) {
   return false;
 }
 
+export async function updateProductPricesBulk(updates) {
+  if (usePostgres) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const update of updates) {
+        await client.query(
+          'UPDATE Productos SET precio_costo_usd = $1, precio_detalle_usd = $2, precio_mayor_usd = $3 WHERE id = $4',
+          [update.cost, update.detail, update.mayor, update.id]
+        );
+      }
+      await client.query('COMMIT');
+      return true;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('Error en updateProductPricesBulk (Postgres):', err.message);
+      return false;
+    } finally {
+      client.release();
+    }
+  } else {
+    const products = readJsonFile('products.json', mockProducts);
+    for (const update of updates) {
+      const idx = products.findIndex(p => p.id === update.id);
+      if (idx !== -1) {
+        products[idx].precio_costo_usd = update.cost;
+        products[idx].precio_detalle_usd = update.detail;
+        products[idx].precio_mayor_usd = update.mayor;
+      }
+    }
+    writeJsonFile('products.json', products);
+    return true;
+  }
+}
+
 export async function getClients() {
   if (usePostgres) {
     try {

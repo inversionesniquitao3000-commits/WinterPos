@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import {
   getCompanyConfig, saveCompanyConfig, getUsers, getProducts, saveProduct,
-  updateProductStock, updateProductPrices, getClients, saveClient, registerAbono,
+  updateProductStock, updateProductPrices, updateProductPricesBulk, getClients, saveClient, registerAbono,
   getTasaHistory, saveTasa, getMovements, saveMovement, getPriceHistory, savePriceHistory,
   getSales, saveSale, getCierres, abrirCaja, cerrarCaja, getCajaEstado, registrarCajaMovimiento, updateCierre,
   updateClient, deleteClient, getAbonos, deleteProduct, updateProduct, saveProductsBulk,
@@ -87,6 +87,17 @@ app.post('/api/productos/stock', async (req, res) => {
 app.post('/api/productos/precios', async (req, res) => {
   const { id, cost, detail, mayor } = req.body;
   const success = await updateProductPrices(id, { cost, detail, mayor });
+  res.json({ success });
+});
+
+app.post('/api/productos/precios/bulk', async (req, res) => {
+  const { updates, historyLogs } = req.body;
+  const success = await updateProductPricesBulk(updates);
+  if (success && historyLogs && historyLogs.length > 0) {
+    for (const log of historyLogs) {
+      await savePriceHistory(log);
+    }
+  }
   res.json({ success });
 });
 

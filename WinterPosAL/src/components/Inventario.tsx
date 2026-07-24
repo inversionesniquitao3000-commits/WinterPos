@@ -12,6 +12,7 @@ interface InventarioProps {
   onAddProductsBulk: (productsArray: any[]) => Promise<number | null>;
   onUpdateProductStock: (prodId: number, type: 'Entrada' | 'Salida' | 'Merma' | 'Devolucion', qty: number, reason: string) => void;
   onUpdateProductPrices: (prodId: number, prices: { cost: number; detail: number; mayor: number }, reason: string) => void;
+  onUpdateProductPricesBulk: (updates: { id: number; cost: number; detail: number; mayor: number }[], historyLogs: any[]) => Promise<boolean>;
   onDeleteProduct: (prodId: number) => Promise<boolean>;
   onUpdateProduct: (prod: Product) => Promise<boolean>;
 }
@@ -32,6 +33,7 @@ export default function Inventario({
   onAddProductsBulk,
   onUpdateProductStock,
   onUpdateProductPrices,
+  onUpdateProductPricesBulk,
   onDeleteProduct,
   onUpdateProduct
 }: InventarioProps) {
@@ -103,6 +105,18 @@ export default function Inventario({
   const [quickAddName, setQuickAddName] = useState('');
   const [quickAddTarget, setQuickAddTarget] = useState<'new' | 'edit'>('new');
 
+  const [showGeneralAdjustModal, setShowGeneralAdjustModal] = useState(false);
+  const [adjustScope, setAdjustScope] = useState<'todos' | 'categoria' | 'seleccionados'>('todos');
+  const [selectedScopeCategory, setSelectedScopeCategory] = useState('ALIMENTOS');
+  const [selectedProductIds, setSelectedProductIds] = useState<number[]>([]);
+  const [generalAdjustType, setGeneralAdjustType] = useState<'aumento' | 'disminucion'>('aumento');
+  const [generalAdjustPct, setGeneralAdjustPct] = useState('10');
+  const [generalAdjustCost, setGeneralAdjustCost] = useState(true);
+  const [generalAdjustDetail, setGeneralAdjustDetail] = useState(true);
+  const [generalAdjustMayor, setGeneralAdjustMayor] = useState(true);
+  const [generalAdjustReason, setGeneralAdjustReason] = useState('');
+  const [generalAdjustSearch, setGeneralAdjustSearch] = useState('');
+
   // Escape key listener to close modals
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -114,6 +128,8 @@ export default function Inventario({
         setShowBulkModal(false);
         setShowCategoriesModal(false);
         setShowQuickAddModal(false);
+        setShowGeneralAdjustModal(false);
+        setGeneralAdjustSearch('');
       }
     };
     window.addEventListener('keydown', handleEsc);
@@ -516,6 +532,119 @@ export default function Inventario({
 
     setCategories(prev => prev.filter(cat => cat !== catName));
     showToast(`Categoría "${catName}" eliminada con éxito.`);
+  };
+
+  const getGeneralAdjustTargetProducts = () => {
+    return products.filter(p => {
+      if (adjustScope === 'todos') return true;
+      if (adjustScope === 'categoria') return p.category === selectedScopeCategory;
+      if (adjustScope === 'seleccionados') return selectedProductIds.includes(p.id);
+      return false;
+    });
+  };
+
+  const computePriceChange = (val: number) => {
+    const pct = parseFloat(generalAdjustPct) || 0;
+    const factor = pct / 100;
+    if (generalAdjustType === 'aumento') {
+      return parseFloat((val * (1 + factor)).toFixed(4));
+    } else {
+      return parseFloat((val * (1 - factor)).toFixed(4));
+    }
+  };
+
+  const handleApplyGeneralAdjustment = async () => {
+    if (!generalAdjustReason.trim()) {
+      showAlert('Debe especificar una justificación obligatoria.', 'Justificación Requerida', 'warning');
+      return;
+    }
+
+    const pctVal = parseFloat(generalAdjustPct);
+    if (isNaN(pctVal) || pctVal <= 0) {
+      showAlert('Por favor ingrese un porcentaje de ajuste válido mayor a cero.', 'Porcentaje Inválido', 'warning');
+      return;
+    }
+
+    const targetProducts = getGeneralAdjustTargetProducts();
+    if (targetProducts.length === 0) {
+      showAlert('No hay productos que coincidan con la selección actual.', 'Sin Productos', 'warning');
+      return;
+    }
+
+    // Compute changes and validate
+    const updates: { id: number; cost: number; detail: number; mayor: number }[] = [];
+    const historyLogs: any[] = [];
+    let violationsCount = 0;
+
+    for (const p of targetProducts) {
+      const nextCost = generalAdjustCost ? computePriceChange(p.precio_costo_usd) : p.precio_costo_usd;
+      const nextDetail = generalAdjustDetail ? computePriceChange(p.precio_detalle_usd) : p.precio_detalle_usd;
+      const nextMayor = generalAdjustMayor ? computePriceChange(p.precio_mayor_usd) : p.precio_mayor_usd;
+
+      if (nextDetail <= nextCost || nextMayor <= nextCost) {
+        violationsCount++;
+      }
+
+      updates.push({
+        id: p.id,
+        cost: nextCost,
+        detail: nextDetail,
+        mayor: nextMayor
+      });
+
+      if (generalAdjustCost && p.precio_costo_usd !== nextCost) {
+        historyLogs.push({
+          productCode: p.barcode,
+          priceType: 'Costo',
+          oldPrice: p.precio_costo_usd,
+          newPrice: nextCost,
+          motivo: generalAdjustReason.trim()
+        });
+      }
+      if (generalAdjustDetail && p.precio_detalle_usd !== nextDetail) {
+        historyLogs.push({
+          productCode: p.barcode,
+          priceType: 'Detalle',
+          oldPrice: p.precio_detalle_usd,
+          newPrice: nextDetail,
+          motivo: generalAdjustReason.trim()
+        });
+      }
+      if (generalAdjustMayor && p.precio_mayor_usd !== nextMayor) {
+        historyLogs.push({
+          productCode: p.barcode,
+          priceType: 'Mayor',
+          oldPrice: p.precio_mayor_usd,
+          newPrice: nextMayor,
+          motivo: generalAdjustReason.trim()
+        });
+      }
+    }
+
+    if (violationsCount > 0) {
+      showAlert(
+        `El ajuste no puede aplicarse. ${violationsCount} productos quedarían con precio de venta menor o igual a su precio de costo. Verifique los porcentajes.`,
+        'Violación de Regla de Precios',
+        'error'
+      );
+      return;
+    }
+
+    const confirm = await showConfirm(
+      `¿Está seguro de aplicar este ajuste del ${generalAdjustPct}% a los ${targetProducts.length} productos seleccionados?`,
+      'Confirmar Ajuste General'
+    );
+    if (!confirm) return;
+
+    const success = await onUpdateProductPricesBulk(updates, historyLogs);
+    if (success) {
+      setShowGeneralAdjustModal(false);
+      setSelectedProductIds([]);
+      setGeneralAdjustReason('');
+      showToast('Ajuste general de precios aplicado con éxito.');
+    } else {
+      showAlert('Hubo un error al guardar los cambios masivos.', 'Error de Servidor', 'error');
+    }
   };
 
   // New product form state
@@ -1281,6 +1410,21 @@ export default function Inventario({
                     >
                       <Tag className="w-4 h-4 bg-emerald-700/50 rounded-full p-0.5" />
                       <span>Categorías</span>
+                    </button>
+                  )}
+
+                  {/* BUTTON: AJUSTE GENERAL */}
+                  {_currentUser.rol.toLowerCase() === 'administrador' && (
+                    <button
+                      onClick={() => {
+                        setSelectedProductIds([]);
+                        setGeneralAdjustReason('');
+                        setShowGeneralAdjustModal(true);
+                      }}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all active:scale-95"
+                    >
+                      <Layers className="w-4 h-4 bg-emerald-700/50 rounded-full p-0.5" />
+                      <span>Ajuste General</span>
                     </button>
                   )}
 
@@ -2610,6 +2754,344 @@ export default function Inventario({
           </div>
         </div>
       )}
+
+      {/* GENERAL ADJUSTMENT MODAL */}
+      {showGeneralAdjustModal && (() => {
+        const targetProducts = getGeneralAdjustTargetProducts();
+        
+        // Check violations
+        let violationsCount = 0;
+        const updatesPreview = targetProducts.map(p => {
+          const nextCost = generalAdjustCost ? computePriceChange(p.precio_costo_usd) : p.precio_costo_usd;
+          const nextDetail = generalAdjustDetail ? computePriceChange(p.precio_detalle_usd) : p.precio_detalle_usd;
+          const nextMayor = generalAdjustMayor ? computePriceChange(p.precio_mayor_usd) : p.precio_mayor_usd;
+          
+          const violates = nextDetail <= nextCost || nextMayor <= nextCost;
+          if (violates) violationsCount++;
+          
+          return {
+            p,
+            nextCost,
+            nextDetail,
+            nextMayor,
+            violates
+          };
+        });
+
+        // Filter products for the manual selection list
+        const filteredForSelection = products.filter(p => 
+          p.description.toLowerCase().includes(generalAdjustSearch.toLowerCase()) ||
+          p.barcode.toLowerCase().includes(generalAdjustSearch.toLowerCase())
+        );
+
+        return (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[50] flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-4xl w-full h-[85vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
+              {/* Header */}
+              <div className="bg-gradient-to-r from-emerald-600 to-emerald-700 px-6 py-4 flex justify-between items-center text-white">
+                <h3 className="text-sm font-extrabold uppercase tracking-wider font-mono flex items-center gap-2">
+                  <Layers className="w-4 h-4 bg-emerald-700/50 rounded-full p-0.5" />
+                  Ajuste General de Precios (Porcentaje)
+                </h3>
+                <button 
+                  onClick={() => setShowGeneralAdjustModal(false)}
+                  className="text-white/80 hover:text-white text-base focus:outline-none"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Main Content Area (Two Columns) */}
+              <div className="flex-1 flex overflow-hidden min-h-0">
+                {/* Left Column: Settings */}
+                <div className="w-1/2 p-6 border-r border-slate-200 overflow-y-auto space-y-5">
+                  {/* 1. Scope selection */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold font-mono block">Ámbito de Aplicación</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setAdjustScope('todos')}
+                        className={`py-2 px-3 rounded-lg text-xs font-bold font-sans transition-all border ${
+                          adjustScope === 'todos'
+                            ? 'bg-emerald-50 border-emerald-500 text-emerald-700'
+                            : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-650'
+                        }`}
+                      >
+                        Todos
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAdjustScope('categoria')}
+                        className={`py-2 px-3 rounded-lg text-xs font-bold font-sans transition-all border ${
+                          adjustScope === 'categoria'
+                            ? 'bg-emerald-50 border-emerald-500 text-emerald-700'
+                            : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-650'
+                        }`}
+                      >
+                        Por Categoría
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAdjustScope('seleccionados')}
+                        className={`py-2 px-3 rounded-lg text-xs font-bold font-sans transition-all border ${
+                          adjustScope === 'seleccionados'
+                            ? 'bg-emerald-50 border-emerald-500 text-emerald-700'
+                            : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-650'
+                        }`}
+                      >
+                        Manual (Uno a Uno)
+                      </button>
+                    </div>
+
+                    {/* Category Selection Dropdown */}
+                    {adjustScope === 'categoria' && (
+                      <div className="mt-2 animate-in fade-in slide-in-from-top-1 duration-150">
+                        <label className="text-[10px] text-slate-500 block mb-1 font-sans">Seleccione Categoría</label>
+                        <select
+                          value={selectedScopeCategory}
+                          onChange={(e) => setSelectedScopeCategory(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-350 rounded p-2 text-xs text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none"
+                        >
+                          {categories.map(cat => (
+                            <option key={cat} value={cat}>{cat}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 2. Adjustment Type and Percentage */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold font-mono block">Tipo de Ajuste y Valor</label>
+                    <div className="flex gap-3">
+                      <div className="w-1/2">
+                        <label className="text-[10px] text-slate-500 block mb-1 font-sans">Acción</label>
+                        <select
+                          value={generalAdjustType}
+                          onChange={(e) => setGeneralAdjustType(e.target.value as any)}
+                          className="w-full bg-slate-50 border border-slate-350 rounded p-2 text-xs font-bold text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none"
+                        >
+                          <option value="aumento">Aumento (+)</option>
+                          <option value="disminucion">Disminución (-)</option>
+                        </select>
+                      </div>
+                      <div className="w-1/2">
+                        <label className="text-[10px] text-slate-500 block mb-1 font-sans">Porcentaje (%)</label>
+                        <input
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          value={generalAdjustPct}
+                          onChange={(e) => setGeneralAdjustPct(e.target.value)}
+                          placeholder="Ej: 10"
+                          className="w-full bg-slate-50 border border-slate-350 rounded p-2 text-xs text-slate-800 font-mono focus:bg-white focus:border-emerald-600 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 3. Fields to Adjust Checkboxes */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold font-mono block">Precios a Modificar</label>
+                    <div className="flex gap-4 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-sans text-slate-700 select-none">
+                        <input
+                          type="checkbox"
+                          checked={generalAdjustCost}
+                          onChange={(e) => setGeneralAdjustCost(e.target.checked)}
+                          className="rounded border-slate-350 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        Precio Costo
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-sans text-slate-700 select-none">
+                        <input
+                          type="checkbox"
+                          checked={generalAdjustDetail}
+                          onChange={(e) => setGeneralAdjustDetail(e.target.checked)}
+                          className="rounded border-slate-350 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        Venta Detalle
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-sans text-slate-700 select-none">
+                        <input
+                          type="checkbox"
+                          checked={generalAdjustMayor}
+                          onChange={(e) => setGeneralAdjustMayor(e.target.checked)}
+                          className="rounded border-slate-350 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        Venta Mayor
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* 4. Reason / Justification */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold font-mono block">Justificación / Motivo</label>
+                    <textarea
+                      rows={2}
+                      value={generalAdjustReason}
+                      onChange={(e) => setGeneralAdjustReason(e.target.value)}
+                      placeholder="Motivo de la actualización de precios (Obligatorio)..."
+                      className="w-full bg-slate-50 border border-slate-350 rounded-lg px-3 py-2 text-xs text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none font-sans"
+                    />
+                  </div>
+                </div>
+
+                {/* Right Column: Preview & Selection */}
+                <div className="w-1/2 p-6 bg-slate-50 flex flex-col overflow-hidden">
+                  {adjustScope === 'seleccionados' ? (
+                    /* Manual Selection Mode view */
+                    <div className="flex-1 flex flex-col min-h-0 space-y-3">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold font-mono">Selección de Productos ({selectedProductIds.length})</label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (selectedProductIds.length === filteredForSelection.length) {
+                              setSelectedProductIds([]);
+                            } else {
+                              setSelectedProductIds(filteredForSelection.map(p => p.id));
+                            }
+                          }}
+                          className="text-[10px] text-emerald-600 hover:text-emerald-700 font-bold"
+                        >
+                          {selectedProductIds.length === filteredForSelection.length ? 'Desmarcar Todos' : 'Marcar Todos'}
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 pointer-events-none text-slate-450">
+                          <Search className="w-3.5 h-3.5" />
+                        </span>
+                        <input
+                          type="text"
+                          placeholder="Buscar por descripción o código..."
+                          value={generalAdjustSearch}
+                          onChange={(e) => setGeneralAdjustSearch(e.target.value)}
+                          className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 pl-8 text-xs text-slate-800 focus:outline-none focus:border-emerald-600 font-sans"
+                        />
+                      </div>
+                      
+                      <div className="flex-1 border border-slate-200 rounded-lg bg-white overflow-y-auto divide-y divide-slate-100">
+                        {filteredForSelection.map(p => {
+                          const isChecked = selectedProductIds.includes(p.id);
+                          return (
+                            <label 
+                              key={p.id} 
+                              className="flex items-center gap-3 px-3 py-2 hover:bg-slate-50 cursor-pointer text-xs select-none"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  if (isChecked) {
+                                    setSelectedProductIds(prev => prev.filter(id => id !== p.id));
+                                  } else {
+                                    setSelectedProductIds(prev => [...prev, p.id]);
+                                  }
+                                }}
+                                className="rounded border-slate-350 text-emerald-600 focus:ring-emerald-500"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <p className="font-bold text-slate-700 truncate">{p.description}</p>
+                                <p className="text-[10px] text-slate-400 font-mono truncate">{p.barcode} • Costo: ${p.precio_costo_usd.toFixed(2)}</p>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    /* General Preview Mode view */
+                    <div className="flex-1 flex flex-col min-h-0 space-y-3">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold font-mono">
+                          Resumen Global ({targetProducts.length} Afectados)
+                        </label>
+                        {violationsCount > 0 && (
+                          <span className="bg-red-100 text-red-700 text-[10px] px-2 py-0.5 rounded font-extrabold animate-pulse">
+                            ⚠️ {violationsCount} Violaciones de Regla Costo/Venta
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex-1 border border-slate-250 rounded-lg overflow-hidden bg-white flex flex-col min-h-0">
+                        <div className="overflow-x-auto flex-1">
+                          <table className="w-full text-left border-collapse text-xs">
+                            <thead className="bg-slate-100 text-[10px] uppercase text-slate-500 font-mono sticky top-0 z-10 border-b border-slate-200">
+                              <tr>
+                                <th className="px-3 py-2">Producto</th>
+                                <th className="px-2 py-2 text-right">Costo</th>
+                                <th className="px-2 py-2 text-right">Detalle</th>
+                                <th className="px-2 py-2 text-right">Mayor</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {updatesPreview.slice(0, 100).map(({ p, nextCost, nextDetail, nextMayor, violates }) => (
+                                <tr key={p.id} className={`hover:bg-slate-50 ${violates ? 'bg-red-50/50' : ''}`}>
+                                  <td className="px-3 py-1.5 font-sans min-w-[120px]">
+                                    <p className="font-bold text-slate-700 truncate max-w-[150px]" title={p.description}>
+                                      {p.description}
+                                    </p>
+                                    <span className="text-[9px] text-slate-400 font-mono block">{p.barcode}</span>
+                                  </td>
+                                  <td className="px-2 py-1.5 text-right font-mono">
+                                    <span className="text-[9px] text-slate-400 block decoration-red-500 line-through">${p.precio_costo_usd.toFixed(2)}</span>
+                                    <span className={`font-bold ${generalAdjustCost ? 'text-slate-800' : 'text-slate-500'}`}>${nextCost.toFixed(2)}</span>
+                                  </td>
+                                  <td className="px-2 py-1.5 text-right font-mono">
+                                    <span className="text-[9px] text-slate-400 block line-through">${p.precio_detalle_usd.toFixed(2)}</span>
+                                    <span className={`font-bold ${violates ? 'text-red-600' : generalAdjustDetail ? 'text-emerald-600' : 'text-slate-500'}`}>${nextDetail.toFixed(2)}</span>
+                                  </td>
+                                  <td className="px-2 py-1.5 text-right font-mono">
+                                    <span className="text-[9px] text-slate-400 block line-through">${p.precio_mayor_usd.toFixed(2)}</span>
+                                    <span className={`font-bold ${violates ? 'text-red-600' : generalAdjustMayor ? 'text-slate-800' : 'text-slate-500'}`}>${nextMayor.toFixed(2)}</span>
+                                  </td>
+                                </tr>
+                              ))}
+                              {updatesPreview.length > 100 && (
+                                <tr>
+                                  <td colSpan={4} className="px-3 py-2 text-center text-slate-450 italic text-[10px] bg-slate-50">
+                                    Mostrando los primeros 100 productos de {updatesPreview.length} totales...
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex justify-between items-center">
+                <span className="text-[10px] text-slate-400 italic">
+                  * Todos los precios resultantes serán redondeados a 4 decimales.
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowGeneralAdjustModal(false)}
+                    className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-5 py-2.5 rounded-lg text-xs font-sans font-bold transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleApplyGeneralAdjustment}
+                    disabled={violationsCount > 0 || targetProducts.length === 0}
+                    className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-lg text-xs font-sans font-bold transition-all"
+                  >
+                    Aplicar Ajuste ({targetProducts.length})
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );
