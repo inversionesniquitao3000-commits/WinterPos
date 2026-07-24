@@ -16,6 +16,13 @@ interface InventarioProps {
   onUpdateProduct: (prod: Product) => Promise<boolean>;
 }
 
+const formatStockVal = (val: any, aGranel?: boolean) => {
+  const num = parseFloat(val);
+  if (isNaN(num)) return '0';
+  if (!aGranel) return Math.round(num).toString();
+  return num.toFixed(3);
+};
+
 export default function Inventario({
   products,
   movements,
@@ -302,8 +309,14 @@ export default function Inventario({
           
           const cleanFloat = (val: string) => val.replace(/,/g, '.');
 
-          const stock_actual = parseFloat(cleanFloat(getValue('stock_actual', '0'))) || 0;
-          const stock_minimo = parseFloat(cleanFloat(getValue('stock_minimo', '0'))) || 0;
+           const granelStr = getValue('a_granel', 'NO').toUpperCase();
+          const a_granel = granelStr === 'SI' || granelStr === 'YES' || granelStr === 'TRUE' || granelStr === '1';
+
+          const raw_stock_actual = parseFloat(cleanFloat(getValue('stock_actual', '0'))) || 0;
+          const raw_stock_minimo = parseFloat(cleanFloat(getValue('stock_minimo', '0'))) || 0;
+          const stock_actual = a_granel ? raw_stock_actual : Math.round(raw_stock_actual);
+          const stock_minimo = a_granel ? raw_stock_minimo : Math.round(raw_stock_minimo);
+
           const precio_costo_usd = parseFloat(cleanFloat(getValue('precio_costo_usd'))) || 0;
           const precio_detalle_usd = parseFloat(cleanFloat(getValue('precio_detalle_usd'))) || 0;
           const precio_mayor_usd = parseFloat(cleanFloat(getValue('precio_mayor_usd'))) || 0;
@@ -311,9 +324,6 @@ export default function Inventario({
           
           const exentoStr = getValue('exento_impuesto', 'NO').toUpperCase();
           const exento_impuesto = exentoStr === 'SI' || exentoStr === 'YES' || exentoStr === 'TRUE' || exentoStr === '1';
-
-          const granelStr = getValue('a_granel', 'NO').toUpperCase();
-          const a_granel = granelStr === 'SI' || granelStr === 'YES' || granelStr === 'TRUE' || granelStr === '1';
 
           if (!barcode) {
             errors.push(`Fila ${i + 1}: El código de barras o clave es obligatorio.`);
@@ -478,7 +488,8 @@ export default function Inventario({
       barcode: editBarcode.trim() || editClave.trim(),
       description: editDesc.trim().toUpperCase(),
       category: editCat,
-      stock_minimo: parseInt(editMinStock) || 0,
+      stock_actual: editAGranel ? selectedProduct.stock_actual : Math.round(selectedProduct.stock_actual),
+      stock_minimo: editAGranel ? (parseFloat(editMinStock) || 0) : (parseInt(editMinStock) || 0),
       cantidad_mayorista: parseInt(editWholesaleQty) || 12,
       exento_impuesto: !editTaxActive,
       a_granel: editAGranel,
@@ -606,9 +617,14 @@ export default function Inventario({
     e.preventDefault();
     if (!selectedProduct) return;
     
-    const qty = parseInt(adjustQty);
+    const qty = selectedProduct.a_granel ? parseFloat(adjustQty) : parseInt(adjustQty);
     if (isNaN(qty) || qty <= 0) {
       showAlert('Por favor ingrese una cantidad válida mayor a cero.', 'Cantidad Inválida', 'warning');
+      return;
+    }
+
+    if (!selectedProduct.a_granel && !Number.isInteger(parseFloat(adjustQty))) {
+      showAlert('Este producto se vende por unidad. La cantidad debe ser un número entero.', 'Cantidad Inválida', 'warning');
       return;
     }
 
@@ -663,7 +679,7 @@ export default function Inventario({
     const cost = parseFloat(newCost) || 0;
     const detail = parseFloat(newDetail) || 0;
     const mayor = parseFloat(newMayor) || 0;
-    const min = parseInt(newMinStock) || 0;
+    const min = newAGranel ? (parseFloat(newMinStock) || 0) : (parseInt(newMinStock) || 0);
     const wholesale = parseInt(newWholesaleQty) || 12;
 
     const newProd: Product = {
@@ -710,9 +726,9 @@ export default function Inventario({
     }
 
     const totalFilteredProducts = filteredProducts.length;
-    const totalFilteredQty = filteredProducts.reduce((acc, p) => acc + p.stock_actual, 0);
-    const totalFilteredValueVenta = filteredProducts.reduce((acc, p) => acc + p.precio_detalle_usd * p.stock_actual, 0);
-    const totalFilteredValueCosto = filteredProducts.reduce((acc, p) => acc + p.precio_costo_usd * p.stock_actual, 0);
+    const totalFilteredQty = filteredProducts.reduce((acc, p) => acc + (parseFloat(p.stock_actual as any) || 0), 0);
+    const totalFilteredValueVenta = filteredProducts.reduce((acc, p) => acc + p.precio_detalle_usd * (parseFloat(p.stock_actual as any) || 0), 0);
+    const totalFilteredValueCosto = filteredProducts.reduce((acc, p) => acc + p.precio_costo_usd * (parseFloat(p.stock_actual as any) || 0), 0);
 
     const now = new Date().toLocaleString();
 
@@ -896,24 +912,49 @@ export default function Inventario({
         <div className="space-y-4">
           
           {/* INVENTORY METRICS PANEL */}
-          <div className="bg-white border border-slate-200 rounded-xl py-2 px-4 shadow-sm grid grid-cols-1 md:grid-cols-3 gap-3 text-slate-800 font-mono text-xs">
-            <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-100 pb-1.5 md:pb-0 md:pr-4">
-              <span className="text-slate-500 font-sans">Precio 1 del Inventario :</span>
-              <span className="font-extrabold text-slate-900 text-sm">
-                {products.reduce((acc, p) => acc + p.precio_detalle_usd * p.stock_actual, 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
+          <div className="bg-white border border-slate-200 rounded-xl py-3 px-4 shadow-sm text-slate-800 font-mono text-xs space-y-2.5">
+            {/* General metrics (All products) */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-100 pb-1.5 md:pb-0 md:pr-4">
+                <span className="text-slate-500 font-sans font-bold">Precio 1 del Inventario :</span>
+                <span className="font-extrabold text-slate-900 text-sm">
+                  ${products.reduce((acc, p) => acc + p.precio_detalle_usd * (parseFloat(p.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-105 pb-1.5 md:pb-0 md:px-4">
+                <span className="text-slate-500 font-sans font-bold">Costo del Inventario :</span>
+                <span className="font-extrabold text-slate-900 text-sm">
+                  ${products.reduce((acc, p) => acc + p.precio_costo_usd * (parseFloat(p.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="flex justify-between items-center md:pl-4">
+                <span className="text-slate-500 font-sans font-bold">Total Productos :</span>
+                <span className="font-extrabold text-slate-900 text-sm">
+                  {products.length} <span className="text-[10px] text-slate-400 font-normal">({products.reduce((acc, p) => acc + (!p.a_granel ? (parseFloat(p.stock_actual as any) || 0) : 0), 0)} uds + {products.reduce((acc, p) => acc + (p.a_granel ? (parseFloat(p.stock_actual as any) || 0) : 0), 0).toFixed(3)} kg)</span>
+                </span>
+              </div>
             </div>
-            <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-105 pb-1.5 md:pb-0 md:px-4">
-              <span className="text-slate-500 font-sans">Costo del Inventario :</span>
-              <span className="font-extrabold text-slate-900 text-sm">
-                {products.reduce((acc, p) => acc + p.precio_costo_usd * p.stock_actual, 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
-            </div>
-            <div className="flex justify-between items-center md:pl-4">
-              <span className="text-slate-500 font-sans">Total Productos :</span>
-              <span className="font-extrabold text-slate-900 text-sm">
-                {products.length} <span className="text-[10px] text-slate-400 font-normal">({products.reduce((acc, p) => acc + p.stock_actual, 0)} uds)</span>
-              </span>
+            
+            {/* Filtered metrics */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-dashed border-slate-200">
+              <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-100 pb-1.5 md:pb-0 md:pr-4">
+                <span className="text-sky-700 font-sans font-bold">Precio 1 (Filtrado) :</span>
+                <span className="font-extrabold text-sky-850 text-sm">
+                  ${filteredProducts.reduce((acc, p) => acc + p.precio_detalle_usd * (parseFloat(p.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-105 pb-1.5 md:pb-0 md:px-4">
+                <span className="text-sky-700 font-sans font-bold">Costo (Filtrado) :</span>
+                <span className="font-extrabold text-sky-850 text-sm">
+                  ${filteredProducts.reduce((acc, p) => acc + p.precio_costo_usd * (parseFloat(p.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+              <div className="flex justify-between items-center md:pl-4">
+                <span className="text-sky-700 font-sans font-bold">Total (Filtrado) :</span>
+                <span className="font-extrabold text-sky-850 text-sm">
+                  {filteredProducts.length} <span className="text-[10px] text-sky-500 font-normal">({filteredProducts.reduce((acc, p) => acc + (!p.a_granel ? (parseFloat(p.stock_actual as any) || 0) : 0), 0)} uds + {filteredProducts.reduce((acc, p) => acc + (p.a_granel ? (parseFloat(p.stock_actual as any) || 0) : 0), 0).toFixed(3)} kg)</span>
+                </span>
+              </div>
             </div>
           </div>
           <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between bg-slate-50 border border-slate-200 rounded-xl py-2 px-4 shadow-sm">
@@ -1048,9 +1089,9 @@ export default function Inventario({
                               )}
                             </td>
                             <td className="px-2 py-1 font-sans">{p.category}</td>
-                            <td className="px-2 py-1 text-right font-mono text-slate-500">{p.stock_minimo}</td>
+                            <td className="px-2 py-1 text-right font-mono text-slate-500">{formatStockVal(p.stock_minimo, p.a_granel)}</td>
                             <td className={`px-2 py-1 text-right font-black font-mono ${isLowStock ? 'text-red-500 animate-pulse font-bold' : 'text-slate-800'}`}>
-                              {p.stock_actual}
+                              {formatStockVal(p.stock_actual, p.a_granel)}
                             </td>
                             <td className="px-2 py-1 text-right font-mono text-slate-600">${p.precio_costo_usd.toFixed(2)}</td>
                             <td className="px-2 py-1 text-right font-mono text-emerald-600 font-bold">${p.precio_detalle_usd.toFixed(2)}</td>
@@ -1081,7 +1122,7 @@ export default function Inventario({
                     <span className="font-extrabold uppercase truncate">{selectedProduct.description}</span>
                     <span className="font-mono text-slate-500 font-bold">{selectedProduct.barcode}</span>
                     <span className={`font-mono font-black mt-1 ${selectedProduct.stock_actual <= selectedProduct.stock_minimo ? 'text-red-700 animate-pulse' : 'text-slate-700'}`}>
-                      Stock: {selectedProduct.stock_actual}
+                      Stock: {formatStockVal(selectedProduct.stock_actual, selectedProduct.a_granel)} {selectedProduct.a_granel ? 'kg' : 'uds'}
                     </span>
                   </div>
                 )}
@@ -1367,9 +1408,10 @@ export default function Inventario({
                 <label className="text-xs text-slate-500 block mb-1 font-sans">Cantidad de Ajuste</label>
                 <input
                   type="number"
-                  min="1"
+                  step={selectedProduct?.a_granel ? "0.001" : "1"}
+                  min={selectedProduct?.a_granel ? "0.001" : "1"}
                   required
-                  placeholder="Ej: 15"
+                  placeholder={selectedProduct?.a_granel ? "Ej: 1.50" : "Ej: 15"}
                   value={adjustQty}
                   onChange={(e) => setAdjustQty(e.target.value)}
                   className="w-full bg-slate-55 border border-slate-350 rounded p-2.5 text-xs text-slate-850 font-bold font-mono focus:bg-white focus:border-winter-inventarioStart focus:outline-none"

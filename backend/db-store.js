@@ -288,35 +288,43 @@ export async function getProducts() {
 }
 
 export async function saveProduct(p) {
+  const isGranel = !!p.a_granel;
+  const stockActual = isGranel ? (p.stock_actual || 0) : Math.round(p.stock_actual || 0);
+  const stockMinimo = isGranel ? (p.stock_minimo || 0) : Math.round(p.stock_minimo || 0);
+
   if (usePostgres) {
     try {
       const res = await pool.query(
         `INSERT INTO Productos (codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, precio_costo_usd, precio_detalle_usd, precio_mayor_usd, cantidad_mayorista, exento_impuesto, imagen_url, estado, a_granel, fecha_vencimiento, porcentaje_impuesto)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id`,
-        [p.barcode, p.description, p.category, p.stock_actual || 0, p.stock_minimo || 0, p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.cantidad_mayorista || 12, p.exento_impuesto, p.imagen_url, p.estado, p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
+        [p.barcode, p.description, p.category, stockActual, stockMinimo, p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.cantidad_mayorista || 12, p.exento_impuesto, p.imagen_url, p.estado, p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
       );
-      return { ...p, id: res.rows[0].id };
+      return { ...p, id: res.rows[0].id, stock_actual: stockActual, stock_minimo: stockMinimo };
     } catch (err) {
       console.error('Error en saveProduct (Postgres):', err.message);
     }
   }
   const products = readJsonFile('products.json', mockProducts);
-  const newProduct = { ...p, id: Date.now() };
+  const newProduct = { ...p, id: Date.now(), stock_actual: stockActual, stock_minimo: stockMinimo };
   products.push(newProduct);
   writeJsonFile('products.json', products);
   return newProduct;
 }
 
 export async function updateProduct(p) {
+  const isGranel = !!p.a_granel;
+  const stockMinimo = isGranel ? (p.stock_minimo || 0) : Math.round(p.stock_minimo || 0);
+  const stockActual = isGranel ? (p.stock_actual || 0) : Math.round(p.stock_actual || 0);
+
   if (usePostgres) {
     try {
       await pool.query(
         `UPDATE Productos 
-         SET codigo_barras_clave = $1, descripcion = $2, categoria = $3, stock_minimo = $4, precio_costo_usd = $5, precio_detalle_usd = $6, precio_mayor_usd = $7, cantidad_mayorista = $8, exento_impuesto = $9, imagen_url = $10, estado = $11, a_granel = $12, fecha_vencimiento = $13, porcentaje_impuesto = $14
-         WHERE id = $15`,
-        [p.barcode, p.description, p.category, p.stock_minimo || 0, p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.cantidad_mayorista || 12, p.exento_impuesto, p.imagen_url, p.estado, p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0, p.id]
+         SET codigo_barras_clave = $1, descripcion = $2, categoria = $3, stock_minimo = $4, precio_costo_usd = $5, precio_detalle_usd = $6, precio_mayor_usd = $7, cantidad_mayorista = $8, exento_impuesto = $9, imagen_url = $10, estado = $11, a_granel = $12, fecha_vencimiento = $13, porcentaje_impuesto = $14, stock_actual = $15
+         WHERE id = $16`,
+        [p.barcode, p.description, p.category, stockMinimo, p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.cantidad_mayorista || 12, p.exento_impuesto, p.imagen_url, p.estado, p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0, stockActual, p.id]
       );
-      return p;
+      return { ...p, stock_minimo: stockMinimo, stock_actual: stockActual };
     } catch (err) {
       console.error('Error en updateProduct (Postgres):', err.message);
     }
@@ -324,7 +332,7 @@ export async function updateProduct(p) {
   const products = readJsonFile('products.json', mockProducts);
   const idx = products.findIndex(item => item.id === p.id);
   if (idx !== -1) {
-    products[idx] = { ...products[idx], ...p };
+    products[idx] = { ...products[idx], ...p, stock_minimo: stockMinimo, stock_actual: stockActual };
     writeJsonFile('products.json', products);
     return products[idx];
   }
@@ -332,9 +340,15 @@ export async function updateProduct(p) {
 }
 
 export async function updateProductStock(prodId, stockActual) {
+  let isGranel = false;
   if (usePostgres) {
     try {
-      await pool.query('UPDATE Productos SET stock_actual = $1 WHERE id = $2', [stockActual, prodId]);
+      const prodRes = await pool.query('SELECT a_granel FROM Productos WHERE id = $1', [prodId]);
+      if (prodRes.rows.length > 0) {
+        isGranel = !!prodRes.rows[0].a_granel;
+      }
+      const finalStock = isGranel ? stockActual : Math.round(stockActual);
+      await pool.query('UPDATE Productos SET stock_actual = $1 WHERE id = $2', [finalStock, prodId]);
       return true;
     } catch (err) {
       console.error('Error en updateProductStock (Postgres):', err.message);
@@ -343,7 +357,9 @@ export async function updateProductStock(prodId, stockActual) {
   const products = readJsonFile('products.json', mockProducts);
   const idx = products.findIndex(p => p.id === prodId);
   if (idx !== -1) {
-    products[idx].stock_actual = stockActual;
+    isGranel = !!products[idx].a_granel;
+    const finalStock = isGranel ? stockActual : Math.round(stockActual);
+    products[idx].stock_actual = finalStock;
     writeJsonFile('products.json', products);
     return true;
   }
@@ -1341,11 +1357,18 @@ export async function saveSale(s) {
       
       // Insert Items & adjust stock
       for (const item of s.items) {
-        const prodRes = await clientTarget.query('SELECT id, stock_actual, precio_detalle_usd FROM Productos WHERE codigo_barras_clave = $1', [item.product.barcode]);
+        const prodRes = await clientTarget.query('SELECT id, stock_actual, precio_detalle_usd, a_granel FROM Productos WHERE codigo_barras_clave = $1', [item.product.barcode]);
         if (prodRes.rowCount > 0) {
           const prodId = prodRes.rows[0].id;
           const currentStock = prodRes.rows[0].stock_actual;
-          const newStock = Math.max(0, currentStock - item.qty);
+          const isGranel = !!prodRes.rows[0].a_granel;
+          
+          const cleanQty = isGranel ? item.qty : Math.round(item.qty);
+          let newStock = currentStock - cleanQty;
+          if (!isGranel) {
+            newStock = Math.round(newStock);
+          }
+          newStock = Math.max(0, newStock);
           
           // Insert details
           await clientTarget.query(
@@ -1354,10 +1377,10 @@ export async function saveSale(s) {
             [
               saleId, 
               prodId, 
-              item.qty, 
+              cleanQty, 
               item.precio_unitario_usd || item.priceUSD || item.product.precio_detalle_usd, 
               item.tipo_precio || item.priceType || 'Detalle', 
-              item.total_fila_usd || item.totalUSD || (item.qty * (item.priceUSD || item.product.precio_detalle_usd))
+              item.total_fila_usd || item.totalUSD || (cleanQty * (item.priceUSD || item.product.precio_detalle_usd))
             ]
           );
           
@@ -1368,7 +1391,7 @@ export async function saveSale(s) {
           await clientTarget.query(
             `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
              VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [prodId, userId, 'Venta', -item.qty, currentStock, newStock, `Venta Facturada: ${s.factura_nro}`]
+            [prodId, userId, 'Venta', -cleanQty, currentStock, newStock, `Venta Facturada: ${s.factura_nro}`]
           );
         }
       }
@@ -1876,6 +1899,10 @@ export async function saveProductsBulk(products) {
     try {
       const savedList = [];
       for (const p of products) {
+        const isGranel = !!p.a_granel;
+        const stockActual = isGranel ? (p.stock_actual || 0) : Math.round(p.stock_actual || 0);
+        const stockMinimo = isGranel ? (p.stock_minimo || 0) : Math.round(p.stock_minimo || 0);
+
         const res = await pool.query(
           `INSERT INTO Productos (codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, precio_costo_usd, precio_detalle_usd, precio_mayor_usd, cantidad_mayorista, exento_impuesto, imagen_url, estado, a_granel, fecha_vencimiento, porcentaje_impuesto)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
@@ -1895,9 +1922,9 @@ export async function saveProductsBulk(products) {
              fecha_vencimiento = EXCLUDED.fecha_vencimiento,
              porcentaje_impuesto = EXCLUDED.porcentaje_impuesto
            RETURNING id`,
-          [p.barcode, p.description, p.category || '', p.stock_actual || 0, p.stock_minimo || 0, p.precio_costo_usd || 0, p.precio_detalle_usd || 0, p.precio_mayor_usd || 0, p.cantidad_mayorista || 12, p.exento_impuesto || false, p.imagen_url || '', p.estado || 'Activo', p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
+          [p.barcode, p.description, p.category || '', stockActual, stockMinimo, p.precio_costo_usd || 0, p.precio_detalle_usd || 0, p.precio_mayor_usd || 0, p.cantidad_mayorista || 12, p.exento_impuesto || false, p.imagen_url || '', p.estado || 'Activo', p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
         );
-        savedList.push({ ...p, id: res.rows[0].id });
+        savedList.push({ ...p, id: res.rows[0].id, stock_actual: stockActual, stock_minimo: stockMinimo });
       }
       return savedList;
     } catch (err) {
@@ -1910,13 +1937,23 @@ export async function saveProductsBulk(products) {
   const allProducts = readJsonFile('products.json', mockProducts);
   const savedList = [];
   for (const p of products) {
-    const idx = allProducts.findIndex(item => item.barcode === p.barcode);
+    const isGranel = !!p.a_granel;
+    const stockActual = isGranel ? (p.stock_actual || 0) : Math.round(p.stock_actual || 0);
+    const stockMinimo = isGranel ? (p.stock_minimo || 0) : Math.round(p.stock_minimo || 0);
+    
+    const cleanedP = {
+      ...p,
+      stock_actual: stockActual,
+      stock_minimo: stockMinimo
+    };
+
+    const idx = allProducts.findIndex(item => item.barcode === cleanedP.barcode);
     if (idx !== -1) {
-      const updated = { ...allProducts[idx], ...p };
+      const updated = { ...allProducts[idx], ...cleanedP };
       allProducts[idx] = updated;
       savedList.push(updated);
     } else {
-      const newProduct = { ...p, id: Date.now() + Math.floor(Math.random() * 1000) };
+      const newProduct = { ...cleanedP, id: Date.now() + Math.floor(Math.random() * 1000) };
       allProducts.push(newProduct);
       savedList.push(newProduct);
     }

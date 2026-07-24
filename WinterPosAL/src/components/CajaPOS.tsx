@@ -82,6 +82,13 @@ interface CajaPOSProps {
   onLogout: () => void;
 }
 
+const formatStockVal = (val: any, aGranel?: boolean) => {
+  const num = parseFloat(val);
+  if (isNaN(num)) return '0';
+  if (!aGranel) return Math.round(num).toString();
+  return num.toFixed(3);
+};
+
 export default function CajaPOS({
   products,
   clients,
@@ -250,7 +257,8 @@ export default function CajaPOS({
   const handleUpdateDevQty = (index: number, val: number) => {
     setDevItems(prev => prev.map((item, idx) => {
       if (idx === index) {
-        const clampedVal = Math.max(0, Math.min(item.qty, val));
+        const cleanVal = item.product.a_granel ? val : Math.round(val);
+        const clampedVal = Math.max(0, Math.min(item.qty, cleanVal));
         return { ...item, returnQty: clampedVal };
       }
       return item;
@@ -424,9 +432,13 @@ export default function CajaPOS({
 
   const handleExecuteEntradaRapida = async () => {
     if (!matchedProduct) return;
-    const qty = parseFloat(entradaQty);
+    const qty = matchedProduct.a_granel ? parseFloat(entradaQty) : parseInt(entradaQty);
     if (isNaN(qty) || qty <= 0) {
       showAlert('Por favor ingrese una cantidad válida mayor a 0.', 'Cantidad Inválida', 'warning');
+      return;
+    }
+    if (!matchedProduct.a_granel && !Number.isInteger(parseFloat(entradaQty))) {
+      showAlert('Este producto se vende por unidad. La cantidad debe ser un número entero.', 'Cantidad Inválida', 'warning');
       return;
     }
 
@@ -868,7 +880,7 @@ export default function CajaPOS({
       if (existing) {
         const nextQty = existing.qty + finalQty;
         if (nextQty > prod.stock_actual) {
-          showToast(`No hay disponibilidad suficiente. Stock máximo disponible: ${prod.stock_actual}`, 'error');
+          showToast(`No hay disponibilidad suficiente. Stock máximo disponible: ${formatStockVal(prod.stock_actual, prod.a_granel)} ${prod.a_granel ? 'kg' : 'uds'}`, 'error');
           return prev;
         }
         showToast(`Se agregaron ${formattedQty} ${itemUnit} de "${prod.description}" al carrito.`, 'success');
@@ -926,7 +938,7 @@ export default function CajaPOS({
     const existing = saleItems.find(item => item.product.id === bulkProduct.id);
     const existingQty = existing ? existing.qty : 0;
     if (parsed + existingQty > bulkProduct.stock_actual) {
-      showToast(`No hay disponibilidad suficiente. Stock máximo disponible: ${bulkProduct.stock_actual}`, "error");
+      showToast(`No hay disponibilidad suficiente. Stock máximo disponible: ${formatStockVal(bulkProduct.stock_actual, bulkProduct.a_granel)} ${bulkProduct.a_granel ? 'kg' : 'uds'}`, "error");
       return;
     }
 
@@ -950,7 +962,7 @@ export default function CajaPOS({
     }
 
     if (parsed > qtyEditItem.product.stock_actual) {
-      showToast(`No hay disponibilidad suficiente. Stock máximo disponible: ${qtyEditItem.product.stock_actual}`, "error");
+      showToast(`No hay disponibilidad suficiente. Stock máximo disponible: ${formatStockVal(qtyEditItem.product.stock_actual, qtyEditItem.product.a_granel)} ${qtyEditItem.product.a_granel ? 'kg' : 'uds'}`, "error");
       return;
     }
 
@@ -969,7 +981,7 @@ export default function CajaPOS({
     }
 
     if (nextQty > prod.stock_actual) {
-      showAlert(`No hay disponibilidad suficiente. Stock máximo disponible: ${prod.stock_actual}`, 'Stock Insuficiente', 'warning');
+      showAlert(`No hay disponibilidad suficiente. Stock máximo disponible: ${formatStockVal(prod.stock_actual, prod.a_granel)} ${prod.a_granel ? 'kg' : 'uds'}`, 'Stock Insuficiente', 'warning');
       return;
     }
 
@@ -1609,12 +1621,12 @@ export default function CajaPOS({
                           {hasStock ? (
                             <span className="float-right text-emerald-600 font-bold font-mono text-right flex flex-col items-end">
                               <span>${p.precio_detalle_usd.toFixed(2)} <span className="text-slate-550 font-normal text-[9px] font-sans">/ Bs {priceVES.toFixed(2)}</span></span>
-                              <span className="text-[9px] text-slate-500 font-sans font-semibold">Stock: {p.stock_actual} uds</span>
+                              <span className="text-[9px] text-slate-500 font-sans font-semibold">Stock: {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}</span>
                             </span>
                           ) : (
                             <span className="float-right text-red-500 font-bold font-mono text-right flex flex-col items-end">
                               <span>SIN STOCK</span>
-                              <span className="text-[9px] text-slate-400 font-sans font-normal">Stock: {p.stock_actual} uds</span>
+                              <span className="text-[9px] text-slate-400 font-sans font-normal">Stock: {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}</span>
                             </span>
                           )}
                         </button>
@@ -2399,7 +2411,7 @@ export default function CajaPOS({
                 <div className="font-mono text-slate-500 text-[10px] font-bold">Código: {qtyEditItem.product.barcode}</div>
                 <div className="flex justify-between font-mono font-bold mt-2">
                   <span>Existencia disponible:</span>
-                  <span className="text-sky-700">{qtyEditItem.product.stock_actual} {qtyEditItem.product.a_granel ? 'kg' : 'und'}</span>
+                  <span className="text-sky-700">{formatStockVal(qtyEditItem.product.stock_actual, qtyEditItem.product.a_granel)} {qtyEditItem.product.a_granel ? 'kg' : 'und'}</span>
                 </div>
               </div>
 
@@ -2465,7 +2477,7 @@ export default function CajaPOS({
                 <div className="font-mono text-slate-500 text-[10px] font-bold">Código: {bulkProduct.barcode}</div>
                 <div className="flex justify-between font-mono font-bold mt-2">
                   <span>Existencia disponible:</span>
-                  <span className="text-amber-700">{bulkProduct.stock_actual} kg</span>
+                  <span className="text-amber-700">{formatStockVal(bulkProduct.stock_actual, true)} kg</span>
                 </div>
               </div>
 
@@ -3322,7 +3334,7 @@ export default function CajaPOS({
                         >
                           <span className="font-mono text-slate-500 font-bold mr-1.5">{p.barcode}</span>
                           <span>{p.description}</span>
-                          <span className="float-right text-slate-500 text-[9px] font-sans font-semibold">Stock: {p.stock_actual}</span>
+                          <span className="float-right text-slate-500 text-[9px] font-sans font-semibold">Stock: {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}</span>
                         </button>
                       ))}
                     </div>
@@ -3342,7 +3354,7 @@ export default function CajaPOS({
                     <div className="text-[10px] text-slate-500">Categoría: {matchedProduct.category || 'N/A'}</div>
                     <div className="text-[11px] font-bold text-slate-700 flex justify-between border-t border-slate-200 pt-1 mt-1 font-sans">
                       <span>Existencia Actual:</span>
-                      <span className="font-mono text-blue-600 font-extrabold">{matchedProduct.stock_actual}</span>
+                      <span className="font-mono text-blue-600 font-extrabold">{formatStockVal(matchedProduct.stock_actual, matchedProduct.a_granel)} {matchedProduct.a_granel ? 'kg' : 'uds'}</span>
                     </div>
                   </div>
                 ) : (
@@ -3358,10 +3370,10 @@ export default function CajaPOS({
                 <label className="text-xs text-slate-500 block mb-1 font-sans font-bold">Cantidad Entrada Inventario:</label>
                 <input
                   type="number"
-                  step="0.01"
-                  min="0.01"
+                  step={matchedProduct?.a_granel ? "0.001" : "1"}
+                  min={matchedProduct?.a_granel ? "0.001" : "1"}
                   required
-                  placeholder="0.00"
+                  placeholder={matchedProduct?.a_granel ? "0.00" : "1"}
                   value={entradaQty}
                   onChange={(e) => setEntradaQty(e.target.value)}
                   disabled={!matchedProduct}
@@ -3542,7 +3554,7 @@ export default function CajaPOS({
                               <div className="flex items-center border border-slate-300 rounded overflow-hidden">
                                 <button
                                   type="button"
-                                  onClick={() => handleUpdateDevQty(idx, item.returnQty - 1)}
+                                  onClick={() => handleUpdateDevQty(idx, item.returnQty - (item.product.a_granel ? 0.1 : 1))}
                                   className="bg-slate-100 hover:bg-slate-200 px-2.5 py-1 text-slate-600 font-bold"
                                 >
                                   -
@@ -3551,14 +3563,15 @@ export default function CajaPOS({
                                   type="number"
                                   min="0"
                                   max={item.qty}
+                                  step={item.product.a_granel ? "0.001" : "1"}
                                   value={item.returnQty === 0 ? '' : item.returnQty}
                                   placeholder="0"
-                                  onChange={(e) => handleUpdateDevQty(idx, parseInt(e.target.value) || 0)}
-                                  className="w-10 text-center font-bold font-mono text-xs focus:outline-none"
+                                  onChange={(e) => handleUpdateDevQty(idx, item.product.a_granel ? parseFloat(e.target.value) || 0 : parseInt(e.target.value) || 0)}
+                                  className="w-12 text-center font-bold font-mono text-xs focus:outline-none"
                                 />
                                 <button
                                   type="button"
-                                  onClick={() => handleUpdateDevQty(idx, item.returnQty + 1)}
+                                  onClick={() => handleUpdateDevQty(idx, item.returnQty + (item.product.a_granel ? 0.1 : 1))}
                                   className="bg-slate-100 hover:bg-slate-200 px-2.5 py-1 text-slate-600 font-bold"
                                 >
                                   +

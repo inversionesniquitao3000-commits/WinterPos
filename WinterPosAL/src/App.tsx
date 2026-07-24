@@ -303,7 +303,11 @@ export default function App() {
         const productsRes = await fetch(getApiUrl('/productos'));
         if (productsRes.ok) {
           const productsData = await productsRes.json();
-          setProducts(productsData);
+          setProducts(productsData.map((p: any) => ({
+            ...p,
+            stock_actual: parseFloat(p.stock_actual) || 0,
+            stock_minimo: parseFloat(p.stock_minimo) || 0,
+          })));
         }
 
         // Fetch clients
@@ -444,10 +448,20 @@ export default function App() {
 
   const handleAddProduct = async (prod: Product) => {
     const saved = await postApiData('/productos', prod);
-    if (saved) {
-      setProducts(prev => [...prev, saved]);
+    const cleanedSaved = saved ? {
+      ...saved,
+      stock_actual: parseFloat(saved.stock_actual) || 0,
+      stock_minimo: parseFloat(saved.stock_minimo) || 0,
+    } : null;
+    const cleanedProd = {
+      ...prod,
+      stock_actual: parseFloat(prod.stock_actual as any) || 0,
+      stock_minimo: parseFloat(prod.stock_minimo as any) || 0,
+    };
+    if (cleanedSaved) {
+      setProducts(prev => [...prev, cleanedSaved]);
     } else {
-      setProducts(prev => [...prev, prod]);
+      setProducts(prev => [...prev, cleanedProd]);
     }
   };
 
@@ -486,7 +500,12 @@ export default function App() {
       });
       if (res.ok) {
         const saved = await res.json();
-        setProducts(prev => prev.map(p => p.id === prod.id ? saved : p));
+        const cleanedSaved = {
+          ...saved,
+          stock_actual: parseFloat(saved.stock_actual) || 0,
+          stock_minimo: parseFloat(saved.stock_minimo) || 0,
+        };
+        setProducts(prev => prev.map(p => p.id === prod.id ? cleanedSaved : p));
         return true;
       } else {
         const errData = await res.json();
@@ -530,7 +549,13 @@ export default function App() {
     const normalizedType = type === 'Devolución' ? 'Devolucion' : type;
     const isAdd = normalizedType === 'Entrada' || normalizedType === 'Devolucion' || normalizedType === 'Entrada Rápida';
     const multiplier = isAdd ? 1 : -1;
-    const nextStock = Math.max(0, product.stock_actual + qty * multiplier);
+    
+    const cleanQty = product.a_granel ? qty : Math.round(qty);
+    let nextStock = product.stock_actual + cleanQty * multiplier;
+    if (!product.a_granel) {
+      nextStock = Math.round(nextStock);
+    }
+    nextStock = Math.max(0, nextStock);
     
     setProducts(prev =>
       prev.map(p => {
@@ -550,7 +575,7 @@ export default function App() {
       productCode: product.barcode,
       productDescription: product.description,
       type: normalizedType,
-      qty: qty * multiplier,
+      qty: cleanQty * multiplier,
       stock_anterior: product.stock_actual,
       stock_posterior: nextStock,
       motivo: reason,
@@ -945,7 +970,12 @@ export default function App() {
         prevProds.map(p => {
           const item = sale.items.find(i => i.product.id === p.id);
           if (item) {
-            const nextStock = Math.max(0, p.stock_actual - item.qty);
+            const cleanQty = p.a_granel ? item.qty : Math.round(item.qty);
+            let nextStock = p.stock_actual - cleanQty;
+            if (!p.a_granel) {
+              nextStock = Math.round(nextStock);
+            }
+            nextStock = Math.max(0, nextStock);
             
             const newMov: InventoryMovement = {
               id: Math.random(),
@@ -953,7 +983,7 @@ export default function App() {
               productCode: p.barcode,
               productDescription: p.description,
               type: 'Venta',
-              qty: -item.qty,
+              qty: -cleanQty,
               stock_anterior: p.stock_actual,
               stock_posterior: nextStock,
               motivo: `Venta Facturada: ${sale.factura_nro}`,
