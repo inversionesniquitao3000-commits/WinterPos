@@ -430,6 +430,10 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
                   </button>
                 </div>
               </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
                   onClick={handleClear}
                   className="w-1/3 bg-slate-100 border border-slate-250 text-slate-600 py-2.5 rounded font-sans text-xs hover:bg-slate-200 transition-all"
                 >
