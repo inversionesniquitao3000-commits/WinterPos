@@ -1510,122 +1510,125 @@ export default function ConfiguracionEmpresa({
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               
               {/* LEFT COLUMN: STATUS & TROUBLESHOOTING */}
-              <div className="lg:col-span-5 space-y-6">
+              <div className="lg:col-span-6 space-y-6">
                 
-                {/* WhatsApp Connection status */}
-                <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4 flex flex-col justify-between">
-                  <div className="space-y-4">
-                    <h3 className="text-xs font-bold text-slate-700 uppercase flex items-center gap-1.5 font-sans">
-                      <Globe className="w-4 h-4 text-indigo-650" />
-                      Estado del Servicio
-                    </h3>
-                    
-                    <div className="p-4 rounded-lg bg-slate-50 border border-slate-150 space-y-3">
-                      <div className="flex items-center gap-2">
-                        <span className={`w-3 h-3 rounded-full animate-pulse ${
-                          waStatus.status === 'CONNECTED' ? 'bg-emerald-500' :
-                          waStatus.status === 'QR_READY' ? 'bg-amber-500' :
-                          waStatus.status === 'AUTHENTICATING' ? 'bg-sky-500' : 'bg-red-500'
-                        }`} />
-                        <span className="text-xs font-extrabold uppercase font-sans text-slate-700">
-                          {waStatus.status === 'CONNECTED' ? '🟢 Conectado' :
-                           waStatus.status === 'QR_READY' ? '🟡 Esperando Escaneo' :
-                           waStatus.status === 'AUTHENTICATING' ? '🔵 Autenticando...' : '🔴 Desconectado'}
-                        </span>
-                      </div>
+                {/* Side-by-side Grid: Status & QR/Connection Card */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
+                  {/* WhatsApp Connection status */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4 flex flex-col justify-between h-full">
+                    <div className="space-y-4">
+                      <h3 className="text-xs font-bold text-slate-700 uppercase flex items-center gap-1.5 font-sans">
+                        <Globe className="w-4 h-4 text-indigo-650" />
+                        Estado del Servicio
+                      </h3>
                       
-                      <p className="text-[10px] text-slate-500 leading-normal font-sans">
-                        {waStatus.status === 'CONNECTED' ? 'El servidor central tiene una sesión activa vinculada. Los reportes se enviarán de forma automática.' :
-                         waStatus.status === 'QR_READY' ? 'Requiere vincular una cuenta. Escanee el código QR de la derecha con la cámara de su WhatsApp.' :
-                         waStatus.status === 'AUTHENTICATING' ? 'Conectando con los servidores de WhatsApp. Por favor espere...' : 
-                         'La integración está inactiva o requiere habilitarse en el panel.'}
-                      </p>
-
-                      {waStatus.isMock && (
-                        <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg space-y-2">
-                          <p className="text-[10px] text-amber-800 leading-normal font-sans">
-                            ⚠️ <strong>Modo Simulación Activo:</strong> El motor de WhatsApp real (Chrome/Puppeteer) no está listo o falta instalarlo en el servidor.
-                          </p>
-                          <button
-                            type="button"
-                            disabled={isInstallingChrome}
-                            onClick={async () => {
-                              try {
-                                setIsInstallingChrome(true);
-                                showToast('Iniciando instalación de Chrome/Puppeteer en el servidor. Esto puede tomar unos minutos...');
-                                const res = await fetch(getApiUrl('/whatsapp/install-chromium'), { method: 'POST' });
-                                if (res.ok) {
-                                  showAlert('Chrome/Puppeteer se instaló correctamente en el servidor. El servicio de WhatsApp se reiniciará.', 'Instalación Exitosa', 'success');
-                                  window.location.reload();
-                                } else {
-                                  const errData = await res.json();
-                                  showAlert(`Error al instalar: ${errData.error || 'Desconocido'}`, 'Fallo de Instalación', 'error');
-                                }
-                              } catch (err: any) {
-                                showAlert(`Error de red: ${err.message}`, 'Error', 'error');
-                              } finally {
-                                setIsInstallingChrome(false);
-                              }
-                            }}
-                            className={`w-full text-[10px] font-bold py-1.5 px-3 rounded font-sans transition-all text-white ${
-                              isInstallingChrome ? 'bg-amber-400 cursor-not-allowed' : 'bg-amber-600 hover:bg-amber-700'
-                            }`}
-                          >
-                            {isInstallingChrome ? '⏳ Instalando Chrome...' : '🔧 Instalar/Reparar Chrome (Puppeteer)'}
-                          </button>
+                      <div className="p-4 rounded-lg bg-slate-50 border border-slate-150 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-3 h-3 rounded-full animate-pulse ${
+                            waStatus.status === 'CONNECTED' ? 'bg-emerald-500' :
+                            waStatus.status === 'QR_READY' ? 'bg-amber-500' :
+                            waStatus.status === 'AUTHENTICATING' ? 'bg-sky-500' : 'bg-red-500'
+                          }`} />
+                          <span className="text-xs font-extrabold uppercase font-sans text-slate-700">
+                            {waStatus.status === 'CONNECTED' ? '🟢 Conectado' :
+                             waStatus.status === 'QR_READY' ? '🟡 Esperando Escaneo' :
+                             waStatus.status === 'AUTHENTICATING' ? '🔵 Autenticando...' : '🔴 Desconectado'}
+                          </span>
                         </div>
-                      )}
+                        
+                        <p className="text-[10px] text-slate-500 leading-normal font-sans">
+                          {waStatus.status === 'CONNECTED' ? 'El servidor central tiene una sesión activa vinculada. Los reportes se enviarán de forma automática.' :
+                           waStatus.status === 'QR_READY' ? 'Requiere vincular una cuenta. Escanee el código QR de la derecha con la cámara de su WhatsApp.' :
+                           waStatus.status === 'AUTHENTICATING' ? 'Conectando con los servidores de WhatsApp. Por favor espere...' : 
+                           'La integración está inactiva o requiere habilitarse en el panel.'}
+                        </p>
+
+                        {waStatus.isMock && (
+                          <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg space-y-2">
+                            <p className="text-[10px] text-amber-800 leading-normal font-sans">
+                              ⚠️ <strong>Modo Simulación Activo:</strong> El motor de WhatsApp real (Chrome/Puppeteer) no está listo o falta instalarlo en el servidor.
+                            </p>
+                            <button
+                              type="button"
+                              disabled={isInstallingChrome}
+                              onClick={async () => {
+                                try {
+                                  setIsInstallingChrome(true);
+                                  showToast('Iniciando instalación de Chrome/Puppeteer en el servidor. Esto puede tomar unos minutos...');
+                                  const res = await fetch(getApiUrl('/whatsapp/install-chromium'), { method: 'POST' });
+                                  if (res.ok) {
+                                    showAlert('Chrome/Puppeteer se instaló correctamente en el servidor. El servicio de WhatsApp se reiniciará.', 'Instalación Exitosa', 'success');
+                                    window.location.reload();
+                                  } else {
+                                    const errData = await res.json();
+                                    showAlert(`Error al instalar: ${errData.error || 'Desconocido'}`, 'Fallo de Instalación', 'error');
+                                  }
+                                } catch (err: any) {
+                                  showAlert(`Error de red: ${err.message}`, 'Error', 'error');
+                                } finally {
+                                  setIsInstallingChrome(false);
+                                }
+                              }}
+                              className={`w-full text-[10px] font-bold py-1.5 px-3 rounded font-sans transition-all text-white ${
+                                isInstallingChrome ? 'bg-amber-400 cursor-not-allowed' : 'bg-amber-600 hover:bg-amber-700'
+                              }`}
+                            >
+                              {isInstallingChrome ? '⏳ Instalando Chrome...' : '🔧 Instalar/Reparar Chrome (Puppeteer)'}
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
+
+                    {waStatus.status === 'CONNECTED' && (
+                      <button
+                        type="button"
+                        onClick={handleSendTestMessage}
+                        className="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 py-2.5 rounded-lg text-xs font-bold font-sans transition-all active:scale-95 flex items-center justify-center gap-1.5 mt-4"
+                      >
+                        <span>🧪 Enviar Mensaje de Prueba</span>
+                      </button>
+                    )}
                   </div>
 
-                  {waStatus.status === 'CONNECTED' && (
-                    <button
-                      type="button"
-                      onClick={handleSendTestMessage}
-                      className="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 py-2.5 rounded-lg text-xs font-bold font-sans transition-all active:scale-95 flex items-center justify-center gap-1.5 mt-4"
-                    >
-                      <span>🧪 Enviar Mensaje de Prueba</span>
-                    </button>
-                  )}
-                </div>
-
-                {/* QR Code display or Connected state info */}
-                <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4 flex flex-col items-center justify-center text-center min-h-[300px]">
-                  {waStatus.status === 'QR_READY' && waStatus.qr ? (
-                    <div className="space-y-4 flex flex-col items-center">
-                      <span className="text-[11px] font-bold font-sans text-slate-600 uppercase tracking-wide">Código QR de Vinculación</span>
-                      <div className="p-3 bg-white border-2 border-slate-100 rounded-xl shadow-inner">
-                        <img src={waStatus.qr} alt="Código QR de WhatsApp" className="w-48 h-48" />
+                  {/* QR Code display or Connected state info */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4 flex flex-col items-center justify-center text-center h-full min-h-[300px]">
+                    {waStatus.status === 'QR_READY' && waStatus.qr ? (
+                      <div className="space-y-4 flex flex-col items-center">
+                        <span className="text-[11px] font-bold font-sans text-slate-600 uppercase tracking-wide">Código QR de Vinculación</span>
+                        <div className="p-3 bg-white border-2 border-slate-100 rounded-xl shadow-inner">
+                          <img src={waStatus.qr} alt="Código QR de WhatsApp" className="w-48 h-48" />
+                        </div>
+                        <div className="max-w-md space-y-1">
+                          <p className="text-[11px] font-sans font-bold text-indigo-900 uppercase">¿Cómo escanear?</p>
+                          <p className="text-[10px] text-slate-500 font-sans leading-relaxed">
+                            Abra WhatsApp en su teléfono &gt; Dispositivos vinculados &gt; Vincular un dispositivo &gt; Escanee el código QR.
+                          </p>
+                        </div>
                       </div>
-                      <div className="max-w-md space-y-1">
-                        <p className="text-[11px] font-sans font-bold text-indigo-900 uppercase">¿Cómo escanear?</p>
-                        <p className="text-[10px] text-slate-500 font-sans leading-relaxed">
-                          Abra WhatsApp en su teléfono &gt; Menú o Configuración &gt; Dispositivos vinculados &gt; Vincular un dispositivo &gt; Escanee este código QR.
+                    ) : waStatus.status === 'CONNECTED' ? (
+                      <div className="space-y-3">
+                        <div className="w-16 h-16 bg-emerald-50 border border-emerald-200 rounded-full flex items-center justify-center mx-auto text-emerald-500 text-2xl">
+                          ✓
+                        </div>
+                        <h4 className="text-sm font-black text-slate-800 uppercase font-sans tracking-wide">¡Sesión Activa y Vinculada!</h4>
+                        <p className="text-xs text-slate-500 max-w-md mx-auto font-sans leading-relaxed">
+                          El bot de WhatsApp está conectado. Los arqueos de caja se notificarán de forma automatizada al grupo especificado en la configuración.
                         </p>
                       </div>
-                    </div>
-                  ) : waStatus.status === 'CONNECTED' ? (
-                    <div className="space-y-3">
-                      <div className="w-16 h-16 bg-emerald-50 border border-emerald-200 rounded-full flex items-center justify-center mx-auto text-emerald-500 text-2xl">
-                        ✓
+                    ) : waStatus.status === 'AUTHENTICATING' ? (
+                      <div className="space-y-3">
+                        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-650 mx-auto" />
+                        <p className="text-xs text-slate-500 font-sans">Estableciendo conexión y generando código QR. Un momento...</p>
                       </div>
-                      <h4 className="text-sm font-black text-slate-800 uppercase font-sans tracking-wide">¡Sesión Activa y Vinculada!</h4>
-                      <p className="text-xs text-slate-500 max-w-md mx-auto font-sans leading-relaxed">
-                        El bot de WhatsApp está conectado. Los arqueos de caja se notificarán de forma automatizada al grupo especificado en la configuración.
-                      </p>
-                    </div>
-                  ) : waStatus.status === 'AUTHENTICATING' ? (
-                    <div className="space-y-3">
-                      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-650 mx-auto" />
-                      <p className="text-xs text-slate-500 font-sans">Estableciendo conexión y generando código QR. Un momento...</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2 text-slate-400">
-                      <span className="text-4xl block">🔌</span>
-                      <p className="text-xs font-sans font-bold">Servicio deshabilitado</p>
-                      <p className="text-[10px] max-w-xs font-sans">Active la casilla "Habilitar Integración de WhatsApp" en la sección de la derecha para iniciar el servicio.</p>
-                    </div>
-                  )}
+                    ) : (
+                      <div className="space-y-2 text-slate-400">
+                        <span className="text-4xl block">🔌</span>
+                        <p className="text-xs font-sans font-bold">Servicio deshabilitado</p>
+                        <p className="text-[10px] max-w-xs font-sans">Active la casilla "Habilitar Integración de WhatsApp" en la sección de la derecha para iniciar el servicio.</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* GUIA DE RESOLUCION DE PROBLEMAS (TROUBLESHOOTING) */}
@@ -1661,7 +1664,7 @@ export default function ConfiguracionEmpresa({
               </div>
 
               {/* RIGHT COLUMN: CONFIG FORM CARD */}
-              <form onSubmit={handleSaveWaConfig} className="lg:col-span-7 bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-5">
+              <form onSubmit={handleSaveWaConfig} className="lg:col-span-6 bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-5">
                 <h3 className="text-xs font-bold text-slate-700 uppercase flex items-center gap-1.5 font-sans border-b border-slate-100 pb-2">
                   <Settings className="w-4 h-4 text-indigo-650" />
                   Configuración del Grupo & Notificaciones
