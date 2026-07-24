@@ -573,6 +573,19 @@ export default function Inventario({
     e.preventDefault();
     if (!selectedProduct) return;
 
+    const cost = parseFloat(editCost) || 0;
+    const detail = parseFloat(editDetail) || 0;
+    const mayor = parseFloat(editMayor) || 0;
+
+    if (detail < cost) {
+      showAlert('El precio de venta al detalle no puede ser menor al precio de costo.', 'Precios Inválidos', 'warning');
+      return;
+    }
+    if (mayor < cost) {
+      showAlert('El precio de venta al mayor no puede ser menor al precio de costo.', 'Precios Inválidos', 'warning');
+      return;
+    }
+
     const updatedProd: Product = {
       ...selectedProduct,
       barcode: editBarcode.trim() || editClave.trim(),
@@ -584,9 +597,9 @@ export default function Inventario({
       exento_impuesto: !editTaxActive,
       a_granel: editAGranel,
       fecha_vencimiento: editVencimiento || undefined,
-      precio_costo_usd: parseFloat(editCost) || 0,
-      precio_detalle_usd: parseFloat(editDetail) || 0,
-      precio_mayor_usd: parseFloat(editMayor) || 0,
+      precio_costo_usd: cost,
+      precio_detalle_usd: detail,
+      precio_mayor_usd: mayor,
     };
 
     const success = await onUpdateProduct(updatedProd);
@@ -741,6 +754,15 @@ export default function Inventario({
       return;
     }
 
+    if (detail < cost) {
+      showAlert('El precio de venta al detalle no puede ser menor al precio de costo.', 'Precios Inválidos', 'warning');
+      return;
+    }
+    if (mayor < cost) {
+      showAlert('El precio de venta al mayor no puede ser menor al precio de costo.', 'Precios Inválidos', 'warning');
+      return;
+    }
+
     if (!priceReason.trim()) {
       showAlert('Debe especificar una justificación obligatoria para la actualización de precios.', 'Justificación Requerida', 'warning');
       return;
@@ -769,6 +791,16 @@ export default function Inventario({
     const cost = parseFloat(newCost) || 0;
     const detail = parseFloat(newDetail) || 0;
     const mayor = parseFloat(newMayor) || 0;
+
+    if (detail < cost) {
+      showAlert('El precio de venta al detalle no puede ser menor al precio de costo.', 'Precios Inválidos', 'warning');
+      return;
+    }
+    if (mayor < cost) {
+      showAlert('El precio de venta al mayor no puede ser menor al precio de costo.', 'Precios Inválidos', 'warning');
+      return;
+    }
+
     const min = newAGranel ? (parseFloat(newMinStock) || 0) : (parseInt(newMinStock) || 0);
     const wholesale = parseInt(newWholesaleQty) || 12;
 
