@@ -1,6 +1,7 @@
 import { readJsonFile, writeJsonFile } from './db-store.js';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 
 // Configuration file path
 const CONFIG_FILE = 'whatsapp_config.json';
@@ -90,6 +91,27 @@ async function destroyWhatsAppClient() {
   lastQrCode = '';
 }
 
+function findChromeExecutable() {
+  if (process.platform === 'win32') {
+    const homeDir = os.homedir();
+    const paths = [
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+      path.join(homeDir, 'AppData\\Local\\Google\\Chrome\\Application\\chrome.exe'),
+      'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe',
+      'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+      'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'
+    ];
+    for (const p of paths) {
+      if (fs.existsSync(p)) {
+        console.log('[WhatsApp] Encontrado navegador compatible para Puppeteer en:', p);
+        return p;
+      }
+    }
+  }
+  return null;
+}
+
 // Initialize WhatsApp client
 export async function initWhatsAppClient() {
   const config = getWhatsAppConfig();
@@ -111,21 +133,31 @@ export async function initWhatsAppClient() {
 
     console.log('[WhatsApp] Librería whatsapp-web.js cargada. Iniciando cliente...');
 
+    const chromePath = findChromeExecutable();
+    const puppeteerConfig = {
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+        '--disable-gpu',
+        '--disable-features=IsolateOrigins,site-per-process',
+        '--disable-site-isolation-trials',
+        '--disable-web-security',
+        '--disable-features=BlockInsecurePrivateNetworkRequests'
+      ]
+    };
+    if (chromePath) {
+      puppeteerConfig.executablePath = chromePath;
+    }
+
     client = new Client({
       authStrategy: new LocalAuth({ clientId: "winterpos-session" }),
-      puppeteer: {
-        headless: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
-          '--single-process',
-          '--disable-gpu'
-        ]
-      }
+      puppeteer: puppeteerConfig
     });
 
     client.on('qr', async (qr) => {
