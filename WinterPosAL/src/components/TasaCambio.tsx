@@ -55,6 +55,32 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
     loadBcvRates();
   }, []);
 
+  // Helper to parse BCV rates cleanly
+  const parseBcvVal = (valStr: string) => {
+    if (!valStr) return 0;
+    const cleaned = valStr.toString().replace(',', '.');
+    const num = parseFloat(cleaned);
+    return isNaN(num) || num <= 0 ? 0 : num;
+  };
+
+  const eurRateNum = parseBcvVal(bcvRates.eur);
+  const usdRateNum = parseBcvVal(bcvRates.usd);
+
+  const isEurAvailable = !bcvLoading && !bcvError && eurRateNum > 0;
+  const isUsdAvailable = !bcvLoading && !bcvError && usdRateNum > 0;
+
+  const handleApplyRate = (type: 'eur' | 'usd', target: 'dia' | 'vuelto') => {
+    const val = type === 'eur' ? eurRateNum : usdRateNum;
+    if (val <= 0) return;
+    const valStr = val.toFixed(2);
+    if (target === 'dia') {
+      setInputDia(valStr);
+    } else {
+      setInputVuelto(valStr);
+    }
+  };
+
+
   // Filtering states
   const [searchOperator, setSearchOperator] = useState('');
   const [searchDateFrom, setSearchDateFrom] = useState('');
@@ -332,18 +358,38 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="text-[10px] text-slate-500 block mb-1 font-sans">Tasa de Cobro (Bs / $ USD)</label>
-                <div className="flex bg-slate-50 rounded border border-slate-300 items-center focus-within:bg-white focus-within:border-winter-clientesStart transition-all">
-                  <span className="bg-slate-200 px-3 py-1.5 text-xs text-slate-700 border-r border-slate-300 font-bold">Bs</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    required
-                    placeholder="Ej: 40.00"
-                    value={inputDia}
-                    onChange={(e) => setInputDia(e.target.value)}
-                    className="bg-transparent border-none text-slate-800 text-xs px-3 py-1.5 w-full font-bold focus:outline-none"
-                  />
+                <div className="flex gap-1.5 items-center">
+                  <div className="flex bg-slate-50 rounded border border-slate-300 items-center focus-within:bg-white focus-within:border-winter-clientesStart transition-all flex-1 min-w-0">
+                    <span className="bg-slate-200 px-2.5 py-1.5 text-xs text-slate-700 border-r border-slate-300 font-bold">Bs</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      required
+                      placeholder="Ej: 40.00"
+                      value={inputDia}
+                      onChange={(e) => setInputDia(e.target.value)}
+                      className="bg-transparent border-none text-slate-800 text-xs px-2.5 py-1.5 w-full font-bold focus:outline-none min-w-0"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!isEurAvailable}
+                    onClick={() => handleApplyRate('eur', 'dia')}
+                    className="bg-amber-50 hover:bg-amber-100 disabled:bg-slate-100 text-amber-800 disabled:text-slate-400 border border-amber-300 disabled:border-slate-200 px-2.5 py-1.5 rounded text-[11px] font-bold font-sans transition-all whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed shadow-xs active:scale-95"
+                    title={isEurAvailable ? `Aplicar Tasa Euro (${eurRateNum.toFixed(2)})` : 'Tasa Euro BCV no disponible'}
+                  >
+                    Aplicar Euro
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!isUsdAvailable}
+                    onClick={() => handleApplyRate('usd', 'dia')}
+                    className="bg-sky-50 hover:bg-sky-100 disabled:bg-slate-100 text-sky-800 disabled:text-slate-400 border border-sky-300 disabled:border-slate-200 px-2.5 py-1.5 rounded text-[11px] font-bold font-sans transition-all whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed shadow-xs active:scale-95"
+                    title={isUsdAvailable ? `Aplicar Tasa Dólar (${usdRateNum.toFixed(2)})` : 'Tasa Dólar BCV no disponible'}
+                  >
+                    Aplicar $
+                  </button>
                 </div>
               </div>
 
@@ -351,23 +397,39 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
                 <label className="text-[10px] text-slate-500 block mb-1 font-sans">
                   Tasa de Vuelto (Bs / $ USD) <span className="text-slate-400 font-sans font-normal">(Opcional, copia Cobro si está vacía)</span>
                 </label>
-                <div className="flex bg-slate-55 rounded border border-slate-300 items-center focus-within:bg-white focus-within:border-winter-clientesStart transition-all">
-                  <span className="bg-slate-200 px-3 py-1.5 text-xs text-slate-700 border-r border-slate-300 font-bold">Bs</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    placeholder="Ej: 39.50"
-                    value={inputVuelto}
-                    onChange={(e) => setInputVuelto(e.target.value)}
-                    className="bg-transparent border-none text-slate-800 text-xs px-3 py-1.5 w-full font-bold focus:outline-none"
-                  />
+                <div className="flex gap-1.5 items-center">
+                  <div className="flex bg-slate-55 rounded border border-slate-300 items-center focus-within:bg-white focus-within:border-winter-clientesStart transition-all flex-1 min-w-0">
+                    <span className="bg-slate-200 px-2.5 py-1.5 text-xs text-slate-700 border-r border-slate-300 font-bold">Bs</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      placeholder="Ej: 39.50"
+                      value={inputVuelto}
+                      onChange={(e) => setInputVuelto(e.target.value)}
+                      className="bg-transparent border-none text-slate-800 text-xs px-2.5 py-1.5 w-full font-bold focus:outline-none min-w-0"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!isEurAvailable}
+                    onClick={() => handleApplyRate('eur', 'vuelto')}
+                    className="bg-amber-50 hover:bg-amber-100 disabled:bg-slate-100 text-amber-800 disabled:text-slate-400 border border-amber-300 disabled:border-slate-200 px-2.5 py-1.5 rounded text-[11px] font-bold font-sans transition-all whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed shadow-xs active:scale-95"
+                    title={isEurAvailable ? `Aplicar Tasa Euro (${eurRateNum.toFixed(2)})` : 'Tasa Euro BCV no disponible'}
+                  >
+                    Aplicar Euro
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!isUsdAvailable}
+                    onClick={() => handleApplyRate('usd', 'vuelto')}
+                    className="bg-sky-50 hover:bg-sky-100 disabled:bg-slate-100 text-sky-800 disabled:text-slate-400 border border-sky-300 disabled:border-slate-200 px-2.5 py-1.5 rounded text-[11px] font-bold font-sans transition-all whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed shadow-xs active:scale-95"
+                    title={isUsdAvailable ? `Aplicar Tasa Dólar (${usdRateNum.toFixed(2)})` : 'Tasa Dólar BCV no disponible'}
+                  >
+                    Aplicar $
+                  </button>
                 </div>
               </div>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
                   onClick={handleClear}
                   className="w-1/3 bg-slate-100 border border-slate-250 text-slate-600 py-2.5 rounded font-sans text-xs hover:bg-slate-200 transition-all"
                 >
