@@ -202,6 +202,86 @@ app.get('/api/sales', async (req, res) => {
   res.json(sales);
 });
 
+import https from 'https';
+
+// Cache for BCV rates
+let bcvCache = {
+  success: true,
+  usd: '36.5432',
+  eur: '39.7821',
+  fechaValor: 'Pendiente de actualización'
+};
+
+async function fetchBcvRates() {
+  return new Promise((resolve) => {
+    const agent = new https.Agent({
+      rejectUnauthorized: false
+    });
+    
+    const req = https.get('https://www.bcv.org.ve/', { agent, timeout: 4000 }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          // Parse USD and EUR from BCV home page elements
+          const dolarRegex = /id="dolar"[^]*?<strong>\s*([\d,.]+)\s*<\/strong>/i;
+          const euroRegex = /id="euro"[^]*?<strong>\s*([\d,.]+)\s*<\/strong>/i;
+          const fechaRegex = /class="date-display-single"[^]*?>\s*([^<]+?)\s*<\/span>/i;
+
+          const dolarMatch = data.match(dolarRegex);
+          const euroMatch = data.match(euroRegex);
+          const fechaMatch = data.match(fechaRegex);
+
+          if (dolarMatch && euroMatch) {
+            const usd = dolarMatch[1].replace(',', '.').trim();
+            const eur = euroMatch[1].replace(',', '.').trim();
+            
+            let fechaValor = 'Desconocida';
+            if (fechaMatch) {
+              fechaValor = fechaMatch[1].trim();
+            } else {
+              const secondaryFechaRegex = /Fecha Valor:[^]*?<strong>\s*([^<]+?)\s*<\/strong>/i;
+              const secondaryMatch = data.match(secondaryFechaRegex);
+              if (secondaryMatch) {
+                fechaValor = secondaryMatch[1].trim();
+              }
+            }
+
+            bcvCache = {
+              success: true,
+              usd,
+              eur,
+              fechaValor
+            };
+          }
+        } catch (parseErr) {
+          console.error('Error al parsear HTML del BCV:', parseErr.message);
+        }
+        resolve(bcvCache);
+      });
+    });
+
+    req.on('error', (err) => {
+      console.error('Error al consultar tasas del BCV (sin internet o caída de servidor):', err.message);
+      resolve(bcvCache);
+    });
+
+    req.on('timeout', () => {
+      req.destroy();
+      console.warn('Timeout al consultar tasas del BCV (límite de 4s excedido).');
+      resolve(bcvCache);
+    });
+  });
+}
+
+// Background query on startup
+fetchBcvRates().catch(() => {});
+
+app.get('/api/bcv', async (req, res) => {
+  const rates = await fetchBcvRates();
+  res.json(rates);
+});
+
 app.post('/api/sales', async (req, res) => {
   const saved = await saveSale(req.body);
   res.json(saved);

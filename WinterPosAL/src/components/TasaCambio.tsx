@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TasaHistoryItem, User } from '../types';
-import { TrendingUp, Clock, Shuffle, FileDown, Search, Calendar } from 'lucide-react';
+import { TrendingUp, Clock, Shuffle, FileDown, Search, Calendar, RefreshCw, Layers } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 
 interface TasaCambioProps {
@@ -17,6 +17,43 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
   const [inputVuelto, setInputVuelto] = useState(tasaVuelto > 0 ? tasaVuelto.toString() : '');
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+
+  // BCV State
+  const [bcvRates, setBcvRates] = useState<{ usd: string; eur: string; fechaValor: string }>({ usd: '', eur: '', fechaValor: '' });
+  const [bcvLoading, setBcvLoading] = useState(false);
+  const [bcvError, setBcvError] = useState('');
+
+  const loadBcvRates = async () => {
+    setBcvLoading(true);
+    setBcvError('');
+    try {
+      const baseUrl = window.location.port === '5173' ? 'http://localhost:5000' : '';
+      const res = await fetch(`${baseUrl}/api/bcv`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data) {
+          setBcvRates({
+            usd: data.usd || '',
+            eur: data.eur || '',
+            fechaValor: data.fechaValor || ''
+          });
+        } else {
+          setBcvError('No se recibió respuesta válida.');
+        }
+      } else {
+        setBcvError('No se pudo conectar con el servidor.');
+      }
+    } catch (err) {
+      console.warn('Fallo de red al consultar BCV (sin conexión a internet):', err);
+      setBcvError('Sin conexión a Internet (BCV no disponible)');
+    } finally {
+      setBcvLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadBcvRates();
+  }, []);
 
   // Filtering states
   const [searchOperator, setSearchOperator] = useState('');
@@ -344,6 +381,70 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
                 </button>
               </div>
             </form>
+          </div>
+
+          {/* BCV Reference Rates Card */}
+          <div className="bg-white border border-slate-200 p-5 rounded-xl space-y-4 shadow-sm">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+              <h2 className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2 font-sans">
+                <Layers className="w-4 h-4 text-blue-600" />
+                Referencia Oficial BCV
+              </h2>
+              <button
+                type="button"
+                onClick={loadBcvRates}
+                disabled={bcvLoading}
+                className="text-[10px] text-blue-600 hover:text-blue-700 font-sans font-bold flex items-center gap-1 active:scale-95 disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3 h-3 ${bcvLoading ? 'animate-spin' : ''}`} />
+                <span>{bcvLoading ? 'Cargando...' : 'Actualizar'}</span>
+              </button>
+            </div>
+
+            <div className="bg-gradient-to-b from-sky-950 to-slate-900 text-white rounded-xl p-4 flex flex-col items-center justify-center relative overflow-hidden border border-sky-900 shadow-inner">
+              {/* BCV Header */}
+              <div className="flex flex-col items-center border-b border-white/10 pb-3 w-full mb-3 text-center">
+                <div className="bg-white/95 rounded-full p-1.5 w-12 h-12 flex items-center justify-center mb-1.5 shadow-md">
+                  <span className="font-serif font-black text-sky-950 text-xs">BCV</span>
+                </div>
+                <span className="text-[9px] uppercase tracking-widest text-sky-200 font-black font-mono">Banco Central de Venezuela</span>
+                <span className="text-[7.5px] uppercase tracking-wider text-slate-355 font-bold font-sans">Tipo de Cambio de Referencia</span>
+              </div>
+
+              {bcvError ? (
+                <div className="text-[10.5px] text-sky-200/80 font-sans text-center py-2 flex flex-col items-center gap-1">
+                  <span>{bcvError}</span>
+                  <span className="text-[8.5px] text-slate-400 italic">Se mantendrán las tasas locales sin interrupciones.</span>
+                </div>
+              ) : (
+                <div className="w-full space-y-2.5 font-sans">
+                  {/* EUR Rate */}
+                  <div className="flex justify-between items-center bg-white/5 rounded-lg px-4 py-2 border border-white/5 hover:bg-white/10 transition-all">
+                    <span className="text-[11px] font-extrabold flex items-center gap-2">
+                      <span className="text-amber-400 text-sm">€</span> EUR (Euro)
+                    </span>
+                    <span className="text-[13px] font-black font-mono tracking-wider text-sky-50">
+                      {bcvRates.eur ? parseFloat(bcvRates.eur).toFixed(4) : '—'}
+                    </span>
+                  </div>
+                  
+                  {/* USD Rate */}
+                  <div className="flex justify-between items-center bg-white/5 rounded-lg px-4 py-2 border border-white/5 hover:bg-white/10 transition-all">
+                    <span className="text-[11px] font-extrabold flex items-center gap-2">
+                      <span className="text-emerald-400 text-sm">$</span> USD (Dólar)
+                    </span>
+                    <span className="text-[13px] font-black font-mono tracking-wider text-sky-50">
+                      {bcvRates.usd ? parseFloat(bcvRates.usd).toFixed(4) : '—'}
+                    </span>
+                  </div>
+
+                  {/* Value Date */}
+                  <div className="text-center pt-2 text-[9px] text-slate-400 font-semibold border-t border-white/5">
+                    Fecha Valor: <span className="text-slate-300 font-mono font-bold">{bcvRates.fechaValor || 'No disponible'}</span>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
         </div>
