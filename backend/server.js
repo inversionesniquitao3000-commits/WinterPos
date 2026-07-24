@@ -224,8 +224,8 @@ async function fetchBcvRates() {
       res.on('end', () => {
         try {
           // Parse USD and EUR from BCV home page elements
-          const dolarRegex = /id="dolar"[^]*?<strong>\s*([\d,.]+)\s*<\/strong>/i;
-          const euroRegex = /id="euro"[^]*?<strong>\s*([\d,.]+)\s*<\/strong>/i;
+          const dolarRegex = /id="dolar"[^]*?<strong[^>]*?>\s*([\d,.]+)\s*<\/strong>/i;
+          const euroRegex = /id="euro"[^]*?<strong[^>]*?>\s*([\d,.]+)\s*<\/strong>/i;
           const fechaRegex = /class="date-display-single"[^]*?>\s*([^<]+?)\s*<\/span>/i;
 
           const dolarMatch = data.match(dolarRegex);
