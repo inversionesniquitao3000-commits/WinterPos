@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Product, InventoryMovement, PriceAdjustmentHistory, User } from '../types';
-import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download } from 'lucide-react';
+import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 
 interface InventarioProps {
@@ -98,6 +98,10 @@ export default function Inventario({
   const [showPriceModal, setShowPriceModal] = useState(false);
   const [showNewProdModal, setShowNewProdModal] = useState(false);
   const [showBulkModal, setShowBulkModal] = useState(false);
+  const [showCategoriesModal, setShowCategoriesModal] = useState(false);
+  const [showQuickAddModal, setShowQuickAddModal] = useState(false);
+  const [quickAddName, setQuickAddName] = useState('');
+  const [quickAddTarget, setQuickAddTarget] = useState<'new' | 'edit'>('new');
 
   // Escape key listener to close modals
   useEffect(() => {
@@ -108,6 +112,8 @@ export default function Inventario({
         setShowNewProdModal(false);
         setShowEditProdModal(false);
         setShowBulkModal(false);
+        setShowCategoriesModal(false);
+        setShowQuickAddModal(false);
       }
     };
     window.addEventListener('keydown', handleEsc);
@@ -427,6 +433,90 @@ export default function Inventario({
   useEffect(() => {
     localStorage.setItem('pos_categories', JSON.stringify(categories));
   }, [categories]);
+
+  // Categories management modal states
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [editingCategoryName, setEditingCategoryName] = useState('');
+
+  const handleCreateCategory = () => {
+    if (!newCategoryName.trim()) return;
+    const cleanName = newCategoryName.trim().toUpperCase();
+    if (categories.includes(cleanName)) {
+      showAlert('La categoría ya existe.', 'Categoría Duplicada', 'warning');
+      return;
+    }
+    setCategories(prev => [...prev, cleanName]);
+    setNewCategoryName('');
+    showToast(`Categoría "${cleanName}" creada con éxito.`);
+  };
+
+  const handleExecuteQuickAdd = () => {
+    if (!quickAddName.trim()) return;
+    const cleanName = quickAddName.trim().toUpperCase();
+    if (categories.includes(cleanName)) {
+      showAlert('La categoría ya existe en el sistema.', 'Categoría Duplicada', 'warning');
+      return;
+    }
+    setCategories(prev => [...prev, cleanName]);
+    if (quickAddTarget === 'new') {
+      setNewCat(cleanName);
+    } else {
+      setEditCat(cleanName);
+    }
+    setShowQuickAddModal(false);
+    setQuickAddName('');
+    showToast(`Categoría "${cleanName}" creada con éxito.`);
+  };
+
+  const handleRenameCategory = async (oldName: string) => {
+    if (!editingCategoryName.trim()) return;
+    const cleanName = editingCategoryName.trim().toUpperCase();
+    if (cleanName === oldName) {
+      setEditingCategory(null);
+      return;
+    }
+    if (categories.includes(cleanName)) {
+      showAlert('Ese nombre de categoría ya existe.', 'Categoría Duplicada', 'warning');
+      return;
+    }
+    
+    // Rename in the list
+    setCategories(prev => prev.map(cat => cat === oldName ? cleanName : cat));
+    
+    // Rename in all products in the database
+    const productsToUpdate = products.filter(p => p.category === oldName);
+    for (const p of productsToUpdate) {
+      await onUpdateProduct({ ...p, category: cleanName });
+    }
+    
+    setEditingCategory(null);
+    setEditingCategoryName('');
+    showToast(`Categoría renombrada de "${oldName}" a "${cleanName}" con éxito.`);
+  };
+
+  const handleDeleteCategory = async (catName: string) => {
+    const hasActive = products.some(p => p.category === catName && p.estado === 'Activo');
+    if (hasActive) {
+      showAlert('No se puede eliminar la categoría porque existen productos activos asociados a ella.', 'Error al eliminar', 'error');
+      return;
+    }
+
+    const confirm = await showConfirm(
+      `¿Está seguro de eliminar la categoría "${catName}"? Los productos inactivos en ella quedarán sin categoría.`,
+      'Eliminar Categoría'
+    );
+    if (!confirm) return;
+
+    // Set category of inactive products to empty
+    const productsToUpdate = products.filter(p => p.category === catName);
+    for (const p of productsToUpdate) {
+      await onUpdateProduct({ ...p, category: '' });
+    }
+
+    setCategories(prev => prev.filter(cat => cat !== catName));
+    showToast(`Categoría "${catName}" eliminada con éxito.`);
+  };
 
   // New product form state
   const [newClave, setNewClave] = useState('');
@@ -1144,10 +1234,21 @@ export default function Inventario({
                   {hasPermission('crear') && (
                     <button
                       onClick={() => setShowBulkModal(true)}
-                      className="w-full bg-indigo-650 hover:bg-indigo-700 text-white border border-indigo-750 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all active:scale-95"
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all active:scale-95"
                     >
-                      <Upload className="w-4 h-4 bg-indigo-700/50 rounded-full p-0.5" />
+                      <Upload className="w-4 h-4 bg-emerald-700/50 rounded-full p-0.5" />
                       <span>Carga Masiva</span>
+                    </button>
+                  )}
+
+                  {/* BUTTON: CATEGORIAS */}
+                  {_currentUser.rol.toLowerCase() === 'administrador' && (
+                    <button
+                      onClick={() => setShowCategoriesModal(true)}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all active:scale-95"
+                    >
+                      <Tag className="w-4 h-4 bg-emerald-700/50 rounded-full p-0.5" />
+                      <span>Categorías</span>
                     </button>
                   )}
 
@@ -1633,17 +1734,9 @@ export default function Inventario({
                     </select>
                     <button
                       type="button"
-                      onClick={async () => {
-                        const newCatName = prompt("Ingrese el nombre de la nueva categoría:");
-                        if (newCatName && newCatName.trim() !== "") {
-                          const cleanName = newCatName.trim().toUpperCase();
-                          if (categories.includes(cleanName)) {
-                            showAlert('La categoría ya existe en el sistema.', 'Categoría Duplicada', 'warning');
-                          } else {
-                            setCategories(prev => [...prev, cleanName]);
-                            setNewCat(cleanName);
-                          }
-                        }
+                      onClick={() => {
+                        setQuickAddTarget('new');
+                        setShowQuickAddModal(true);
                       }}
                       className="bg-winter-inventarioStart hover:bg-winter-inventarioEnd text-white px-3 py-2.5 rounded text-xs font-bold font-mono transition-all flex items-center justify-center shadow-sm"
                       title="Agregar nueva categoría"
@@ -1869,6 +1962,17 @@ export default function Inventario({
                         <option key={cat} value={cat}>{cat}</option>
                       ))}
                     </select>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickAddTarget('edit');
+                        setShowQuickAddModal(true);
+                      }}
+                      className="bg-winter-inventarioStart hover:bg-winter-inventarioEnd text-white px-3 py-2.5 rounded text-xs font-bold font-mono transition-all flex items-center justify-center shadow-sm"
+                      title="Agregar nueva categoría"
+                    >
+                      +
+                    </button>
                   </div>
                 </div>
                 <div>
@@ -2254,6 +2358,223 @@ export default function Inventario({
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* CATEGORIES MODAL */}
+      {showCategoriesModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in duration-200">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-violet-650 to-violet-755 px-6 py-4 flex justify-between items-center text-white">
+              <h3 className="text-sm font-extrabold uppercase tracking-wider font-mono flex items-center gap-2">
+                <Tag className="w-4 h-4" />
+                Gestión de Categorías
+              </h3>
+              <button 
+                onClick={() => {
+                  setShowCategoriesModal(false);
+                  setEditingCategory(null);
+                  setNewCategoryName('');
+                }} 
+                className="text-white/80 hover:text-white text-base focus:outline-none"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 overflow-y-auto space-y-5 flex-grow">
+              {/* Form Create */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold font-mono block">Crear Nueva Categoría</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newCategoryName}
+                    onChange={(e) => setNewCategoryName(e.target.value)}
+                    placeholder="Escriba el nombre..."
+                    className="flex-grow bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-800 focus:bg-white focus:border-violet-600 focus:outline-none"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleCreateCategory();
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCreateCategory}
+                    className="bg-violet-600 hover:bg-violet-700 text-white font-bold font-mono px-4 py-2 rounded-lg text-xs transition-all flex items-center justify-center shadow-sm"
+                  >
+                    + Agregar
+                  </button>
+                </div>
+              </div>
+
+              {/* Categories list */}
+              <div className="space-y-2">
+                <label className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold font-mono block">Categorías Existentes</label>
+                <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-[40vh] overflow-y-auto bg-slate-50/50">
+                  {categories.length === 0 ? (
+                    <div className="p-4 text-center text-slate-400 text-xs italic">
+                      No hay categorías registradas en el sistema.
+                    </div>
+                  ) : (
+                    categories.map(cat => {
+                      const activeCount = products.filter(p => p.category === cat && p.estado === 'Activo').length;
+                      const isEditing = editingCategory === cat;
+
+                      return (
+                        <div key={cat} className="p-3 flex items-center justify-between gap-3 bg-white hover:bg-slate-50/40 transition-colors">
+                          {isEditing ? (
+                            <div className="flex gap-2 flex-grow">
+                              <input
+                                type="text"
+                                value={editingCategoryName}
+                                onChange={(e) => setEditingCategoryName(e.target.value)}
+                                className="flex-grow bg-slate-50 border border-slate-350 rounded px-2.5 py-1 text-xs text-slate-800 focus:bg-white focus:outline-none"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleRenameCategory(cat);
+                                }}
+                                autoFocus
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleRenameCategory(cat)}
+                                className="text-emerald-600 hover:text-emerald-700 font-bold text-xs uppercase"
+                              >
+                                Guardar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingCategory(null)}
+                                className="text-slate-400 hover:text-slate-500 font-bold text-xs uppercase"
+                              >
+                                Cancelar
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex flex-col">
+                                <span className="text-xs font-bold text-slate-800 uppercase">{cat}</span>
+                                <span className="text-[9px] font-semibold text-slate-450 font-sans mt-0.5">
+                                  {activeCount === 0 ? 'Sin productos activos' : `${activeCount} prod. activos`}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingCategory(cat);
+                                    setEditingCategoryName(cat);
+                                  }}
+                                  className="text-slate-400 hover:text-slate-600 p-1.5 rounded hover:bg-slate-100 transition-all"
+                                  title="Renombrar categoría"
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteCategory(cat)}
+                                  disabled={activeCount > 0}
+                                  className={`p-1.5 rounded transition-all ${
+                                    activeCount > 0
+                                      ? 'text-slate-200 cursor-not-allowed'
+                                      : 'text-red-500 hover:text-red-750 hover:bg-red-50'
+                                  }`}
+                                  title={activeCount > 0 ? 'No se puede eliminar una categoría con productos activos' : 'Eliminar categoría'}
+                                >
+                                  <Minus className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCategoriesModal(false);
+                  setEditingCategory(null);
+                  setNewCategoryName('');
+                }}
+                className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-5 py-2 rounded-lg text-xs font-sans font-bold transition-all"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* QUICK ADD CATEGORY MODAL */}
+      {showQuickAddModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-sm w-full overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-emerald-600 to-emerald-700 px-5 py-3 flex justify-between items-center text-white">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider font-mono flex items-center gap-2">
+                <Tag className="w-3.5 h-3.5" />
+                Nueva Categoría
+              </h3>
+              <button 
+                onClick={() => {
+                  setShowQuickAddModal(false);
+                  setQuickAddName('');
+                }} 
+                className="text-white/80 hover:text-white text-base focus:outline-none"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-5 space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold font-mono block">Nombre de la Categoría</label>
+                <input
+                  type="text"
+                  value={quickAddName}
+                  onChange={(e) => setQuickAddName(e.target.value)}
+                  placeholder="Ej: BEBIDAS FRÍAS..."
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleExecuteQuickAdd();
+                    }
+                  }}
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="bg-slate-50 px-5 py-3 border-t border-slate-200 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowQuickAddModal(false);
+                  setQuickAddName('');
+                }}
+                className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded-lg text-[11px] font-sans font-bold transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteQuickAdd}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-[11px] font-sans font-bold transition-all"
+              >
+                Aceptar
+              </button>
+            </div>
           </div>
         </div>
       )}
