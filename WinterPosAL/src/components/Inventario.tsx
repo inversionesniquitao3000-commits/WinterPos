@@ -117,6 +117,13 @@ export default function Inventario({
   const [generalAdjustReason, setGeneralAdjustReason] = useState('');
   const [generalAdjustSearch, setGeneralAdjustSearch] = useState('');
 
+  // History page filters
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyStartDate, setHistoryStartDate] = useState('');
+  const [historyEndDate, setHistoryEndDate] = useState('');
+  const [historySortField, setHistorySortField] = useState<string>('date');
+  const [historySortOrder, setHistorySortOrder] = useState<'asc' | 'desc'>('desc');
+
   // Escape key listener to close modals
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -532,6 +539,77 @@ export default function Inventario({
 
     setCategories(prev => prev.filter(cat => cat !== catName));
     showToast(`Categoría "${catName}" eliminada con éxito.`);
+  };
+
+  const getFilteredAndSortedHistory = () => {
+    let list = [...priceHistory];
+
+    // 1. Text Search Filter
+    if (historySearch.trim() !== '') {
+      const term = historySearch.toLowerCase();
+      list = list.filter(h => 
+        (h.productCode || '').toLowerCase().includes(term) ||
+        (h.productDescription || '').toLowerCase().includes(term) ||
+        (h.motivo || '').toLowerCase().includes(term) ||
+        (h.usuario || '').toLowerCase().includes(term) ||
+        ((h as any).priceType || h.type || '').toLowerCase().includes(term)
+      );
+    }
+
+    // 2. Date Range Filter
+    if (historyStartDate) {
+      list = list.filter(h => {
+        const itemDate = h.date.split(' ')[0];
+        return itemDate >= historyStartDate;
+      });
+    }
+
+    if (historyEndDate) {
+      list = list.filter(h => {
+        const itemDate = h.date.split(' ')[0];
+        return itemDate <= historyEndDate;
+      });
+    }
+
+    // 3. Sorting
+    list.sort((a, b) => {
+      let valA: any = a[historySortField as keyof typeof a] ?? (a as any)[historySortField];
+      let valB: any = b[historySortField as keyof typeof b] ?? (b as any)[historySortField];
+
+      if (historySortField === 'type') {
+        valA = a.type || (a as any).priceType || '';
+        valB = b.type || (b as any).priceType || '';
+      } else if (historySortField === 'precio_anterior') {
+        valA = a.precio_anterior ?? (a as any).oldPrice ?? 0;
+        valB = b.precio_anterior ?? (b as any).oldPrice ?? 0;
+      } else if (historySortField === 'precio_nuevo') {
+        valA = a.precio_nuevo ?? (a as any).newPrice ?? 0;
+        valB = b.precio_nuevo ?? (b as any).newPrice ?? 0;
+      }
+
+      if (typeof valA === 'string') {
+        return historySortOrder === 'asc' 
+          ? valA.localeCompare(valB) 
+          : valB.localeCompare(valA);
+      } else {
+        const numA = parseFloat(valA || 0);
+        const numB = parseFloat(valB || 0);
+        return historySortOrder === 'asc' 
+          ? numA - numB 
+          : numB - numA;
+      }
+    });
+
+    return list;
+  };
+
+  const toggleHistorySort = (field: string) => {
+    if (historySortField === field) {
+      setHistorySortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setHistorySortField(field);
+      setHistorySortOrder('asc');
+    }
   };
 
   const getGeneralAdjustTargetProducts = () => {
@@ -1591,66 +1669,222 @@ export default function Inventario({
       )}
 
       {/* HISTORIAL PRECIOS PANEL */}
-      {activeSubTab === 'precios' && (
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col h-[500px]">
-          <div className="bg-slate-55 px-5 py-4 border-b border-slate-200 flex justify-between items-center">
-            <h2 className="text-xs font-bold text-slate-600 uppercase tracking-widest flex items-center gap-2 font-sans">
-              <Layers className="w-4 h-4 text-winter-inventarioStart" />
-              Auditoría de Ajustes de Precios
-            </h2>
-            <span className="text-[10px] bg-slate-200 border border-slate-300 px-2.5 py-0.5 rounded text-slate-600 font-sans">
-              {priceHistory.length} ajustes
-            </span>
-          </div>
+      {activeSubTab === 'precios' && (() => {
+        const filteredHistory = getFilteredAndSortedHistory();
+        return (
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col h-[500px]">
+            <div className="bg-slate-55 px-5 py-4 border-b border-slate-200 flex justify-between items-center">
+              <h2 className="text-xs font-bold text-slate-600 uppercase tracking-widest flex items-center gap-2 font-sans">
+                <Layers className="w-4 h-4 text-winter-inventarioStart" />
+                Auditoría de Ajustes de Precios
+              </h2>
+              <span className="text-[10px] bg-slate-200 border border-slate-300 px-2.5 py-0.5 rounded text-slate-600 font-sans">
+                {filteredHistory.length} de {priceHistory.length} ajustes
+              </span>
+            </div>
 
-          <div className="flex-grow overflow-y-auto">
-            <table className="w-full border-collapse text-left">
-              <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 text-slate-555">
-                <tr>
-                  <th className="px-4 py-3 font-sans uppercase">Fecha/Hora</th>
-                  <th className="px-4 py-3 font-sans uppercase">Código</th>
-                  <th className="px-4 py-3 font-sans uppercase">Producto</th>
-                  <th className="px-4 py-3 text-center font-sans uppercase">Tipo Precio</th>
-                  <th className="px-4 py-3 text-right text-red-500 font-sans uppercase">P. Anterior</th>
-                  <th className="px-4 py-3 text-right text-green-600 font-sans uppercase">P. Nuevo</th>
-                  <th className="px-4 py-3 font-sans uppercase">Motivo del Cambio</th>
-                  <th className="px-4 py-3 font-sans uppercase">Usuario</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-[11px] text-slate-700">
-                {priceHistory.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="text-center py-8 text-slate-400 font-sans">
-                      No se han registrado modificaciones de precios de venta o costo.
-                    </td>
-                  </tr>
-                ) : (
-                  [...priceHistory].reverse().map(h => (
-                    <tr key={h.id} className="hover:bg-slate-50/50">
-                      <td className="px-4 py-2.5 font-mono text-slate-450">{h.date}</td>
-                      <td className="px-4 py-2.5 font-mono font-bold text-slate-500">{h.productCode}</td>
-                      <td className="px-4 py-2.5 font-sans">{h.productDescription}</td>
-                      <td className="px-4 py-2.5 text-center">
-                        <span className="px-2 py-0.5 rounded border border-purple-200 text-purple-750 bg-purple-50 text-[9px] uppercase">
-                          {(h as any).type || (h as any).priceType || 'Costo'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2.5 text-right font-mono text-red-550 font-bold">
-                        ${(parseFloat((h as any).precio_anterior ?? (h as any).oldPrice ?? 0)).toFixed(2)}
-                      </td>
-                      <td className="px-4 py-2.5 text-right font-mono text-green-600 font-bold">
-                        ${(parseFloat((h as any).precio_nuevo ?? (h as any).newPrice ?? 0)).toFixed(2)}
-                      </td>
-                      <td className="px-4 py-2.5 text-slate-655 font-sans italic">{h.motivo}</td>
-                      <td className="px-4 py-2.5 font-sans">{h.usuario}</td>
-                    </tr>
-                  ))
+            {/* FILTERS BAR */}
+            <div className="bg-slate-50 border-b border-slate-200 p-3 grid grid-cols-1 md:grid-cols-4 gap-3">
+              {/* Buscador */}
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 pointer-events-none text-slate-450">
+                  <Search className="w-3.5 h-3.5" />
+                </span>
+                <input
+                  type="text"
+                  value={historySearch}
+                  onChange={(e) => setHistorySearch(e.target.value)}
+                  placeholder="Buscar código, descripción, motivo..."
+                  className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 pl-8 text-xs text-slate-800 focus:outline-none focus:border-winter-inventarioStart font-sans"
+                />
+              </div>
+              
+              {/* Fecha Desde */}
+              <div className="flex items-center gap-2">
+                <label className="text-[9px] uppercase font-bold font-mono text-slate-500 whitespace-nowrap">Desde:</label>
+                <input
+                  type="date"
+                  value={historyStartDate}
+                  onChange={(e) => setHistoryStartDate(e.target.value)}
+                  className="w-full bg-white border border-slate-300 rounded px-2 py-1 text-xs text-slate-800 focus:outline-none focus:border-winter-inventarioStart font-mono"
+                />
+              </div>
+
+              {/* Fecha Hasta */}
+              <div className="flex items-center gap-2">
+                <label className="text-[9px] uppercase font-bold font-mono text-slate-500 whitespace-nowrap">Hasta:</label>
+                <input
+                  type="date"
+                  value={historyEndDate}
+                  onChange={(e) => setHistoryEndDate(e.target.value)}
+                  className="w-full bg-white border border-slate-300 rounded px-2 py-1 text-xs text-slate-800 focus:outline-none focus:border-winter-inventarioStart font-mono"
+                />
+              </div>
+
+              {/* Limpiar Filtros */}
+              <div className="flex justify-end items-center">
+                {(historySearch || historyStartDate || historyEndDate) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHistorySearch('');
+                      setHistoryStartDate('');
+                      setHistoryEndDate('');
+                    }}
+                    className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-[10px] font-bold px-3 py-1.5 rounded transition-all flex items-center gap-1"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>Limpiar</span>
+                  </button>
                 )}
-              </tbody>
-            </table>
+              </div>
+            </div>
+
+            <div className="flex-grow overflow-y-auto">
+              <table className="w-full border-collapse text-left">
+                <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 text-slate-555 z-10">
+                  <tr>
+                    <th 
+                      onClick={() => toggleHistorySort('date')}
+                      className="px-4 py-2 text-[10px] font-sans uppercase cursor-pointer hover:bg-slate-100 select-none transition-all group"
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>Fecha/Hora</span>
+                        {historySortField === 'date' ? (
+                          historySortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-slate-500" /> : <ArrowDown className="w-3 h-3 text-slate-500" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-350 opacity-0 group-hover:opacity-100 transition-all" />
+                        )}
+                      </div>
+                    </th>
+                    <th 
+                      onClick={() => toggleHistorySort('productCode')}
+                      className="px-4 py-2 text-[10px] font-sans uppercase cursor-pointer hover:bg-slate-100 select-none transition-all group"
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>Código</span>
+                        {historySortField === 'productCode' ? (
+                          historySortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-slate-500" /> : <ArrowDown className="w-3 h-3 text-slate-500" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-350 opacity-0 group-hover:opacity-100 transition-all" />
+                        )}
+                      </div>
+                    </th>
+                    <th 
+                      onClick={() => toggleHistorySort('productDescription')}
+                      className="px-4 py-2 text-[10px] font-sans uppercase cursor-pointer hover:bg-slate-100 select-none transition-all group"
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>Producto</span>
+                        {historySortField === 'productDescription' ? (
+                          historySortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-slate-500" /> : <ArrowDown className="w-3 h-3 text-slate-500" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-350 opacity-0 group-hover:opacity-100 transition-all" />
+                        )}
+                      </div>
+                    </th>
+                    <th 
+                      onClick={() => toggleHistorySort('type')}
+                      className="px-4 py-2 text-[10px] text-center font-sans uppercase cursor-pointer hover:bg-slate-100 select-none transition-all group"
+                    >
+                      <div className="flex items-center justify-center gap-1">
+                        <span>Tipo Precio</span>
+                        {historySortField === 'type' ? (
+                          historySortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-slate-500" /> : <ArrowDown className="w-3 h-3 text-slate-500" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-350 opacity-0 group-hover:opacity-100 transition-all" />
+                        )}
+                      </div>
+                    </th>
+                    <th 
+                      onClick={() => toggleHistorySort('precio_anterior')}
+                      className="px-4 py-2 text-[10px] text-right text-red-500 font-sans uppercase cursor-pointer hover:bg-slate-100 select-none transition-all group"
+                    >
+                      <div className="flex items-center justify-end gap-1">
+                        <span>P. Anterior</span>
+                        {historySortField === 'precio_anterior' ? (
+                          historySortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-slate-500" /> : <ArrowDown className="w-3 h-3 text-slate-500" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-350 opacity-0 group-hover:opacity-100 transition-all" />
+                        )}
+                      </div>
+                    </th>
+                    <th 
+                      onClick={() => toggleHistorySort('precio_nuevo')}
+                      className="px-4 py-2 text-[10px] text-right text-green-600 font-sans uppercase cursor-pointer hover:bg-slate-100 select-none transition-all group"
+                    >
+                      <div className="flex items-center justify-end gap-1">
+                        <span>P. Nuevo</span>
+                        {historySortField === 'precio_nuevo' ? (
+                          historySortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-slate-500" /> : <ArrowDown className="w-3 h-3 text-slate-500" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-350 opacity-0 group-hover:opacity-100 transition-all" />
+                        )}
+                      </div>
+                    </th>
+                    <th 
+                      onClick={() => toggleHistorySort('motivo')}
+                      className="px-4 py-2 text-[10px] font-sans uppercase cursor-pointer hover:bg-slate-100 select-none transition-all group"
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>Motivo del Cambio</span>
+                        {historySortField === 'motivo' ? (
+                          historySortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-slate-500" /> : <ArrowDown className="w-3 h-3 text-slate-500" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-350 opacity-0 group-hover:opacity-100 transition-all" />
+                        )}
+                      </div>
+                    </th>
+                    <th 
+                      onClick={() => toggleHistorySort('usuario')}
+                      className="px-4 py-2 text-[10px] font-sans uppercase cursor-pointer hover:bg-slate-100 select-none transition-all group"
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>Usuario</span>
+                        {historySortField === 'usuario' ? (
+                          historySortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-slate-500" /> : <ArrowDown className="w-3 h-3 text-slate-500" />
+                        ) : (
+                          <ArrowUpDown className="w-3 h-3 text-slate-350 opacity-0 group-hover:opacity-100 transition-all" />
+                        )}
+                      </div>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-[11px] text-slate-700">
+                  {filteredHistory.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="text-center py-8 text-slate-400 font-sans">
+                        No se han registrado modificaciones de precios de venta o costo que coincidan.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredHistory.map(h => (
+                      <tr key={h.id} className="hover:bg-slate-50/50">
+                        <td className="px-4 py-2.5 font-mono text-slate-450">{h.date}</td>
+                        <td className="px-4 py-2.5 font-mono font-bold text-slate-500">{h.productCode}</td>
+                        <td className="px-4 py-2.5 font-sans">{h.productDescription}</td>
+                        <td className="px-4 py-2.5 text-center">
+                          <span className="px-2 py-0.5 rounded border border-purple-200 text-purple-750 bg-purple-50 text-[9px] uppercase">
+                            {(h as any).type || (h as any).priceType || 'Costo'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono text-red-550 font-bold">
+                          ${(parseFloat((h as any).precio_anterior ?? (h as any).oldPrice ?? 0)).toFixed(2)}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono text-green-600 font-bold">
+                          ${(parseFloat((h as any).precio_nuevo ?? (h as any).newPrice ?? 0)).toFixed(2)}
+                        </td>
+                        <td className="px-4 py-2.5 text-slate-655 font-sans italic">{h.motivo}</td>
+                        <td className="px-4 py-2.5 font-sans">{h.usuario}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* MODAL: STOCK ADJUSTMENT - Light theme */}
       {showAdjustModal && selectedProduct && (
