@@ -1148,6 +1148,36 @@ export default function CajaPOS({
       pagos.push({ metodo: 'CreditoCliente', monto: creditUSDVal, montoUSD: creditUSDVal });
     }
 
+    let finalVueltoUSD = 0;
+    let finalVueltoVES = 0;
+
+    if (changeUSD > 0) {
+      const mixedUsdInput = parseFloat(mixedChangeUSDVal);
+      if (!isNaN(mixedUsdInput) && mixedChangeUSDVal.trim() !== '') {
+        // Auxiliary mixed change calculator was explicitly used
+        finalVueltoUSD = Math.min(changeUSD, Math.max(0, mixedUsdInput));
+        finalVueltoVES = parseFloat(((changeUSD - finalVueltoUSD) * tasaVuelto).toFixed(2));
+      } else {
+        // Default change currency logic based on cash payment method
+        const paidInCashUSD = cashUSDVal > 0;
+        const paidInCashVES = cashVESVal > 0;
+
+        if (paidInCashUSD && !paidInCashVES) {
+          // Paid in USD cash: change delivered in USD
+          finalVueltoUSD = changeUSD;
+          finalVueltoVES = 0;
+        } else if (paidInCashVES && !paidInCashUSD) {
+          // Paid in VES cash: change delivered in VES
+          finalVueltoUSD = 0;
+          finalVueltoVES = changeVES;
+        } else {
+          // Default to USD change
+          finalVueltoUSD = changeUSD;
+          finalVueltoVES = 0;
+        }
+      }
+    }
+
     const factura_nro = nextInvoiceNumber;
 
     const saleResult = {
@@ -1160,8 +1190,8 @@ export default function CajaPOS({
       totalUSD,
       totalVES,
       pagos,
-      vueltoUSD: changeUSD,
-      vueltoVES: changeVES
+      vueltoUSD: finalVueltoUSD,
+      vueltoVES: finalVueltoVES
     };
 
     onRegisterSale(saleResult);
