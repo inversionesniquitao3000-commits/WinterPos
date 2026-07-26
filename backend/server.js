@@ -14,7 +14,14 @@ import {
   initWhatsAppClient, getWhatsAppStatus, saveWhatsAppConfig, sendCierreReport 
 } from './whatsapp-service.js';
 
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -28,6 +35,13 @@ app.use((req, res, next) => {
   console.log(`[${new Date().toLocaleTimeString()}] ${req.method} ${req.url}`);
   next();
 });
+
+// Serve static frontend build if dist directory exists
+const distPath = path.resolve(__dirname, '../WinterPosAL/dist');
+if (fs.existsSync(distPath)) {
+  console.log(`Serving static frontend build from: ${distPath}`);
+  app.use(express.static(distPath));
+}
 
 // Endpoints
 app.get('/api/status', (req, res) => {
@@ -435,9 +449,6 @@ app.post('/api/db/backup/schedule', async (req, res) => {
 });
 
 // AUTOMATIC BACKGROUND BACKUP SCHEDULER
-import fs from 'fs';
-import path from 'path';
-
 const BACKUPS_DIR = path.resolve('./data/backups');
 if (!fs.existsSync(BACKUPS_DIR)) {
   fs.mkdirSync(BACKUPS_DIR, { recursive: true });
@@ -536,6 +547,16 @@ app.post('/api/whatsapp/send-cierre', async (req, res) => {
     console.error('Error en /api/whatsapp/send-cierre:', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// SPA fallback for non-API routes
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) return next();
+  const indexPath = path.join(distPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    return res.sendFile(indexPath);
+  }
+  res.status(404).send('WinterPos API backend running. Frontend dist build not found.');
 });
 
 // Start Server
