@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calculator, Percent, DollarSign, Zap, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Edit2, ShieldAlert } from 'lucide-react';
+import { Calculator, Percent, DollarSign, Zap, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Edit2, ShieldAlert, TrendingUp } from 'lucide-react';
 
 interface AuxiliarCalculoPreciosProps {
   onApplyPrices: (prices: { cost: string; detail: string; mayor: string }) => void;
@@ -43,14 +43,18 @@ export default function AuxiliarCalculoPrecios({
   const [marginDetail, setMarginDetail] = useState('30');
   const [marginMayor, setMarginMayor] = useState('15');
 
+  // Initial previous prices for comparison guide
+  const prevCost = parseFloat(initialCost) || 0;
+  const prevDetail = parseFloat(initialDetail) || 0;
+  const prevMayor = parseFloat(initialMayor) || 0;
+  const hasInitialPrices = prevCost > 0 || prevDetail > 0 || prevMayor > 0;
+
   // Helper to enforce max 2 decimal places strictly for manual inputs
   const sanitize2Decimals = (val: string) => {
     if (val === '') return '';
-    // Allow digits and up to 2 decimal places
     if (/^\d*(\.\d{0,2})?$/.test(val)) {
       return val;
     }
-    // Fallback trimming if pasted with >2 decimals
     const parts = val.split('.');
     if (parts.length > 1) {
       return `${parts[0]}.${parts[1].slice(0, 2)}`;
@@ -437,6 +441,75 @@ export default function AuxiliarCalculoPrecios({
               </div>
             </div>
           </div>
+
+          {/* SECTION 3: INTEGRATED PRICE COMPARISON GUIDE (INSIDE AUXILIAR) */}
+          {hasInitialPrices && (
+            <div className="bg-gradient-to-r from-amber-100/90 via-amber-50 to-orange-100/90 border border-amber-300/90 rounded-lg p-2.5 space-y-2 shadow-sm font-sans">
+              <div className="flex justify-between items-center border-b border-amber-200/80 pb-1.5">
+                <span className="text-[11px] font-extrabold text-amber-900 uppercase flex items-center gap-1.5">
+                  <TrendingUp className="w-3.5 h-3.5 text-amber-700" />
+                  3. Guía Comparativa (Precio Anterior ➡️ Nuevo Previo)
+                </span>
+                <span className="text-[9px] font-extrabold bg-amber-200/90 text-amber-900 px-2 py-0.5 rounded border border-amber-300">
+                  💡 Se aplicará al guardar
+                </span>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                {/* COSTO */}
+                <div className="bg-white/95 border border-amber-200 rounded-md p-1.5 space-y-0.5 shadow-2xs">
+                  <span className="text-[10px] font-extrabold text-amber-800 block uppercase">Costo ($)</span>
+                  <div className="flex items-center justify-center gap-1 font-mono flex-wrap">
+                    <span className="text-slate-400 text-xs font-bold line-through">
+                      ${prevCost.toFixed(2)}
+                    </span>
+                    <span className="text-amber-600 font-extrabold text-xs">➡️</span>
+                    <span className="text-amber-900 font-black text-xs bg-amber-100 px-1 py-0.5 rounded">
+                      ${unitCostUSD.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* VENTA DETALLE */}
+                <div className="bg-white/95 border border-emerald-200 rounded-md p-1.5 space-y-0.5 shadow-2xs">
+                  <span className="text-[10px] font-extrabold text-emerald-800 block uppercase">Venta Detalle ($)</span>
+                  <div className="flex items-center justify-center gap-1 font-mono flex-wrap">
+                    <span className="text-slate-400 text-xs font-bold line-through">
+                      ${prevDetail.toFixed(2)}
+                    </span>
+                    <span className="text-emerald-600 font-extrabold text-xs">➡️</span>
+                    <span className="text-emerald-900 font-black text-xs bg-emerald-100 px-1 py-0.5 rounded">
+                      ${calculatedDetailUSD.toFixed(2)}
+                    </span>
+                  </div>
+                  {taxActive && taxPct > 0 && (
+                    <span className="text-[9px] font-bold text-blue-700 block font-mono">
+                      +IVA: ${detailWithIva.toFixed(2)}
+                    </span>
+                  )}
+                </div>
+
+                {/* VENTA MAYOR */}
+                <div className="bg-white/95 border border-purple-200 rounded-md p-1.5 space-y-0.5 shadow-2xs">
+                  <span className="text-[10px] font-extrabold text-purple-800 block uppercase">Venta Mayor ($)</span>
+                  <div className="flex items-center justify-center gap-1 font-mono flex-wrap">
+                    <span className="text-slate-400 text-xs font-bold line-through">
+                      ${prevMayor.toFixed(2)}
+                    </span>
+                    <span className="text-purple-600 font-extrabold text-xs">➡️</span>
+                    <span className="text-purple-900 font-black text-xs bg-purple-100 px-1 py-0.5 rounded">
+                      ${calculatedMayorUSD.toFixed(2)}
+                    </span>
+                  </div>
+                  {taxActive && taxPct > 0 && (
+                    <span className="text-[9px] font-bold text-blue-700 block font-mono">
+                      +IVA: ${mayorWithIva.toFixed(2)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* MANUAL APPLY BUTTON & NOTE */}
           <div className="flex items-center justify-between pt-0.5">
