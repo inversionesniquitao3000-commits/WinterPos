@@ -311,6 +311,7 @@ export default function CajaPOS({
       // 3. Register the return as a Sale record in the Ventas history (negative sales)
       const returnSaleResult = {
         factura_nro: `DEV-${devSelectedSale.factura_nro.replace('FAC-', '')}`,
+        factura_afectada: devSelectedSale.factura_nro,
         client: devSelectedSale.client,
         items: devItems.filter(i => i.returnQty > 0).map(i => ({
           product: i.product,

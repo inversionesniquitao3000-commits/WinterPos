@@ -1279,19 +1279,34 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
       {selectedSale && (() => {
         const isDev = selectedSale.factura_nro.startsWith('DEV-');
         
-        // Find return transactions affecting this invoice
-        const relatedDevs = !isDev ? sales.filter(s => 
-          s.factura_nro.startsWith('DEV-') && 
-          (s.factura_nro.includes(selectedSale.factura_nro) || (s as any).factura_afectada === selectedSale.factura_nro)
-        ) : [];
+        // Extract numeric suffix (e.g., "FAC-000001" -> "000001")
+        const saleNumSuffix = selectedSale.factura_nro.replace(/^[A-Z]+-?/, '');
 
-        // Map returned quantities per product key (barcode or description)
+        // Find return transactions affecting this invoice
+        const relatedDevs = !isDev ? sales.filter(s => {
+          if (!s.factura_nro.startsWith('DEV-')) return false;
+          const devNumSuffix = s.factura_nro.replace(/^[A-Z]+-?/, '');
+          
+          return (
+            (s as any).factura_afectada === selectedSale.factura_nro ||
+            s.factura_nro === `DEV-${saleNumSuffix}` ||
+            s.factura_nro === `DEV-${selectedSale.factura_nro}` ||
+            s.factura_nro.includes(selectedSale.factura_nro) ||
+            devNumSuffix === saleNumSuffix
+          );
+        }) : [];
+
+        // Map returned quantities per product key (barcode and description)
         const returnedQtyMap: { [key: string]: number } = {};
         relatedDevs.forEach(devSale => {
           (devSale.items ?? []).forEach(devItem => {
-            const key = (devItem.product?.barcode || devItem.product?.description || '').toUpperCase();
-            if (key) {
-              returnedQtyMap[key] = (returnedQtyMap[key] || 0) + devItem.qty;
+            const barcodeKey = (devItem.product?.barcode || '').trim().toUpperCase();
+            const descKey = (devItem.product?.description || '').trim().toUpperCase();
+            if (barcodeKey) {
+              returnedQtyMap[barcodeKey] = (returnedQtyMap[barcodeKey] || 0) + devItem.qty;
+            }
+            if (descKey) {
+              returnedQtyMap[descKey] = (returnedQtyMap[descKey] || 0) + devItem.qty;
             }
           });
         });
@@ -1304,8 +1319,13 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
           const itemCost = item.product?.precio_costo_usd ?? 0;
           const unitPrice = item.priceUSD ?? (item.qty > 0 ? (item.totalUSD / item.qty) : 0);
           
-          const key = (item.product?.barcode || item.product?.description || '').toUpperCase();
-          const returnedQty = !isDev ? Math.min(item.qty, returnedQtyMap[key] || (item as any).returnedQty || 0) : 0;
+          const itemBarcode = (item.product?.barcode || '').trim().toUpperCase();
+          const itemDesc = (item.product?.description || '').trim().toUpperCase();
+
+          const returnedByBarcode = itemBarcode ? (returnedQtyMap[itemBarcode] || 0) : 0;
+          const returnedByDesc = itemDesc ? (returnedQtyMap[itemDesc] || 0) : 0;
+
+          const returnedQty = !isDev ? Math.min(item.qty, Math.max(returnedByBarcode, returnedByDesc, (item as any).returnedQty || 0)) : 0;
           const remainingQty = Math.max(0, item.qty - returnedQty);
 
           if (returnedQty > 0) {
@@ -1479,7 +1499,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                   {/* Totals & Payments */}
                   <div className={`bg-white border border-slate-200 p-4 rounded-lg space-y-2 shadow-sm ${isDev ? 'md:col-span-2' : ''}`}>
                     <div className="font-bold text-[9px] text-slate-500 uppercase border-b border-slate-100 pb-1 font-sans flex justify-between">
-                      <span>{isDev ? 'Montos y Reembolso' : 'Montos y Pagos Nombrenes'}</span>
+                      <span>{isDev ? 'Montos y Reembolso' : 'Montos y Pagos'}</span>
                       {hasReturnsOnThisSale && <span className="text-rose-600 font-extrabold">(Recalculado por Devolución)</span>}
                     </div>
                     <div className="space-y-1.5 text-[11px] text-slate-700">
