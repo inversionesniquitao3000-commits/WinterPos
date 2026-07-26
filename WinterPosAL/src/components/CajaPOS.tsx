@@ -1256,8 +1256,14 @@ export default function CajaPOS({
     const salidaEfectivoVes = shiftSalidasVes;
     const devolucionEfectivoUsd = shiftDevolucionesUsd;
     const devolucionEfectivoVes = shiftDevolucionesVes;
-    const dineroEnCajaExpected = aperturaUsd + ventasEfectivoUsd + abonoClientesUsd + entradaEfectivoUsd - salidaEfectivoUsd - devolucionEfectivoUsd;
-    const expectedVes = aperturaVes + cajaVentasVes + entradaEfectivoVes - salidaEfectivoVes - devolucionEfectivoVes;
+    const vueltosEntregadosVes = shiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      return acc + (sale.vueltoVES || 0);
+    }, 0);
+
+    const dineroEnCajaExpected = Math.max(0, aperturaUsd + ventasEfectivoUsd + abonoClientesUsd + entradaEfectivoUsd - salidaEfectivoUsd - devolucionEfectivoUsd);
+    const rawExpectedVes = aperturaVes + cajaVentasVes + entradaEfectivoVes - salidaEfectivoVes - devolucionEfectivoVes - vueltosEntregadosVes;
+    const expectedVes = Math.max(0, parseFloat(rawExpectedVes.toFixed(2)));
     
     const ventasTotalesUsd = shiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
