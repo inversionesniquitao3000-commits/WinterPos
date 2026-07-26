@@ -553,6 +553,8 @@ export default function ConfiguracionEmpresa({
           localStorage.removeItem('pos_movimientos_usd');
           localStorage.removeItem('pos_movimientos_ves');
           localStorage.removeItem('pos_apertura_fecha');
+          localStorage.removeItem('pos_movements');
+          localStorage.removeItem('pos_price_history');
         }
         if (mode === 'clients' || mode === 'all') {
           localStorage.removeItem('pos_clients');
@@ -1306,7 +1308,7 @@ export default function ConfiguracionEmpresa({
                 <div className="border border-slate-200 rounded-lg p-4 space-y-3 flex flex-col justify-between">
                   <div>
                     <span className="font-bold text-slate-700 block">Vaciar Registro de Ventas y Facturas</span>
-                    <p className="text-[10px] text-slate-500 font-sans">Elimina todas las transacciones históricas, reinicia los folios de factura a cero y limpia los cierres de caja.</p>
+                    <p className="text-[10px] text-slate-500 font-sans">Elimina todas las transacciones históricas, reinicia folios de factura, limpia cierres de caja, vacía el kardex (movimientos) e historial de precios.</p>
                   </div>
                   <button
                     onClick={() => handleWipeDb('sales')}

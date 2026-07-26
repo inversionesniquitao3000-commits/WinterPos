@@ -909,6 +909,8 @@ export async function wipeDatabase(options) {
         await pool.query('TRUNCATE TABLE Ventas, Ventas_Detalle, Pagos_Venta RESTART IDENTITY CASCADE');
         await pool.query('TRUNCATE TABLE Cajas_Apertura_Cierre, Movimientos_Caja RESTART IDENTITY CASCADE');
         await pool.query('TRUNCATE TABLE Tasas_Cambio RESTART IDENTITY CASCADE');
+        await pool.query('TRUNCATE TABLE Movimientos_Inventario RESTART IDENTITY CASCADE');
+        await pool.query('TRUNCATE TABLE Historial_Precios RESTART IDENTITY CASCADE');
         writeJsonFile('abonos.json', []);
       }
       if (options.wipeClients) {
@@ -950,6 +952,9 @@ export async function wipeDatabase(options) {
     writeJsonFile('abonos.json', []);
     writeJsonFile('cierres.json', []);
     writeJsonFile('tasa_history.json', []);
+    writeJsonFile('movements.json', []);
+    writeJsonFile('price-history.json', []);
+    writeJsonFile('price_history.json', []);
     writeJsonFile('caja_activa.json', { abierta: false, id: null, monto_usd: 0, monto_ves: 0 });
     // Also write fallback file just in case
     writeJsonFile('caja_estado.json', { abierta: false, id: null, monto_usd: 0, monto_ves: 0 });
