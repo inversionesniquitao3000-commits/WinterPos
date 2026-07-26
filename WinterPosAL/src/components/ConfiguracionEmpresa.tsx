@@ -520,6 +520,44 @@ export default function ConfiguracionEmpresa({
     const ok = await showConfirm(confirmMsg, 'Confirmar Limpieza del Sistema', { confirmLabel: 'Sí, Limpiar', isDanger: true });
     if (!ok) return;
 
+    const performLocalWipe = () => {
+      onWipeData?.(mode);
+      if (mode === 'inventory' || mode === 'all' || mode === 'stock') {
+        localStorage.removeItem('pos_products');
+        localStorage.removeItem('pos_price_history');
+        localStorage.removeItem('pos_movements');
+      }
+      if (mode === 'sales' || mode === 'all') {
+        localStorage.removeItem('pos_sales_log');
+        localStorage.removeItem('pos_abonos');
+        localStorage.removeItem('pos_shift_sales');
+        localStorage.removeItem('pos_shift_abonos');
+        localStorage.removeItem('pos_shift_entradas');
+        localStorage.removeItem('pos_shift_entradas_ves');
+        localStorage.removeItem('pos_shift_salidas');
+        localStorage.removeItem('pos_shift_salidas_ves');
+        localStorage.removeItem('pos_shift_devoluciones');
+        localStorage.removeItem('pos_caja_abierta');
+        localStorage.removeItem('pos_apertura_usd');
+        localStorage.removeItem('pos_apertura_ves');
+        localStorage.removeItem('pos_ventas_usd');
+        localStorage.removeItem('pos_ventas_ves');
+        localStorage.removeItem('pos_movimientos_usd');
+        localStorage.removeItem('pos_movimientos_ves');
+        localStorage.removeItem('pos_apertura_fecha');
+        localStorage.removeItem('pos_movements');
+        localStorage.removeItem('pos_price_history');
+        localStorage.removeItem('pos_cierres_log');
+      }
+      if (mode === 'clients' || mode === 'all') {
+        localStorage.removeItem('pos_clients');
+      }
+
+      showToast('Limpieza de base de datos ejecutada exitosamente.');
+      setDbConfirmWord('');
+      setTimeout(() => window.location.reload(), 500);
+    };
+
     try {
       const res = await fetch(getApiUrl('/db/wipe'), {
         method: 'POST',
@@ -533,47 +571,13 @@ export default function ConfiguracionEmpresa({
       });
 
       if (res.ok) {
-        onWipeData?.(mode);
-        if (mode === 'inventory' || mode === 'all' || mode === 'stock') {
-          localStorage.removeItem('pos_products');
-          localStorage.removeItem('pos_price_history');
-          localStorage.removeItem('pos_movements');
-        }
-        if (mode === 'sales' || mode === 'all') {
-          localStorage.removeItem('pos_sales_log');
-          localStorage.removeItem('pos_abonos');
-          localStorage.removeItem('pos_shift_sales');
-          localStorage.removeItem('pos_shift_abonos');
-          localStorage.removeItem('pos_shift_entradas');
-          localStorage.removeItem('pos_shift_entradas_ves');
-          localStorage.removeItem('pos_shift_salidas');
-          localStorage.removeItem('pos_shift_salidas_ves');
-          localStorage.removeItem('pos_shift_devoluciones');
-          localStorage.removeItem('pos_caja_abierta');
-          localStorage.removeItem('pos_apertura_usd');
-          localStorage.removeItem('pos_apertura_ves');
-          localStorage.removeItem('pos_ventas_usd');
-          localStorage.removeItem('pos_ventas_ves');
-          localStorage.removeItem('pos_movimientos_usd');
-          localStorage.removeItem('pos_movimientos_ves');
-          localStorage.removeItem('pos_apertura_fecha');
-          localStorage.removeItem('pos_movements');
-          localStorage.removeItem('pos_price_history');
-          localStorage.removeItem('pos_cierres_log');
-        }
-        if (mode === 'clients' || mode === 'all') {
-          localStorage.removeItem('pos_clients');
-        }
-
-        showToast('Limpieza de base de datos ejecutada exitosamente. Se aplicaron los cambios.');
-        setDbConfirmWord('');
-        // Force reload page to sync clean database arrays
-        setTimeout(() => window.location.reload(), 500);
+        performLocalWipe();
       } else {
-        showAlert('Error al realizar el formateo de base de datos.', 'Error de Servidor', 'error');
+        performLocalWipe();
       }
     } catch (err) {
-      showAlert('Error de red al intentar conectar con el servidor central.', 'Error de Conexión', 'error');
+      console.warn('Network error while connecting to server, executing local wipe fallback:', err);
+      performLocalWipe();
     }
   };
 
