@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Product, InventoryMovement, PriceAdjustmentHistory, User } from '../types';
 import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
+import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
 
 interface InventarioProps {
   products: Product[];
@@ -2238,6 +2239,18 @@ export default function Inventario({
                 </div>
               </div>
 
+              {/* AUXILIAR DE CÁLCULO DE PRECIOS */}
+              <AuxiliarCalculoPrecios
+                initialCost={newCost}
+                initialDetail={newDetail}
+                initialMayor={newMayor}
+                onApplyPrices={({ cost, detail, mayor }) => {
+                  setNewCost(cost);
+                  setNewDetail(detail);
+                  setNewMayor(mayor);
+                }}
+              />
+
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="text-[10px] text-slate-500 block mb-1 font-sans">Precio Costo ($)</label>
@@ -2466,6 +2479,18 @@ export default function Inventario({
                   />
                 </div>
               </div>
+
+              {/* AUXILIAR DE CÁLCULO DE PRECIOS */}
+              <AuxiliarCalculoPrecios
+                initialCost={editCost}
+                initialDetail={editDetail}
+                initialMayor={editMayor}
+                onApplyPrices={({ cost, detail, mayor }) => {
+                  setEditCost(cost);
+                  setEditDetail(detail);
+                  setEditMayor(mayor);
+                }}
+              />
 
               <div className="grid grid-cols-3 gap-3 bg-slate-50 border border-slate-200 rounded-lg p-3">
                 <div>
