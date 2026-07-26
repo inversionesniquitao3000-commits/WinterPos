@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Calculator, Percent, DollarSign, Zap, ChevronDown, ChevronUp, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Calculator, Percent, DollarSign, Zap, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Edit2 } from 'lucide-react';
 
 interface AuxiliarCalculoPreciosProps {
   onApplyPrices: (prices: { cost: string; detail: string; mayor: string }) => void;
-  tasaBCV?: number;
+  tasaBCV?: number;       // Official BCV Rate
+  tasaFallback?: number;  // Fallback system rate
   initialCost?: string;
   initialDetail?: string;
   initialMayor?: string;
@@ -13,37 +14,39 @@ interface AuxiliarCalculoPreciosProps {
 export default function AuxiliarCalculoPrecios({
   onApplyPrices,
   tasaBCV = 0,
+  tasaFallback = 0,
   initialCost = '',
   initialDetail = '',
   initialMayor = '',
   onToggleExpand
 }: AuxiliarCalculoPreciosProps) {
   const [isEnabled, setIsEnabled] = useState(false);
-  
-  // Helper to determine initial exchange rate safely without errors
-  const getInitialRate = () => {
-    if (tasaBCV && tasaBCV > 0) return tasaBCV.toString();
-    try {
-      const savedTasa = localStorage.getItem('pos_tasa_activa') || localStorage.getItem('pos_tasa_bcv');
-      if (savedTasa) {
-        const parsed = parseFloat(savedTasa);
-        if (!isNaN(parsed) && parsed > 0) return parsed.toString();
-      }
-    } catch (e) {
-      // ignore storage errors
-    }
-    return '742.23'; // Reasonable default fallback if offline and no storage
-  };
+
+  // Determine effective rate
+  const isBcvAvailable = tasaBCV > 0;
+  const effectiveRate = isBcvAvailable 
+    ? tasaBCV 
+    : (tasaFallback > 0 ? tasaFallback : 742.23);
 
   // Cost calculation states
   const [totalCost, setTotalCost] = useState('');
   const [currency, setCurrency] = useState<'USD' | 'VES'>('USD');
   const [units, setUnits] = useState('1');
-  const [customRate, setCustomRate] = useState<string>(getInitialRate());
+  const [customRate, setCustomRate] = useState<string>(effectiveRate.toString());
+  const [isCustomEditing, setIsCustomEditing] = useState<boolean>(false);
   
   // Profit margin states (%)
   const [marginDetail, setMarginDetail] = useState('30');
   const [marginMayor, setMarginMayor] = useState('15');
+
+  // Sync customRate when official BCV rate arrives or updates
+  useEffect(() => {
+    if (isBcvAvailable && !isCustomEditing) {
+      setCustomRate(tasaBCV.toString());
+    } else if (!isBcvAvailable && !customRate) {
+      setCustomRate(effectiveRate.toString());
+    }
+  }, [tasaBCV, isBcvAvailable]);
 
   // Notify parent component when toggled
   const handleToggle = (checked: boolean) => {
@@ -51,17 +54,14 @@ export default function AuxiliarCalculoPrecios({
     onToggleExpand?.(checked);
   };
 
-  // Update customRate safely if tasaBCV prop arrives later and user hasn't overridden
-  useEffect(() => {
-    if (tasaBCV && tasaBCV > 0) {
-      setCustomRate(tasaBCV.toString());
-    }
-  }, [tasaBCV]);
-
   // Derived calculations with zero-error safety
   const parsedTotalCost = Math.max(parseFloat(totalCost) || 0, 0);
   const parsedUnits = Math.max(parseFloat(units) || 1, 0.001);
-  const parsedRate = Math.max(parseFloat(customRate) || 1, 0.0001);
+  const activeRateNum = isCustomEditing 
+    ? (parseFloat(customRate) || effectiveRate || 1)
+    : (effectiveRate || parseFloat(customRate) || 1);
+  
+  const parsedRate = Math.max(activeRateNum, 0.0001);
 
   // Total cost converted to USD
   const totalCostUSD = currency === 'VES' ? (parsedTotalCost / parsedRate) : parsedTotalCost;
@@ -85,7 +85,7 @@ export default function AuxiliarCalculoPrecios({
         mayor: calculatedMayorUSD.toFixed(2)
       });
     }
-  }, [isEnabled, totalCost, currency, units, customRate, marginDetail, marginMayor]);
+  }, [isEnabled, totalCost, currency, units, customRate, isCustomEditing, marginDetail, marginMayor, parsedRate]);
 
   const handleManualApply = () => {
     if (unitCostUSD >= 0) {
@@ -150,15 +150,26 @@ export default function AuxiliarCalculoPrecios({
               
               {/* Rate Status Indicator */}
               <div className="flex items-center gap-1 text-[10px]">
-                {tasaBCV && tasaBCV > 0 ? (
-                  <span className="text-emerald-700 font-extrabold flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-mono">
-                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                    Tasa Oficial BCV: {tasaBCV.toFixed(2)} Bs/$
-                  </span>
+                {isBcvAvailable ? (
+                  <div className="flex items-center gap-1">
+                    <span className="text-emerald-700 font-extrabold flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-mono">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                      Tasa Oficial BCV: {tasaBCV.toFixed(2)} Bs/$
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsCustomEditing(!isCustomEditing)}
+                      className="text-[9px] font-extrabold text-slate-600 hover:text-amber-800 bg-slate-100 hover:bg-amber-100 px-1.5 py-0.5 rounded border border-slate-300 transition-all flex items-center gap-0.5"
+                      title="Editar tasa manualmente"
+                    >
+                      <Edit2 className="w-2.5 h-2.5" />
+                      <span>{isCustomEditing ? 'Usar BCV' : 'Editar'}</span>
+                    </button>
+                  </div>
                 ) : (
                   <span className="text-amber-800 font-extrabold flex items-center gap-1 bg-amber-100 px-2 py-0.5 rounded border border-amber-300 font-mono">
                     <AlertCircle className="w-3 h-3 text-amber-600" />
-                    Tasa Manual Activa (Sin BCV)
+                    Tasa Manual (BCV no disponible)
                   </span>
                 )}
               </div>
@@ -199,21 +210,31 @@ export default function AuxiliarCalculoPrecios({
                 </div>
               </div>
 
-              {/* Editable Rate Input (Always editable when currency is VES) */}
+              {/* Rate Input (Visible when currency is VES) */}
               {currency === 'VES' && (
                 <div>
                   <label className="text-[10px] font-bold text-slate-600 flex items-center justify-between mb-0.5">
                     <span>Tasa Conversión (Bs/$)</span>
-                    <span className="text-[9px] text-emerald-700 font-extrabold">✏️ Editable</span>
+                    <span className="text-[9px] text-emerald-700 font-extrabold">
+                      {isBcvAvailable && !isCustomEditing ? '🟢 BCV' : '✏️ Manual'}
+                    </span>
                   </label>
                   <input
                     type="number"
                     step="0.01"
                     min="0.0001"
+                    disabled={isBcvAvailable && !isCustomEditing}
                     placeholder="Ej. 742.23"
-                    value={customRate}
-                    onChange={(e) => setCustomRate(e.target.value)}
-                    className="w-full bg-emerald-50/50 border border-emerald-300 rounded p-1.5 text-xs font-mono font-bold text-emerald-900 focus:bg-white focus:border-emerald-500 focus:outline-none"
+                    value={isCustomEditing ? customRate : parsedRate.toFixed(2)}
+                    onChange={(e) => {
+                      setIsCustomEditing(true);
+                      setCustomRate(e.target.value);
+                    }}
+                    className={`w-full border rounded p-1.5 text-xs font-mono font-bold focus:outline-none ${
+                      isBcvAvailable && !isCustomEditing 
+                        ? 'bg-slate-100 text-slate-700 border-slate-300 cursor-not-allowed' 
+                        : 'bg-emerald-50/70 text-emerald-900 border-emerald-400 focus:bg-white focus:border-emerald-600'
+                    }`}
                   />
                 </div>
               )}

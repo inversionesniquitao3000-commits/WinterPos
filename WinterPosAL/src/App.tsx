@@ -261,7 +261,12 @@ export default function App() {
     return null;
   };
 
-  // Load business config and users immediately when app starts/network settings change
+  const [bcvRateUSD, setBcvRateUSD] = useState<number>(() => {
+    const saved = localStorage.getItem('pos_bcv_usd');
+    return saved ? parseFloat(saved) || 0 : 0;
+  });
+
+  // Load business config, users, and official BCV rate immediately when app starts
   useEffect(() => {
     const loadConfig = async () => {
       try {
@@ -281,6 +286,21 @@ export default function App() {
         }
       } catch (err) {
         console.warn('⚠️ No se pudo obtener la lista de usuarios al iniciar.');
+      }
+      try {
+        const bcvRes = await fetch(getApiUrl('/bcv'));
+        if (bcvRes.ok) {
+          const bcvData = await bcvRes.json();
+          if (bcvData && bcvData.usd) {
+            const parsed = parseFloat(bcvData.usd.toString().replace(',', '.'));
+            if (!isNaN(parsed) && parsed > 0) {
+              setBcvRateUSD(parsed);
+              localStorage.setItem('pos_bcv_usd', parsed.toString());
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('⚠️ No se pudo obtener la tasa oficial del BCV al iniciar.');
       }
     };
     loadConfig();
@@ -1319,6 +1339,7 @@ export default function App() {
               priceHistory={priceHistory}
               currentUser={currentUser}
               tasaDia={tasaDia}
+              bcvRateUSD={bcvRateUSD}
               onAddProduct={handleAddProduct}
               onAddProductsBulk={handleAddProductsBulk}
               onUpdateProductStock={handleUpdateProductStock}

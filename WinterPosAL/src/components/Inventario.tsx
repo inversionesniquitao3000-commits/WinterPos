@@ -10,6 +10,7 @@ interface InventarioProps {
   priceHistory: PriceAdjustmentHistory[];
   currentUser: User;
   tasaDia?: number;
+  bcvRateUSD?: number;
   onAddProduct: (prod: Product) => void;
   onAddProductsBulk: (productsArray: any[]) => Promise<number | null>;
   onUpdateProductStock: (prodId: number, type: 'Entrada' | 'Salida' | 'Merma' | 'Devolucion', qty: number, reason: string) => void;
@@ -32,6 +33,7 @@ export default function Inventario({
   priceHistory,
   currentUser: _currentUser,
   tasaDia,
+  bcvRateUSD,
   onAddProduct,
   onAddProductsBulk,
   onUpdateProductStock,
@@ -2248,17 +2250,8 @@ export default function Inventario({
                 initialCost={newCost}
                 initialDetail={newDetail}
                 initialMayor={newMayor}
-                tasaBCV={(() => {
-                  if (tasaDia && tasaDia > 0) return tasaDia;
-                  try {
-                    const saved = localStorage.getItem('pos_tasa_activa') || localStorage.getItem('pos_tasa_bcv');
-                    if (saved) {
-                      const parsed = parseFloat(saved);
-                      if (!isNaN(parsed) && parsed > 0) return parsed;
-                    }
-                  } catch (e) {}
-                  return 742.23;
-                })()}
+                tasaBCV={bcvRateUSD || parseFloat(localStorage.getItem('pos_bcv_usd') || '0') || 0}
+                tasaFallback={tasaDia || parseFloat(localStorage.getItem('pos_tasa_activa') || '0') || 0}
                 onToggleExpand={(expanded) => setIsAuxExpandedNew(expanded)}
                 onApplyPrices={({ cost, detail, mayor }) => {
                   setNewCost(cost);
@@ -2501,17 +2494,8 @@ export default function Inventario({
                 initialCost={editCost}
                 initialDetail={editDetail}
                 initialMayor={editMayor}
-                tasaBCV={(() => {
-                  if (tasaDia && tasaDia > 0) return tasaDia;
-                  try {
-                    const saved = localStorage.getItem('pos_tasa_activa') || localStorage.getItem('pos_tasa_bcv');
-                    if (saved) {
-                      const parsed = parseFloat(saved);
-                      if (!isNaN(parsed) && parsed > 0) return parsed;
-                    }
-                  } catch (e) {}
-                  return 742.23;
-                })()}
+                tasaBCV={bcvRateUSD || parseFloat(localStorage.getItem('pos_bcv_usd') || '0') || 0}
+                tasaFallback={tasaDia || parseFloat(localStorage.getItem('pos_tasa_activa') || '0') || 0}
                 onToggleExpand={(expanded) => setIsAuxExpandedEdit(expanded)}
                 onApplyPrices={({ cost, detail, mayor }) => {
                   setEditCost(cost);
