@@ -198,15 +198,26 @@ export default function CajaPOS({
   }, [showAperturaModal, onLogout]);
 
   const handleOpenDevolucion = async () => {
+    let salesData: Sale[] = [];
     try {
       const res = await fetch(getApiUrl('/sales'));
       if (res.ok) {
-        const data = await res.json();
-        setAllSalesList(data);
+        salesData = await res.json();
       }
     } catch (e) {
       console.error('Error fetching sales for devolucion:', e);
     }
+
+    if (!salesData || salesData.length === 0) {
+      try {
+        const local = JSON.parse(localStorage.getItem('pos_sales_log') || '[]');
+        salesData = Array.isArray(local) && local.length > 0 ? local : shiftSales;
+      } catch (err) {
+        salesData = shiftSales;
+      }
+    }
+
+    setAllSalesList(salesData);
     setDevSelectedSale(null);
     setDevItems([]);
     setDevMotivo('');
@@ -216,7 +227,16 @@ export default function CajaPOS({
   };
 
   const filteredDevSales = useMemo(() => {
-    const sortedSales = [...allSalesList].sort((a, b) => b.id - a.id);
+    const listToUse = allSalesList.length > 0 ? allSalesList : shiftSales;
+    const validSales = listToUse.filter(s => s && s.factura_nro && !s.factura_nro.startsWith('DEV-'));
+
+    const sortedSales = [...validSales].sort((a, b) => {
+      const idA = typeof a.id === 'number' ? a.id : 0;
+      const idB = typeof b.id === 'number' ? b.id : 0;
+      if (idA !== idB) return idB - idA;
+      return (b.factura_nro || '').localeCompare(a.factura_nro || '');
+    });
+
     if (devSearchTerm.trim() === '') return sortedSales;
     const term = devSearchTerm.toLowerCase();
     return sortedSales.filter(sale => 
@@ -224,7 +244,7 @@ export default function CajaPOS({
       sale.client?.nombre?.toLowerCase().includes(term) ||
       sale.client?.cedula_rif?.toLowerCase().includes(term)
     );
-  }, [devSearchTerm, allSalesList]);
+  }, [devSearchTerm, allSalesList, shiftSales]);
 
   const handleSelectDevSale = (sale: Sale) => {
     setDevSelectedSale(sale);
