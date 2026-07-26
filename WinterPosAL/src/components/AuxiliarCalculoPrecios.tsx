@@ -120,16 +120,7 @@ export default function AuxiliarCalculoPrecios({
   const detailWithIva = calculatedDetailUSD * taxMultiplier;
   const mayorWithIva = calculatedMayorUSD * taxMultiplier;
 
-  // Automatically update parent form when values change while enabled
-  useEffect(() => {
-    if (isEnabled && unitCostUSD > 0) {
-      onApplyPrices({
-        cost: unitCostUSD.toFixed(2),
-        detail: calculatedDetailUSD.toFixed(2),
-        mayor: calculatedMayorUSD.toFixed(2)
-      });
-    }
-  }, [isEnabled, totalCost, currency, units, customRate, isCustomEditing, marginDetail, marginMayor, parsedRate, taxActive, taxPct]);
+  const [appliedToast, setAppliedToast] = useState(false);
 
   const handleManualApply = () => {
     if (unitCostUSD >= 0) {
@@ -138,6 +129,8 @@ export default function AuxiliarCalculoPrecios({
         detail: calculatedDetailUSD.toFixed(2),
         mayor: calculatedMayorUSD.toFixed(2)
       });
+      setAppliedToast(true);
+      setTimeout(() => setAppliedToast(false), 2500);
     }
   };
 
@@ -513,16 +506,24 @@ export default function AuxiliarCalculoPrecios({
 
           {/* MANUAL APPLY BUTTON & NOTE */}
           <div className="flex items-center justify-between pt-0.5">
-            <span className="text-[10px] text-amber-800 font-medium">
-              💡 Precios aplicados automáticamente. Puedes ajustarlos abajo si lo deseas.
+            <span className="text-[10px] font-bold text-amber-900">
+              {appliedToast ? (
+                <span className="text-emerald-700 font-extrabold flex items-center gap-1 animate-pulse bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
+                  ⚡ ¡Precios aplicados a los campos de la ficha técnica!
+                </span>
+              ) : (
+                <span>💡 Presiona "Aplicar al Producto" para transferir estos precios a la ficha.</span>
+              )}
             </span>
             <button
               type="button"
               onClick={handleManualApply}
-              className="bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-extrabold px-3 py-1 rounded-lg transition-all flex items-center gap-1 shadow-sm active:scale-95 shrink-0"
+              className={`text-white text-[11px] font-extrabold px-3 py-1 rounded-lg transition-all flex items-center gap-1 shadow-sm active:scale-95 shrink-0 ${
+                appliedToast ? 'bg-emerald-600 hover:bg-emerald-700 ring-2 ring-emerald-300' : 'bg-amber-600 hover:bg-amber-700'
+              }`}
             >
               <Zap className="w-3.5 h-3.5" />
-              <span>Aplicar al Producto</span>
+              <span>{appliedToast ? '¡Aplicado!' : 'Aplicar al Producto'}</span>
             </button>
           </div>
         </div>
