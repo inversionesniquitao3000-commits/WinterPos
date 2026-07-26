@@ -143,12 +143,7 @@ export async function initWhatsAppClient() {
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
         '--no-zygote',
-        '--single-process',
-        '--disable-gpu',
-        '--disable-features=IsolateOrigins,site-per-process',
-        '--disable-site-isolation-trials',
-        '--disable-web-security',
-        '--disable-features=BlockInsecurePrivateNetworkRequests'
+        '--disable-gpu'
       ]
     };
     if (chromePath) {
@@ -157,6 +152,10 @@ export async function initWhatsAppClient() {
 
     client = new Client({
       authStrategy: new LocalAuth({ clientId: "winterpos-session" }),
+      webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+      },
       puppeteer: puppeteerConfig
     });
 

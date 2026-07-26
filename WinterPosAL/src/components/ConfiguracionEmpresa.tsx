@@ -1567,7 +1567,7 @@ export default function ConfiguracionEmpresa({
                                   const res = await fetch(getApiUrl('/whatsapp/install-chromium'), { method: 'POST' });
                                   if (res.ok) {
                                     showAlert('Chrome/Puppeteer se instaló correctamente en el servidor. El servicio de WhatsApp se reiniciará.', 'Instalación Exitosa', 'success');
-                                    window.location.reload();
+                                    fetchWaStatus();
                                   } else {
                                     const errData = await res.json();
                                     showAlert(`Error al instalar: ${errData.error || 'Desconocido'}`, 'Fallo de Instalación', 'error');
