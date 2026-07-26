@@ -1416,6 +1416,36 @@ export default function App() {
                   console.error('Error reloading users:', e);
                 }
               }}
+              onWipeData={(mode) => {
+                if (mode === 'sales' || mode === 'all') {
+                  setSales([]);
+                  setCierres([]);
+                  setMovements([]);
+                  setPriceHistory([]);
+                  setAbonos([]);
+                  setShiftSales([]);
+                  setShiftAbonosUsd(0);
+                  setShiftEntradasUsd(0);
+                  setShiftEntradasVes(0);
+                  setShiftSalidasUsd(0);
+                  setShiftSalidasVes(0);
+                  setShiftDevolucionesUsd(0);
+                  setShiftDevolucionesVes(0);
+                  setShiftCajaAbierta(false);
+                }
+                if (mode === 'inventory' || mode === 'all') {
+                  setProducts([]);
+                  setMovements([]);
+                  setPriceHistory([]);
+                }
+                if (mode === 'stock') {
+                  setProducts(prev => prev.map(p => ({ ...p, stock_actual: 0 })));
+                  setMovements([]);
+                }
+                if (mode === 'clients' || mode === 'all') {
+                  setClients(prev => prev.filter(c => c.cedula_rif === 'V-00000000'));
+                }
+              }}
             />
           )}
         </div>

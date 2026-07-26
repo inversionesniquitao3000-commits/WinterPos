@@ -1656,6 +1656,17 @@ export default function Inventario({
                     if (m.type === 'Merma') typeColor = 'text-red-700 bg-red-50 border-red-200 font-bold';
                     if (m.type === 'Devolucion' || m.type === 'Devolución') typeColor = 'text-yellow-700 bg-yellow-50 border-yellow-250 font-bold';
 
+                    // Check if product is a granel (bulk)
+                    const relatedProd = products.find(p => p.barcode === m.productCode || p.description === m.productDescription);
+                    const isBulk = relatedProd?.a_granel === true || (m as any).a_granel === true;
+
+                    const formatKardexVal = (numVal: number, showSign: boolean = false) => {
+                      const val = typeof numVal === 'number' ? numVal : (parseFloat(numVal) || 0);
+                      const formatted = isBulk ? val.toFixed(3) : (Math.round(val * 1000) / 1000 % 1 === 0 ? Math.round(val).toString() : val.toFixed(3));
+                      if (showSign && val > 0) return `+${formatted}`;
+                      return formatted;
+                    };
+
                     return (
                       <tr key={m.id} className="hover:bg-slate-55/50">
                         <td className="px-4 py-2.5 font-mono text-slate-450">{m.date}</td>
@@ -1667,10 +1678,10 @@ export default function Inventario({
                           </span>
                         </td>
                         <td className={`px-4 py-2.5 text-right font-black font-mono ${m.qty > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {m.qty > 0 ? `+${m.qty}` : m.qty}
+                          {formatKardexVal(m.qty, true)}
                         </td>
-                        <td className="px-4 py-2.5 text-right font-mono text-slate-450">{m.stock_anterior}</td>
-                        <td className="px-4 py-2.5 text-right font-mono text-slate-600">{m.stock_posterior}</td>
+                        <td className="px-4 py-2.5 text-right font-mono text-slate-450">{formatKardexVal(m.stock_anterior)}</td>
+                        <td className="px-4 py-2.5 text-right font-mono text-slate-600">{formatKardexVal(m.stock_posterior)}</td>
                         <td className="px-4 py-2.5 text-slate-655 italic font-sans">{m.motivo}</td>
                         <td className="px-4 py-2.5 font-sans">{m.usuario}</td>
                         <td className="px-4 py-2.5 text-center">

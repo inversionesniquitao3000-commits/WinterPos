@@ -13,6 +13,7 @@ interface ConfiguracionEmpresaProps {
   currentUser: User;
   getApiUrl: (path: string) => string;
   onReloadUsers?: () => void;
+  onWipeData?: (mode: 'inventory' | 'sales' | 'clients' | 'all' | 'stock') => void;
 }
 
 const MODULOS_PERMISOS = [
@@ -59,7 +60,8 @@ export default function ConfiguracionEmpresa({
   onSaveConfig, 
   currentUser, 
   getApiUrl, 
-  onReloadUsers 
+  onReloadUsers,
+  onWipeData
 }: ConfiguracionEmpresaProps) {
   const { showAlert, showConfirm } = useDialog();
   // Navigation tabs
@@ -531,9 +533,11 @@ export default function ConfiguracionEmpresa({
       });
 
       if (res.ok) {
+        onWipeData?.(mode);
         if (mode === 'inventory' || mode === 'all' || mode === 'stock') {
           localStorage.removeItem('pos_products');
           localStorage.removeItem('pos_price_history');
+          localStorage.removeItem('pos_movements');
         }
         if (mode === 'sales' || mode === 'all') {
           localStorage.removeItem('pos_sales_log');
@@ -555,6 +559,7 @@ export default function ConfiguracionEmpresa({
           localStorage.removeItem('pos_apertura_fecha');
           localStorage.removeItem('pos_movements');
           localStorage.removeItem('pos_price_history');
+          localStorage.removeItem('pos_cierres_log');
         }
         if (mode === 'clients' || mode === 'all') {
           localStorage.removeItem('pos_clients');
@@ -563,7 +568,7 @@ export default function ConfiguracionEmpresa({
         showToast('Limpieza de base de datos ejecutada exitosamente. Se aplicaron los cambios.');
         setDbConfirmWord('');
         // Force reload page to sync clean database arrays
-        setTimeout(() => window.location.reload(), 1500);
+        setTimeout(() => window.location.reload(), 500);
       } else {
         showAlert('Error al realizar el formateo de base de datos.', 'Error de Servidor', 'error');
       }
