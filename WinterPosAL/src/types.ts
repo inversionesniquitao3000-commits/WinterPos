@@ -108,7 +108,7 @@ export interface InventoryMovement {
   date: string;
   productCode: string;
   productDescription: string;
-  type: 'Entrada' | 'Salida' | 'Merma' | 'Venta' | 'Devolucion' | 'Entrada Rápida';
+  type: 'Entrada' | 'Salida' | 'Merma' | 'Venta' | 'Devolucion' | 'Devolución' | 'Entrada Rápida';
   qty: number;
   stock_anterior: number;
   stock_posterior: number;
@@ -140,6 +140,7 @@ export interface CompanyConfig {
 }
 
 export interface Sale {
+  id?: number;
   factura_nro: string;
   client: Client;
   items: SaleItem[];
@@ -154,6 +155,45 @@ export interface Sale {
   usuario: string;
   estatus?: string;
   iva?: number;
+  terminal?: string;
+}
+
+export interface CierreDetails {
+  ventasEfectivoUsd?: number;
+  ventasEfectivoVes?: number;
+  abonoClientesUsd?: number;
+  abonosEfectivoUsd?: number;
+  abonosEfectivoBsVes?: number;
+  abonosEfectivoBsUsd?: number;
+  abonosBiopagoVes?: number;
+  abonosBiopagoUsd?: number;
+  abonosPuntoVes?: number;
+  abonosPuntoUsd?: number;
+  entradaEfectivoUsd?: number;
+  entradaEfectivoVes?: number;
+  salidaEfectivoUsd?: number;
+  salidaEfectivoVes?: number;
+  devolucionEfectivoUsd?: number;
+  devolucionEfectivoVes?: number;
+  vueltosEntregadosUsd?: number;
+  vueltosEntregadosVes?: number;
+  dineroEnCajaExpected?: number;
+  ventasTotalesUsd?: number;
+  descuentosUsd?: number;
+  ventaBrutaUsd?: number;
+  pagosEfectivoUsd?: number;
+  pagosEfectivoBsUsd?: number;
+  pagosEfectivoBsVes?: number;
+  pagosBiopagoUsd?: number;
+  pagosBiopagoVes?: number;
+  pagosPuntoUsd?: number;
+  pagosPuntoVes?: number;
+  pagosTarjetaUsd?: number;
+  pagosCreditoUsd?: number;
+  pagosPuntosUsd?: number;
+  devolucionVentasUsd?: number;
+  devolucionVentasVes?: number;
+  ventaTotalUsd?: number;
 }
 
 export interface CierreCaja {
@@ -166,16 +206,29 @@ export interface CierreCaja {
   usuario: string;
   aperturaUsd: number;
   aperturaVes: number;
+  terminal?: string;
+  status?: string;
+  diffUsd?: number;
   
   // Detailed cash registry metrics
   ventasEfectivoUsd: number;
+  ventasEfectivoVes?: number;
   abonoClientesUsd: number;
+  abonosEfectivoUsd?: number;
+  abonosEfectivoBsVes?: number;
+  abonosEfectivoBsUsd?: number;
+  abonosBiopagoVes?: number;
+  abonosBiopagoUsd?: number;
+  abonosPuntoVes?: number;
+  abonosPuntoUsd?: number;
   entradaEfectivoUsd: number;
   entradaEfectivoVes?: number;
   salidaEfectivoUsd: number;
   salidaEfectivoVes?: number;
   devolucionEfectivoUsd: number;
   devolucionEfectivoVes?: number;
+  vueltosEntregadosUsd?: number;
+  vueltosEntregadosVes?: number;
   dineroEnCajaExpected: number;
   realUsd: number; 
   
@@ -206,6 +259,10 @@ export interface Abono {
   nombre: string;
   cedula_rif: string;
   monto: number;
+  metodo_pago?: 'Efectivo$' | 'EfectivoBs' | 'TarjetaBs' | 'PagoMovil' | 'Biopago';
+  monto_ves?: number;
+  referencia?: string;
+  usuario?: string;
   fecha: string;
 }
 

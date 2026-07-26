@@ -11,11 +11,17 @@ interface ClientesProps {
   clients: Client[];
   currentUser: User;
   onAddClient: (newClient: Client) => void;
-  onRegisterAbono: (clientId: number, amountUSD: number) => void;
+  onRegisterAbono: (
+    clientId: number, 
+    amountUSD: number, 
+    metodoPago?: 'Efectivo$' | 'EfectivoBs' | 'TarjetaBs' | 'PagoMovil' | 'Biopago',
+    referencia?: string
+  ) => void;
   onUpdateClient?: (updatedClient: Client) => Promise<boolean>;
   onDeleteClient?: (clientId: number) => Promise<boolean>;
   sales: Sale[];
   abonos: Abono[];
+  tasaDia?: number;
 }
 
 export default function Clientes({ 
@@ -26,7 +32,8 @@ export default function Clientes({
   onUpdateClient, 
   onDeleteClient,
   sales,
-  abonos
+  abonos,
+  tasaDia = 1
 }: ClientesProps) {
   const { showAlert, showConfirm } = useDialog();
   const hasPermission = (action: 'ver' | 'crear' | 'editar' | 'eliminar') => {
@@ -71,6 +78,8 @@ export default function Clientes({
   const [editPrecioCosto, setEditPrecioCosto] = useState(false);
 
   const [abonoVal, setAbonoVal] = useState('');
+  const [abonoMethod, setAbonoMethod] = useState<'Efectivo$' | 'EfectivoBs' | 'TarjetaBs' | 'PagoMovil' | 'Biopago'>('Efectivo$');
+  const [abonoRef, setAbonoRef] = useState('');
 
   // Sorting state (Catálogo)
   type SortField = 'cedula_rif' | 'nombre' | 'telefono' | 'porcentaje_descuento' | 'limite_credito' | 'credito_disponible' | 'saldo_pendiente';
@@ -201,7 +210,17 @@ export default function Clientes({
 
   // 2. Credits and Abonos chronological list
   const creditAbonoList = useMemo(() => {
-    const list: { tipo: 'Crédito' | 'Abono'; fecha: string; ref: string; nombre: string; cedula_rif: string; monto: number }[] = [];
+    const list: { 
+      tipo: 'Crédito' | 'Abono'; 
+      fecha: string; 
+      ref: string; 
+      nombre: string; 
+      cedula_rif: string; 
+      monto: number;
+      metodo: string;
+      metodoRaw: string;
+      referencia?: string;
+    }[] = [];
     
     // Extract credit payments from sales
     sales.forEach(s => {
@@ -213,20 +232,31 @@ export default function Clientes({
           ref: s.factura_nro,
           nombre: s.client.nombre,
           cedula_rif: s.client.cedula_rif,
-          monto: creditPayment.monto
+          monto: creditPayment.monto,
+          metodo: 'Crédito',
+          metodoRaw: 'Credito'
         });
       }
     });
 
     // Extract Abonos history
     abonos.forEach(a => {
+      let metodoLabel = 'Efectivo $';
+      if (a.metodo_pago === 'EfectivoBs') metodoLabel = 'Efectivo Bs';
+      else if (a.metodo_pago === 'TarjetaBs') metodoLabel = 'Tarjeta / Punto Bs';
+      else if (a.metodo_pago === 'PagoMovil') metodoLabel = 'Pago Móvil Bs';
+      else if (a.metodo_pago === 'Biopago') metodoLabel = 'Biopago Bs';
+
       list.push({
         tipo: 'Abono',
         fecha: a.fecha,
         ref: `ABO-${a.id.toString().substring(7)}`,
         nombre: a.nombre,
         cedula_rif: a.cedula_rif,
-        monto: a.monto
+        monto: a.monto,
+        metodo: metodoLabel,
+        metodoRaw: a.metodo_pago || 'Efectivo$',
+        referencia: a.referencia
       });
     });
 
@@ -246,14 +276,18 @@ export default function Clientes({
         (item.fecha || '').toLowerCase().includes(term) ||
         (item.ref || '').toLowerCase().includes(term) ||
         (item.nombre || '').toLowerCase().includes(term) ||
-        (item.cedula_rif || '').toLowerCase().includes(term)
+        (item.cedula_rif || '').toLowerCase().includes(term) ||
+        (item.metodo || '').toLowerCase().includes(term) ||
+        (item.referencia || '').toLowerCase().includes(term)
       );
     }
     return [...list].sort((a, b) => {
-      const va = a[creditSortField];
-      const vb = b[creditSortField];
+      const va: any = (a as any)[creditSortField];
+      const vb: any = (b as any)[creditSortField];
       if (creditSortField === 'monto') {
-        return creditSortDir === 'asc' ? va - vb : vb - va;
+        const nA = typeof va === 'number' ? va : parseFloat(String(va)) || 0;
+        const nB = typeof vb === 'number' ? vb : parseFloat(String(vb)) || 0;
+        return creditSortDir === 'asc' ? nA - nB : nB - nA;
       }
       return creditSortDir === 'asc'
         ? String(va).localeCompare(String(vb))
@@ -271,6 +305,8 @@ export default function Clientes({
   const handleOpenAbono = () => {
     if (!selectedRowClient) return;
     setAbonoVal('');
+    setAbonoMethod('Efectivo$');
+    setAbonoRef('');
     setShowAbonoModal(true);
   };
 
@@ -289,8 +325,10 @@ export default function Clientes({
       return;
     }
 
-    onRegisterAbono(selectedRowClient.id, val);
+    onRegisterAbono(selectedRowClient.id, val, abonoMethod, abonoRef);
     setShowAbonoModal(false);
+    setAbonoMethod('Efectivo$');
+    setAbonoRef('');
     showAlert('Abono registrado con éxito. El crédito disponible del cliente ha sido restablecido.', 'Abono Registrado', 'success');
   };
 
@@ -1157,6 +1195,9 @@ export default function Clientes({
                           <CreditSortIcon field="cedula_rif" />
                         </div>
                       </th>
+                      <th className="px-4 py-2 font-sans uppercase select-none">
+                        <span>Forma de Pago</span>
+                      </th>
                       <th className="px-4 py-2 text-right font-sans uppercase cursor-pointer select-none" onClick={() => handleCreditSort('monto')}>
                         <div className="flex items-center justify-end gap-1">
                           <span>Monto ($ USD)</span>
@@ -1168,7 +1209,7 @@ export default function Clientes({
                   <tbody className="divide-y divide-slate-100 text-slate-700">
                     {filteredCreditAbonoList.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-4 py-8 text-center text-slate-400 font-sans italic">
+                        <td colSpan={7} className="px-4 py-8 text-center text-slate-400 font-sans italic">
                           No se registran movimientos de créditos o abonos {selectedRowClient ? 'para este cliente.' : 'en el sistema.'}
                         </td>
                       </tr>
@@ -1187,6 +1228,25 @@ export default function Clientes({
                             <td className="px-4 py-2.5 font-mono font-bold text-slate-605">{item.ref}</td>
                             <td className="px-4 py-2.5 font-sans font-medium uppercase">{item.nombre}</td>
                             <td className="px-4 py-2.5 font-mono">{item.cedula_rif}</td>
+                            <td className="px-4 py-2.5 font-sans">
+                              {isCredit ? (
+                                <span className="text-[10px] font-bold text-orange-600">Crédito Otorgado</span>
+                              ) : (
+                                <div className="flex flex-col">
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold w-fit ${
+                                    item.metodoRaw === 'Efectivo$' ? 'bg-emerald-100 text-emerald-800' :
+                                    item.metodoRaw === 'EfectivoBs' ? 'bg-teal-100 text-teal-800' :
+                                    item.metodoRaw === 'Biopago' ? 'bg-sky-100 text-sky-800' :
+                                    'bg-purple-100 text-purple-800'
+                                  }`}>
+                                    {item.metodo}
+                                  </span>
+                                  {item.referencia && (
+                                    <span className="text-[9px] font-mono text-slate-400">Ref: {item.referencia}</span>
+                                  )}
+                                </div>
+                              )}
+                            </td>
                             <td className={`px-4 py-2.5 text-right font-mono font-extrabold ${isCredit ? 'text-orange-600' : 'text-emerald-600'}`}>
                               {isCredit ? '+' : '-'}${item.monto.toFixed(2)}
                             </td>
@@ -1615,8 +1675,43 @@ export default function Clientes({
                 />
               </div>
 
+              <div>
+                <label className="text-xs text-slate-500 block mb-1 font-sans">Forma de Pago del Abono</label>
+                <select
+                  value={abonoMethod}
+                  onChange={(e) => setAbonoMethod(e.target.value as any)}
+                  className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs font-sans text-slate-800 focus:bg-white focus:border-sky-500 focus:outline-none"
+                >
+                  <option value="Efectivo$">💵 Efectivo en Dólares ($ USD)</option>
+                  <option value="EfectivoBs">🇻🇪 Efectivo en Bolívares (Bs VES)</option>
+                  <option value="TarjetaBs">💳 Tarjeta de Débito / Crédito (Bs)</option>
+                  <option value="PagoMovil">📱 Pago Móvil (Bs)</option>
+                  <option value="Biopago">👆 Biopago (Bs)</option>
+                </select>
+              </div>
+
+              {abonoMethod !== 'Efectivo$' && (
+                <div className="bg-emerald-50 border border-emerald-200 p-2.5 rounded text-xs font-mono text-emerald-900 flex justify-between items-center">
+                  <span className="font-sans text-[10px] font-bold uppercase text-emerald-700">Monto en Bs:</span>
+                  <strong className="text-sm">Bs {((parseFloat(abonoVal || '0') || 0) * tasaDia).toFixed(2)}</strong>
+                </div>
+              )}
+
+              {(abonoMethod === 'TarjetaBs' || abonoMethod === 'PagoMovil' || abonoMethod === 'Biopago') && (
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1 font-sans">Nro. de Referencia (Opcional)</label>
+                  <input
+                    type="text"
+                    value={abonoRef}
+                    onChange={(e) => setAbonoRef(e.target.value)}
+                    placeholder="Ej: 123456"
+                    className="w-full bg-slate-50 border border-slate-350 rounded p-2 text-xs font-mono focus:bg-white focus:border-sky-500 focus:outline-none"
+                  />
+                </div>
+              )}
+
               <div className="text-[10px] text-slate-500 font-sans">
-                * Nota: El abono se registrará como un ingreso de caja en efectivo por defecto. El crédito disponible del cliente aumentará en proporción al abono.
+                * Nota: El abono se contabilizará según la forma de pago elegida y restablecerá el crédito disponible del cliente.
               </div>
 
               <div className="flex gap-2 pt-2">

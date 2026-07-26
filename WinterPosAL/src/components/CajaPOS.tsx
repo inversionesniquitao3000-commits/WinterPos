@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Product, Client, User, CompanyConfig, SaleItem, Payment, Sale, CierreCaja } from '../types';
+import { Product, Client, User, CompanyConfig, SaleItem, Payment, Sale, CierreCaja, CierreDetails, Abono } from '../types';
 import { 
   ShoppingBag, Search, Trash2, 
   XCircle, ArrowUpRight, 
@@ -36,31 +36,7 @@ interface CajaPOSProps {
   onCerrarCaja: (
     realUsd: number, 
     realVes: number,
-    details?: {
-      ventasEfectivoUsd: number;
-      abonoClientesUsd: number;
-      entradaEfectivoUsd: number;
-      entradaEfectivoVes?: number;
-      salidaEfectivoUsd: number;
-      salidaEfectivoVes?: number;
-      devolucionEfectivoUsd: number;
-      dineroEnCajaExpected: number;
-      ventasTotalesUsd: number;
-      descuentosUsd: number;
-      ventaBrutaUsd: number;
-      pagosEfectivoUsd: number;
-      pagosEfectivoBsUsd: number;
-      pagosEfectivoBsVes: number;
-      pagosBiopagoUsd: number;
-      pagosBiopagoVes: number;
-      pagosPuntoUsd: number;
-      pagosPuntoVes: number;
-      pagosTarjetaUsd: number;
-      pagosCreditoUsd: number;
-      pagosPuntosUsd: number;
-      devolucionVentasUsd: number;
-      ventaTotalUsd: number;
-    }
+    details?: CierreDetails
   ) => Promise<CierreCaja>;
   shiftSales: Sale[];
   shiftAbonosUsd: number;
@@ -76,7 +52,13 @@ interface CajaPOSProps {
     qty: number,
     reason: string
   ) => Promise<void>;
-  onRegisterAbono: (clientId: number, amountUSD: number) => void;
+  onRegisterAbono: (
+    clientId: number, 
+    amountUSD: number,
+    metodoPago?: 'Efectivo$' | 'EfectivoBs' | 'TarjetaBs' | 'PagoMovil' | 'Biopago',
+    referencia?: string
+  ) => void;
+  abonos?: Abono[];
   getApiUrl: (path: string) => string;
   nextInvoiceNumber: string;
   onLogout: () => void;
@@ -104,7 +86,7 @@ export default function CajaPOS({
   onAbrirCaja,
   onCerrarCaja,
   shiftSales,
-  shiftAbonosUsd,
+  shiftAbonosUsd: _shiftAbonosUsd,
   shiftEntradasUsd,
   shiftEntradasVes,
   shiftSalidasUsd,
@@ -113,6 +95,7 @@ export default function CajaPOS({
   shiftDevolucionesVes,
   onUpdateProductStock,
   onRegisterAbono,
+  abonos,
   getApiUrl,
   nextInvoiceNumber,
   onLogout
@@ -254,8 +237,8 @@ export default function CajaPOS({
     const items = (sale.items || []).map(item => {
       const barcode = item?.product?.barcode || '';
       const description = item?.product?.description || 'Producto sin descripción';
-      const price = parseFloat(item?.precio_unitario_usd || item?.priceUSD || item?.product?.precio_detalle_usd || 0);
-      const qty = parseFloat(item?.qty || 0);
+      const price = parseFloat(String((item as any)?.precio_unitario_usd || item?.priceUSD || item?.product?.precio_detalle_usd || 0));
+      const qty = typeof item?.qty === 'number' ? item.qty : (parseFloat(String(item?.qty || 0)) || 0);
 
       const fullProd = products.find(p => p.barcode === barcode) || {
         id: item?.product?.id || Date.now() + Math.random(),
@@ -302,6 +285,8 @@ export default function CajaPOS({
   };
 
   const executeDevolucionProcess = async () => {
+    const currentSale = devSelectedSale;
+    if (!currentSale) return;
     setShowDevConfirmModal(false);
     try {
       // 1. Update product stock (for each returned item, increase stock)
@@ -311,7 +296,7 @@ export default function CajaPOS({
             item.product.id,
             'Devolución',
             item.returnQty,
-            `Devolución FAC: ${devSelectedSale.factura_nro} - ${devMotivo}`
+            `Devolución FAC: ${currentSale.factura_nro} - ${devMotivo}`
           );
         }
       }
@@ -323,16 +308,16 @@ export default function CajaPOS({
       // 2. Register manual cash movement of type Devolucion
       onRegisterCajaMovement(
         'Devolucion',
-        `Devolución de Efectivo FAC: ${devSelectedSale.factura_nro} - Motivo: ${devMotivo}`,
+        `Devolución de Efectivo FAC: ${currentSale.factura_nro} - Motivo: ${devMotivo}`,
         refundUsd,
         refundVes
       );
 
       // 3. Register the return as a Sale record in the Ventas history (negative sales)
       const returnSaleResult = {
-        factura_nro: `DEV-${devSelectedSale.factura_nro.replace('FAC-', '')}`,
-        factura_afectada: devSelectedSale.factura_nro,
-        client: devSelectedSale.client,
+        factura_nro: `DEV-${currentSale.factura_nro.replace('FAC-', '')}`,
+        factura_afectada: currentSale.factura_nro,
+        client: currentSale.client,
         items: devItems.filter(i => i.returnQty > 0).map(i => ({
           product: i.product,
           qty: i.returnQty,
@@ -570,6 +555,8 @@ export default function CajaPOS({
   // Keyboard row selection and mixed change state
   const [selectedItemIndex, setSelectedItemIndex] = useState<number>(0);
   const [mixedChangeUSDVal, setMixedChangeUSDVal] = useState('');
+  const [abonoMethod, setAbonoMethod] = useState<'Efectivo$' | 'EfectivoBs' | 'TarjetaBs' | 'PagoMovil' | 'Biopago'>('Efectivo$');
+  const [abonoRef, setAbonoRef] = useState('');
 
   // Reset mixed change on open/close
   useEffect(() => {
@@ -1154,26 +1141,23 @@ export default function CajaPOS({
     if (changeUSD > 0) {
       const mixedUsdInput = parseFloat(mixedChangeUSDVal);
       if (!isNaN(mixedUsdInput) && mixedChangeUSDVal.trim() !== '') {
-        // Auxiliary mixed change calculator was explicitly used
+        // Auxiliary mixed change calculator explicitly specified a USD amount to return in bills
         finalVueltoUSD = Math.min(changeUSD, Math.max(0, mixedUsdInput));
         finalVueltoVES = parseFloat(((changeUSD - finalVueltoUSD) * tasaVuelto).toFixed(2));
       } else {
-        // Default change currency logic based on cash payment method
+        // Default change currency logic: if Auxiliar Vuelto field is left empty, return 0 USD bills and 100% in Bolívares (VES)
         const paidInCashUSD = cashUSDVal > 0;
         const paidInCashVES = cashVESVal > 0;
 
         if (paidInCashUSD && !paidInCashVES) {
-          // Paid in USD cash: change delivered in USD
-          finalVueltoUSD = changeUSD;
-          finalVueltoVES = 0;
+          finalVueltoUSD = 0;
+          finalVueltoVES = parseFloat((changeUSD * tasaVuelto).toFixed(2));
         } else if (paidInCashVES && !paidInCashUSD) {
-          // Paid in VES cash: change delivered in VES
           finalVueltoUSD = 0;
           finalVueltoVES = changeVES;
         } else {
-          // Default to USD change
-          finalVueltoUSD = changeUSD;
-          finalVueltoVES = 0;
+          finalVueltoUSD = 0;
+          finalVueltoVES = parseFloat((changeUSD * tasaVuelto).toFixed(2));
         }
       }
     }
@@ -1291,8 +1275,6 @@ export default function CajaPOS({
     const realVes = parseFloat(cierreRealVes) || 0;
 
     // Detailed metrics calculation
-    const cajaVentasVes = parseFloat(localStorage.getItem('pos_ventas_ves') || '0');
-    const cajaMovimientosVes = parseFloat(localStorage.getItem('pos_movimientos_ves') || '0');
     const aperturaUsd = _montoAperturaUsd;
     const aperturaVes = _montoAperturaVes;
     const ventasEfectivoUsd = shiftSales.reduce((acc, sale) => {
@@ -1300,20 +1282,61 @@ export default function CajaPOS({
       const cashPay = sale.pagos.find(p => p.metodo === 'Efectivo$');
       return acc + (cashPay ? cashPay.monto : 0);
     }, 0);
-    const abonoClientesUsd = shiftAbonosUsd;
+    const ventasEfectivoVes = shiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      const cashPay = sale.pagos.find(p => p.metodo === 'EfectivoBs');
+      return acc + (cashPay ? cashPay.monto : 0);
+    }, 0);
+    // Detailed abonos metrics calculation
+    const abonosEfectivoUsd = (abonos || []).reduce((acc, a) => {
+      if (a.metodo_pago === 'Efectivo$' || !a.metodo_pago) return acc + a.monto;
+      return acc;
+    }, 0);
+    const abonosEfectivoBsVes = (abonos || []).reduce((acc, a) => {
+      if (a.metodo_pago === 'EfectivoBs') return acc + (a.monto_ves || a.monto * tasaDia);
+      return acc;
+    }, 0);
+    const abonosEfectivoBsUsd = (abonos || []).reduce((acc, a) => {
+      if (a.metodo_pago === 'EfectivoBs') return acc + a.monto;
+      return acc;
+    }, 0);
+    const abonosBiopagoVes = (abonos || []).reduce((acc, a) => {
+      if (a.metodo_pago === 'Biopago') return acc + (a.monto_ves || a.monto * tasaDia);
+      return acc;
+    }, 0);
+    const abonosBiopagoUsd = (abonos || []).reduce((acc, a) => {
+      if (a.metodo_pago === 'Biopago') return acc + a.monto;
+      return acc;
+    }, 0);
+    const abonosPuntoVes = (abonos || []).reduce((acc, a) => {
+      if (a.metodo_pago === 'TarjetaBs' || a.metodo_pago === 'PagoMovil') return acc + (a.monto_ves || a.monto * tasaDia);
+      return acc;
+    }, 0);
+    const abonosPuntoUsd = (abonos || []).reduce((acc, a) => {
+      if (a.metodo_pago === 'TarjetaBs' || a.metodo_pago === 'PagoMovil') return acc + a.monto;
+      return acc;
+    }, 0);
+    const abonoClientesUsd = abonosEfectivoUsd + abonosEfectivoBsUsd + abonosBiopagoUsd + abonosPuntoUsd;
+
     const entradaEfectivoUsd = shiftEntradasUsd;
     const entradaEfectivoVes = shiftEntradasVes;
     const salidaEfectivoUsd = shiftSalidasUsd;
     const salidaEfectivoVes = shiftSalidasVes;
     const devolucionEfectivoUsd = shiftDevolucionesUsd;
     const devolucionEfectivoVes = shiftDevolucionesVes;
+    const vueltosEntregadosUsd = shiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      return acc + (sale.vueltoUSD || 0);
+    }, 0);
     const vueltosEntregadosVes = shiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
       return acc + (sale.vueltoVES || 0);
     }, 0);
 
-    const dineroEnCajaExpected = Math.max(0, aperturaUsd + ventasEfectivoUsd + abonoClientesUsd + entradaEfectivoUsd - salidaEfectivoUsd - devolucionEfectivoUsd);
-    const rawExpectedVes = aperturaVes + cajaVentasVes + entradaEfectivoVes - salidaEfectivoVes - devolucionEfectivoVes - vueltosEntregadosVes;
+    const rawExpectedUsd = aperturaUsd + ventasEfectivoUsd + abonosEfectivoUsd + entradaEfectivoUsd - salidaEfectivoUsd - devolucionEfectivoUsd - vueltosEntregadosUsd;
+    const dineroEnCajaExpected = Math.max(0, parseFloat(rawExpectedUsd.toFixed(2)));
+
+    const rawExpectedVes = aperturaVes + ventasEfectivoVes + abonosEfectivoBsVes + entradaEfectivoVes - salidaEfectivoVes - devolucionEfectivoVes - vueltosEntregadosVes;
     const expectedVes = Math.max(0, parseFloat(rawExpectedVes.toFixed(2)));
     
     const ventasTotalesUsd = shiftSales.reduce((acc, sale) => {
@@ -1326,39 +1349,55 @@ export default function CajaPOS({
     }, 0);
     const ventaBrutaUsd = ventasTotalesUsd + descuentosUsd;
     
+    const getPayUsd = (p: Payment) => {
+      const val = typeof p?.montoUSD === 'number' && !isNaN(p.montoUSD) ? p.montoUSD : (typeof p?.monto === 'number' && !isNaN(p.monto) ? p.monto : 0);
+      return isNaN(val) ? 0 : val;
+    };
+
+    const getPayVes = (p: Payment) => {
+      const val = typeof p?.monto === 'number' && !isNaN(p.monto) ? p.monto : 0;
+      return isNaN(val) ? 0 : val;
+    };
+
     const pagosEfectivoUsd = shiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
-      return acc + sale.pagos.reduce((a, p) => p.metodo === 'Efectivo$' ? a + p.montoUSD : a, 0);
+      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Efectivo$' ? a + getPayUsd(p) : a, 0);
     }, 0);
+
     const pagosEfectivoBsUsd = shiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
-      return acc + sale.pagos.reduce((a, p) => p.metodo === 'EfectivoBs' ? a + p.montoUSD : a, 0);
+      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'EfectivoBs' ? a + getPayUsd(p) : a, 0);
     }, 0);
+
     const pagosEfectivoBsVes = shiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
-      return acc + sale.pagos.reduce((a, p) => p.metodo === 'EfectivoBs' ? a + p.monto : a, 0);
-    }, 0);
+      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'EfectivoBs' ? a + getPayVes(p) : a, 0);
+    }, 0) + abonosEfectivoBsVes;
+
     const pagosBiopagoUsd = shiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
-      return acc + sale.pagos.reduce((a, p) => p.metodo === 'Biopago' ? a + p.montoUSD : a, 0);
+      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Biopago' ? a + getPayUsd(p) : a, 0);
     }, 0);
+
     const pagosBiopagoVes = shiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
-      return acc + sale.pagos.reduce((a, p) => p.metodo === 'Biopago' ? a + p.monto : a, 0);
-    }, 0);
+      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Biopago' ? a + getPayVes(p) : a, 0);
+    }, 0) + abonosBiopagoVes;
+
     const pagosPuntoUsd = shiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
-      return acc + sale.pagos.reduce((a, p) => (p.metodo === 'Tarjeta$' || p.metodo === 'PagoMovil' || p.metodo === 'TarjetaBs') ? a + p.montoUSD : a, 0);
+      return acc + (sale.pagos || []).reduce((a, p) => (p.metodo === 'Tarjeta$' || p.metodo === 'PagoMovil' || p.metodo === 'TarjetaBs') ? a + getPayUsd(p) : a, 0);
     }, 0);
+
     const pagosPuntoVes = shiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
-      return acc + sale.pagos.reduce((a, p) => (p.metodo === 'Tarjeta$' || p.metodo === 'PagoMovil' || p.metodo === 'TarjetaBs') ? a + p.monto : a, 0);
-    }, 0);
+      return acc + (sale.pagos || []).reduce((a, p) => (p.metodo === 'Tarjeta$' || p.metodo === 'PagoMovil' || p.metodo === 'TarjetaBs') ? a + getPayVes(p) : a, 0);
+    }, 0) + abonosPuntoVes;
     
     const pagosTarjetaUsd = pagosEfectivoBsUsd; 
     const pagosCreditoUsd = shiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
-      return acc + sale.pagos.reduce((a, p) => p.metodo === 'CreditoCliente' ? a + p.montoUSD : a, 0);
+      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'CreditoCliente' ? a + getPayUsd(p) : a, 0);
     }, 0);
     const pagosPuntosUsd = pagosBiopagoUsd; 
     
@@ -1378,14 +1417,39 @@ export default function CajaPOS({
     }, 0);
     const ventaTotalUsd = ventasTotalesUsd - devolucionVentasUsd;
 
+    const getItemUnitCost = (item: any) => {
+      if (!item) return 0;
+      let cost = 0;
+      if (typeof item.product?.precio_costo_usd === 'number' && item.product.precio_costo_usd > 0) {
+        cost = item.product.precio_costo_usd;
+      } else if (typeof item.precio_costo_usd === 'number' && item.precio_costo_usd > 0) {
+        cost = item.precio_costo_usd;
+      } else if (typeof item.costo_usd === 'number' && item.costo_usd > 0) {
+        cost = item.costo_usd;
+      }
+      
+      if (!cost) {
+        const code = item.product?.barcode || item.barcode || item.productCode || item.code;
+        if (code) {
+          const match = products.find(p => p.barcode === code);
+          if (match && typeof match.precio_costo_usd === 'number' && match.precio_costo_usd > 0) {
+            cost = match.precio_costo_usd;
+          }
+        }
+      }
+      return isNaN(cost) ? 0 : cost;
+    };
+
     const costoTotalUsd = shiftSales.reduce((acc, sale) => {
-      const isDev = sale.factura_nro.startsWith('DEV-');
+      const isDev = sale.factura_nro?.startsWith('DEV-');
       const mult = isDev ? -1 : 1;
       return acc + (sale.items || []).reduce((itemAcc, item) => {
-        return itemAcc + ((item.product.precio_costo_usd || 0) * item.qty * mult);
+        const qty = typeof item.qty === 'number' && !isNaN(item.qty) ? item.qty : (parseFloat(String(item.qty)) || 0);
+        return itemAcc + (getItemUnitCost(item) * qty * mult);
       }, 0);
     }, 0);
-    const utilidadUsd = Math.max(0, ventaTotalUsd - costoTotalUsd);
+
+    const utilidadUsd = ventaTotalUsd - costoTotalUsd;
 
     const localCierreResult: CierreCaja = {
       id: Date.now(),
@@ -1401,13 +1465,23 @@ export default function CajaPOS({
       costoTotalUsd,
       utilidadUsd,
       ventasEfectivoUsd,
+      ventasEfectivoVes,
       abonoClientesUsd,
+      abonosEfectivoUsd,
+      abonosEfectivoBsVes,
+      abonosEfectivoBsUsd,
+      abonosBiopagoVes,
+      abonosBiopagoUsd,
+      abonosPuntoVes,
+      abonosPuntoUsd,
       entradaEfectivoUsd,
       entradaEfectivoVes,
       salidaEfectivoUsd,
       salidaEfectivoVes,
       devolucionEfectivoUsd,
       devolucionEfectivoVes,
+      vueltosEntregadosUsd,
+      vueltosEntregadosVes,
       dineroEnCajaExpected,
       ventasTotalesUsd,
       descuentosUsd,
@@ -1458,7 +1532,7 @@ export default function CajaPOS({
       `*WinterPosAL Cloud System*`;
 
     const summaryText = template
-      .replace(/{fecha}/g, cierreResult.fechaCierre)
+      .replace(/{fecha}/g, cierreResult.fechaCierre || cierreResult.fecha || '')
       .replace(/{usuario}/g, cierreResult.usuario.toUpperCase())
       .replace(/{terminal}/g, localStorage.getItem('pos_terminal_name') || 'CAJA_01')
       .replace(/{dineroEnCajaExpected}/g, cierreResult.dineroEnCajaExpected.toFixed(2))
@@ -2654,8 +2728,10 @@ export default function CajaPOS({
             return;
           }
 
-          onRegisterAbono(abonoClient.id, val);
+          onRegisterAbono(abonoClient.id, val, abonoMethod, abonoRef);
           setShowCajaAbonoModal(false);
+          setAbonoMethod('Efectivo$');
+          setAbonoRef('');
           showToast('Abono registrado con éxito de forma segura.', 'success');
         };
 
@@ -2742,13 +2818,43 @@ export default function CajaPOS({
                         placeholder="0.00"
                         className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-emerald-600 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
                         autoFocus
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            handleSaveCajaAbono();
-                          }
-                        }}
                       />
                     </div>
+
+                    <div>
+                      <label className="text-[10px] text-slate-500 block mb-1.5 font-sans font-bold uppercase tracking-wider">Forma de Pago del Abono:</label>
+                      <select
+                        value={abonoMethod}
+                        onChange={(e) => setAbonoMethod(e.target.value as any)}
+                        className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-sans text-slate-800 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:outline-none"
+                      >
+                        <option value="Efectivo$">💵 Efectivo en Dólares ($ USD)</option>
+                        <option value="EfectivoBs">🇻🇪 Efectivo en Bolívares (Bs VES)</option>
+                        <option value="TarjetaBs">💳 Tarjeta de Débito / Crédito (Bs)</option>
+                        <option value="PagoMovil">📱 Pago Móvil (Bs)</option>
+                        <option value="Biopago">👆 Biopago (Bs)</option>
+                      </select>
+                    </div>
+
+                    {abonoMethod !== 'Efectivo$' && (
+                      <div className="bg-emerald-50 border border-emerald-200 p-2.5 rounded-lg text-xs font-mono text-emerald-900 flex justify-between items-center">
+                        <span className="font-sans text-[10px] font-bold uppercase text-emerald-700">Monto a Recibir en Bs:</span>
+                        <strong className="text-sm">Bs {((parseFloat(abonoAmount || '0') || 0) * tasaDia).toFixed(2)}</strong>
+                      </div>
+                    )}
+
+                    {(abonoMethod === 'TarjetaBs' || abonoMethod === 'PagoMovil' || abonoMethod === 'Biopago') && (
+                      <div>
+                        <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold uppercase tracking-wider">Nro. de Referencia (Opcional):</label>
+                        <input
+                          type="text"
+                          value={abonoRef}
+                          onChange={(e) => setAbonoRef(e.target.value)}
+                          placeholder="Ej: 123456"
+                          className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-mono focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:outline-none"
+                        />
+                      </div>
+                    )}
                     
                     <button
                       onClick={() => setAbonoClient(null)}
@@ -2983,14 +3089,51 @@ export default function CajaPOS({
                       </div>
                       
                       <div className="flex justify-between">
-                        <span>Ventas en Efectivo :</span>
+                        <span>Ventas en Efectivo ($) :</span>
                         <span className="font-bold text-slate-800">$ {cierreResult.ventasEfectivoUsd.toFixed(2)}</span>
                       </div>
 
-                      <div className="flex justify-between">
-                        <span>Abono de Clientes :</span>
-                        <span className="font-bold text-slate-800">$ {cierreResult.abonoClientesUsd.toFixed(2)}</span>
-                      </div>
+                      {(cierreResult.ventasEfectivoVes ?? 0) > 0 && (
+                        <div className="flex justify-between font-bold text-slate-800">
+                          <span>Ventas en Efectivo (Bs) :</span>
+                          <span>Bs {cierreResult.ventasEfectivoVes!.toFixed(2)}</span>
+                        </div>
+                      )}
+
+                      {(cierreResult.abonosEfectivoUsd ?? 0) > 0 && (
+                        <div className="flex justify-between font-bold text-emerald-700">
+                          <span>Abono Clientes (Efectivo $) :</span>
+                          <span>$ {cierreResult.abonosEfectivoUsd!.toFixed(2)}</span>
+                        </div>
+                      )}
+
+                      {(cierreResult.abonosEfectivoBsVes ?? 0) > 0 && (
+                        <div className="flex justify-between font-bold text-emerald-700">
+                          <span>Abono Clientes (Efectivo Bs) :</span>
+                          <span>Bs {cierreResult.abonosEfectivoBsVes!.toFixed(2)}</span>
+                        </div>
+                      )}
+
+                      {(cierreResult.abonosBiopagoVes ?? 0) > 0 && (
+                        <div className="flex justify-between font-bold text-sky-700">
+                          <span>Abono Clientes (Biopago) :</span>
+                          <span>Bs {cierreResult.abonosBiopagoVes!.toFixed(2)}</span>
+                        </div>
+                      )}
+
+                      {(cierreResult.abonosPuntoVes ?? 0) > 0 && (
+                        <div className="flex justify-between font-bold text-indigo-700">
+                          <span>Abono Clientes (Punto / P.Móvil) :</span>
+                          <span>Bs {cierreResult.abonosPuntoVes!.toFixed(2)}</span>
+                        </div>
+                      )}
+
+                      {cierreResult.abonoClientesUsd === 0 && (
+                        <div className="flex justify-between">
+                          <span>Abono de Clientes :</span>
+                          <span className="font-bold text-slate-800">$ 0.00</span>
+                        </div>
+                      )}
 
                       <div className="flex justify-between">
                         <span>Entrada Efectivo ($) :</span>
@@ -3020,6 +3163,16 @@ export default function CajaPOS({
                       <div className="flex justify-between text-red-555 font-bold">
                         <span>Devolución Efectivo (Bs) :</span>
                         <span>- Bs {(cierreResult.devolucionEfectivoVes ?? 0).toFixed(2)}</span>
+                      </div>
+
+                      <div className="flex justify-between text-amber-700 font-bold">
+                        <span>Vuelto Entregado ($) :</span>
+                        <span>- $ {(cierreResult.vueltosEntregadosUsd ?? 0).toFixed(2)}</span>
+                      </div>
+
+                      <div className="flex justify-between text-amber-700 font-bold">
+                        <span>Vuelto Entregado (Bs) :</span>
+                        <span>- Bs {(cierreResult.vueltosEntregadosVes ?? 0).toFixed(2)}</span>
                       </div>
                     </div>
 
@@ -3057,27 +3210,27 @@ export default function CajaPOS({
                     <div className="space-y-2 pt-1 font-mono text-[13px]">
                       <div className="flex justify-between">
                         <span>Efectivo $ :</span>
-                        <span className="font-bold text-slate-800">$ {cierreResult.pagosEfectivoUsd.toFixed(2)}</span>
+                        <span className="font-bold text-slate-800">$ {(cierreResult.pagosEfectivoUsd && !isNaN(cierreResult.pagosEfectivoUsd) ? cierreResult.pagosEfectivoUsd : 0).toFixed(2)}</span>
                       </div>
                       
                       <div className="flex justify-between">
                         <span>Efectivo Bs :</span>
-                        <span className="font-bold text-slate-800">Bs {cierreResult.pagosEfectivoBsVes.toFixed(2)}</span>
+                        <span className="font-bold text-slate-800">Bs {(cierreResult.pagosEfectivoBsVes && !isNaN(cierreResult.pagosEfectivoBsVes) ? cierreResult.pagosEfectivoBsVes : 0).toFixed(2)}</span>
                       </div>
 
                       <div className="flex justify-between">
                         <span>Biopago :</span>
-                        <span className="font-bold text-slate-800">Bs {cierreResult.pagosBiopagoVes.toFixed(2)}</span>
+                        <span className="font-bold text-slate-800">Bs {(cierreResult.pagosBiopagoVes && !isNaN(cierreResult.pagosBiopagoVes) ? cierreResult.pagosBiopagoVes : 0).toFixed(2)}</span>
                       </div>
 
                       <div className="flex justify-between">
                         <span>Punto / Tarjeta :</span>
-                        <span className="font-bold text-slate-800">Bs {cierreResult.pagosPuntoVes.toFixed(2)}</span>
+                        <span className="font-bold text-slate-800">Bs {(cierreResult.pagosPuntoVes && !isNaN(cierreResult.pagosPuntoVes) ? cierreResult.pagosPuntoVes : 0).toFixed(2)}</span>
                       </div>
 
                       <div className="flex justify-between">
                         <span>A Crédito :</span>
-                        <span className="font-bold text-slate-800">$ {cierreResult.pagosCreditoUsd.toFixed(2)}</span>
+                        <span className="font-bold text-slate-800">$ {(cierreResult.pagosCreditoUsd && !isNaN(cierreResult.pagosCreditoUsd) ? cierreResult.pagosCreditoUsd : 0).toFixed(2)}</span>
                       </div>
 
                       <div className="flex justify-between text-red-550 font-bold">
@@ -3102,6 +3255,31 @@ export default function CajaPOS({
                       <div className="text-[8.5px] text-slate-450 italic font-mono font-medium uppercase tracking-tighter text-right">
                         {formatNumberToWordsUSD(cierreResult.ventaTotalUsd)}
                       </div>
+                    </div>
+
+                    {/* PROFITABILITY BREAKDOWN */}
+                    <div className="pt-2.5 font-sans space-y-2 text-[11.5px] text-slate-700 bg-emerald-50/50 p-3 rounded border border-emerald-100 mt-2 select-text">
+                      <div className="font-bold text-[10px] text-emerald-855 uppercase border-b border-emerald-200/60 pb-1 font-sans flex justify-between">
+                        <span>CÁLCULO DE UTILIDAD DEL CIERRE</span>
+                      </div>
+                      <div className="flex justify-between font-mono">
+                        <span>Subtotal Ventas (sin IVA):</span>
+                        <span className="font-bold text-slate-800">$ {(cierreResult.ventaBrutaUsd ?? cierreResult.ventaTotalUsd ?? 0).toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between font-mono">
+                        <span>Costo de Mercancía:</span>
+                        <span className="font-bold text-red-600">- $ {(cierreResult.costoTotalUsd ?? 0).toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between font-mono text-[12.5px] border-t border-emerald-300/80 pt-1 mt-1 font-extrabold text-emerald-700">
+                        <span>UTILIDAD BRUTA (SUBTOTAL):</span>
+                        <span className="text-base font-black">$ {((cierreResult.ventaBrutaUsd ?? cierreResult.ventaTotalUsd ?? 0) - (cierreResult.costoTotalUsd ?? 0)).toFixed(2)}</span>
+                      </div>
+                      {(cierreResult.ventaTotalUsd ?? 0) > (cierreResult.ventaBrutaUsd ?? 0) && (
+                        <div className="flex justify-between text-slate-500 font-mono text-[9.5px] mt-0.5 italic pt-1 border-t border-dashed border-emerald-200">
+                          <span>Total Facturado (con IVA):</span>
+                          <span>$ {(cierreResult.ventaTotalUsd ?? 0).toFixed(2)} (Utilidad Neta: ${(cierreResult.utilidadUsd ?? ((cierreResult.ventaTotalUsd ?? 0) - (cierreResult.costoTotalUsd ?? 0))).toFixed(2)})</span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -3511,10 +3689,10 @@ export default function CajaPOS({
                   ) : (
                     filteredDevSales.map(sale => (
                       <button
-                        key={sale.id}
+                        key={sale.id || sale.factura_nro}
                         onClick={() => handleSelectDevSale(sale)}
                         className={`w-full text-left p-3 rounded-lg border transition-all flex flex-col gap-1 ${
-                          devSelectedSale?.id === sale.id
+                          devSelectedSale?.factura_nro === sale.factura_nro
                             ? 'bg-rose-50 border-rose-250 text-rose-900 shadow-sm'
                             : 'bg-white border-slate-150 hover:bg-slate-50 text-slate-750'
                         }`}
@@ -3555,7 +3733,7 @@ export default function CajaPOS({
                         <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Forma de Pago Original:</span>
                         <div className="flex flex-wrap gap-2.5 font-semibold text-slate-700">
                           {devSelectedSale.pagos?.map((p, pIdx) => {
-                            let label = p.metodo;
+                            let label: string = p.metodo;
                             if (p.metodo === 'Efectivo$') label = 'Efectivo $';
                             else if (p.metodo === 'EfectivoBs') label = 'Efectivo Bs';
                             else if (p.metodo === 'TarjetaBs') label = 'Tarjeta Bs';

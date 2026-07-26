@@ -125,8 +125,8 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
       );
     }
     return [...list].sort((a, b) => {
-      let va: any = a[salesSortField];
-      let vb: any = b[salesSortField];
+      let va: any = (a as any)[salesSortField];
+      let vb: any = (b as any)[salesSortField];
 
       if (salesSortField === 'cliente') {
         va = a.client?.nombre || '';
@@ -197,8 +197,8 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
       );
     }
     return [...list].sort((a, b) => {
-      let va: any = a[cierresSortField];
-      let vb: any = b[cierresSortField];
+      let va: any = (a as any)[cierresSortField];
+      let vb: any = (b as any)[cierresSortField];
 
       if (cierresSortField === 'diffUsd') {
         const d1_expected = a.dineroEnCajaExpected ?? (a as any).expectedUsd ?? 0;
@@ -1019,11 +1019,8 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         const ventaBrutaUsd = selectedCierre.ventaBrutaUsd ?? 0;
         
         const pagosEfectivoUsd = selectedCierre.pagosEfectivoUsd ?? 0;
-        const pagosEfectivoBsUsd = (selectedCierre as any).pagosEfectivoBsUsd ?? 0;
         const pagosEfectivoBsVes = (selectedCierre as any).pagosEfectivoBsVes ?? 0;
-        const pagosBiopagoUsd = (selectedCierre as any).pagosBiopagoUsd ?? 0;
         const pagosBiopagoVes = (selectedCierre as any).pagosBiopagoVes ?? 0;
-        const pagosPuntoUsd = (selectedCierre as any).pagosPuntoUsd ?? 0;
         const pagosPuntoVes = (selectedCierre as any).pagosPuntoVes ?? 0;
         const pagosCreditoUsd = selectedCierre.pagosCreditoUsd ?? 0;
         const devolucionVentasUsd = selectedCierre.devolucionVentasUsd ?? 0;
@@ -1033,13 +1030,42 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         const expectedVes = Math.max(0, selectedCierre.expectedVes ?? 0);
         const realVes = Math.max(0, selectedCierre.realVes ?? 0);
 
-        const tasa = (() => {
-          if (pagosEfectivoBsUsd > 0) return Math.round((pagosEfectivoBsVes / pagosEfectivoBsUsd) * 100) / 100;
-          if (pagosBiopagoUsd > 0) return Math.round((pagosBiopagoVes / pagosBiopagoUsd) * 100) / 100;
-          if (pagosPuntoUsd > 0) return Math.round((pagosPuntoVes / pagosPuntoUsd) * 100) / 100;
-          if (aperturaUsd > 0 && aperturaVes > 0) return Math.round((aperturaVes / aperturaUsd) * 100) / 100;
-          return 0;
-        })();
+        const rawCosto = selectedCierre.costoTotalUsd;
+        let costoTotalUsd = typeof rawCosto === 'number' && rawCosto > 0 ? rawCosto : 0;
+
+        if (!costoTotalUsd && sales && sales.length > 0) {
+          const cierreDateStr = selectedCierre.fecha ? selectedCierre.fecha.split(',')[0].trim() : '';
+          const matchingSales = sales.filter(s => {
+            const sDate = s.fecha ? s.fecha.split(',')[0].trim() : '';
+            return sDate === cierreDateStr || s.fecha === selectedCierre.fecha;
+          });
+
+          costoTotalUsd = matchingSales.reduce((acc, sale) => {
+            const isDev = sale.factura_nro?.startsWith('DEV-');
+            const mult = isDev ? -1 : 1;
+            return acc + (sale.items || []).reduce((itemAcc, item) => {
+              const itemCost = item.product?.precio_costo_usd ?? (item as any).precio_costo_usd ?? (item as any).costo_usd ?? 0;
+              const qty = typeof item.qty === 'number' ? item.qty : (parseFloat(String(item.qty)) || 0);
+              return itemAcc + (itemCost * qty * mult);
+            }, 0);
+          }, 0);
+        }
+
+        let subtotalNetoUsd = selectedCierre.ventaBrutaUsd ?? (selectedCierre as any).subtotalUsd ?? 0;
+        if (!subtotalNetoUsd && sales && sales.length > 0) {
+          const cierreDateStr = selectedCierre.fecha ? selectedCierre.fecha.split(',')[0].trim() : '';
+          const matchingSales = sales.filter(s => {
+            const sDate = s.fecha ? s.fecha.split(',')[0].trim() : '';
+            return sDate === cierreDateStr || s.fecha === selectedCierre.fecha;
+          });
+          subtotalNetoUsd = matchingSales.reduce((acc, sale) => {
+            if (sale.factura_nro?.startsWith('DEV-')) return acc;
+            return acc + (sale.subtotal ?? sale.totalUSD);
+          }, 0);
+        }
+        if (!subtotalNetoUsd) subtotalNetoUsd = ventaTotalUsd;
+        const utilidadSubtotal = subtotalNetoUsd - costoTotalUsd;
+        const utilidadUsd = selectedCierre.utilidadUsd && selectedCierre.costoTotalUsd ? selectedCierre.utilidadUsd : (ventaTotalUsd - costoTotalUsd);
 
         return (
           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-slate-800">
@@ -1063,7 +1089,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                 {/* Left Column: Cash Drawer */}
                 <div className="bg-white border border-slate-200 p-5 rounded-lg space-y-3 shadow-sm select-text">
                   <div>
-                    <span className="text-slate-500 font-sans block text-[11px] font-bold uppercase">Usuario Cajero</span>
+                    <span className="text-slate-550 font-sans block text-[11px] font-bold uppercase">Usuario Cajero</span>
                     <strong className="text-slate-850 text-sm block uppercase truncate">
                       {selectedCierre.usuario}
                     </strong>
@@ -1114,12 +1140,24 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                       <span>Devolución Efectivo (Bs) :</span>
                       <span>- Bs {devolucionEfectivoVes.toFixed(2)}</span>
                     </div>
+
+                    <div className="flex justify-between text-amber-700 font-bold">
+                      <span>Vuelto Entregado ($) :</span>
+                      <span>- $ {(selectedCierre.vueltosEntregadosUsd ?? 0).toFixed(2)}</span>
+                    </div>
+
+                    <div className="flex justify-between text-amber-700 font-bold">
+                      <span>Vuelto Entregado (Bs) :</span>
+                      <span>- Bs {(selectedCierre.vueltosEntregadosVes ?? 0).toFixed(2)}</span>
+                    </div>
                   </div>
 
-                  <div className="border-t border-slate-300 pt-2 font-bold font-sans">
-                    <div className="flex justify-between text-sm text-slate-900 font-black items-baseline">
-                      <span className="uppercase text-[11px] font-extrabold text-slate-600">Dinero en Caja :</span>
-                      <span className="text-xl text-winter-blueBtn font-mono font-black">$ {dineroEnCajaExpected.toFixed(2)}</span>
+                  <div className="border-t border-slate-300 pt-2.5 space-y-0.5">
+                    <div className="flex justify-between text-sm font-black text-slate-900 items-baseline">
+                      <span className="font-sans uppercase text-[11px] font-extrabold text-slate-600">Dinero en Caja :</span>
+                      <span className="text-xl text-winter-blueBtn font-mono font-black">
+                        $ {dineroEnCajaExpected.toFixed(2)}
+                      </span>
                     </div>
                     <div className="text-[8.5px] text-slate-450 italic mt-0.5 leading-tight font-medium uppercase tracking-tighter text-right font-mono">
                       {formatNumberToWordsUSD(dineroEnCajaExpected)}
@@ -1128,85 +1166,93 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                 </div>
 
                 {/* Right Column: Performance */}
-                <div className="bg-white border border-slate-200 p-5 rounded-lg space-y-3 shadow-sm select-text">
-                  <div className="space-y-2 font-mono">
-                    <div className="flex justify-between">
-                      <span>Ventas Totales :</span>
-                      <span className="font-bold text-slate-800">$ {ventasTotalesUsd.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Descuentos :</span>
-                      <span className="font-bold text-slate-800">$ {descuentosUsd.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between font-bold text-slate-900 border-b border-dashed border-slate-200 pb-1.5">
-                      <span className="font-sans text-[11px] font-bold text-slate-500 uppercase">Venta Bruta :</span>
-                      <span>$ {ventaBrutaUsd.toFixed(2)}</span>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2 pt-1 font-mono text-[13px]">
-                    <div className="flex justify-between">
-                      <span>Efectivo $ :</span>
-                      <span className="font-bold text-slate-800">$ {pagosEfectivoUsd.toFixed(2)}</span>
-                    </div>
-                    
-                    <div className="flex justify-between">
-                      <span>Efectivo Bs :</span>
-                      <span className="font-bold text-slate-800">Bs {pagosEfectivoBsVes.toFixed(2)}</span>
+                <div className="bg-white border border-slate-200 p-5 rounded-lg space-y-3 shadow-sm select-text flex flex-col justify-between">
+                  <div className="space-y-3">
+                    <div className="space-y-2 font-mono">
+                      <div className="flex justify-between">
+                        <span>Ventas Totales :</span>
+                        <span className="font-bold text-slate-800">$ {ventasTotalesUsd.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Descuentos :</span>
+                        <span className="font-bold text-slate-800">$ {descuentosUsd.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between font-bold text-slate-900 border-b border-dashed border-slate-200 pb-1.5">
+                        <span className="font-sans text-[11px] font-bold text-slate-500 uppercase">Venta Bruta :</span>
+                        <span>$ {ventaBrutaUsd.toFixed(2)}</span>
+                      </div>
                     </div>
 
-                    <div className="flex justify-between">
-                      <span>Biopago :</span>
-                      <span className="font-bold text-slate-800">Bs {pagosBiopagoVes.toFixed(2)}</span>
+                    <div className="space-y-2 pt-1 font-mono text-[13px]">
+                      <div className="flex justify-between">
+                        <span>Efectivo $ :</span>
+                        <span className="font-bold text-slate-800">$ {pagosEfectivoUsd.toFixed(2)}</span>
+                      </div>
+                      
+                      <div className="flex justify-between">
+                        <span>Efectivo Bs :</span>
+                        <span className="font-bold text-slate-800">Bs {pagosEfectivoBsVes.toFixed(2)}</span>
+                      </div>
+
+                      <div className="flex justify-between">
+                        <span>Biopago :</span>
+                        <span className="font-bold text-slate-800">Bs {pagosBiopagoVes.toFixed(2)}</span>
+                      </div>
+
+                      <div className="flex justify-between">
+                        <span>Punto / Tarjeta :</span>
+                        <span className="font-bold text-slate-800">Bs {pagosPuntoVes.toFixed(2)}</span>
+                      </div>
+
+                      <div className="flex justify-between">
+                        <span>A Crédito :</span>
+                        <span className="font-bold text-slate-800">$ {pagosCreditoUsd.toFixed(2)}</span>
+                      </div>
+
+                      <div className="flex justify-between text-red-550 font-bold">
+                        <span>Devolución Ventas ($) :</span>
+                        <span>- $ {devolucionVentasUsd.toFixed(2)}</span>
+                      </div>
+
+                      <div className="flex justify-between text-red-550 font-bold">
+                        <span>Devolución Ventas (Bs) :</span>
+                        <span>- Bs {devolucionVentasVes.toFixed(2)}</span>
+                      </div>
                     </div>
 
-                    <div className="flex justify-between">
-                      <span>Punto / Tarjeta :</span>
-                      <span className="font-bold text-slate-800">Bs {pagosPuntoVes.toFixed(2)}</span>
+                    <div className="border-t border-slate-300 pt-2 font-bold font-sans">
+                      <div className="flex justify-between text-sm font-black text-slate-900 border-b border-dashed border-slate-200 pb-1.5 items-baseline">
+                        <span className="uppercase text-[11px] font-extrabold text-slate-600">Venta Total :</span>
+                        <span className="text-xl text-winter-blueBtn font-mono font-black">$ {ventaTotalUsd.toFixed(2)}</span>
+                      </div>
+                      <div className="text-[8.5px] text-slate-450 italic mt-0.5 leading-tight font-medium uppercase tracking-tighter text-right mb-2 font-mono">
+                        {formatNumberToWordsUSD(ventaTotalUsd)}
+                      </div>
                     </div>
 
-                    <div className="flex justify-between">
-                      <span>A Crédito :</span>
-                      <span className="font-bold text-slate-800">$ {pagosCreditoUsd.toFixed(2)}</span>
-                    </div>
-
-                    <div className="flex justify-between text-red-550 font-bold">
-                      <span>Devolución Ventas ($) :</span>
-                      <span>- $ {devolucionVentasUsd.toFixed(2)}</span>
-                    </div>
-
-                    <div className="flex justify-between text-red-550 font-bold">
-                      <span>Devolución Ventas (Bs) :</span>
-                      <span>- Bs {devolucionVentasVes.toFixed(2)}</span>
-                    </div>
-                  </div>
-
-                  <div className="border-t border-slate-300 pt-2 font-bold font-sans">
-                    <div className="flex justify-between text-sm text-slate-900 font-black border-b border-dashed border-slate-200 pb-1.5 items-baseline">
-                      <span className="uppercase text-[11px] font-extrabold text-slate-600">Venta Total :</span>
-                      <span className="text-xl text-winter-blueBtn font-mono font-black">$ {ventaTotalUsd.toFixed(2)}</span>
-                    </div>
-                    <div className="text-[8.5px] text-slate-450 italic mt-0.5 leading-tight font-medium uppercase tracking-tighter text-right mb-2 font-mono">
-                      {formatNumberToWordsUSD(ventaTotalUsd)}
-                    </div>
-                  </div>
-
-                  {/* PROFITABILITY BREAKDOWN */}
-                  <div className="pt-2.5 font-sans space-y-2 text-[11.5px] text-slate-700 bg-emerald-50/50 p-3 rounded border border-emerald-100 mt-2 select-text">
-                    <div className="font-bold text-[10px] text-emerald-855 uppercase border-b border-emerald-200/60 pb-1">
-                      CÁLCULO DE UTILIDAD DEL CIERRE
-                    </div>
-                    <div className="flex justify-between font-mono">
-                      <span>Ingreso Neto (Ventas):</span>
-                      <span className="font-bold text-slate-800">$ {ventaTotalUsd.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between font-mono">
-                      <span>Costo de Mercancía:</span>
-                      <span className="font-bold text-red-600">- $ {(selectedCierre.costoTotalUsd ?? 0).toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between font-mono text-[12.5px] border-t border-emerald-300/80 pt-1 mt-1 font-extrabold text-emerald-700">
-                      <span>UTILIDAD NETA:</span>
-                      <span className="text-base font-black">$ {(selectedCierre.utilidadUsd ?? (ventaTotalUsd - (selectedCierre.costoTotalUsd ?? 0))).toFixed(2)}</span>
+                    {/* PROFITABILITY BREAKDOWN */}
+                    <div className="pt-2.5 font-sans space-y-2 text-[11.5px] text-slate-700 bg-emerald-50/50 p-3 rounded border border-emerald-100 mt-2 select-text">
+                      <div className="font-bold text-[10px] text-emerald-855 uppercase border-b border-emerald-200/60 pb-1">
+                        CÁLCULO DE UTILIDAD DEL CIERRE
+                      </div>
+                      <div className="flex justify-between font-mono">
+                        <span>Subtotal Ventas (sin IVA):</span>
+                        <span className="font-bold text-slate-800">$ {(subtotalNetoUsd ?? 0).toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between font-mono">
+                        <span>Costo de Mercancía:</span>
+                        <span className="font-bold text-red-600">- $ {(costoTotalUsd ?? 0).toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between font-mono text-[12.5px] border-t border-emerald-300/80 pt-1 mt-1 font-extrabold text-emerald-700">
+                        <span>UTILIDAD BRUTA (SUBTOTAL):</span>
+                        <span className="text-base font-black">$ {(utilidadSubtotal ?? 0).toFixed(2)}</span>
+                      </div>
+                      {(ventaTotalUsd ?? 0) > (subtotalNetoUsd ?? 0) && (
+                        <div className="flex justify-between text-slate-500 font-mono text-[9.5px] mt-0.5 italic pt-1 border-t border-dashed border-emerald-200">
+                          <span>Total Facturado (con IVA):</span>
+                          <span>$ {(ventaTotalUsd ?? 0).toFixed(2)} (Utilidad Neta: ${(utilidadUsd ?? 0).toFixed(2)})</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1249,7 +1295,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                         : 'bg-slate-50 border-slate-200';
                     return (
                       <div className={`p-4 ${boxBgClass} border rounded-lg text-sm font-mono select-text space-y-1 transition-all`}>
-                        <div className="text-slate-600 font-sans text-[12px] mb-1.5 font-bold uppercase tracking-wide">Bolívares Bs:</div>
+                        <div className="text-slate-600 font-sans text-[12px] mb-1.5 font-bold uppercase tracking-wide">Bolívares BS:</div>
                         <div className="flex justify-between"><span>Gaveta Esperado:</span> <span>Bs {expectedVes.toFixed(2)}</span></div>
                         <div className="flex justify-between"><span>Recibido Real:</span> <span className="text-purple-755 font-bold">Bs {realVes.toFixed(2)}</span></div>
                         <div className="flex justify-between border-t border-dashed border-slate-300 pt-1.5 font-bold text-slate-800">
@@ -1311,28 +1357,40 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
           });
         });
 
+        const safeNum = (v: any) => {
+          if (v === null || v === undefined) return 0;
+          if (typeof v === 'number') return isNaN(v) ? 0 : v;
+          if (typeof v === 'string') {
+            const p = parseFloat(v);
+            return isNaN(p) ? 0 : p;
+          }
+          return 0;
+        };
+
         let totalNetCost = 0;
         let totalNetSale = 0;
         let hasReturnsOnThisSale = relatedDevs.length > 0;
 
         const itemsWithProfit = (selectedSale.items ?? []).map(item => {
-          const itemCost = item.product?.precio_costo_usd ?? 0;
-          const unitPrice = item.priceUSD ?? (item.qty > 0 ? (item.totalUSD / item.qty) : 0);
+          const itemCost = safeNum(item.product?.precio_costo_usd ?? (item as any)?.precio_costo_usd ?? (item as any)?.costo_usd ?? 0);
+          const rawQty = safeNum(item.qty ?? (item as any)?.cantidad ?? 0);
+          const rawTotalUsd = safeNum(item.totalUSD ?? (item as any)?.total_fila_usd ?? 0);
+          const unitPrice = safeNum(item.priceUSD ?? (item as any)?.precio_unitario_usd ?? 0) || (rawQty > 0 ? (rawTotalUsd / rawQty) : 0);
           
-          const itemBarcode = (item.product?.barcode || '').trim().toUpperCase();
-          const itemDesc = (item.product?.description || '').trim().toUpperCase();
+          const itemBarcode = (item.product?.barcode || (item as any)?.barcode || '').trim().toUpperCase();
+          const itemDesc = (item.product?.description || (item as any)?.description || '').trim().toUpperCase();
 
           const returnedByBarcode = itemBarcode ? (returnedQtyMap[itemBarcode] || 0) : 0;
           const returnedByDesc = itemDesc ? (returnedQtyMap[itemDesc] || 0) : 0;
 
-          const returnedQty = !isDev ? Math.min(item.qty, Math.max(returnedByBarcode, returnedByDesc, (item as any).returnedQty || 0)) : 0;
-          const remainingQty = Math.max(0, item.qty - returnedQty);
+          const returnedQty = !isDev ? Math.min(rawQty, Math.max(returnedByBarcode, returnedByDesc, (item as any)?.returnedQty || 0)) : 0;
+          const remainingQty = Math.max(0, rawQty - returnedQty);
 
           if (returnedQty > 0) {
             hasReturnsOnThisSale = true;
           }
 
-          const activeQty = isDev ? item.qty : remainingQty;
+          const activeQty = isDev ? rawQty : remainingQty;
           const activeItemCost = itemCost * activeQty;
           const activeItemSale = unitPrice * activeQty;
           const activeItemProfit = activeItemSale - activeItemCost;
@@ -1341,14 +1399,16 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
             totalNetCost += activeItemCost;
             totalNetSale += activeItemSale;
           } else {
-            totalNetCost += itemCost * item.qty;
-            totalNetSale += item.totalUSD ?? (unitPrice * item.qty);
+            totalNetCost += itemCost * rawQty;
+            totalNetSale += rawTotalUsd || (unitPrice * rawQty);
           }
 
           return {
             ...item,
+            product: item.product || { description: (item as any)?.descripcion || (item as any)?.description || 'Producto', barcode: (item as any)?.barcode || '' },
             cost: itemCost,
             unitPrice,
+            qty: rawQty,
             returnedQty,
             remainingQty,
             activeItemCost,
@@ -1359,11 +1419,20 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
           };
         });
 
-        const subtotal = isDev ? (selectedSale.subtotal ?? 0) : (hasReturnsOnThisSale ? totalNetSale : (selectedSale.subtotal ?? 0));
-        const descuento = selectedSale.descuento ?? 0;
-        const iva = selectedSale.iva ?? 0;
-        const totalUSD = isDev ? (selectedSale.totalUSD ?? 0) : (hasReturnsOnThisSale ? totalNetSale : (selectedSale.totalUSD ?? 0));
+        const subtotal = safeNum(isDev ? (selectedSale.subtotal ?? 0) : (hasReturnsOnThisSale ? totalNetSale : (selectedSale.subtotal ?? selectedSale.totalUSD ?? 0)));
+        const descuento = safeNum(selectedSale.descuento);
+        const iva = safeNum(selectedSale.iva);
+        const totalUSD = safeNum(isDev ? (selectedSale.totalUSD ?? 0) : (hasReturnsOnThisSale ? totalNetSale : (selectedSale.totalUSD ?? 0)));
         const totalProfit = isDev ? 0 : (totalUSD - totalNetCost);
+        const subtotalProfit = subtotal - totalNetCost;
+
+        const formatItemQty = (qty: number, isBulk?: boolean) => {
+          const safe = safeNum(qty);
+          if (isBulk || (safe % 1 !== 0)) {
+            return safe.toFixed(3);
+          }
+          return Math.round(safe).toString();
+        };
 
         return (
           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-slate-800 animate-fade-in">
@@ -1393,15 +1462,15 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                   </div>
                   <div>
                     <span className="text-slate-450 block text-[9px] uppercase">Fecha y Hora</span>
-                    <strong className="text-slate-800 text-xs block font-mono font-medium">{selectedSale.fecha}</strong>
+                    <span className="font-bold text-slate-700 text-xs block font-mono">{selectedSale.fecha}</span>
                   </div>
                   <div>
-                    <span className="text-slate-455 block text-[9px] uppercase">Cliente</span>
-                    <strong className="text-slate-800 text-xs block uppercase truncate">{selectedSale.client.nombre}</strong>
+                    <span className="text-slate-450 block text-[9px] uppercase">Cliente</span>
+                    <strong className="text-slate-800 text-xs block font-mono truncate">{selectedSale.client?.nombre || 'PÚBLICO GENERAL'}</strong>
                   </div>
                   <div>
-                    <span className="text-slate-455 block text-[9px] uppercase">Operador / Cajero</span>
-                    <strong className="text-slate-800 text-xs block uppercase truncate">{selectedSale.usuario}</strong>
+                    <span className="text-slate-450 block text-[9px] uppercase">Operador / Cajero</span>
+                    <strong className="text-slate-800 text-xs block font-mono uppercase truncate">{selectedSale.usuario}</strong>
                   </div>
                 </div>
 
@@ -1412,53 +1481,46 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                   </div>
                 )}
 
-                {/* Items Table */}
+                {/* Items table */}
                 <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
-                  <table className="w-full border-collapse text-left">
-                    <thead className="bg-slate-50 border-b border-slate-200">
-                      <tr className="text-slate-555 font-sans uppercase text-[10px] font-bold">
-                        <th className="px-4 py-3">{isDev ? 'PRODUCTO DEVUELTO' : 'PRODUCTO'}</th>
-                        <th className="px-4 py-3 text-center">CANT</th>
-                        <th className="px-4 py-3 text-right">{isDev ? 'PRECIO REF' : 'UNIT VENTA'}</th>
-                        <th className="px-4 py-3 text-right">UNIT COSTO</th>
-                        <th className="px-4 py-3 text-right">TOTAL {isDev ? 'DEVUELTO' : 'VENTA NETA'}</th>
-                        {!isDev && <th className="px-4 py-3 text-right text-emerald-700">UTILIDAD NETA</th>}
+                  <table className="w-full text-[11px] text-left">
+                    <thead className="bg-slate-100 text-slate-600 font-extrabold border-b border-slate-200 font-sans text-[10px] uppercase">
+                      <tr>
+                        <th className="px-4 py-2.5">Producto</th>
+                        <th className="px-4 py-2.5 text-center">Cant</th>
+                        <th className="px-4 py-2.5 text-right">Unit Venta</th>
+                        <th className="px-4 py-2.5 text-right">Unit Costo</th>
+                        <th className="px-4 py-2.5 text-right">Total Venta Neta</th>
+                        {!isDev && <th className="px-4 py-2.5 text-right text-emerald-700">Utilidad Neta</th>}
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 text-[11px] text-slate-750 font-mono select-text">
+                    <tbody className="divide-y divide-slate-150 font-mono">
                       {itemsWithProfit.map((item, idx) => (
-                        <tr key={idx} className={`hover:bg-slate-50/50 ${item.isFullyReturned ? 'bg-rose-50/40' : item.isPartiallyReturned ? 'bg-amber-50/40' : ''}`}>
-                          {/* PRODUCT NAME & RETURN BADGE */}
-                          <td className="px-4 py-2.5 font-sans font-bold uppercase">
-                            {item.isFullyReturned ? (
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="line-through text-slate-400 font-bold">{item.product.description}</span>
-                                <span className="bg-rose-600 text-white text-[9px] px-1.5 py-0.5 rounded font-extrabold font-sans">
-                                  DEVOLUCIÓN (-{item.returnedQty})
-                                </span>
-                              </div>
-                            ) : item.isPartiallyReturned ? (
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span>{item.product.description}</span>
-                                <span className="bg-amber-500 text-white text-[9px] px-1.5 py-0.5 rounded font-extrabold font-sans">
-                                  DEV. PARCIAL (-{item.returnedQty})
-                                </span>
-                              </div>
-                            ) : (
-                              <span>{item.product.description}</span>
+                        <tr key={idx} className={item.isFullyReturned ? 'bg-rose-50/40 text-slate-400' : 'hover:bg-slate-50'}>
+                          <td className="px-4 py-2.5 font-sans">
+                            <span className={`font-bold block text-[12px] ${item.isFullyReturned ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+                              {item.product?.description}
+                            </span>
+                            <span className="text-[9px] text-slate-400 block font-mono">{item.product?.barcode}</span>
+                            {item.isFullyReturned && (
+                              <span className="inline-block bg-rose-100 text-rose-700 text-[8.5px] font-bold px-1.5 py-0.5 rounded mt-0.5">
+                                Devuelto Totalmente
+                              </span>
+                            )}
+                            {item.isPartiallyReturned && (
+                              <span className="inline-block bg-amber-100 text-amber-800 text-[8.5px] font-bold px-1.5 py-0.5 rounded mt-0.5">
+                                {formatItemQty(item.returnedQty, item.product?.a_granel)} de {formatItemQty(item.qty, item.product?.a_granel)} Devuelto(s)
+                              </span>
                             )}
                           </td>
-
-                          {/* QTY */}
-                          <td className={`px-4 py-2.5 text-center font-black ${
-                            item.isFullyReturned ? 'line-through text-slate-400' : isDev ? 'text-rose-700' : 'text-slate-850'
-                          }`}>
-                            {item.isFullyReturned ? (
-                              `0 (de ${item.qty})`
-                            ) : item.isPartiallyReturned ? (
-                              `${item.remainingQty} (de ${item.qty})`
+                          <td className="px-4 py-2.5 text-center font-bold">
+                            {item.isPartiallyReturned ? (
+                              <span>
+                                <span className="line-through text-slate-400 font-normal mr-1">{formatItemQty(item.qty, item.product?.a_granel)}</span>
+                                <span className="text-slate-900 font-extrabold">{formatItemQty(item.remainingQty, item.product?.a_granel)}</span>
+                              </span>
                             ) : (
-                              `${isDev ? '-' : ''}${item.qty}`
+                              formatItemQty(item.qty, item.product?.a_granel)
                             )}
                           </td>
 
@@ -1514,7 +1576,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                         </div>
                       )}
                       {descuento > 0 && (
-                        <div className="flex justify-between text-red-500">
+                        <div className="flex justify-between text-red-550">
                           <span>Descuentos USD:</span>
                           <span>- $ {descuento.toFixed(2)}</span>
                         </div>
@@ -1524,18 +1586,6 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                         <span className={`${isDev ? 'text-rose-600' : 'text-winter-blueBtn'} font-mono font-black text-[15px]`}>
                           {isDev ? '-' : ''}$ {Math.abs(totalUSD).toFixed(2)}
                         </span>
-                      </div>
-                    </div>
-                    <div className="pt-2 border-t border-slate-100">
-                      <div className="text-[8.5px] uppercase text-slate-450 font-bold mb-1 font-sans">
-                        {isDev ? 'Método de Reembolso' : 'Métodos Aplicados'}
-                      </div>
-                      <div className="flex flex-wrap gap-1 font-sans">
-                        {(selectedSale.pagos ?? []).map((p, idx) => (
-                          <span key={idx} className="bg-slate-100 border border-slate-200 text-slate-700 px-2 py-1 rounded text-[10px] font-bold">
-                            {p.metodo === 'Efectivo$' && isDev ? 'Reembolso $' : p.metodo}: ${Math.abs(p.monto).toFixed(2)}
-                          </span>
-                        ))}
                       </div>
                     </div>
                   </div>
@@ -1550,8 +1600,8 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                         </div>
                         <div className="space-y-2 pt-2 text-[11px] text-slate-700">
                           <div className="flex justify-between">
-                            <span>Ingreso Neto Venta:</span>
-                            <span className="font-bold text-slate-800">$ {totalUSD.toFixed(2)}</span>
+                            <span>Subtotal Venta (sin IVA):</span>
+                            <span className="font-bold text-slate-800">$ {subtotal.toFixed(2)}</span>
                           </div>
                           <div className="flex justify-between">
                             <span>Costo Mercancía:</span>
@@ -1562,9 +1612,15 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
 
                       <div className="border-t border-emerald-300 pt-2 font-bold font-sans">
                         <div className="flex justify-between text-emerald-800 font-extrabold items-baseline">
-                          <span className="uppercase text-[11px] font-black">UTILIDAD NETA:</span>
-                          <span className="text-xl text-emerald-600 font-mono font-black">$ {totalProfit.toFixed(2)}</span>
+                          <span className="uppercase text-[10px] font-black">UTILIDAD BRUTA (SUBTOTAL):</span>
+                          <span className="text-xl text-emerald-700 font-mono font-black">$ {subtotalProfit.toFixed(2)}</span>
                         </div>
+                        {iva > 0 && (
+                          <div className="flex justify-between text-slate-500 font-mono text-[9.5px] mt-1 italic pt-1 border-t border-dashed border-emerald-200">
+                            <span>Total Facturado (con IVA $ {iva.toFixed(2)}):</span>
+                            <span>$ {totalUSD.toFixed(2)} (Utilidad Neta: ${totalProfit.toFixed(2)})</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}

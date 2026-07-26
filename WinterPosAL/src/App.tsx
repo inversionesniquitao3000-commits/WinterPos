@@ -6,7 +6,7 @@ import {
 import { 
   User, Product, Client, TasaHistoryItem, CompanyConfig, 
   InventoryMovement, PriceAdjustmentHistory, SaleItem, Payment,
-  Sale, CierreCaja, Abono
+  Sale, CierreCaja, Abono, CierreDetails
 } from './types';
 
 // Helper to get local date and time string in YYYY-MM-DD HH:MM format
@@ -770,13 +770,25 @@ export default function App() {
     }
   };
 
-  const handleRegisterAbono = async (clientId: number, amountUSD: number) => {
+  const handleRegisterAbono = async (
+    clientId: number, 
+    amountUSD: number,
+    metodoPago: 'Efectivo$' | 'EfectivoBs' | 'TarjetaBs' | 'PagoMovil' | 'Biopago' = 'Efectivo$',
+    referencia: string = ''
+  ) => {
+    const montoVES = parseFloat((amountUSD * tasaDia).toFixed(2));
+
     setClients(prev =>
       prev.map(c => {
         if (c.id === clientId) {
           const nextPending = Math.max(0, c.saldo_pendiente - amountUSD);
           const nextCreditAvailable = Math.min(c.limite_credito, c.credito_disponible + amountUSD);
-          handleRegisterCajaMovement('Entrada', `Abono de Crédito Cliente: ${c.nombre}`, amountUSD, 0);
+
+          if (metodoPago === 'EfectivoBs') {
+            handleRegisterCajaMovement('Entrada', `Abono de Crédito Cliente: ${c.nombre} (Efectivo Bs)`, 0, montoVES);
+          } else if (metodoPago === 'Efectivo$') {
+            handleRegisterCajaMovement('Entrada', `Abono de Crédito Cliente: ${c.nombre} (Efectivo $)`, amountUSD, 0);
+          }
           
           // Append to abonos state
           const newAbonoLog: Abono = {
@@ -785,6 +797,10 @@ export default function App() {
             nombre: c.nombre,
             cedula_rif: c.cedula_rif,
             monto: amountUSD,
+            metodo_pago: metodoPago,
+            monto_ves: montoVES,
+            referencia: referencia || undefined,
+            usuario: currentUser?.nombre || 'SISTEMA',
             fecha: getLocalISODateString()
           };
           setAbonos(prev => [...prev, newAbonoLog]);
@@ -799,7 +815,12 @@ export default function App() {
       })
     );
 
-    await postApiData('/clientes/abono', { id: clientId, monto: amountUSD });
+    await postApiData('/clientes/abono', { 
+      id: clientId, 
+      monto: amountUSD,
+      metodo_pago: metodoPago,
+      referencia 
+    });
   };
 
   const handleUpdateClient = async (updatedCli: Client) => {
@@ -882,30 +903,8 @@ export default function App() {
   const handleCerrarCaja = async (
     realUsd: number, 
     realVes: number,
-    details?: {
-      ventasEfectivoUsd: number;
-      abonoClientesUsd: number;
-      entradaEfectivoUsd: number;
-      salidaEfectivoUsd: number;
-      devolucionEfectivoUsd: number;
-      dineroEnCajaExpected: number;
-      ventasTotalesUsd: number;
-      descuentosUsd: number;
-      ventaBrutaUsd: number;
-      pagosEfectivoUsd: number;
-      pagosEfectivoBsUsd: number;
-      pagosEfectivoBsVes: number;
-      pagosBiopagoUsd: number;
-      pagosBiopagoVes: number;
-      pagosPuntoUsd: number;
-      pagosPuntoVes: number;
-      pagosTarjetaUsd: number;
-      pagosCreditoUsd: number;
-      pagosPuntosUsd: number;
-      devolucionVentasUsd: number;
-      ventaTotalUsd: number;
-    }
-  ): CierreCaja => {
+    details?: CierreDetails
+  ): Promise<CierreCaja> => {
     const expectedUsd = montoAperturaUsd + cajaVentasUsd + cajaMovimientosUsd;
     const expectedVes = montoAperturaVes + cajaVentasVes + cajaMovimientosVes;
     
@@ -939,6 +938,8 @@ export default function App() {
       salidaEfectivoUsd: details?.salidaEfectivoUsd ?? shiftSalidasUsd,
       devolucionEfectivoUsd: details?.devolucionEfectivoUsd ?? shiftDevolucionesUsd,
       devolucionEfectivoVes: details?.devolucionEfectivoVes ?? shiftDevolucionesVes,
+      vueltosEntregadosUsd: details?.vueltosEntregadosUsd ?? 0,
+      vueltosEntregadosVes: details?.vueltosEntregadosVes ?? 0,
       dineroEnCajaExpected: details?.dineroEnCajaExpected ?? expectedUsd,
       
       // Detailed sales metrics
@@ -1326,6 +1327,7 @@ export default function App() {
               shiftDevolucionesVes={shiftDevolucionesVes}
               onUpdateProductStock={handleUpdateProductStock}
               onRegisterAbono={handleRegisterAbono}
+              abonos={abonos}
               getApiUrl={getApiUrl}
               nextInvoiceNumber={nextInvoiceNumber}
               onLogout={handleLogout}
@@ -1386,6 +1388,7 @@ export default function App() {
               onDeleteClient={handleDeleteClient}
               sales={sales}
               abonos={abonos}
+              tasaDia={tasaDia}
             />
           )}
 
@@ -1431,7 +1434,7 @@ export default function App() {
                   setShiftSalidasVes(0);
                   setShiftDevolucionesUsd(0);
                   setShiftDevolucionesVes(0);
-                  setShiftCajaAbierta(false);
+                  setCajaAbierta(false);
                 }
                 if (mode === 'inventory' || mode === 'all') {
                   setProducts([]);

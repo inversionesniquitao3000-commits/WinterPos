@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Calculator, Percent, DollarSign, Zap, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Edit2, ShieldAlert, TrendingUp } from 'lucide-react';
 
 interface AuxiliarCalculoPreciosProps {
