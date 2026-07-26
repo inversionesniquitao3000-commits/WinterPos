@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calculator, Percent, DollarSign, Zap, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Edit2 } from 'lucide-react';
+import { Calculator, Percent, DollarSign, Zap, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Edit2, ShieldAlert } from 'lucide-react';
 
 interface AuxiliarCalculoPreciosProps {
   onApplyPrices: (prices: { cost: string; detail: string; mayor: string }) => void;
@@ -8,6 +8,8 @@ interface AuxiliarCalculoPreciosProps {
   initialCost?: string;
   initialDetail?: string;
   initialMayor?: string;
+  taxActive?: boolean;
+  taxPct?: number;
   onToggleExpand?: (expanded: boolean) => void;
 }
 
@@ -18,6 +20,8 @@ export default function AuxiliarCalculoPrecios({
   initialCost = '',
   initialDetail = '',
   initialMayor = '',
+  taxActive = false,
+  taxPct = 16,
   onToggleExpand
 }: AuxiliarCalculoPreciosProps) {
   const [isEnabled, setIsEnabled] = useState(false);
@@ -32,19 +36,34 @@ export default function AuxiliarCalculoPrecios({
   const [totalCost, setTotalCost] = useState('');
   const [currency, setCurrency] = useState<'USD' | 'VES'>('USD');
   const [units, setUnits] = useState('1');
-  const [customRate, setCustomRate] = useState<string>(effectiveRate.toString());
+  const [customRate, setCustomRate] = useState<string>(effectiveRate.toFixed(2));
   const [isCustomEditing, setIsCustomEditing] = useState<boolean>(false);
   
   // Profit margin states (%)
   const [marginDetail, setMarginDetail] = useState('30');
   const [marginMayor, setMarginMayor] = useState('15');
 
+  // Helper to enforce max 2 decimal places strictly for manual inputs
+  const sanitize2Decimals = (val: string) => {
+    if (val === '') return '';
+    // Allow digits and up to 2 decimal places
+    if (/^\d*(\.\d{0,2})?$/.test(val)) {
+      return val;
+    }
+    // Fallback trimming if pasted with >2 decimals
+    const parts = val.split('.');
+    if (parts.length > 1) {
+      return `${parts[0]}.${parts[1].slice(0, 2)}`;
+    }
+    return val;
+  };
+
   // Sync customRate when official BCV rate arrives or updates
   useEffect(() => {
     if (isBcvAvailable && !isCustomEditing) {
-      setCustomRate(tasaBCV.toString());
+      setCustomRate(tasaBCV.toFixed(2));
     } else if (!isBcvAvailable && !customRate) {
-      setCustomRate(effectiveRate.toString());
+      setCustomRate(effectiveRate.toFixed(2));
     }
   }, [tasaBCV, isBcvAvailable]);
 
@@ -71,10 +90,31 @@ export default function AuxiliarCalculoPrecios({
 
   // Calculated prices in USD
   const pctDetail = Math.max(parseFloat(marginDetail) || 0, 0);
-  const pctMayor = Math.max(parseFloat(marginMayor) || 0, 0);
+  let pctMayor = Math.max(parseFloat(marginMayor) || 0, 0);
 
-  const calculatedDetailUSD = unitCostUSD > 0 ? (unitCostUSD * (1 + pctDetail / 100)) : (parseFloat(initialDetail) || 0);
-  const calculatedMayorUSD = unitCostUSD > 0 ? (unitCostUSD * (1 + pctMayor / 100)) : (parseFloat(initialMayor) || 0);
+  // CONSTRAINT RULE: Wholesale margin/price MUST be less than retail margin/price
+  let isMayorAdjusted = false;
+  if (pctMayor >= pctDetail && pctDetail > 0) {
+    pctMayor = Math.max(0, pctDetail - 1);
+    isMayorAdjusted = true;
+  }
+
+  const rawDetailUSD = unitCostUSD > 0 ? (unitCostUSD * (1 + pctDetail / 100)) : (parseFloat(initialDetail) || 0);
+  let rawMayorUSD = unitCostUSD > 0 ? (unitCostUSD * (1 + pctMayor / 100)) : (parseFloat(initialMayor) || 0);
+
+  // Additional check to enforce rawMayorUSD < rawDetailUSD
+  if (rawMayorUSD >= rawDetailUSD && rawDetailUSD > 0) {
+    rawMayorUSD = Math.max(0, rawDetailUSD - 0.01);
+    isMayorAdjusted = true;
+  }
+
+  const calculatedDetailUSD = rawDetailUSD;
+  const calculatedMayorUSD = rawMayorUSD;
+
+  // IVA Calculations
+  const taxMultiplier = taxActive && taxPct > 0 ? (1 + taxPct / 100) : 1;
+  const detailWithIva = calculatedDetailUSD * taxMultiplier;
+  const mayorWithIva = calculatedMayorUSD * taxMultiplier;
 
   // Automatically update parent form when values change while enabled
   useEffect(() => {
@@ -85,7 +125,7 @@ export default function AuxiliarCalculoPrecios({
         mayor: calculatedMayorUSD.toFixed(2)
       });
     }
-  }, [isEnabled, totalCost, currency, units, customRate, isCustomEditing, marginDetail, marginMayor, parsedRate]);
+  }, [isEnabled, totalCost, currency, units, customRate, isCustomEditing, marginDetail, marginMayor, parsedRate, taxActive, taxPct]);
 
   const handleManualApply = () => {
     if (unitCostUSD >= 0) {
@@ -176,19 +216,23 @@ export default function AuxiliarCalculoPrecios({
             </div>
 
             <div className={`grid grid-cols-1 ${currency === 'VES' ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-2`}>
-              {/* Total Cost Input */}
+              {/* Total Cost Input (Strictly max 2 decimals) */}
               <div>
                 <label className="text-[10px] font-bold text-slate-600 block mb-0.5">
-                  Monto Total Pagado
+                  Monto Total Pagado (Máx 2 dec.)
                 </label>
                 <div className="relative flex items-center">
                   <input
-                    type="number"
-                    step="0.01"
-                    min="0"
+                    type="text"
+                    inputMode="decimal"
                     placeholder="0.00"
                     value={totalCost}
-                    onChange={(e) => setTotalCost(e.target.value)}
+                    onChange={(e) => setTotalCost(sanitize2Decimals(e.target.value))}
+                    onBlur={() => {
+                      if (totalCost && !isNaN(parseFloat(totalCost))) {
+                        setTotalCost(parseFloat(totalCost).toFixed(2));
+                      }
+                    }}
                     className="w-full bg-amber-50/40 border border-amber-300 rounded p-1.5 pr-14 text-xs font-mono font-bold text-slate-900 focus:bg-white focus:border-amber-500 focus:outline-none"
                   />
                   <div className="absolute right-1 flex bg-slate-100 border border-slate-200 rounded text-[10px] font-extrabold overflow-hidden">
@@ -210,25 +254,29 @@ export default function AuxiliarCalculoPrecios({
                 </div>
               </div>
 
-              {/* Rate Input (Visible when currency is VES) */}
+              {/* Manual Rate Input (Strictly max 2 decimals) */}
               {currency === 'VES' && (
                 <div>
                   <label className="text-[10px] font-bold text-slate-600 flex items-center justify-between mb-0.5">
-                    <span>Tasa Conversión (Bs/$)</span>
+                    <span>Tasa (Bs/$ - 2 dec.)</span>
                     <span className="text-[9px] text-emerald-700 font-extrabold">
                       {isBcvAvailable && !isCustomEditing ? '🟢 BCV' : '✏️ Manual'}
                     </span>
                   </label>
                   <input
-                    type="number"
-                    step="0.01"
-                    min="0.0001"
+                    type="text"
+                    inputMode="decimal"
                     disabled={isBcvAvailable && !isCustomEditing}
                     placeholder="Ej. 742.23"
                     value={isCustomEditing ? customRate : parsedRate.toFixed(2)}
                     onChange={(e) => {
                       setIsCustomEditing(true);
-                      setCustomRate(e.target.value);
+                      setCustomRate(sanitize2Decimals(e.target.value));
+                    }}
+                    onBlur={() => {
+                      if (customRate && !isNaN(parseFloat(customRate))) {
+                        setCustomRate(parseFloat(customRate).toFixed(2));
+                      }
                     }}
                     className={`w-full border rounded p-1.5 text-xs font-mono font-bold focus:outline-none ${
                       isBcvAvailable && !isCustomEditing 
@@ -272,10 +320,24 @@ export default function AuxiliarCalculoPrecios({
 
           {/* SECTION 2: MARGIN CALCULATOR */}
           <div className="bg-white border border-amber-200 rounded-lg p-2.5 space-y-2 shadow-sm">
-            <span className="text-[11px] font-extrabold text-amber-800 uppercase flex items-center gap-1">
-              <Percent className="w-3.5 h-3.5 text-amber-600" />
-              2. Márgenes de Ganancia Deseados (%)
-            </span>
+            <div className="flex justify-between items-center">
+              <span className="text-[11px] font-extrabold text-amber-800 uppercase flex items-center gap-1">
+                <Percent className="w-3.5 h-3.5 text-amber-600" />
+                2. Márgenes de Ganancia Deseados (%)
+              </span>
+              {taxActive && (
+                <span className="text-[9px] font-extrabold bg-blue-50 text-blue-800 px-2 py-0.5 rounded border border-blue-200 font-sans">
+                  🏷️ Incluye Impuesto ({taxPct}% IVA)
+                </span>
+              )}
+            </div>
+
+            {isMayorAdjusted && (
+              <div className="flex items-center gap-1 text-[10px] font-bold text-amber-800 bg-amber-100 p-1.5 rounded border border-amber-300">
+                <ShieldAlert className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                <span>Nota: El Precio Mayor ha sido ajustado para mantenerse inferior al Precio Venta.</span>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {/* Retail Margin */}
@@ -284,9 +346,16 @@ export default function AuxiliarCalculoPrecios({
                   <label className="text-[10px] font-extrabold text-emerald-900">
                     % Ganancia Venta (Detalle)
                   </label>
-                  <span className="text-xs font-black font-mono text-emerald-700">
-                    ${calculatedDetailUSD.toFixed(2)}
-                  </span>
+                  <div className="text-right font-mono">
+                    <span className="text-xs font-black text-emerald-700 block">
+                      Base: ${calculatedDetailUSD.toFixed(2)}
+                    </span>
+                    {taxActive && (
+                      <span className="text-[9px] font-extrabold text-blue-700 block">
+                        +{taxPct}% IVA: ${detailWithIva.toFixed(2)}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <input
@@ -325,9 +394,16 @@ export default function AuxiliarCalculoPrecios({
                   <label className="text-[10px] font-extrabold text-purple-900">
                     % Ganancia Mayorista
                   </label>
-                  <span className="text-xs font-black font-mono text-purple-700">
-                    ${calculatedMayorUSD.toFixed(2)}
-                  </span>
+                  <div className="text-right font-mono">
+                    <span className="text-xs font-black text-purple-700 block">
+                      Base: ${calculatedMayorUSD.toFixed(2)}
+                    </span>
+                    {taxActive && (
+                      <span className="text-[9px] font-extrabold text-blue-700 block">
+                        +{taxPct}% IVA: ${mayorWithIva.toFixed(2)}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <input

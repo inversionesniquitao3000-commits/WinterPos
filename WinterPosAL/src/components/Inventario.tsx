@@ -808,6 +808,10 @@ export default function Inventario({
       showAlert('El precio de venta al mayor debe ser mayor al precio de costo.', 'Precios Inválidos', 'warning');
       return;
     }
+    if (mayor >= detail) {
+      showAlert('El precio de venta al mayor debe ser estrictamente menor al precio de venta al detalle.', 'Precios Inválidos', 'warning');
+      return;
+    }
 
     const updatedProd: Product = {
       ...selectedProduct,
@@ -1021,6 +1025,10 @@ export default function Inventario({
     }
     if (mayor <= cost) {
       showAlert('El precio de venta al mayor debe ser mayor al precio de costo.', 'Precios Inválidos', 'warning');
+      return;
+    }
+    if (mayor >= detail) {
+      showAlert('El precio de venta al mayor debe ser estrictamente menor al precio de venta al detalle.', 'Precios Inválidos', 'warning');
       return;
     }
 
@@ -2252,6 +2260,8 @@ export default function Inventario({
                 initialMayor={newMayor}
                 tasaBCV={bcvRateUSD || parseFloat(localStorage.getItem('pos_bcv_usd') || '0') || 0}
                 tasaFallback={tasaDia || parseFloat(localStorage.getItem('pos_tasa_activa') || '0') || 0}
+                taxActive={newTaxActive}
+                taxPct={parseFloat(newTaxPct) || 16}
                 onToggleExpand={(expanded) => setIsAuxExpandedNew(expanded)}
                 onApplyPrices={({ cost, detail, mayor }) => {
                   setNewCost(cost);
@@ -2496,6 +2506,8 @@ export default function Inventario({
                 initialMayor={editMayor}
                 tasaBCV={bcvRateUSD || parseFloat(localStorage.getItem('pos_bcv_usd') || '0') || 0}
                 tasaFallback={tasaDia || parseFloat(localStorage.getItem('pos_tasa_activa') || '0') || 0}
+                taxActive={editTaxActive}
+                taxPct={parseFloat(editTaxPct) || 16}
                 onToggleExpand={(expanded) => setIsAuxExpandedEdit(expanded)}
                 onApplyPrices={({ cost, detail, mayor }) => {
                   setEditCost(cost);
@@ -2542,6 +2554,75 @@ export default function Inventario({
                   />
                 </div>
               </div>
+
+              {/* GUÍA COMPARATIVA DE PRECIOS (ANTERIOR VS NUEVO PREVIO) */}
+              {selectedProduct && (
+                <div className="bg-slate-900 text-white rounded-lg p-3 space-y-2 border border-slate-700 font-mono shadow-inner">
+                  <div className="flex justify-between items-center text-[10px] uppercase font-bold text-slate-300 border-b border-slate-700 pb-1.5 font-sans">
+                    <span className="flex items-center gap-1.5">
+                      <Tag className="w-3.5 h-3.5 text-cyan-400" />
+                      Guía Comparativa: Precio Anterior vs Nuevo Previo
+                    </span>
+                    <span className="text-[9px] text-amber-300 bg-amber-950/80 px-2 py-0.5 rounded border border-amber-700/80 font-bold">
+                      💡 El cambio se guardará al hacer clic en Modificar Producto
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                    {/* COSTO */}
+                    <div className="bg-slate-800/80 p-2 rounded border border-slate-700 space-y-0.5">
+                      <span className="text-[9px] text-slate-400 font-bold block uppercase font-sans">Costo ($)</span>
+                      <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                        <span className="text-slate-400 text-[11px] font-bold line-through">
+                          ${selectedProduct.precio_costo_usd.toFixed(2)}
+                        </span>
+                        <span className="text-yellow-400 font-extrabold text-[11px]">➡️</span>
+                        <span className="text-yellow-300 font-black text-xs">
+                          ${(parseFloat(editCost) || 0).toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* VENTA DETALLE */}
+                    <div className="bg-slate-800/80 p-2 rounded border border-slate-700 space-y-0.5">
+                      <span className="text-[9px] text-slate-400 font-bold block uppercase font-sans">Venta ($)</span>
+                      <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                        <span className="text-slate-400 text-[11px] font-bold line-through">
+                          ${selectedProduct.precio_detalle_usd.toFixed(2)}
+                        </span>
+                        <span className="text-emerald-400 font-extrabold text-[11px]">➡️</span>
+                        <span className="text-emerald-300 font-black text-xs">
+                          ${(parseFloat(editDetail) || 0).toFixed(2)}
+                        </span>
+                      </div>
+                      {editTaxActive && parseFloat(editTaxPct) > 0 && (
+                        <span className="text-[8px] text-blue-300 block font-sans font-bold mt-0.5">
+                          +IVA: ${((parseFloat(editDetail) || 0) * (1 + (parseFloat(editTaxPct) || 0) / 100)).toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* MAYOR */}
+                    <div className="bg-slate-800/80 p-2 rounded border border-slate-700 space-y-0.5">
+                      <span className="text-[9px] text-slate-400 font-bold block uppercase font-sans">Mayor ($)</span>
+                      <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                        <span className="text-slate-400 text-[11px] font-bold line-through">
+                          ${selectedProduct.precio_mayor_usd.toFixed(2)}
+                        </span>
+                        <span className="text-purple-400 font-extrabold text-[11px]">➡️</span>
+                        <span className="text-purple-300 font-black text-xs">
+                          ${(parseFloat(editMayor) || 0).toFixed(2)}
+                        </span>
+                      </div>
+                      {editTaxActive && parseFloat(editTaxPct) > 0 && (
+                        <span className="text-[8px] text-blue-300 block font-sans font-bold mt-0.5">
+                          +IVA: ${((parseFloat(editMayor) || 0) * (1 + (parseFloat(editTaxPct) || 0) / 100)).toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
