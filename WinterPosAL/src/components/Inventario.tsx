@@ -97,6 +97,8 @@ export default function Inventario({
   
   // Modals / Actions states
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [isAuxExpandedNew, setIsAuxExpandedNew] = useState(false);
+  const [isAuxExpandedEdit, setIsAuxExpandedEdit] = useState(false);
   const [showAdjustModal, setShowAdjustModal] = useState(false);
   const [showPriceModal, setShowPriceModal] = useState(false);
   const [showNewProdModal, setShowNewProdModal] = useState(false);
@@ -2088,7 +2090,7 @@ export default function Inventario({
         <div className="fixed inset-0 bg-slate-950/20 pointer-events-none flex items-center justify-center p-4 z-50 animate-fade-in font-mono text-slate-800">
           <div 
             style={{ transform: `translate(${dragPos.x}px, ${dragPos.y}px)` }}
-            className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-lg shadow-2xl p-6 space-y-4 pointer-events-auto select-none"
+            className={`bg-white border border-slate-200 rounded-xl overflow-hidden w-full ${isAuxExpandedNew ? 'max-w-2xl sm:max-w-3xl' : 'max-w-xl'} shadow-2xl p-6 space-y-4 pointer-events-auto select-none transition-all duration-300 max-h-[92vh] overflow-y-auto`}
           >
             <div 
               onMouseDown={handleMouseDown}
@@ -2244,6 +2246,7 @@ export default function Inventario({
                 initialCost={newCost}
                 initialDetail={newDetail}
                 initialMayor={newMayor}
+                onToggleExpand={(expanded) => setIsAuxExpandedNew(expanded)}
                 onApplyPrices={({ cost, detail, mayor }) => {
                   setNewCost(cost);
                   setNewDetail(detail);
@@ -2350,7 +2353,7 @@ export default function Inventario({
       {/* MODAL: MODIFICAR FICHA DE PRODUCTO */}
       {showEditProdModal && (
         <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-sans text-slate-800">
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-lg shadow-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+          <div className={`bg-white border border-slate-200 rounded-xl overflow-hidden w-full ${isAuxExpandedEdit ? 'max-w-2xl sm:max-w-3xl' : 'max-w-xl'} shadow-2xl p-6 space-y-4 transition-all duration-300 max-h-[92vh] overflow-y-auto`}>
             
             <div className="flex justify-between items-center border-b border-slate-200 pb-3">
               <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
@@ -2485,6 +2488,7 @@ export default function Inventario({
                 initialCost={editCost}
                 initialDetail={editDetail}
                 initialMayor={editMayor}
+                onToggleExpand={(expanded) => setIsAuxExpandedEdit(expanded)}
                 onApplyPrices={({ cost, detail, mayor }) => {
                   setEditCost(cost);
                   setEditDetail(detail);

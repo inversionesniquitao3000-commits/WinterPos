@@ -7,6 +7,7 @@ interface AuxiliarCalculoPreciosProps {
   initialCost?: string;
   initialDetail?: string;
   initialMayor?: string;
+  onToggleExpand?: (expanded: boolean) => void;
 }
 
 export default function AuxiliarCalculoPrecios({
@@ -14,7 +15,8 @@ export default function AuxiliarCalculoPrecios({
   tasaBCV = 742.23,
   initialCost = '',
   initialDetail = '',
-  initialMayor = ''
+  initialMayor = '',
+  onToggleExpand
 }: AuxiliarCalculoPreciosProps) {
   const [isEnabled, setIsEnabled] = useState(false);
   
@@ -27,6 +29,12 @@ export default function AuxiliarCalculoPrecios({
   // Profit margin states (%)
   const [marginDetail, setMarginDetail] = useState('30');
   const [marginMayor, setMarginMayor] = useState('15');
+
+  // Notify parent component when toggled
+  const handleToggle = (checked: boolean) => {
+    setIsEnabled(checked);
+    onToggleExpand?.(checked);
+  };
 
   // Sync customRate if tasaBCV prop changes
   useEffect(() => {
@@ -77,7 +85,7 @@ export default function AuxiliarCalculoPrecios({
   return (
     <div className={`transition-all duration-300 rounded-xl border-2 ${
       isEnabled 
-        ? 'bg-amber-50/60 border-amber-400 shadow-md p-3.5' 
+        ? 'bg-amber-50/70 border-amber-400 shadow-md p-3' 
         : 'bg-slate-50 border-dashed border-slate-300 p-2.5 hover:border-amber-300'
     }`}>
       {/* HEADER / TOGGLE BAR */}
@@ -86,11 +94,11 @@ export default function AuxiliarCalculoPrecios({
           <input
             type="checkbox"
             checked={isEnabled}
-            onChange={(e) => setIsEnabled(e.target.checked)}
+            onChange={(e) => handleToggle(e.target.checked)}
             className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-slate-350 cursor-pointer"
           />
           <div className="flex items-center gap-1.5">
-            <Calculator className={`w-4 h-4 ${isEnabled ? 'text-amber-700 animate-bounce' : 'text-slate-500'}`} />
+            <Calculator className={`w-4 h-4 ${isEnabled ? 'text-amber-700' : 'text-slate-500'}`} />
             <span className={`text-xs font-extrabold font-sans uppercase tracking-wide ${
               isEnabled ? 'text-amber-900' : 'text-slate-700'
             }`}>
@@ -101,7 +109,7 @@ export default function AuxiliarCalculoPrecios({
 
         <button
           type="button"
-          onClick={() => setIsEnabled(!isEnabled)}
+          onClick={() => handleToggle(!isEnabled)}
           className={`text-[11px] font-bold px-2.5 py-1 rounded flex items-center gap-1 transition-all ${
             isEnabled 
               ? 'bg-amber-200 hover:bg-amber-300 text-amber-900' 
@@ -115,10 +123,10 @@ export default function AuxiliarCalculoPrecios({
 
       {/* EXPANDABLE BODY */}
       {isEnabled && (
-        <div className="mt-3.5 space-y-3 pt-3 border-t border-amber-200/80 animate-fade-in font-sans text-slate-800">
+        <div className="mt-3 space-y-2.5 pt-2.5 border-t border-amber-200/80 animate-fade-in font-sans text-slate-800">
           
           {/* SECTION 1: COST CALCULATOR */}
-          <div className="bg-white border border-amber-200 rounded-lg p-3 space-y-2.5 shadow-sm">
+          <div className="bg-white border border-amber-200 rounded-lg p-2.5 space-y-2 shadow-sm">
             <div className="flex justify-between items-center">
               <span className="text-[11px] font-extrabold text-amber-800 uppercase flex items-center gap-1">
                 <DollarSign className="w-3.5 h-3.5 text-amber-600" />
@@ -131,10 +139,10 @@ export default function AuxiliarCalculoPrecios({
               )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               {/* Total Cost Input */}
               <div>
-                <label className="text-[10px] font-bold text-slate-600 block mb-1">
+                <label className="text-[10px] font-bold text-slate-600 block mb-0.5">
                   Monto Total Pagado
                 </label>
                 <div className="relative flex items-center">
@@ -168,7 +176,7 @@ export default function AuxiliarCalculoPrecios({
 
               {/* Units Input */}
               <div>
-                <label className="text-[10px] font-bold text-slate-600 block mb-1">
+                <label className="text-[10px] font-bold text-slate-600 block mb-0.5">
                   Cant. Unidades
                 </label>
                 <input
@@ -183,9 +191,9 @@ export default function AuxiliarCalculoPrecios({
               </div>
 
               {/* Calculated Unit Cost Display */}
-              <div className="bg-amber-100/60 border border-amber-300 rounded p-1.5 flex flex-col justify-center items-center text-center">
+              <div className="bg-amber-100/70 border border-amber-300 rounded p-1 flex flex-col justify-center items-center text-center">
                 <span className="text-[9px] font-extrabold uppercase text-amber-800">Costo Unitario ($)</span>
-                <span className="text-sm font-black font-mono text-amber-900">
+                <span className="text-sm font-black font-mono text-amber-950">
                   ${unitCostUSD.toFixed(2)}
                 </span>
                 {currency === 'VES' && parsedTotalCost > 0 && (
@@ -198,15 +206,15 @@ export default function AuxiliarCalculoPrecios({
           </div>
 
           {/* SECTION 2: MARGIN CALCULATOR */}
-          <div className="bg-white border border-amber-200 rounded-lg p-3 space-y-2.5 shadow-sm">
+          <div className="bg-white border border-amber-200 rounded-lg p-2.5 space-y-2 shadow-sm">
             <span className="text-[11px] font-extrabold text-amber-800 uppercase flex items-center gap-1">
               <Percent className="w-3.5 h-3.5 text-amber-600" />
               2. Márgenes de Ganancia Deseados (%)
             </span>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {/* Retail Margin */}
-              <div className="space-y-1.5 bg-emerald-50/50 border border-emerald-200 rounded-lg p-2">
+              <div className="space-y-1 bg-emerald-50/50 border border-emerald-200 rounded-lg p-2">
                 <div className="flex justify-between items-center">
                   <label className="text-[10px] font-extrabold text-emerald-900">
                     % Ganancia Venta (Detalle)
@@ -215,7 +223,7 @@ export default function AuxiliarCalculoPrecios({
                     ${calculatedDetailUSD.toFixed(2)}
                   </span>
                 </div>
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 flex-wrap">
                   <input
                     type="number"
                     step="1"
@@ -223,11 +231,11 @@ export default function AuxiliarCalculoPrecios({
                     placeholder="30"
                     value={marginDetail}
                     onChange={(e) => setMarginDetail(e.target.value)}
-                    className="w-20 bg-white border border-emerald-300 rounded p-1 text-xs font-mono font-bold text-center focus:ring-1 focus:ring-emerald-500 focus:outline-none"
+                    className="w-16 bg-white border border-emerald-300 rounded p-1 text-xs font-mono font-bold text-center focus:ring-1 focus:ring-emerald-500 focus:outline-none"
                   />
                   <span className="text-xs font-bold text-emerald-800">%</span>
                   {/* Preset Buttons */}
-                  <div className="flex gap-1 ml-auto">
+                  <div className="flex flex-wrap gap-1 ml-auto">
                     {['20', '30', '40', '50'].map(pct => (
                       <button
                         key={pct}
@@ -247,7 +255,7 @@ export default function AuxiliarCalculoPrecios({
               </div>
 
               {/* Wholesale Margin */}
-              <div className="space-y-1.5 bg-purple-50/50 border border-purple-200 rounded-lg p-2">
+              <div className="space-y-1 bg-purple-50/50 border border-purple-200 rounded-lg p-2">
                 <div className="flex justify-between items-center">
                   <label className="text-[10px] font-extrabold text-purple-900">
                     % Ganancia Mayorista
@@ -256,7 +264,7 @@ export default function AuxiliarCalculoPrecios({
                     ${calculatedMayorUSD.toFixed(2)}
                   </span>
                 </div>
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 flex-wrap">
                   <input
                     type="number"
                     step="1"
@@ -264,11 +272,11 @@ export default function AuxiliarCalculoPrecios({
                     placeholder="15"
                     value={marginMayor}
                     onChange={(e) => setMarginMayor(e.target.value)}
-                    className="w-20 bg-white border border-purple-300 rounded p-1 text-xs font-mono font-bold text-center focus:ring-1 focus:ring-purple-500 focus:outline-none"
+                    className="w-16 bg-white border border-purple-300 rounded p-1 text-xs font-mono font-bold text-center focus:ring-1 focus:ring-purple-500 focus:outline-none"
                   />
                   <span className="text-xs font-bold text-purple-800">%</span>
                   {/* Preset Buttons */}
-                  <div className="flex gap-1 ml-auto">
+                  <div className="flex flex-wrap gap-1 ml-auto">
                     {['10', '15', '20', '25'].map(pct => (
                       <button
                         key={pct}
@@ -290,14 +298,14 @@ export default function AuxiliarCalculoPrecios({
           </div>
 
           {/* MANUAL APPLY BUTTON & NOTE */}
-          <div className="flex items-center justify-between pt-1">
+          <div className="flex items-center justify-between pt-0.5">
             <span className="text-[10px] text-amber-800 font-medium">
-              💡 Los precios se aplican automáticamente abajo. Puedes ajustarlos manualmente si lo deseas.
+              💡 Precios aplicados automáticamente. Puedes ajustarlos abajo si lo deseas.
             </span>
             <button
               type="button"
               onClick={handleManualApply}
-              className="bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-extrabold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 shadow-sm active:scale-95"
+              className="bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-extrabold px-3 py-1 rounded-lg transition-all flex items-center gap-1 shadow-sm active:scale-95 shrink-0"
             >
               <Zap className="w-3.5 h-3.5" />
               <span>Aplicar al Producto</span>
