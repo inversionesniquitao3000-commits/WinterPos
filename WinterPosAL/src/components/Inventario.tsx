@@ -9,6 +9,7 @@ interface InventarioProps {
   movements: InventoryMovement[];
   priceHistory: PriceAdjustmentHistory[];
   currentUser: User;
+  tasaDia?: number;
   onAddProduct: (prod: Product) => void;
   onAddProductsBulk: (productsArray: any[]) => Promise<number | null>;
   onUpdateProductStock: (prodId: number, type: 'Entrada' | 'Salida' | 'Merma' | 'Devolucion', qty: number, reason: string) => void;
@@ -30,6 +31,7 @@ export default function Inventario({
   movements,
   priceHistory,
   currentUser: _currentUser,
+  tasaDia,
   onAddProduct,
   onAddProductsBulk,
   onUpdateProductStock,
@@ -2247,10 +2249,15 @@ export default function Inventario({
                 initialDetail={newDetail}
                 initialMayor={newMayor}
                 tasaBCV={(() => {
+                  if (tasaDia && tasaDia > 0) return tasaDia;
                   try {
                     const saved = localStorage.getItem('pos_tasa_activa') || localStorage.getItem('pos_tasa_bcv');
-                    return saved ? parseFloat(saved) || 0 : 0;
-                  } catch (e) { return 0; }
+                    if (saved) {
+                      const parsed = parseFloat(saved);
+                      if (!isNaN(parsed) && parsed > 0) return parsed;
+                    }
+                  } catch (e) {}
+                  return 742.23;
                 })()}
                 onToggleExpand={(expanded) => setIsAuxExpandedNew(expanded)}
                 onApplyPrices={({ cost, detail, mayor }) => {
@@ -2495,10 +2502,15 @@ export default function Inventario({
                 initialDetail={editDetail}
                 initialMayor={editMayor}
                 tasaBCV={(() => {
+                  if (tasaDia && tasaDia > 0) return tasaDia;
                   try {
                     const saved = localStorage.getItem('pos_tasa_activa') || localStorage.getItem('pos_tasa_bcv');
-                    return saved ? parseFloat(saved) || 0 : 0;
-                  } catch (e) { return 0; }
+                    if (saved) {
+                      const parsed = parseFloat(saved);
+                      if (!isNaN(parsed) && parsed > 0) return parsed;
+                    }
+                  } catch (e) {}
+                  return 742.23;
                 })()}
                 onToggleExpand={(expanded) => setIsAuxExpandedEdit(expanded)}
                 onApplyPrices={({ cost, detail, mayor }) => {

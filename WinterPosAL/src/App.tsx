@@ -170,6 +170,10 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('pos_tasa_history', JSON.stringify(tasaHistory));
+    const current = tasaHistory[tasaHistory.length - 1];
+    if (current && current.tasa_cobro > 0) {
+      localStorage.setItem('pos_tasa_activa', current.tasa_cobro.toString());
+    }
   }, [tasaHistory]);
 
   useEffect(() => {
@@ -1314,6 +1318,7 @@ export default function App() {
               movements={movements}
               priceHistory={priceHistory}
               currentUser={currentUser}
+              tasaDia={tasaDia}
               onAddProduct={handleAddProduct}
               onAddProductsBulk={handleAddProductsBulk}
               onUpdateProductStock={handleUpdateProductStock}
