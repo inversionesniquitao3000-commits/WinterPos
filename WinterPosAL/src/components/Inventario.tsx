@@ -2246,6 +2246,12 @@ export default function Inventario({
                 initialCost={newCost}
                 initialDetail={newDetail}
                 initialMayor={newMayor}
+                tasaBCV={(() => {
+                  try {
+                    const saved = localStorage.getItem('pos_tasa_activa') || localStorage.getItem('pos_tasa_bcv');
+                    return saved ? parseFloat(saved) || 0 : 0;
+                  } catch (e) { return 0; }
+                })()}
                 onToggleExpand={(expanded) => setIsAuxExpandedNew(expanded)}
                 onApplyPrices={({ cost, detail, mayor }) => {
                   setNewCost(cost);
@@ -2488,6 +2494,12 @@ export default function Inventario({
                 initialCost={editCost}
                 initialDetail={editDetail}
                 initialMayor={editMayor}
+                tasaBCV={(() => {
+                  try {
+                    const saved = localStorage.getItem('pos_tasa_activa') || localStorage.getItem('pos_tasa_bcv');
+                    return saved ? parseFloat(saved) || 0 : 0;
+                  } catch (e) { return 0; }
+                })()}
                 onToggleExpand={(expanded) => setIsAuxExpandedEdit(expanded)}
                 onApplyPrices={({ cost, detail, mayor }) => {
                   setEditCost(cost);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calculator, Percent, DollarSign, Zap, ChevronDown, ChevronUp } from 'lucide-react';
+import { Calculator, Percent, DollarSign, Zap, ChevronDown, ChevronUp, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 interface AuxiliarCalculoPreciosProps {
   onApplyPrices: (prices: { cost: string; detail: string; mayor: string }) => void;
@@ -12,7 +12,7 @@ interface AuxiliarCalculoPreciosProps {
 
 export default function AuxiliarCalculoPrecios({
   onApplyPrices,
-  tasaBCV = 742.23,
+  tasaBCV = 0,
   initialCost = '',
   initialDetail = '',
   initialMayor = '',
@@ -20,11 +20,26 @@ export default function AuxiliarCalculoPrecios({
 }: AuxiliarCalculoPreciosProps) {
   const [isEnabled, setIsEnabled] = useState(false);
   
+  // Helper to determine initial exchange rate safely without errors
+  const getInitialRate = () => {
+    if (tasaBCV && tasaBCV > 0) return tasaBCV.toString();
+    try {
+      const savedTasa = localStorage.getItem('pos_tasa_activa') || localStorage.getItem('pos_tasa_bcv');
+      if (savedTasa) {
+        const parsed = parseFloat(savedTasa);
+        if (!isNaN(parsed) && parsed > 0) return parsed.toString();
+      }
+    } catch (e) {
+      // ignore storage errors
+    }
+    return '742.23'; // Reasonable default fallback if offline and no storage
+  };
+
   // Cost calculation states
   const [totalCost, setTotalCost] = useState('');
   const [currency, setCurrency] = useState<'USD' | 'VES'>('USD');
   const [units, setUnits] = useState('1');
-  const [customRate, setCustomRate] = useState<string>(tasaBCV.toString());
+  const [customRate, setCustomRate] = useState<string>(getInitialRate());
   
   // Profit margin states (%)
   const [marginDetail, setMarginDetail] = useState('30');
@@ -36,17 +51,17 @@ export default function AuxiliarCalculoPrecios({
     onToggleExpand?.(checked);
   };
 
-  // Sync customRate if tasaBCV prop changes
+  // Update customRate safely if tasaBCV prop arrives later and user hasn't overridden
   useEffect(() => {
     if (tasaBCV && tasaBCV > 0) {
       setCustomRate(tasaBCV.toString());
     }
   }, [tasaBCV]);
 
-  // Derived calculations
-  const parsedTotalCost = parseFloat(totalCost) || 0;
+  // Derived calculations with zero-error safety
+  const parsedTotalCost = Math.max(parseFloat(totalCost) || 0, 0);
   const parsedUnits = Math.max(parseFloat(units) || 1, 0.001);
-  const parsedRate = parseFloat(customRate) || tasaBCV || 1;
+  const parsedRate = Math.max(parseFloat(customRate) || 1, 0.0001);
 
   // Total cost converted to USD
   const totalCostUSD = currency === 'VES' ? (parsedTotalCost / parsedRate) : parsedTotalCost;
@@ -55,8 +70,8 @@ export default function AuxiliarCalculoPrecios({
   const unitCostUSD = parsedTotalCost > 0 ? (totalCostUSD / parsedUnits) : (parseFloat(initialCost) || 0);
 
   // Calculated prices in USD
-  const pctDetail = parseFloat(marginDetail) || 0;
-  const pctMayor = parseFloat(marginMayor) || 0;
+  const pctDetail = Math.max(parseFloat(marginDetail) || 0, 0);
+  const pctMayor = Math.max(parseFloat(marginMayor) || 0, 0);
 
   const calculatedDetailUSD = unitCostUSD > 0 ? (unitCostUSD * (1 + pctDetail / 100)) : (parseFloat(initialDetail) || 0);
   const calculatedMayorUSD = unitCostUSD > 0 ? (unitCostUSD * (1 + pctMayor / 100)) : (parseFloat(initialMayor) || 0);
@@ -132,14 +147,24 @@ export default function AuxiliarCalculoPrecios({
                 <DollarSign className="w-3.5 h-3.5 text-amber-600" />
                 1. Costo de Compra (Lote / Empaque)
               </span>
-              {currency === 'VES' && (
-                <span className="text-[10px] font-mono text-slate-500">
-                  Tasa: <strong className="text-emerald-700">{parsedRate.toFixed(2)} Bs/$</strong>
-                </span>
-              )}
+              
+              {/* Rate Status Indicator */}
+              <div className="flex items-center gap-1 text-[10px]">
+                {tasaBCV && tasaBCV > 0 ? (
+                  <span className="text-emerald-700 font-extrabold flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-mono">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                    Tasa Oficial BCV: {tasaBCV.toFixed(2)} Bs/$
+                  </span>
+                ) : (
+                  <span className="text-amber-800 font-extrabold flex items-center gap-1 bg-amber-100 px-2 py-0.5 rounded border border-amber-300 font-mono">
+                    <AlertCircle className="w-3 h-3 text-amber-600" />
+                    Tasa Manual Activa (Sin BCV)
+                  </span>
+                )}
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className={`grid grid-cols-1 ${currency === 'VES' ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-2`}>
               {/* Total Cost Input */}
               <div>
                 <label className="text-[10px] font-bold text-slate-600 block mb-0.5">
@@ -173,6 +198,25 @@ export default function AuxiliarCalculoPrecios({
                   </div>
                 </div>
               </div>
+
+              {/* Editable Rate Input (Always editable when currency is VES) */}
+              {currency === 'VES' && (
+                <div>
+                  <label className="text-[10px] font-bold text-slate-600 flex items-center justify-between mb-0.5">
+                    <span>Tasa Conversión (Bs/$)</span>
+                    <span className="text-[9px] text-emerald-700 font-extrabold">✏️ Editable</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.0001"
+                    placeholder="Ej. 742.23"
+                    value={customRate}
+                    onChange={(e) => setCustomRate(e.target.value)}
+                    className="w-full bg-emerald-50/50 border border-emerald-300 rounded p-1.5 text-xs font-mono font-bold text-emerald-900 focus:bg-white focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+              )}
 
               {/* Units Input */}
               <div>
