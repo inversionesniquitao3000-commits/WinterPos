@@ -27,7 +27,7 @@ interface CajaPOSProps {
     pagos: Payment[];
     vueltoUSD: number;
     vueltoVES: number;
-  }) => void;
+  }) => Promise<Sale | undefined> | void;
   onRegisterCajaMovement: (type: 'Entrada' | 'Salida' | 'Devolucion', description: string, usd: number, ves: number) => void;
   cajaAbierta: boolean;
   montoAperturaUsd: number;
@@ -61,6 +61,7 @@ interface CajaPOSProps {
   abonos?: Abono[];
   getApiUrl: (path: string) => string;
   nextInvoiceNumber: string;
+  lastInvoiceNumber: string | null;
   onLogout: () => void;
 }
 
@@ -98,6 +99,7 @@ export default function CajaPOS({
   abonos,
   getApiUrl,
   nextInvoiceNumber,
+  lastInvoiceNumber,
   onLogout
 }: CajaPOSProps) {
   const { showAlert, showConfirm } = useDialog();
@@ -1082,7 +1084,7 @@ export default function CajaPOS({
 
   const canConfirmCheckout = totalPaidUSD >= totalUSD && isPagoMovilValid && isBiopagoValid && isCreditValid;
 
-  const handleConfirmCheckout = (shouldPrint: boolean = false) => {
+  const handleConfirmCheckout = async (shouldPrint: boolean = false) => {
     if (!canConfirmCheckout) {
       showAlert('Información de cobro incompleta o inválida. Verifique los montos ingresados.', 'Pago Incompleto', 'warning');
       return;
@@ -1162,10 +1164,8 @@ export default function CajaPOS({
       }
     }
 
-    const factura_nro = nextInvoiceNumber;
-
-    const saleResult = {
-      factura_nro,
+    const salePayload = {
+      factura_nro: 'FAC-PENDIENTE', // Server will assign the real number via seq_factura
       client: selectedClient,
       items: saleItems,
       subtotal: subtotalUSD,
@@ -1178,11 +1178,13 @@ export default function CajaPOS({
       vueltoVES: finalVueltoVES
     };
 
-    onRegisterSale(saleResult);
-    
+    // Await the server response to get the confirmed factura_nro
+    const confirmedSale = await onRegisterSale(salePayload);
+    const finalSaleForTicket = confirmedSale ?? salePayload;
+
     setShowCheckoutModal(false);
     if (shouldPrint) {
-      setPrintedTicketData(saleResult);
+      setPrintedTicketData(finalSaleForTicket as any);
       setShowTicketModal(true);
     }
 
@@ -1936,8 +1938,13 @@ export default function CajaPOS({
           <div className="flex justify-between items-center text-[10.5px] border-b border-slate-100 pb-1.5">
             <div className="flex flex-col gap-0.5">
               <span className="font-sans text-slate-400 uppercase tracking-tight">SUCURSAL NIQUITAO 3000</span>
+              {lastInvoiceNumber && (
+                <span className="text-[9.5px] font-mono text-slate-500 tracking-wider">
+                  ÚLT: <span className="text-emerald-600 font-bold">{lastInvoiceNumber}</span>
+                </span>
+              )}
               <span className="text-[11.5px] font-mono font-extrabold text-slate-800 tracking-wider">
-                PRÓX. FACTURA: {nextInvoiceNumber}
+                PRÓX: <span className="text-winter-blueBtn">{nextInvoiceNumber === '---' ? 'Cargando...' : nextInvoiceNumber}</span>
               </span>
             </div>
             <span className="text-winter-blueBtn font-black uppercase text-[10px]">MONEDA: USD</span>

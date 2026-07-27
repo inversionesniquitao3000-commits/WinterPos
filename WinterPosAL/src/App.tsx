@@ -74,16 +74,10 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  const nextInvoiceNumber = useMemo(() => {
-    const numbers = sales
-      .map(s => {
-        const match = s.factura_nro ? s.factura_nro.match(/^FAC-(\d+)$/) : null;
-        return match ? parseInt(match[1], 10) : 0;
-      })
-      .filter(n => n > 0);
-    const maxNum = numbers.length > 0 ? Math.max(...numbers) : 0;
-    return `FAC-${String(maxNum + 1).padStart(6, '0')}`;
-  }, [sales]);
+  // Invoice reference state: fetched from server after each sale so the operator
+  // sees the real last FAC- number and the estimated next correlative.
+  // Actual assignment is always done server-side via seq_factura (atomic, collision-free).
+  const [lastInvoiceInfo, setLastInvoiceInfo] = useState<{ last: string | null; next: string }>({ last: null, next: '---' });
 
   const [abonos, setAbonos] = useState<Abono[]>(() => {
     const saved = localStorage.getItem('pos_abonos');
@@ -305,6 +299,24 @@ export default function App() {
     };
     loadConfig();
   }, [lanIP, dbMode]);
+
+  // Fetch last invoice number from server for operator reference display
+  const fetchLastInvoice = async () => {
+    try {
+      const res = await fetch(getApiUrl('/sales/last-invoice'));
+      if (res.ok) {
+        const data = await res.json();
+        setLastInvoiceInfo({ last: data.last, next: data.next });
+      }
+    } catch (_) {
+      // Silent fail — not critical
+    }
+  };
+
+  // Load on login
+  useEffect(() => {
+    if (currentUser) fetchLastInvoice();
+  }, [currentUser, lanIP, dbMode]);
 
   // Load all initial data from centralized backend database
   useEffect(() => {
@@ -1106,15 +1118,15 @@ export default function App() {
       );
     }
 
-    // 3. Log sale to processed list
-    const newSaleObj: Sale = {
+    // 3. Log sale to processed list with a temporary invoice number
+    const tempSaleObj: Sale = {
       ...sale,
       fecha: getLocalISODateString(),
       usuario: currentUser?.nombre || 'SISTEMA',
       terminal: terminalName
     };
-    setSales(prev => [...prev, newSaleObj]);
-    setShiftSales(prev => [...prev, newSaleObj]);
+    setSales(prev => [...prev, tempSaleObj]);
+    setShiftSales(prev => [...prev, tempSaleObj]);
 
     // 4. Increment cash counters
     let cashUSDReceived = 0;
@@ -1134,7 +1146,19 @@ export default function App() {
     localStorage.setItem('pos_ventas_usd', nextVentasUsd.toString());
     localStorage.setItem('pos_ventas_ves', nextVentasVes.toString());
 
-    await postApiData('/sales', newSaleObj);
+    // 5. Send to server — server returns the definitive factura_nro from seq_factura
+    const saved = await postApiData('/sales', tempSaleObj);
+    if (saved && saved.factura_nro && saved.factura_nro !== tempSaleObj.factura_nro) {
+      // Update state with the confirmed server-assigned invoice number
+      const confirmedSale: Sale = { ...tempSaleObj, factura_nro: saved.factura_nro, id: saved.id };
+      setSales(prev => prev.map(s => s === tempSaleObj ? confirmedSale : s));
+      setShiftSales(prev => prev.map(s => s === tempSaleObj ? confirmedSale : s));
+      // Refresh the invoice reference display with the new last number
+      fetchLastInvoice();
+      return confirmedSale; // Return confirmed sale so CajaPOS can print the real number
+    }
+    fetchLastInvoice();
+    return tempSaleObj;
   };
 
   const handleLogout = () => {
@@ -1329,7 +1353,8 @@ export default function App() {
               onRegisterAbono={handleRegisterAbono}
               abonos={abonos}
               getApiUrl={getApiUrl}
-              nextInvoiceNumber={nextInvoiceNumber}
+              nextInvoiceNumber={lastInvoiceInfo.next}
+              lastInvoiceNumber={lastInvoiceInfo.last}
               onLogout={handleLogout}
             />
           )}
@@ -1456,7 +1481,7 @@ export default function App() {
 
       {/* FOOTER BAR */}
       <footer className="bg-slate-900 border-t border-slate-800 py-3 px-6 select-none flex justify-between items-center text-[9px] text-slate-450 text-white flex-shrink-0">
-        <span>Licencia activa para Inversiones Niquitao 3000 C.A.</span>
+        <span>Licencia activa para {companyConfig.nombre_comercio || 'su empresa'}</span>
         <span>Operador: {currentUser.nombre} (Turno Activo)</span>
         <span>SISTEMA WINTERPOS-AL v4.0.0</span>
       </footer>

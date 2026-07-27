@@ -216,6 +216,26 @@ app.get('/api/sales', async (req, res) => {
   res.json(sales);
 });
 
+// Returns the last confirmed FAC- invoice number stored in the database
+// Used by terminals to show the operator the last sale and estimate the next correlative
+app.get('/api/sales/last-invoice', async (req, res) => {
+  try {
+    const sales = await getSales();
+    const facSales = sales.filter(s => s.factura_nro?.startsWith('FAC-'));
+    if (facSales.length > 0) {
+      // Sales come ordered DESC from getSales (Postgres), so first is the latest
+      const last = facSales[0].factura_nro;
+      const num = parseInt(last.replace('FAC-', ''), 10);
+      const next = `FAC-${String(num + 1).padStart(6, '0')}`;
+      return res.json({ last, next });
+    }
+    return res.json({ last: null, next: 'FAC-000001' });
+  } catch (err) {
+    console.error('Error en /api/sales/last-invoice:', err.message);
+    res.json({ last: null, next: 'FAC-000001' });
+  }
+});
+
 import https from 'https';
 
 // Cache for BCV rates

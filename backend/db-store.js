@@ -60,6 +60,8 @@ try {
       nombre VARCHAR(100) UNIQUE,
       permisos TEXT
     );
+    -- Secuencia global para numeración atómica de facturas (evita colisiones multi-terminal)
+    CREATE SEQUENCE IF NOT EXISTS seq_factura START 1;
   `);
 
   // Alter enum type outside of main multi-statement query to prevent implicit transaction block errors in Postgres
@@ -1395,11 +1397,22 @@ export async function saveSale(s) {
       const clientId = clientRes.rowCount > 0 ? clientRes.rows[0].id : 1;
       const cajaId = activeCaja.rowCount > 0 ? activeCaja.rows[0].id : 1;
       
-      // Insert Sale
+      // Insert Sale — factura_nro generated atomically by PostgreSQL sequence (prevents multi-terminal collisions)
+      // Devoluciones keep their DEV- prefix from the frontend; regular sales get a server-assigned number.
+      let factura_nro = s.factura_nro;
+      if (!factura_nro || (!factura_nro.startsWith('DEV-') && !factura_nro.startsWith('FAC-'))) {
+        // Generate from sequence as fallback if no number provided
+        const seqRes = await clientTarget.query("SELECT 'FAC-' || LPAD(nextval('seq_factura')::text, 6, '0') AS factura_nro");
+        factura_nro = seqRes.rows[0].factura_nro;
+      } else if (!factura_nro.startsWith('DEV-')) {
+        // Regular FAC- sale: always use the sequence to guarantee uniqueness
+        const seqRes = await clientTarget.query("SELECT 'FAC-' || LPAD(nextval('seq_factura')::text, 6, '0') AS factura_nro");
+        factura_nro = seqRes.rows[0].factura_nro;
+      }
       const saleRes = await clientTarget.query(
         `INSERT INTO Ventas (factura_nro, cliente_id, usuario_id, caja_id, subtotal_usd, descuento_usd, total_usd, total_ves, estacion_nombre)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, fecha`,
-        [s.factura_nro, clientId, userId, cajaId, s.subtotal, s.descuento, s.totalUSD, s.totalVES, s.terminal || 'CAJA_PRINCIPAL']
+        [factura_nro, clientId, userId, cajaId, s.subtotal, s.descuento, s.totalUSD, s.totalVES, s.terminal || 'CAJA_PRINCIPAL']
       );
       
       const saleId = saleRes.rows[0].id;
@@ -1440,7 +1453,7 @@ export async function saveSale(s) {
           await clientTarget.query(
             `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
              VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [prodId, userId, 'Venta', -cleanQty, currentStock, newStock, `Venta Facturada: ${s.factura_nro}`]
+            [prodId, userId, 'Venta', -cleanQty, currentStock, newStock, `Venta Facturada: ${factura_nro}`]
           );
         }
       }
@@ -1466,6 +1479,7 @@ export async function saveSale(s) {
       return {
         ...s,
         id: saleId,
+        factura_nro, // Return the server-assigned invoice number to the frontend
         fecha: getLocalISODateString(new Date(saleRes.rows[0].fecha))
       };
     } catch (err) {
@@ -1475,9 +1489,19 @@ export async function saveSale(s) {
       clientTarget.release();
     }
   }
+  // JSON fallback: generate a sequential invoice number based on current max in file
   const sales = readJsonFile('sales.json', []);
+  let factura_nro_json = s.factura_nro;
+  if (!factura_nro_json || !factura_nro_json.startsWith('DEV-')) {
+    const numbers = sales
+      .map(sale => { const m = sale.factura_nro?.match(/^FAC-(\d+)$/); return m ? parseInt(m[1], 10) : 0; })
+      .filter(n => n > 0);
+    const maxNum = numbers.length > 0 ? Math.max(...numbers) : 0;
+    factura_nro_json = `FAC-${String(maxNum + 1).padStart(6, '0')}`;
+  }
   const newSale = {
     ...s,
+    factura_nro: factura_nro_json,
     id: Date.now(),
     fecha: getLocalISODateString()
   };
