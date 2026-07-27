@@ -1,0 +1,10 @@
+{
+  "name": "winterpos",
+  "version": "1.0.0",
+  "description": "WinterPos Punto de Venta - Desktop Launcher",
+  "main": "desktop-main.js",
+  "type": "module",
+  "scripts": {
+    "start": "node desktop-main.js"
+  }
+}

@@ -1,0 +1,12 @@
+# Binarios del instalador (demasiado grandes para Git)
+installer_output/*.exe
+
+# Caché y autenticación de WhatsApp Web
+backend/.wwebjs_auth/
+backend/.wwebjs_cache/
+
+# Caché de node_modules
+backend/node_modules/.cache/
+
+# Variables de entorno locales
+backend/.env
