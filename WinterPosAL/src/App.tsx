@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   mockUsers, mockProducts, mockClients, mockTasaHistory, 
   mockConfig, mockMovements 
@@ -318,36 +318,64 @@ export default function App() {
     if (currentUser) fetchLastInvoice();
   }, [currentUser, lanIP, dbMode]);
 
-  // Multi-terminal polling: check every 15 seconds for new sales from other terminals
-  // This keeps all stations in sync without WebSockets
+  // Multi-terminal unified sync polling (every 10 seconds)
+  // Syncs: new sales (by ID), tasa changes, and session closure detection
+  // Uses integer IDs instead of timestamps to avoid timezone bugs
+  const sessionStartRef = useRef<string>(new Date().toISOString());
+
   useEffect(() => {
     if (!currentUser) return;
-    let lastPollTime = new Date().toISOString();
-    const terminalName = localStorage.getItem('pos_terminal_name') || 'CAJA_01';
+    const myTerminal = localStorage.getItem('pos_terminal_name') || 'CAJA_01';
 
-    const pollNewSales = async () => {
+    const pollSync = async () => {
       try {
-        const pollUrl = getApiUrl(`/sales/poll?since=${encodeURIComponent(lastPollTime)}&terminal=${encodeURIComponent(terminalName)}`);
-        const res = await fetch(pollUrl);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.serverTime) lastPollTime = data.serverTime;
-          if (data.sales && data.sales.length > 0) {
-            console.log(`[Sync] Detectadas ${data.sales.length} venta(s) nueva(s) de otras terminales. Actualizando lista...`);
-            setSales(prev => {
-              const existingIds = new Set(prev.map(s => s.id));
-              const existingFacs = new Set(prev.map(s => s.factura_nro));
-              const trulyNew = data.sales.filter((s: any) => !existingIds.has(s.id) && !existingFacs.has(s.factura_nro));
-              return trulyNew.length > 0 ? [...prev, ...trulyNew] : prev;
-            });
-          }
+        // Calculate max known IDs from current state
+        const maxSaleId = sales.reduce((max, s) => Math.max(max, s.id || 0), 0);
+        const maxTasaId = tasaHistory.reduce((max, t) => Math.max(max, t.id || 0), 0);
+
+        const params = new URLSearchParams({
+          since_id: String(maxSaleId),
+          last_tasa_id: String(maxTasaId),
+          terminal: myTerminal,
+          usuario: currentUser.nombre,
+          session_since: sessionStartRef.current
+        });
+
+        const res = await fetch(getApiUrl(`/sync/poll?${params.toString()}`));
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // 1. Session closed on another terminal → force logout
+        if (data.sessionClosed) {
+          alert('⚠️ Tu turno fue cerrado desde otro equipo. Debes iniciar sesión nuevamente para continuar.');
+          handleLogout();
+          return; // Stop processing, user is logged out
+        }
+
+        // 2. New sales from other terminals
+        if (data.sales && data.sales.length > 0) {
+          console.log(`[Sync] ${data.sales.length} venta(s) nueva(s) de otras terminales.`);
+          setSales(prev => {
+            const existingIds = new Set(prev.map(s => s.id));
+            const existingFacs = new Set(prev.map(s => s.factura_nro));
+            const trulyNew = data.sales.filter((s: any) => !existingIds.has(s.id) && !existingFacs.has(s.factura_nro));
+            return trulyNew.length > 0 ? [...prev, ...trulyNew] : prev;
+          });
+          // Also refresh invoice reference
+          fetchLastInvoice();
+        }
+
+        // 3. Tasa updated from another terminal
+        if (data.tasas) {
+          console.log('[Sync] Tasa de cambio actualizada desde otra terminal.');
+          setTasaHistory(data.tasas);
         }
       } catch (_) {
         // Silent fail — polling is best-effort
       }
     };
 
-    const interval = setInterval(pollNewSales, 15000);
+    const interval = setInterval(pollSync, 10000);
     return () => clearInterval(interval);
   }, [currentUser, lanIP, dbMode]);
 

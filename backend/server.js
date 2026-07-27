@@ -236,28 +236,62 @@ app.get('/api/sales/last-invoice', async (req, res) => {
   }
 });
 
-// Polling endpoint for multi-terminal sync: returns sales newer than ?since=<ISO timestamp>
-// Light polling (no WebSockets needed). Terminals call this every 15s to see new sales from other stations.
-app.get('/api/sales/poll', async (req, res) => {
+// Unified sync/poll endpoint for multi-terminal real-time synchronization
+// Returns: new sales (by ID), updated tasas, session closure detection
+// Fixes the timezone bug by comparing integer IDs instead of date strings
+app.get('/api/sync/poll', async (req, res) => {
   try {
-    const since = req.query.since ? new Date(req.query.since) : null;
-    const sales = await getSales();
-    if (!since) {
-      return res.json({ sales: [], serverTime: new Date().toISOString() });
-    }
-    // Return only sales newer than the given timestamp and not from the requesting terminal
+    const sinceId = parseInt(req.query.since_id) || 0;
+    const lastTasaId = parseInt(req.query.last_tasa_id) || 0;
     const terminal = req.query.terminal || null;
-    const newSales = sales.filter(s => {
-      if (!s.fecha) return false;
-      const saleDate = new Date(s.fecha);
-      const isNewer = saleDate > since;
-      const isOtherTerminal = terminal ? s.terminal !== terminal : true;
-      return isNewer && isOtherTerminal;
-    });
-    res.json({ sales: newSales, serverTime: new Date().toISOString() });
+    const usuario = req.query.usuario || null;
+    const sessionSince = req.query.session_since || null;
+
+    const result = {
+      sales: [],
+      tasas: null,        // null = no changes; array = full updated list
+      sessionClosed: false,
+      serverTime: new Date().toISOString()
+    };
+
+    // 1. New sales with id > since_id (excluding this terminal's own sales)
+    const allSales = await getSales();
+    if (sinceId > 0) {
+      result.sales = allSales.filter(s => {
+        const hasHigherId = s.id && s.id > sinceId;
+        const isOtherTerminal = terminal ? s.terminal !== terminal : true;
+        return hasHigherId && isOtherTerminal;
+      });
+    }
+
+    // 2. Tasa changes: if any tasa has id > lastTasaId, send the full updated list
+    const tasas = await getTasaHistory();
+    const maxTasaId = tasas.length > 0 ? Math.max(...tasas.map(t => t.id)) : 0;
+    if (maxTasaId > lastTasaId) {
+      result.tasas = tasas;
+    }
+
+    // 3. Session closure detection: check if this user closed their register
+    //    on a DIFFERENT terminal after the current session started
+    if (usuario && sessionSince) {
+      const cierres = await getCierres();
+      const sessionStart = new Date(sessionSince);
+      const userClosedElsewhere = cierres.some(c => {
+        if (!c.usuario || !c.fechaCierre) return false;
+        // Same user, different terminal, closed AFTER current session started
+        const isSameUser = c.usuario.toLowerCase() === usuario.toLowerCase();
+        const isDiffTerminal = terminal ? c.terminal !== terminal : false;
+        const closedAfterSession = new Date(c.fechaCierre) > sessionStart;
+        const isClosed = c.status === 'Cerrada';
+        return isSameUser && isDiffTerminal && closedAfterSession && isClosed;
+      });
+      result.sessionClosed = userClosedElsewhere;
+    }
+
+    res.json(result);
   } catch (err) {
-    console.error('Error en /api/sales/poll:', err.message);
-    res.json({ sales: [], serverTime: new Date().toISOString() });
+    console.error('Error en /api/sync/poll:', err.message);
+    res.json({ sales: [], tasas: null, sessionClosed: false, serverTime: new Date().toISOString() });
   }
 });
 
