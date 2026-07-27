@@ -55,7 +55,7 @@ interface CajaPOSProps {
   onRegisterAbono: (
     clientId: number, 
     amountUSD: number,
-    metodoPago?: 'Efectivo$' | 'EfectivoBs' | 'TarjetaBs' | 'PagoMovil' | 'Biopago',
+    metodoPago?: 'Efectivo$' | 'EfectivoBs' | 'Tarjeta$' | 'TarjetaBs' | 'PagoMovil' | 'Biopago' | 'Binance' | 'PayPal',
     referencia?: string
   ) => void;
   abonos?: Abono[];
@@ -557,7 +557,7 @@ export default function CajaPOS({
   // Keyboard row selection and mixed change state
   const [selectedItemIndex, setSelectedItemIndex] = useState<number>(0);
   const [mixedChangeUSDVal, setMixedChangeUSDVal] = useState('');
-  const [abonoMethod, setAbonoMethod] = useState<'Efectivo$' | 'EfectivoBs' | 'TarjetaBs' | 'PagoMovil' | 'Biopago'>('Efectivo$');
+  const [abonoMethod, setAbonoMethod] = useState<'Efectivo$' | 'EfectivoBs' | 'Tarjeta$' | 'TarjetaBs' | 'PagoMovil' | 'Biopago' | 'Binance' | 'PayPal'>('Efectivo$');
   const [abonoRef, setAbonoRef] = useState('');
 
   // Reset mixed change on open/close
@@ -628,8 +628,11 @@ export default function CajaPOS({
   const [payCashUSD, setPayCashUSD] = useState('');
   const [payCashVES, setPayCashVES] = useState('');
   const [payCardVES, setPayCardVES] = useState('');
+  const [payCardUSD, setPayCardUSD] = useState('');    // Tarjeta $ USD
   const [payPagoMovilVES, setPayPagoMovilVES] = useState('');
   const [payBiopagoVES, setPayBiopagoVES] = useState('');
+  const [payBinanceUSD, setPayBinanceUSD] = useState('');  // Binance $
+  const [payPaypalUSD, setPayPaypalUSD] = useState('');    // PayPal $
   const [payCreditUSD, setPayCreditUSD] = useState('');
 
   const [refPagoMovil, setRefPagoMovil] = useState('');
@@ -1046,8 +1049,11 @@ export default function CajaPOS({
     setPayCashUSD('');
     setPayCashVES('');
     setPayCardVES('');
+    setPayCardUSD('');
     setPayPagoMovilVES('');
     setPayBiopagoVES('');
+    setPayBinanceUSD('');
+    setPayPaypalUSD('');
     setPayCreditUSD('');
     
     setRefPagoMovil('');
@@ -1060,8 +1066,11 @@ export default function CajaPOS({
   const cashUSDVal = parseFloat(payCashUSD) || 0;
   const cashVESVal = parseFloat(payCashVES) || 0;
   const cardVESVal = parseFloat(payCardVES) || 0;
+  const cardUSDVal = parseFloat(payCardUSD) || 0;      // Tarjeta $ USD
   const pagoMovilVESVal = parseFloat(payPagoMovilVES) || 0;
   const biopagoVESVal = parseFloat(payBiopagoVES) || 0;
+  const binanceUSDVal = parseFloat(payBinanceUSD) || 0;  // Binance $
+  const paypalUSDVal = parseFloat(payPaypalUSD) || 0;    // PayPal $
   const creditUSDVal = parseFloat(payCreditUSD) || 0;
 
   // Round paid USD calculation to 2 decimals to avoid floating-point issues
@@ -1069,8 +1078,11 @@ export default function CajaPOS({
     cashUSDVal +
     (cashVESVal / tasaDia) +
     (cardVESVal / tasaDia) +
+    cardUSDVal +
     (pagoMovilVESVal / tasaDia) +
     (biopagoVESVal / tasaDia) +
+    binanceUSDVal +
+    paypalUSDVal +
     creditUSDVal
   ) * 100) / 100;
 
@@ -1115,6 +1127,7 @@ export default function CajaPOS({
     if (cashUSDVal > 0) pagos.push({ metodo: 'Efectivo$', monto: cashUSDVal, montoUSD: cashUSDVal });
     if (cashVESVal > 0) pagos.push({ metodo: 'EfectivoBs', monto: cashVESVal, montoUSD: cashVESVal / tasaDia });
     if (cardVESVal > 0) pagos.push({ metodo: 'TarjetaBs', monto: cardVESVal, montoUSD: cardVESVal / tasaDia });
+    if (cardUSDVal > 0) pagos.push({ metodo: 'Tarjeta$', monto: cardUSDVal, montoUSD: cardUSDVal });
     if (pagoMovilVESVal > 0) {
       pagos.push({
         metodo: 'PagoMovil',
@@ -1133,6 +1146,8 @@ export default function CajaPOS({
         bancoEmisor: ''
       });
     }
+    if (binanceUSDVal > 0) pagos.push({ metodo: 'Binance', monto: binanceUSDVal, montoUSD: binanceUSDVal });
+    if (paypalUSDVal > 0) pagos.push({ metodo: 'PayPal', monto: paypalUSDVal, montoUSD: paypalUSDVal });
     if (creditUSDVal > 0) {
       pagos.push({ metodo: 'CreditoCliente', monto: creditUSDVal, montoUSD: creditUSDVal });
     }
@@ -1179,7 +1194,18 @@ export default function CajaPOS({
     };
 
     // Await the server response to get the confirmed factura_nro
-    const confirmedSale = await onRegisterSale(salePayload);
+    let confirmedSale: any;
+    try {
+      confirmedSale = await onRegisterSale(salePayload);
+    } catch (err: any) {
+      // Server failed to save the sale — show error and abort
+      showAlert(
+        `❌ Error al guardar la venta en el servidor: ${err.message || 'Error desconocido'}. La venta NO fue registrada. Verifique la conexión con el servidor e intente de nuevo.`,
+        'Error Crítico de Venta',
+        'error'
+      );
+      return;
+    }
     const finalSaleForTicket = confirmedSale ?? salePayload;
 
     setShowCheckoutModal(false);
@@ -2295,6 +2321,51 @@ export default function CajaPOS({
                     value={payBiopagoVES}
                     onChange={(e) => setPayBiopagoVES(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
+                  />
+                </div>
+                )}
+
+                {/* Tarjeta $ USD */}
+                {companyConfig.metodos_pago_activos.includes('tarjeta_usd') && (
+                <div className="space-y-2 border-t border-slate-200 pt-2">
+                  <label className="text-[10px] text-blue-700 block font-bold font-sans">Tarjeta $ (USD)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={payCardUSD}
+                    onChange={(e) => setPayCardUSD(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-blue-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
+                  />
+                </div>
+                )}
+
+                {/* Binance $ */}
+                {companyConfig.metodos_pago_activos.includes('binance') && (
+                <div className="space-y-2 border-t border-slate-200 pt-2">
+                  <label className="text-[10px] text-yellow-600 block font-bold font-sans">Binance ($ USD)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={payBinanceUSD}
+                    onChange={(e) => setPayBinanceUSD(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-yellow-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
+                  />
+                </div>
+                )}
+
+                {/* PayPal $ */}
+                {companyConfig.metodos_pago_activos.includes('paypal') && (
+                <div className="space-y-2 border-t border-slate-200 pt-2">
+                  <label className="text-[10px] text-indigo-600 block font-bold font-sans">PayPal ($ USD)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={payPaypalUSD}
+                    onChange={(e) => setPayPaypalUSD(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-indigo-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
                   />
                 </div>
                 )}

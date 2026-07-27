@@ -95,7 +95,7 @@ export interface SaleItem {
 }
 
 export interface Payment {
-  metodo: 'Efectivo$' | 'EfectivoBs' | 'Tarjeta$' | 'TarjetaBs' | 'PagoMovil' | 'Biopago' | 'CreditoCliente';
+  metodo: 'Efectivo$' | 'EfectivoBs' | 'Tarjeta$' | 'TarjetaBs' | 'PagoMovil' | 'Biopago' | 'Binance' | 'PayPal' | 'CreditoCliente';
   monto: number; // in the currency of the payment (VES for Bs, USD for $)
   montoUSD: number; // calculated in USD
   reference?: string;
@@ -259,7 +259,7 @@ export interface Abono {
   nombre: string;
   cedula_rif: string;
   monto: number;
-  metodo_pago?: 'Efectivo$' | 'EfectivoBs' | 'TarjetaBs' | 'PagoMovil' | 'Biopago';
+  metodo_pago?: 'Efectivo$' | 'EfectivoBs' | 'Tarjeta$' | 'TarjetaBs' | 'PagoMovil' | 'Biopago' | 'Binance' | 'PayPal';
   monto_ves?: number;
   referencia?: string;
   usuario?: string;

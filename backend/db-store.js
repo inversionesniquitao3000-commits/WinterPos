@@ -1485,6 +1485,7 @@ export async function saveSale(s) {
     } catch (err) {
       await clientTarget.query('ROLLBACK');
       console.error('Error al registrar venta en Postgres:', err.message);
+      throw err; // Propagate error so server returns HTTP 500 and frontend knows the sale failed
     } finally {
       clientTarget.release();
     }

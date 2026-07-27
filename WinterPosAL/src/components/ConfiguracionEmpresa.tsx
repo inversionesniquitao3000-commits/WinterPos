@@ -674,8 +674,11 @@ export default function ConfiguracionEmpresa({
     { id: 'efectivo_usd', label: 'Efectivo $' },
     { id: 'efectivo_ves', label: 'Efectivo Bs' },
     { id: 'tarjeta_ves', label: 'Tarjeta de Débito Bs' },
+    { id: 'tarjeta_usd', label: 'Tarjeta $ (USD)' },
     { id: 'pago_movil', label: 'Pago Móvil Bs' },
     { id: 'biopago', label: 'Biopago Bs' },
+    { id: 'binance', label: 'Binance $' },
+    { id: 'paypal', label: 'PayPal $' },
     { id: 'credito', label: 'Crédito Cliente $' }
   ];
 

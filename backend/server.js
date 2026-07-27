@@ -236,6 +236,31 @@ app.get('/api/sales/last-invoice', async (req, res) => {
   }
 });
 
+// Polling endpoint for multi-terminal sync: returns sales newer than ?since=<ISO timestamp>
+// Light polling (no WebSockets needed). Terminals call this every 15s to see new sales from other stations.
+app.get('/api/sales/poll', async (req, res) => {
+  try {
+    const since = req.query.since ? new Date(req.query.since) : null;
+    const sales = await getSales();
+    if (!since) {
+      return res.json({ sales: [], serverTime: new Date().toISOString() });
+    }
+    // Return only sales newer than the given timestamp and not from the requesting terminal
+    const terminal = req.query.terminal || null;
+    const newSales = sales.filter(s => {
+      if (!s.fecha) return false;
+      const saleDate = new Date(s.fecha);
+      const isNewer = saleDate > since;
+      const isOtherTerminal = terminal ? s.terminal !== terminal : true;
+      return isNewer && isOtherTerminal;
+    });
+    res.json({ sales: newSales, serverTime: new Date().toISOString() });
+  } catch (err) {
+    console.error('Error en /api/sales/poll:', err.message);
+    res.json({ sales: [], serverTime: new Date().toISOString() });
+  }
+});
+
 import https from 'https';
 
 // Cache for BCV rates
@@ -317,8 +342,17 @@ app.get('/api/bcv', async (req, res) => {
 });
 
 app.post('/api/sales', async (req, res) => {
-  const saved = await saveSale(req.body);
-  res.json(saved);
+  try {
+    const saved = await saveSale(req.body);
+    if (!saved) {
+      // saveSale throws on Postgres error, but guard against null return from JSON fallback
+      return res.status(500).json({ error: 'Error interno al registrar la venta. Intente de nuevo.' });
+    }
+    res.json(saved);
+  } catch (err) {
+    console.error('❌ Error crítico al registrar venta:', err.message);
+    res.status(500).json({ error: err.message || 'Error interno al registrar la venta.' });
+  }
 });
 
 app.get('/api/cajas/estado', async (req, res) => {

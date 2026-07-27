@@ -318,6 +318,39 @@ export default function App() {
     if (currentUser) fetchLastInvoice();
   }, [currentUser, lanIP, dbMode]);
 
+  // Multi-terminal polling: check every 15 seconds for new sales from other terminals
+  // This keeps all stations in sync without WebSockets
+  useEffect(() => {
+    if (!currentUser) return;
+    let lastPollTime = new Date().toISOString();
+    const terminalName = localStorage.getItem('pos_terminal_name') || 'CAJA_01';
+
+    const pollNewSales = async () => {
+      try {
+        const pollUrl = getApiUrl(`/sales/poll?since=${encodeURIComponent(lastPollTime)}&terminal=${encodeURIComponent(terminalName)}`);
+        const res = await fetch(pollUrl);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.serverTime) lastPollTime = data.serverTime;
+          if (data.sales && data.sales.length > 0) {
+            console.log(`[Sync] Detectadas ${data.sales.length} venta(s) nueva(s) de otras terminales. Actualizando lista...`);
+            setSales(prev => {
+              const existingIds = new Set(prev.map(s => s.id));
+              const existingFacs = new Set(prev.map(s => s.factura_nro));
+              const trulyNew = data.sales.filter((s: any) => !existingIds.has(s.id) && !existingFacs.has(s.factura_nro));
+              return trulyNew.length > 0 ? [...prev, ...trulyNew] : prev;
+            });
+          }
+        }
+      } catch (_) {
+        // Silent fail — polling is best-effort
+      }
+    };
+
+    const interval = setInterval(pollNewSales, 15000);
+    return () => clearInterval(interval);
+  }, [currentUser, lanIP, dbMode]);
+
   // Load all initial data from centralized backend database
   useEffect(() => {
     if (!currentUser) return;
@@ -785,7 +818,7 @@ export default function App() {
   const handleRegisterAbono = async (
     clientId: number, 
     amountUSD: number,
-    metodoPago: 'Efectivo$' | 'EfectivoBs' | 'TarjetaBs' | 'PagoMovil' | 'Biopago' = 'Efectivo$',
+    metodoPago: 'Efectivo$' | 'EfectivoBs' | 'Tarjeta$' | 'TarjetaBs' | 'PagoMovil' | 'Biopago' | 'Binance' | 'PayPal' = 'Efectivo$',
     referencia: string = ''
   ) => {
     const montoVES = parseFloat((amountUSD * tasaDia).toFixed(2));
@@ -1147,18 +1180,46 @@ export default function App() {
     localStorage.setItem('pos_ventas_ves', nextVentasVes.toString());
 
     // 5. Send to server — server returns the definitive factura_nro from seq_factura
-    const saved = await postApiData('/sales', tempSaleObj);
-    if (saved && saved.factura_nro && saved.factura_nro !== tempSaleObj.factura_nro) {
-      // Update state with the confirmed server-assigned invoice number
-      const confirmedSale: Sale = { ...tempSaleObj, factura_nro: saved.factura_nro, id: saved.id };
-      setSales(prev => prev.map(s => s === tempSaleObj ? confirmedSale : s));
-      setShiftSales(prev => prev.map(s => s === tempSaleObj ? confirmedSale : s));
-      // Refresh the invoice reference display with the new last number
+    try {
+      const res = await fetch(getApiUrl('/sales'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(tempSaleObj)
+      });
+
+      if (!res.ok) {
+        // Server returned error (HTTP 500) — ROLLBACK local state to avoid phantom sale
+        const errData = await res.json().catch(() => ({}));
+        const errMsg = errData.error || `Error HTTP ${res.status} al guardar la venta en el servidor.`;
+        console.error('❌ Error al registrar venta en servidor:', errMsg);
+        
+        // Revert optimistic local state updates
+        setSales(prev => prev.filter(s => s !== tempSaleObj));
+        setShiftSales(prev => prev.filter(s => s !== tempSaleObj));
+        setCajaVentasUsd(cajaVentasUsd);
+        setCajaVentasVes(cajaVentasVes);
+        localStorage.setItem('pos_ventas_usd', cajaVentasUsd.toString());
+        localStorage.setItem('pos_ventas_ves', cajaVentasVes.toString());
+        
+        throw new Error(errMsg);
+      }
+
+      const saved = await res.json();
+      if (saved && saved.factura_nro && saved.factura_nro !== tempSaleObj.factura_nro) {
+        // Update state with the confirmed server-assigned invoice number
+        const confirmedSale: Sale = { ...tempSaleObj, factura_nro: saved.factura_nro, id: saved.id };
+        setSales(prev => prev.map(s => s === tempSaleObj ? confirmedSale : s));
+        setShiftSales(prev => prev.map(s => s === tempSaleObj ? confirmedSale : s));
+        // Refresh the invoice reference display with the new last number
+        fetchLastInvoice();
+        return confirmedSale; // Return confirmed sale so CajaPOS can print the real number
+      }
       fetchLastInvoice();
-      return confirmedSale; // Return confirmed sale so CajaPOS can print the real number
+      return tempSaleObj;
+    } catch (err) {
+      // Re-throw so CajaPOS can display the error alert to the operator
+      throw err;
     }
-    fetchLastInvoice();
-    return tempSaleObj;
   };
 
   const handleLogout = () => {
