@@ -237,7 +237,7 @@ app.get('/api/sales/last-invoice', async (req, res) => {
 });
 
 // Unified sync/poll endpoint for multi-terminal real-time synchronization
-// Returns: new sales (by ID), updated tasas, session closure detection
+// Returns: new sales (by ID), updated tasas, session closure detection, updated cierres list
 // Fixes the timezone bug by comparing integer IDs instead of date strings
 app.get('/api/sync/poll', async (req, res) => {
   try {
@@ -247,9 +247,15 @@ app.get('/api/sync/poll', async (req, res) => {
     const usuario = req.query.usuario || null;
     const sessionSince = req.query.session_since || null;
 
+    // Cierres sync parameters
+    const clientCierreCount = parseInt(req.query.cierres_count) || 0;
+    const clientLastCierreId = parseInt(req.query.last_cierre_id) || 0;
+    const clientCierresSignature = parseFloat(req.query.cierres_signature) || 0;
+
     const result = {
       sales: [],
       tasas: null,        // null = no changes; array = full updated list
+      cierres: null,      // null = no changes; array = full updated list
       sessionClosed: false,
       serverTime: new Date().toISOString()
     };
@@ -271,10 +277,22 @@ app.get('/api/sync/poll', async (req, res) => {
       result.tasas = tasas;
     }
 
-    // 3. Session closure detection: check if this user closed their register
+    // 3. Cierres sync: if count, last ID, or signature (realUsd + realVes sum) differs, send full list
+    const cierres = await getCierres();
+    const maxCierreId = cierres.length > 0 ? Math.max(...cierres.map(c => c.id || 0)) : 0;
+    const serverCierresSignature = cierres.reduce((acc, c) => acc + (c.realUsd || 0) + (c.realVes || 0), 0);
+
+    // Round signature to 2 decimal places to avoid floating point precision mismatches
+    const roundedServerSig = Math.round(serverCierresSignature * 100) / 100;
+    const roundedClientSig = Math.round(clientCierresSignature * 100) / 100;
+
+    if (cierres.length !== clientCierreCount || maxCierreId !== clientLastCierreId || roundedServerSig !== roundedClientSig) {
+      result.cierres = cierres;
+    }
+
+    // 4. Session closure detection: check if this user closed their register
     //    on a DIFFERENT terminal after the current session started
     if (usuario && sessionSince) {
-      const cierres = await getCierres();
       const sessionStart = new Date(sessionSince);
       const userClosedElsewhere = cierres.some(c => {
         if (!c.usuario || !c.fechaCierre) return false;
@@ -291,7 +309,7 @@ app.get('/api/sync/poll', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('Error en /api/sync/poll:', err.message);
-    res.json({ sales: [], tasas: null, sessionClosed: false, serverTime: new Date().toISOString() });
+    res.json({ sales: [], tasas: null, cierres: null, sessionClosed: false, serverTime: new Date().toISOString() });
   }
 });
 

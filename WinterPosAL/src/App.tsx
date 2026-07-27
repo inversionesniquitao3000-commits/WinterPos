@@ -319,7 +319,7 @@ export default function App() {
   }, [currentUser, lanIP, dbMode]);
 
   // Multi-terminal unified sync polling (every 10 seconds)
-  // Syncs: new sales (by ID), tasa changes, and session closure detection
+  // Syncs: new sales (by ID), tasa changes, cierres updates, and session closure detection
   // Uses integer IDs instead of timestamps to avoid timezone bugs
   const sessionStartRef = useRef<string>(new Date().toISOString());
 
@@ -332,10 +332,18 @@ export default function App() {
         // Calculate max known IDs from current state
         const maxSaleId = sales.reduce((max, s) => Math.max(max, s.id || 0), 0);
         const maxTasaId = tasaHistory.reduce((max, t) => Math.max(max, t.id || 0), 0);
+        
+        // Calculate cierres parameters
+        const cierresCount = cierres.length;
+        const maxCierreId = cierres.reduce((max, c) => Math.max(max, c.id || 0), 0);
+        const cierresSig = cierres.reduce((acc, c) => acc + (c.realUsd || 0) + (c.realVes || 0), 0);
 
         const params = new URLSearchParams({
           since_id: String(maxSaleId),
           last_tasa_id: String(maxTasaId),
+          cierres_count: String(cierresCount),
+          last_cierre_id: String(maxCierreId),
+          cierres_signature: String(cierresSig),
           terminal: myTerminal,
           usuario: currentUser.nombre,
           session_since: sessionStartRef.current
@@ -370,6 +378,12 @@ export default function App() {
           console.log('[Sync] Tasa de cambio actualizada desde otra terminal.');
           setTasaHistory(data.tasas);
         }
+
+        // 4. Cierres list updated from another terminal
+        if (data.cierres) {
+          console.log('[Sync] Historial de cierres de caja actualizado desde el servidor central.');
+          setCierres(data.cierres);
+        }
       } catch (_) {
         // Silent fail — polling is best-effort
       }
@@ -377,7 +391,7 @@ export default function App() {
 
     const interval = setInterval(pollSync, 10000);
     return () => clearInterval(interval);
-  }, [currentUser, lanIP, dbMode]);
+  }, [currentUser, lanIP, dbMode, sales, tasaHistory, cierres]);
 
   // Load all initial data from centralized backend database
   useEffect(() => {
