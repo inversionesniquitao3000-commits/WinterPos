@@ -62,6 +62,8 @@ try {
     );
     -- Secuencia global para numeración atómica de facturas (evita colisiones multi-terminal)
     CREATE SEQUENCE IF NOT EXISTS seq_factura START 1;
+    -- Asegurar que todos los cierres tengan fecha_cierre asignada
+    UPDATE Cajas_Apertura_Cierre SET fecha_cierre = COALESCE(fecha_cierre, fecha_apertura, CURRENT_TIMESTAMP) WHERE fecha_cierre IS NULL;
   `);
 
   // Alter enum type outside of main multi-statement query to prevent implicit transaction block errors in Postgres
@@ -1536,10 +1538,14 @@ export async function getCierres() {
             console.error('Error parsing detalles_json', e);
           }
         }
+        const fApertura = r.fecha_apertura ? getLocalISODateString(new Date(r.fecha_apertura)) : getLocalISODateString();
+        const fCierre = r.fecha_cierre ? getLocalISODateString(new Date(r.fecha_cierre)) : (parsedDetails.fechaCierre || parsedDetails.fecha || fApertura);
+
         return {
           id: r.id,
-          fechaApertura: getLocalISODateString(new Date(r.fecha_apertura)),
-          fechaCierre: r.fecha_cierre ? getLocalISODateString(new Date(r.fecha_cierre)) : null,
+          fechaApertura: fApertura,
+          fechaCierre: fCierre,
+          fecha: fCierre,
           aperturaUsd: parseFloat(r.monto_apertura_usd),
           aperturaVes: parseFloat(r.monto_apertura_ves),
           realUsd: r.monto_cierre_real_usd ? parseFloat(r.monto_cierre_real_usd) : 0,
@@ -1554,6 +1560,7 @@ export async function getCierres() {
           ...parsedDetails
         };
       });
+
     } catch (err) {
       console.error('Error en getCierres (Postgres):', err.message);
     }
