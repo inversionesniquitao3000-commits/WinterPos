@@ -1548,6 +1548,7 @@ export default function App() {
               tasaVuelto={tasaVuelto}
               tasaHistory={tasaHistory}
               currentUser={currentUser}
+              isServer={terminalName === 'CAJA_01' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'}
               onUpdateTasa={handleUpdateTasa}
             />
           )}

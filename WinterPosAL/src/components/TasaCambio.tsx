@@ -8,10 +8,11 @@ interface TasaCambioProps {
   tasaVuelto: number;
   tasaHistory: TasaHistoryItem[];
   currentUser: User;
+  isServer?: boolean;
   onUpdateTasa: (newDia: number, newVuelto: number) => void;
 }
 
-export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUser: _currentUser, onUpdateTasa }: TasaCambioProps) {
+export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUser: _currentUser, isServer = true, onUpdateTasa }: TasaCambioProps) {
   const { showAlert } = useDialog();
   const [inputDia, setInputDia] = useState(tasaDia > 0 ? tasaDia.toString() : '');
   const [inputVuelto, setInputVuelto] = useState(tasaVuelto > 0 ? tasaVuelto.toString() : '');
@@ -350,11 +351,23 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
             </div>
           </div>
 
-          {/* Rate Update Form - Light Styled */}
+          {/* Rate Update Form - Server Only */}
           <div className="bg-white border border-slate-200 p-5 rounded-xl space-y-4 shadow-sm">
             <h2 className="text-xs font-bold text-slate-550 uppercase tracking-widest border-b border-slate-100 pb-2 font-sans">
               Registrar Actualización Cambiaria
             </h2>
+
+            {!isServer ? (
+              <div className="bg-amber-50/80 border border-amber-200 p-4 rounded-lg text-amber-900 space-y-2">
+                <div className="flex items-center gap-2 font-bold text-xs uppercase tracking-wider text-amber-800 font-sans">
+                  🔒 Control Centralizado de Tasa
+                </div>
+                <p className="text-[11px] font-sans text-amber-700 leading-relaxed">
+                  La modificación del tipo de cambio sólo está permitida desde la <strong>Caja Principal / Servidor (CAJA_01)</strong>. 
+                  Esta terminal cliente trabaja automáticamente con la tasa establecida por el servidor.
+                </p>
+              </div>
+            ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="text-[10px] text-slate-500 block mb-1 font-sans">Tasa de Cobro (Bs / $ USD)</label>
@@ -447,6 +460,7 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
                 </button>
               </div>
             </form>
+            )}
           </div>
         </div>
 
