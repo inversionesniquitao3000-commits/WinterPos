@@ -1003,7 +1003,13 @@ export default function App() {
     localStorage.setItem('pos_movimientos_ves', '0');
     localStorage.setItem('pos_apertura_fecha', getLocalISODateString());
 
-    await postApiData('/cajas/abrir', { usd, ves, usuarioId: currentUser?.id, terminal: terminalName });
+    await postApiData('/cajas/abrir', { 
+      usd, 
+      ves, 
+      usuarioId: currentUser?.id, 
+      usuarioNombre: currentUser?.nombre, 
+      terminal: terminalName 
+    });
   };
 
   const handleCerrarCaja = async (

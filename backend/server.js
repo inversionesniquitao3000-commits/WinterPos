@@ -432,8 +432,8 @@ app.get('/api/cajas/estado', async (req, res) => {
 });
 
 app.post('/api/cajas/abrir', async (req, res) => {
-  const { usd, ves, usuarioId, terminal } = req.body;
-  const id = await abrirCaja(usd, ves, usuarioId, terminal);
+  const { usd, ves, usuarioId, usuarioNombre, terminal } = req.body;
+  const id = await abrirCaja(usd, ves, usuarioId, terminal, usuarioNombre);
   res.json({ success: true, id });
 });
 

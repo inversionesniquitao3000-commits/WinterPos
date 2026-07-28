@@ -1584,6 +1584,8 @@ export async function getCierres() {
         const fApertura = r.fecha_apertura ? getLocalISODateString(new Date(r.fecha_apertura)) : getLocalISODateString();
         const fCierre = r.fecha_cierre ? getLocalISODateString(new Date(r.fecha_cierre)) : (parsedDetails.fechaCierre || parsedDetails.fecha || fApertura);
 
+        const cajeroName = parsedDetails.usuario || r.usuario || 'SISTEMA';
+
         return {
           id: r.id,
           fechaApertura: fApertura,
@@ -1597,10 +1599,10 @@ export async function getCierres() {
           expectedVes: r.monto_cierre_esperado_ves ? parseFloat(r.monto_cierre_esperado_ves) : 0,
           ventaTotalUsd: r.venta_total_usd ? parseFloat(r.venta_total_usd) : 0,
           utilidadUsd: r.utilidad_usd ? parseFloat(r.utilidad_usd) : 0,
-          usuario: r.usuario,
-          terminal: r.terminal,
+          ...parsedDetails,
+          usuario: cajeroName,
+          terminal: r.terminal || parsedDetails.terminal || 'CAJA_PRINCIPAL',
           status: r.estatus === 'Abierta' ? 'Abierta' : 'Cerrada',
-          ...parsedDetails
         };
       });
     } catch (err) {
@@ -1610,10 +1612,18 @@ export async function getCierres() {
   return readJsonFile('cierres.json', []);
 }
 
-export async function abrirCaja(usd, ves, usuarioId, terminal) {
+export async function abrirCaja(usd, ves, usuarioId, terminal, usuarioNombre) {
   if (usePostgres) {
     try {
-      const userId = (typeof usuarioId === 'number' && usuarioId > 0) ? usuarioId : 1;
+      let userId = parseInt(usuarioId);
+      if (isNaN(userId) || userId <= 0) {
+        if (usuarioNombre) {
+          const uRes = await pool.query('SELECT id FROM Usuarios WHERE nombre = $1 OR usuario = $2 LIMIT 1', [usuarioNombre, usuarioNombre]);
+          if (uRes.rowCount > 0) userId = uRes.rows[0].id;
+        }
+      }
+      if (isNaN(userId) || userId <= 0) userId = 1;
+
       const termName = terminal || 'CAJA_PRINCIPAL';
       const res = await pool.query(
         `INSERT INTO Cajas_Apertura_Cierre (usuario_id, estacion_nombre, monto_apertura_usd, monto_apertura_ves, estatus)
@@ -1626,6 +1636,7 @@ export async function abrirCaja(usd, ves, usuarioId, terminal) {
       throw err;
     }
   }
+
   const activeCheck = readJsonFile('caja_activa.json', { abierta: false });
   
   activeCheck.abierta = true;
@@ -1652,33 +1663,69 @@ export async function cerrarCaja(cierre) {
       if (activeCaja.rowCount > 0) {
         const cajaId = activeCaja.rows[0].id;
         
+        let userId = parseInt(cierre.usuarioId || cierre.usuario_id);
+        if (isNaN(userId) || userId <= 0) {
+          if (cierre.usuario) {
+            const uRes = await pool.query('SELECT id FROM Usuarios WHERE nombre = $1 OR usuario = $2 LIMIT 1', [cierre.usuario, cierre.usuario]);
+            if (uRes.rowCount > 0) userId = uRes.rows[0].id;
+          }
+        }
+
         const ventaTotalUsd = cierre.ventaTotalUsd ?? 0;
         const utilidadUsd = cierre.utilidadUsd ?? 0;
         const detallesJson = JSON.stringify(cierre);
 
-        await pool.query(
-          `UPDATE Cajas_Apertura_Cierre SET 
-            fecha_cierre = CURRENT_TIMESTAMP, 
-            monto_cierre_esperado_usd = $1, 
-            monto_cierre_esperado_ves = $2, 
-            monto_cierre_real_usd = $3, 
-            monto_cierre_real_ves = $4, 
-            estatus = 'Cerrada',
-            venta_total_usd = $5,
-            utilidad_usd = $6,
-            detalles_json = $7
-           WHERE id = $8`,
-          [
-            cierre.expectedUsd || cierre.dineroEnCajaExpected || 0, 
-            cierre.expectedVes || 0, 
-            cierre.realUsd || 0, 
-            cierre.realVes || 0, 
-            ventaTotalUsd, 
-            utilidadUsd, 
-            detallesJson, 
-            cajaId
-          ]
-        );
+        if (!isNaN(userId) && userId > 0) {
+          await pool.query(
+            `UPDATE Cajas_Apertura_Cierre SET 
+              usuario_id = $1,
+              fecha_cierre = CURRENT_TIMESTAMP, 
+              monto_cierre_esperado_usd = $2, 
+              monto_cierre_esperado_ves = $3, 
+              monto_cierre_real_usd = $4, 
+              monto_cierre_real_ves = $5, 
+              estatus = 'Cerrada',
+              venta_total_usd = $6,
+              utilidad_usd = $7,
+              detalles_json = $8
+             WHERE id = $9`,
+            [
+              userId,
+              cierre.expectedUsd || cierre.dineroEnCajaExpected || 0, 
+              cierre.expectedVes || 0, 
+              cierre.realUsd || 0, 
+              cierre.realVes || 0, 
+              ventaTotalUsd, 
+              utilidadUsd, 
+              detallesJson, 
+              cajaId
+            ]
+          );
+        } else {
+          await pool.query(
+            `UPDATE Cajas_Apertura_Cierre SET 
+              fecha_cierre = CURRENT_TIMESTAMP, 
+              monto_cierre_esperado_usd = $1, 
+              monto_cierre_esperado_ves = $2, 
+              monto_cierre_real_usd = $3, 
+              monto_cierre_real_ves = $4, 
+              estatus = 'Cerrada',
+              venta_total_usd = $5,
+              utilidad_usd = $6,
+              detalles_json = $7
+             WHERE id = $8`,
+            [
+              cierre.expectedUsd || cierre.dineroEnCajaExpected || 0, 
+              cierre.expectedVes || 0, 
+              cierre.realUsd || 0, 
+              cierre.realVes || 0, 
+              ventaTotalUsd, 
+              utilidadUsd, 
+              detallesJson, 
+              cajaId
+            ]
+          );
+        }
         return true;
       }
     } catch (err) {
@@ -1686,6 +1733,7 @@ export async function cerrarCaja(cierre) {
       throw err;
     }
   }
+
   const cierres = readJsonFile('cierres.json', []);
   const activeCheck = readJsonFile('caja_activa.json', { abierta: false });
   
