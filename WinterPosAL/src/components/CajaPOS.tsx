@@ -1627,6 +1627,7 @@ export default function CajaPOS({
     }
 
     await onCerrarCaja(cierreResult.realUsd, cierreResult.realVes, {
+      terminal: localStorage.getItem('pos_terminal_name') || 'CAJA_01',
       ventasEfectivoUsd: cierreResult.ventasEfectivoUsd,
       abonoClientesUsd: cierreResult.abonoClientesUsd,
       entradaEfectivoUsd: cierreResult.entradaEfectivoUsd,

@@ -63,8 +63,9 @@ try {
     );
     -- Secuencia global para numeración atómica de facturas (evita colisiones multi-terminal)
     CREATE SEQUENCE IF NOT EXISTS seq_factura START 1;
-    -- Asegurar que todos los cierres tengan fecha_cierre asignada
+    -- Asegurar que todos los cierres tengan fecha_cierre asignada y estatus 'Cerrada' si ya tienen detalles de conciliación
     UPDATE Cajas_Apertura_Cierre SET fecha_cierre = COALESCE(fecha_cierre, fecha_apertura, CURRENT_TIMESTAMP) WHERE fecha_cierre IS NULL;
+    UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada' WHERE (monto_cierre_real_usd IS NOT NULL OR detalles_json IS NOT NULL) AND (estatus IS NULL OR estatus = 'Abierta');
   `);
 
   // Alter enum type outside of main multi-statement query to prevent implicit transaction block errors in Postgres

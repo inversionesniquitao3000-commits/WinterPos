@@ -1035,6 +1035,8 @@ export default function App() {
       fechaCierre: getLocalISODateString(),
       fechaApertura: localStorage.getItem('pos_apertura_fecha') || getLocalISODateString(),
       usuario: currentUser?.nombre || 'SISTEMA',
+      usuarioId: currentUser?.id,
+      terminal: terminalName,
       aperturaUsd: montoAperturaUsd,
       aperturaVes: montoAperturaVes,
       realUsd,
