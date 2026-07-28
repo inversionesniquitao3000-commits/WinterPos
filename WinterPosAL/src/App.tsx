@@ -320,13 +320,31 @@ export default function App() {
     if (currentUser) fetchLastInvoice();
   }, [currentUser, lanIP, dbMode]);
 
-  // Multi-terminal unified sync polling (every 10 seconds)
-  // Syncs: new sales (by ID), tasa changes, cierres updates, and session closure detection
-  // Uses integer IDs instead of timestamps to avoid timezone bugs
+  // Load initial company config and users on mount (so Login screen updates immediately)
+  useEffect(() => {
+    const fetchInitialConfigAndUsers = async () => {
+      try {
+        const configRes = await fetch(getApiUrl('/config'));
+        if (configRes.ok) {
+          const configData = await configRes.json();
+          setCompanyConfig(configData);
+          localStorage.setItem('pos_biz_info', JSON.stringify(configData));
+        }
+        const usersRes = await fetch(getApiUrl('/users'));
+        if (usersRes.ok) {
+          const usersData = await usersRes.json();
+          setUsers(usersData);
+        }
+      } catch (_) {}
+    };
+    fetchInitialConfigAndUsers();
+  }, [lanIP, dbMode]);
+
+  // Multi-terminal unified sync polling (every 1 second)
+  // Syncs: new sales (by ID), tasa changes, cierres updates, company config updates, and session closure detection
   const sessionStartRef = useRef<string>(new Date().toISOString());
 
   useEffect(() => {
-    if (!currentUser) return;
     const myTerminal = localStorage.getItem('pos_terminal_name') || 'CAJA_01';
 
     const pollSync = async () => {
@@ -334,7 +352,7 @@ export default function App() {
         // Calculate max known IDs from current state
         const maxSaleId = sales.reduce((max, s) => Math.max(max, s.id || 0), 0);
         
-        // Calculate latest active rate details (immune to mixed sequential/timestamp IDs)
+        // Calculate latest active rate details
         const currentTasaObj = tasaHistory[tasaHistory.length - 1];
         const lastTasaCobro = currentTasaObj ? currentTasaObj.tasa_cobro : 0;
         const lastTasaVuelto = currentTasaObj ? currentTasaObj.tasa_vuelto : 0;
@@ -353,8 +371,10 @@ export default function App() {
           cierres_count: String(cierresCount),
           last_cierre_id: String(maxCierreId),
           cierres_signature: String(cierresSig),
+          config_name: companyConfig?.nombre_comercio || '',
+          config_rif: companyConfig?.rif || '',
           terminal: myTerminal,
-          usuario: currentUser.nombre,
+          usuario: currentUser ? currentUser.nombre : '',
           session_since: sessionStartRef.current
         });
 
@@ -362,8 +382,12 @@ export default function App() {
         if (!res.ok) return;
         const data = await res.json();
 
-        // 1. Session closed on another terminal → update cierres list without kicking out user
-        // (Allows all terminals to continue working independently without losing data)
+        // 1. Company config updated from central server
+        if (data.config) {
+          console.log('[Sync] Configuración de empresa actualizada desde el servidor central.');
+          setCompanyConfig(data.config);
+          localStorage.setItem('pos_biz_info', JSON.stringify(data.config));
+        }
 
         // 2. New sales from other terminals
         if (data.sales && data.sales.length > 0) {
@@ -375,7 +399,7 @@ export default function App() {
             return trulyNew.length > 0 ? [...prev, ...trulyNew] : prev;
           });
           // Also refresh invoice reference
-          fetchLastInvoice();
+          if (currentUser) fetchLastInvoice();
         }
 
         // 3. Tasa updated from another terminal
@@ -397,7 +421,7 @@ export default function App() {
     pollSync();
     const interval = setInterval(pollSync, 1000);
     return () => clearInterval(interval);
-  }, [currentUser, lanIP, dbMode, sales, tasaHistory, cierres]);
+  }, [currentUser, lanIP, dbMode, sales, tasaHistory, cierres, companyConfig]);
 
   // Load all initial data from centralized backend database
   useEffect(() => {
@@ -1580,6 +1604,7 @@ export default function App() {
               currentUser={currentUser}
               tasaDia={tasaDia}
               bcvRateUSD={bcvRateUSD}
+              companyConfig={companyConfig}
               onAddProduct={handleAddProduct}
               onAddProductsBulk={handleAddProductsBulk}
               onUpdateProductStock={handleUpdateProductStock}
@@ -1625,8 +1650,8 @@ export default function App() {
                 } catch (e) {
                   console.error('Error eliminando cierre:', e);
                 }
-                return false;
               }}
+              getApiUrl={getApiUrl}
             />
 
           )}

@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
-import { Product, InventoryMovement, PriceAdjustmentHistory, User } from '../types';
-import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { Product, InventoryMovement, PriceAdjustmentHistory, User, CompanyConfig } from '../types';
+import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
 
@@ -11,6 +11,7 @@ interface InventarioProps {
   currentUser: User;
   tasaDia?: number;
   bcvRateUSD?: number;
+  companyConfig?: CompanyConfig;
   onAddProduct: (prod: Product) => void;
   onAddProductsBulk: (productsArray: any[]) => Promise<number | null>;
   onUpdateProductStock: (prodId: number, type: 'Entrada' | 'Salida' | 'Merma' | 'Devolucion', qty: number, reason: string) => void;
@@ -34,6 +35,7 @@ export default function Inventario({
   currentUser: _currentUser,
   tasaDia,
   bcvRateUSD,
+  companyConfig,
   onAddProduct,
   onAddProductsBulk,
   onUpdateProductStock,
@@ -60,8 +62,11 @@ export default function Inventario({
   const [searchTerm, setSearchTerm] = useState('');
   
   // Filter states
-  const [filterCategory, setFilterCategory] = useState('TODAS');
-  const [filterStock, setFilterStock] = useState<'todos' | 'con_existencia' | 'sin_existencia'>('todos');
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [showCategoryMenu, setShowCategoryMenu] = useState(false);
+  const categoryMenuRef = useRef<HTMLDivElement>(null);
+
+  const [filterStock, setFilterStock] = useState<'todos' | 'con_existencia' | 'sin_existencia' | 'menor_5' | 'menor_10' | 'menor_15'>('todos');
   const [filterMinStock, setFilterMinStock] = useState<'todos' | 'bajo_minimo'>('todos');
 
   // Sorting states
@@ -886,45 +891,72 @@ export default function Inventario({
     };
   }, [isDragging]);
 
-  const filteredProducts = products.filter(p => {
-    const matchesSearch = p.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.barcode.toLowerCase().includes(searchTerm.toLowerCase());
-      
-    const matchesCategory = filterCategory === 'TODAS' || p.category.toUpperCase() === filterCategory.toUpperCase();
-    
-    const matchesStock = 
-      filterStock === 'todos' ? true :
-      filterStock === 'con_existencia' ? p.stock_actual > 0 :
-      filterStock === 'sin_existencia' ? p.stock_actual === 0 : true;
-      
-    const matchesMinStock = 
-      filterMinStock === 'todos' ? true :
-      filterMinStock === 'bajo_minimo' ? p.stock_actual <= p.stock_minimo : true;
-      
-    return matchesSearch && matchesCategory && matchesStock && matchesMinStock;
-  });
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
-  const sortedProducts = [...filteredProducts].sort((a, b) => {
-    if (!sortField) return 0;
+  // Reset page when filters or search change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedCategories, filterStock, filterMinStock]);
+
+  const filteredProducts = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+
+    return products.filter(p => {
+      const matchesSearch = !term || 
+        p.description.toLowerCase().includes(term) ||
+        p.barcode.toLowerCase().includes(term);
+        
+      const matchesCategory = selectedCategories.length === 0 ||
+        selectedCategories.includes(p.category.toUpperCase());
+      
+      const matchesStock = 
+        filterStock === 'todos' ? true :
+        filterStock === 'con_existencia' ? p.stock_actual > 0 :
+        filterStock === 'sin_existencia' ? p.stock_actual === 0 :
+        filterStock === 'menor_5' ? p.stock_actual <= 5 :
+        filterStock === 'menor_10' ? p.stock_actual <= 10 :
+        filterStock === 'menor_15' ? p.stock_actual <= 15 : true;
+        
+      const matchesMinStock = 
+        filterMinStock === 'todos' ? true :
+        filterMinStock === 'bajo_minimo' ? p.stock_actual <= p.stock_minimo : true;
+        
+      return matchesSearch && matchesCategory && matchesStock && matchesMinStock;
+    });
+  }, [products, searchTerm, selectedCategories, filterStock, filterMinStock]);
+
+  const sortedProducts = useMemo(() => {
+    if (!sortField) return filteredProducts;
     
-    let aVal: any = '';
-    let bVal: any = '';
-    
-    if (sortField === 'existencia') {
-      aVal = a.stock_actual;
-      bVal = b.stock_actual;
-    } else if (sortField === 'categoria') {
-      aVal = a.category.toLowerCase();
-      bVal = b.category.toLowerCase();
-    } else if (sortField === 'descripcion') {
-      aVal = a.description.toLowerCase();
-      bVal = b.description.toLowerCase();
-    }
-    
-    if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
-    if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
-    return 0;
-  });
+    return [...filteredProducts].sort((a, b) => {
+      let aVal: any = '';
+      let bVal: any = '';
+      
+      if (sortField === 'existencia') {
+        aVal = a.stock_actual;
+        bVal = b.stock_actual;
+      } else if (sortField === 'categoria') {
+        aVal = a.category.toLowerCase();
+        bVal = b.category.toLowerCase();
+      } else if (sortField === 'descripcion') {
+        aVal = a.description.toLowerCase();
+        bVal = b.description.toLowerCase();
+      }
+      
+      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [filteredProducts, sortField, sortDirection]);
+
+  const totalPages = Math.ceil(sortedProducts.length / pageSize) || 1;
+
+  const paginatedProducts = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return sortedProducts.slice(start, start + pageSize);
+  }, [sortedProducts, currentPage, pageSize]);
 
   const handleOpenAdjust = (prod: Product) => {
     setSelectedProduct(prod);
@@ -1071,6 +1103,20 @@ export default function Inventario({
     setNewVencimiento('');
   };
 
+  // Report menu states
+  const [showReportMenu, setShowReportMenu] = useState(false);
+  const reportMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (reportMenuRef.current && !reportMenuRef.current.contains(e.target as Node)) {
+        setShowReportMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const handlePrintReport = () => {
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
@@ -1078,74 +1124,87 @@ export default function Inventario({
       return;
     }
 
-    const totalFilteredProducts = filteredProducts.length;
-    const totalFilteredQty = filteredProducts.reduce((acc, p) => acc + (parseFloat(p.stock_actual as any) || 0), 0);
-    const totalFilteredValueVenta = filteredProducts.reduce((acc, p) => acc + p.precio_detalle_usd * (parseFloat(p.stock_actual as any) || 0), 0);
-    const totalFilteredValueCosto = filteredProducts.reduce((acc, p) => acc + p.precio_costo_usd * (parseFloat(p.stock_actual as any) || 0), 0);
+    const totalFilteredProducts = sortedProducts.length;
+    const totalFilteredQty = sortedProducts.reduce((acc, p) => acc + (parseFloat(p.stock_actual as any) || 0), 0);
+    const totalFilteredValueVenta = sortedProducts.reduce((acc, p) => acc + p.precio_detalle_usd * (parseFloat(p.stock_actual as any) || 0), 0);
+    const totalFilteredValueCosto = sortedProducts.reduce((acc, p) => acc + p.precio_costo_usd * (parseFloat(p.stock_actual as any) || 0), 0);
 
-    const now = new Date().toLocaleString();
+    const companyName = companyConfig?.nombre_comercio || 'INVERSIONES NIQUITAO 3000 C.A.';
+    const companyRif = companyConfig?.rif || 'J-41132631';
+    const companyTel = companyConfig?.telefono || '0424-2042877';
 
-    const categoryFilterLabel = filterCategory === 'TODAS' ? 'TODAS' : filterCategory;
+    const now = new Date().toLocaleString('es-VE');
+
+    const categoryFilterLabel = selectedCategories.length === 0 ? 'TODAS' : selectedCategories.join(', ');
     const stockFilterLabel = 
       filterStock === 'todos' ? 'TODOS' :
-      filterStock === 'con_existencia' ? 'CON EXISTENCIA' : 'SIN EXISTENCIA';
+      filterStock === 'con_existencia' ? 'CON EXISTENCIA (>0)' :
+      filterStock === 'sin_existencia' ? 'SIN EXISTENCIA (0)' :
+      filterStock === 'menor_5' ? 'EXISTENCIA ≤ 5' :
+      filterStock === 'menor_10' ? 'EXISTENCIA ≤ 10' :
+      filterStock === 'menor_15' ? 'EXISTENCIA ≤ 15' : 'TODOS';
     const minStockFilterLabel = 
       filterMinStock === 'todos' ? 'TODOS' : 'BAJO STOCK MÍNIMO';
 
-    const rowsHtml = filteredProducts.map(p => `
-      <tr style="border-bottom: 1px solid #e2e8f0;">
-        <td style="padding: 6px 8px; font-family: monospace; font-size: 10px; font-weight: bold; color: #475569;">${p.barcode}</td>
-        <td style="padding: 6px 8px; font-size: 10px; font-weight: bold;">${p.description}</td>
-        <td style="padding: 6px 8px; font-size: 10px;">${p.category}</td>
-        <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-size: 10px; color: #64748b;">${p.stock_minimo}</td>
-        <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-size: 10px; font-weight: bold; ${p.stock_actual <= p.stock_minimo ? 'color: #ef4444;' : 'color: #1e293b;'}">${p.stock_actual}</td>
-        <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-size: 10px; color: #475569;">$${p.precio_costo_usd.toFixed(2)}</td>
-        <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-size: 10px; font-weight: bold; color: #059669;">$${p.precio_detalle_usd.toFixed(2)}</td>
-        <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-size: 10px; color: #475569;">$${p.precio_mayor_usd.toFixed(2)} <span style="font-size: 8px; color: #94a3b8;">x${p.cantidad_mayorista}</span></td>
+    const sortInfo = sortField ? ` (Ordenado por ${sortField} ${sortDirection.toUpperCase()})` : '';
+
+    const totalQtyFormatted = totalFilteredQty.toLocaleString('es-VE', { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+
+    const rowsHtml = sortedProducts.map(p => `
+      <tr style="border-bottom: 1px solid #e2e8f0; page-break-inside: avoid;">
+        <td style="padding: 1.5px 3px; font-family: monospace; font-size: 8px; font-weight: bold; color: #334155;">${p.barcode}</td>
+        <td style="padding: 1.5px 3px; font-size: 8.5px; font-weight: bold; color: #0f172a;">${p.description}</td>
+        <td style="padding: 1.5px 3px; font-size: 8px; color: #475569;">${p.category}</td>
+        <td style="padding: 1.5px 3px; text-align: right; font-family: monospace; font-size: 8px; color: #64748b;">${formatStockVal(p.stock_minimo, p.a_granel)}</td>
+        <td style="padding: 1.5px 3px; text-align: right; font-family: monospace; font-size: 8px; font-weight: bold; ${p.stock_actual <= p.stock_minimo ? 'color: #dc2626;' : 'color: #0f172a;'}">${formatStockVal(p.stock_actual, p.a_granel)}</td>
+        <td style="padding: 1.5px 3px; text-align: right; font-family: monospace; font-size: 8px; color: #475569;">$${p.precio_costo_usd.toFixed(2)}</td>
+        <td style="padding: 1.5px 3px; text-align: right; font-family: monospace; font-size: 8.5px; font-weight: bold; color: #059669;">$${p.precio_detalle_usd.toFixed(2)}</td>
+        <td style="padding: 1.5px 3px; text-align: right; font-family: monospace; font-size: 8px; color: #475569;">$${p.precio_mayor_usd.toFixed(2)} <span style="font-size: 7.5px; color: #94a3b8;">x${p.cantidad_mayorista}</span></td>
       </tr>
     `).join('');
 
     printWindow.document.write(`
       <html>
         <head>
-          <title>Reporte de Inventario - Inversiones Niquitao</title>
+          <title>Reporte de Inventario - ${companyName}</title>
           <style>
-            body { font-family: system-ui, -apple-system, sans-serif; color: #1e293b; margin: 20px; font-size: 11px; }
-            .header { border-bottom: 2px solid #0f172a; padding-bottom: 10px; margin-bottom: 15px; }
-            .title { font-size: 16px; font-weight: bold; text-transform: uppercase; margin: 0; color: #0f172a; }
-            .subtitle { font-size: 10px; color: #64748b; margin: 2px 0 0 0; }
-            .info-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 15px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 10px; border-radius: 6px; }
+            @page { size: portrait; margin: 0.5cm; }
+            body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #0f172a; margin: 0; padding: 5px; font-size: 8.5px; line-height: 1.15; }
+            .header { border-bottom: 1.5px solid #0f172a; padding-bottom: 4px; margin-bottom: 6px; }
+            .title { font-size: 13px; font-weight: bold; text-transform: uppercase; margin: 0; color: #0f172a; }
+            .subtitle { font-size: 8.5px; color: #475569; margin: 1px 0 0 0; }
+            .info-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-bottom: 6px; background: #f8fafc; border: 1px solid #cbd5e1; padding: 4px 6px; border-radius: 4px; }
             .info-item { display: flex; flex-direction: column; }
-            .info-label { font-size: 8px; text-transform: uppercase; color: #64748b; font-weight: bold; }
-            .info-value { font-size: 11px; font-weight: bold; color: #0f172a; }
-            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-            th { background-color: #f1f5f9; padding: 8px; font-weight: bold; text-align: left; text-transform: uppercase; font-size: 9px; border-bottom: 2px solid #cbd5e1; color: #475569; }
+            .info-label { font-size: 7.5px; text-transform: uppercase; color: #64748b; font-weight: bold; }
+            .info-value { font-size: 9.5px; font-weight: bold; color: #0f172a; }
+            table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+            th { background-color: #f1f5f9; padding: 3px 4px; font-weight: bold; text-align: left; text-transform: uppercase; font-size: 8px; border-bottom: 1.5px solid #94a3b8; color: #334155; }
             @media print {
-              body { margin: 10px; }
-              .no-print { display: none; }
-              @page { size: portrait; margin: 1cm; }
+              body { margin: 0; }
+              .no-print { display: none !important; }
             }
           </style>
         </head>
         <body>
           <div class="header">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
               <div>
-                <h1 class="title">INVERSIONES NIQUITAO 3000 C.A.</h1>
-                <p class="subtitle">RIF: J-41132631 | Tel: 0424-2042877 | Reporte de Inventario</p>
+                <h1 class="title">${companyName}</h1>
+                <p class="subtitle">RIF: ${companyRif} | Tel: ${companyTel} | Reporte General de Inventario</p>
               </div>
               <div style="text-align: right;">
-                <p style="margin: 0; font-weight: bold; font-size: 11px;">Estación: CAJA_01</p>
-                <p style="margin: 2px 0 0 0; font-size: 9px; color: #64748b;">Generado: ${now}</p>
+                <p style="margin: 0; font-weight: bold; font-size: 9.5px;">Estación: ${localStorage.getItem('pos_terminal_name') || 'CAJA_01'}</p>
+                <p style="margin: 1px 0 0 0; font-size: 8px; color: #64748b;">Generado: ${now}</p>
               </div>
             </div>
           </div>
 
-          <div style="margin-bottom: 8px; font-weight: bold; text-transform: uppercase; font-size: 9px; letter-spacing: 0.5px; color: #64748b;">
+          <div style="margin-bottom: 4px; font-weight: bold; text-transform: uppercase; font-size: 8px; color: #475569;">
             Filtros Aplicados: 
-            <span style="background: #f1f5f9; border: 1px solid #e2e8f0; padding: 2px 6px; border-radius: 4px; margin-right: 5px; color: #334155;">Categoría: ${categoryFilterLabel}</span>
-            <span style="background: #f1f5f9; border: 1px solid #e2e8f0; padding: 2px 6px; border-radius: 4px; margin-right: 5px; color: #334155;">Existencia: ${stockFilterLabel}</span>
-            <span style="background: #f1f5f9; border: 1px solid #e2e8f0; padding: 2px 6px; border-radius: 4px; color: #334155;">Stock Mínimo: ${minStockFilterLabel}</span>
+            <span style="background: #f1f5f9; border: 1px solid #cbd5e1; padding: 1px 4px; border-radius: 3px; margin-right: 4px; color: #1e293b;">Categoría: ${categoryFilterLabel}</span>
+            <span style="background: #f1f5f9; border: 1px solid #cbd5e1; padding: 1px 4px; border-radius: 3px; margin-right: 4px; color: #1e293b;">Stock: ${stockFilterLabel}</span>
+            <span style="background: #f1f5f9; border: 1px solid #cbd5e1; padding: 1px 4px; border-radius: 3px; color: #1e293b;">Alerta: ${minStockFilterLabel}</span>
+            <span style="color: #64748b; font-style: italic; font-weight: normal; margin-left: 4px;">${sortInfo}</span>
           </div>
 
           <div class="info-grid">
@@ -1155,7 +1214,7 @@ export default function Inventario({
             </div>
             <div class="info-item">
               <span class="info-label">Total Unidades</span>
-              <span class="info-value">${totalFilteredQty} uds</span>
+              <span class="info-value">${totalQtyFormatted}</span>
             </div>
             <div class="info-item">
               <span class="info-label">Valor Inv. (Detalle)</span>
@@ -1170,23 +1229,23 @@ export default function Inventario({
           <table>
             <thead>
               <tr>
-                <th style="width: 15%; text-align: left;">Código</th>
-                <th style="width: 35%; text-align: left;">Descripción</th>
-                <th style="width: 15%; text-align: left;">Categoría</th>
-                <th style="width: 8%; text-align: right;">Mínimo</th>
-                <th style="width: 8%; text-align: right;">Existencia</th>
-                <th style="width: 8%; text-align: right;">P. Costo</th>
-                <th style="width: 8%; text-align: right; color: #059669;">P. Detalle</th>
-                <th style="width: 10%; text-align: right;">P. Mayor</th>
+                <th style="width: 14%; text-align: left;">Código</th>
+                <th style="width: 36%; text-align: left;">Descripción</th>
+                <th style="width: 14%; text-align: left;">Categoría</th>
+                <th style="width: 7%; text-align: right;">Mínimo</th>
+                <th style="width: 7%; text-align: right;">Existencia</th>
+                <th style="width: 7%; text-align: right;">P. Costo</th>
+                <th style="width: 7.5%; text-align: right; color: #059669;">P. Detalle</th>
+                <th style="width: 7.5%; text-align: right;">P. Mayor</th>
               </tr>
             </thead>
             <tbody>
-              ${rowsHtml || '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #64748b;">No hay productos con los filtros seleccionados.</td></tr>'}
+              ${rowsHtml || '<tr><td colspan="8" style="text-align: center; padding: 15px; color: #64748b;">No hay productos con los filtros seleccionados.</td></tr>'}
             </tbody>
           </table>
 
-          <div style="margin-top: 30px; text-align: center; font-size: 9px; color: #94a3b8; border-top: 1px dashed #e2e8f0; padding-top: 10px;" class="no-print">
-            <button onclick="window.print()" style="background: #0f172a; color: white; border: none; padding: 6px 12px; border-radius: 4px; font-weight: bold; cursor: pointer; font-family: inherit;">Imprimir Reporte</button>
+          <div style="margin-top: 15px; text-align: center; font-size: 8px; color: #94a3b8; border-top: 1px dashed #cbd5e1; padding-top: 6px;" class="no-print">
+            <button onclick="window.print()" style="background: #0f172a; color: white; border: none; padding: 4px 10px; border-radius: 4px; font-weight: bold; cursor: pointer; font-family: inherit; font-size: 9px;">Imprimir Reporte</button>
           </div>
 
           <script>
@@ -1200,6 +1259,165 @@ export default function Inventario({
       </html>
     `);
     printWindow.document.close();
+  };
+
+  const handleExportExcel = () => {
+    if (sortedProducts.length === 0) {
+      showAlert('No hay productos en el listado para exportar.', 'Sin Datos', 'warning');
+      return;
+    }
+
+    const headers = [
+      'CÓDIGO DE BARRAS',
+      'DESCRIPCIÓN',
+      'CATEGORÍA',
+      'STOCK MÍNIMO',
+      'EXISTENCIA ACTUAL',
+      'PRECIO COSTO USD',
+      'PRECIO DETALLE USD',
+      'PRECIO MAYOR USD',
+      'CANTIDAD MAYORISTA',
+      'ESTADO'
+    ];
+
+    const escapeCsv = (val: any) => {
+      const str = val === null || val === undefined ? '' : String(val);
+      return `"${str.replace(/"/g, '""')}"`;
+    };
+
+    const rows = sortedProducts.map(p => [
+      escapeCsv(p.barcode),
+      escapeCsv(p.description),
+      escapeCsv(p.category),
+      escapeCsv(p.stock_minimo),
+      escapeCsv(p.stock_actual),
+      escapeCsv(p.precio_costo_usd),
+      escapeCsv(p.precio_detalle_usd),
+      escapeCsv(p.precio_mayor_usd),
+      escapeCsv(p.cantidad_mayorista),
+      escapeCsv(p.estado || 'Activo')
+    ]);
+
+    const csvContent = '\uFEFF' + [headers.map(escapeCsv).join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    const dateStr = new Date().toISOString().split('T')[0];
+    link.setAttribute('download', `reporte_inventario_${dateStr}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast('✅ Reporte exportado a Excel (CSV) con éxito.');
+  };
+
+  // Opción 1: Enviar Reporte General por WhatsApp (Abre PDF + Copia Resumen)
+  const handleSendWhatsAppReport = () => {
+    if (sortedProducts.length === 0) {
+      showAlert('No hay productos en el listado para compartir por WhatsApp.', 'Sin Datos', 'warning');
+      return;
+    }
+
+    // 1. Trigger dense PDF print window so user can save PDF
+    handlePrintReport();
+
+    const companyName = companyConfig?.nombre_comercio || 'INVERSIONES NIQUITAO 3000 C.A.';
+    const totalItems = sortedProducts.length;
+    const totalValueVenta = sortedProducts.reduce((acc, p) => acc + p.precio_detalle_usd * (parseFloat(p.stock_actual as any) || 0), 0);
+    const totalValueCosto = sortedProducts.reduce((acc, p) => acc + p.precio_costo_usd * (parseFloat(p.stock_actual as any) || 0), 0);
+    const dateStr = new Date().toLocaleDateString('es-VE');
+
+    let text = `📦 *REPORTE GENERAL DE INVENTARIO (PDF)*\n`;
+    text += `🏢 *${companyName}*\n`;
+    text += `📅 Fecha: ${dateStr}\n`;
+    text += `───────────────\n`;
+    text += `📊 *Resumen Ejecutivo:*\n`;
+    text += `• Total Artículos: ${totalItems}\n`;
+    text += `• Valor Inv. (Detalle): *$${totalValueVenta.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}*\n`;
+    text += `• Valor Inv. (Costo): *$${totalValueCosto.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}*\n`;
+    const categoryLabel = selectedCategories.length === 0 ? 'TODAS' : selectedCategories.join(', ');
+    text += `• Filtro Categoría: ${categoryLabel}\n`;
+    text += `───────────────\n`;
+    text += `📎 *Se adjunta documento PDF con la totalidad de los ${totalItems} productos.*`;
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+
+    setTimeout(() => {
+      showAlert(
+        `📄 Se ha generado la vista preliminar del Reporte PDF para guardarlo en tu equipo.\n\nTambién se copió el resumen al portapapeles. Puedes adjuntar el archivo PDF en WhatsApp Web o presionar Ctrl + V para pegar el resumen.`,
+        'Reporte PDF Generado',
+        'info'
+      );
+    }, 400);
+  };
+
+  // Opción 2: Envío de Lista de Mercancía / Proveedores (soluciona la pantalla blanca de WhatsApp copiando al portapapeles)
+  const handleSendWhatsAppSupplierList = (onlyLowStock = false) => {
+    let listToExport = sortedProducts;
+    if (onlyLowStock) {
+      listToExport = sortedProducts.filter(p => p.stock_actual <= p.stock_minimo);
+    }
+
+    if (listToExport.length === 0) {
+      showAlert(
+        onlyLowStock 
+          ? 'No hay productos con bajo stock o alerta de existencia en la selección actual.' 
+          : 'No hay productos en el listado para generar la lista de proveedores.',
+        'Sin Datos',
+        'warning'
+      );
+      return;
+    }
+
+    const companyName = companyConfig?.nombre_comercio || 'INVERSIONES NIQUITAO 3000 C.A.';
+    const dateStr = new Date().toLocaleDateString('es-VE');
+
+    // Group products by category
+    const grouped: { [category: string]: typeof listToExport } = {};
+    listToExport.forEach(p => {
+      const cat = (p.category || 'GENERAL / SIN CATEGORÍA').toUpperCase();
+      if (!grouped[cat]) grouped[cat] = [];
+      grouped[cat].push(p);
+    });
+
+    let text = `📝 *LISTA DE MERCANCÍA / PEDIDO A PROVEEDORES ${onlyLowStock ? '(SOLO FALTANTES)' : ''}*\n`;
+    text += `🏢 *${companyName}*\n`;
+    text += `📅 Fecha: ${dateStr}\n`;
+    text += `───────────────\n`;
+
+    const categoriesList = Object.keys(grouped).sort();
+
+    categoriesList.forEach(cat => {
+      text += `\n📌 *CATEGORÍA: ${cat}*\n`;
+      grouped[cat].forEach(p => {
+        text += `• ${p.description}\n`;
+      });
+    });
+
+    text += `\n───────────────\n`;
+    text += `_Total de productos en lista: ${listToExport.length}_`;
+
+    // Copy to clipboard to handle large data without crashing WhatsApp URL limit
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        showToast('📋 Lista de mercancía copiada al portapapeles.');
+      }).catch(() => {});
+    }
+
+    // Protection against URL length limits (> 1500 chars causes WhatsApp Web blank screen)
+    if (text.length < 1500) {
+      const encodedText = encodeURIComponent(text);
+      window.open(`https://web.whatsapp.com/send?text=${encodedText}`, '_blank');
+    } else {
+      window.open('https://web.whatsapp.com/', '_blank');
+      showAlert(
+        `La lista contiene ${listToExport.length} productos (${text.length} caracteres).\n\nPara evitar que WhatsApp se quede en pantalla blanca por exceso de datos en la URL, se ha copiado la lista completa automáticamente a tu portapapeles.\n\nEn WhatsApp Web, solo abre el chat de tu proveedor y presiona Ctrl + V para pegar la lista entera.`,
+        '📋 Lista Copiada al Portapapeles',
+        'info'
+      );
+    }
   };
 
   return (
@@ -1325,32 +1543,156 @@ export default function Inventario({
               />
             </div>
             
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="relative" ref={reportMenuRef}>
               <button
-                onClick={handlePrintReport}
-                className="bg-slate-700 hover:bg-slate-800 text-white px-4 py-1.5 rounded-lg text-xs font-bold font-sans transition-all flex items-center gap-1.5 shadow-sm"
+                type="button"
+                onClick={() => setShowReportMenu(prev => !prev)}
+                className="bg-slate-800 hover:bg-slate-900 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold font-sans transition-all flex items-center gap-2 shadow-sm"
               >
-                <Printer className="w-4 h-4" />
-                Imprimir Reporte
+                <Printer className="w-4 h-4 text-sky-400" />
+                <span>Generar Reporte</span>
+                <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${showReportMenu ? 'rotate-180' : ''}`} />
               </button>
+
+              {showReportMenu && (
+                <div className="absolute right-0 mt-1 w-56 bg-white border border-slate-200 rounded-xl shadow-xl z-50 py-1.5 text-xs text-slate-700 font-sans">
+                  <div className="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                    Seleccionar Formato
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowReportMenu(false);
+                      handlePrintReport();
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-slate-50 flex items-center gap-2.5 transition-colors font-medium"
+                  >
+                    <Printer className="w-4 h-4 text-slate-600" />
+                    <div>
+                      <div className="font-bold text-slate-800">Imprimir / PDF</div>
+                      <div className="text-[10px] text-slate-400">Filas delgadas, diseño ultra-denso</div>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowReportMenu(false);
+                      handleExportExcel();
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-slate-50 flex items-center gap-2.5 transition-colors font-medium border-t border-slate-100"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                    <div>
+                      <div className="font-bold text-slate-800">Exportar a Excel (.csv)</div>
+                      <div className="text-[10px] text-slate-400">Formato UTF-8 compatible con Excel</div>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowReportMenu(false);
+                      handleSendWhatsAppReport();
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-slate-50 flex items-center gap-2.5 transition-colors font-medium border-t border-slate-100"
+                  >
+                    <MessageCircle className="w-4 h-4 text-green-600" />
+                    <div>
+                      <div className="font-bold text-slate-800">WhatsApp: Reporte General (con PDF)</div>
+                      <div className="text-[10px] text-slate-400">Genera documento PDF + copia resumen</div>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowReportMenu(false);
+                      handleSendWhatsAppSupplierList(true);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-slate-50 flex items-center gap-2.5 transition-colors font-medium border-t border-slate-100"
+                  >
+                    <MessageCircle className="w-4 h-4 text-amber-600" />
+                    <div>
+                      <div className="font-bold text-slate-800">WhatsApp: Envío de Lista (Solo Faltantes ⚠️)</div>
+                      <div className="text-[10px] text-slate-400">Lista por categorías de productos con bajo stock</div>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowReportMenu(false);
+                      handleSendWhatsAppSupplierList(false);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-slate-50 flex items-center gap-2.5 transition-colors font-medium border-t border-slate-100"
+                  >
+                    <MessageCircle className="w-4 h-4 text-emerald-600" />
+                    <div>
+                      <div className="font-bold text-slate-800">WhatsApp: Envío de Lista (Completo por Categorías)</div>
+                      <div className="text-[10px] text-slate-400">Lista completa organizada para proveedores (sin límite)</div>
+                    </div>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
           {/* FILTER CONTROLS */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 bg-slate-50/50 border border-slate-200/60 rounded-xl py-1.5 px-3 shadow-sm">
-            {/* Category Filter */}
-            <div className="flex flex-col gap-0.5">
-              <label className="text-[10px] font-bold text-slate-500 font-sans uppercase">Categoría</label>
-              <select
-                value={filterCategory}
-                onChange={(e) => setFilterCategory(e.target.value)}
-                className="bg-white border border-slate-300 rounded-lg py-1 px-2 text-xs text-slate-800 font-sans focus:border-winter-inventarioStart focus:outline-none"
+            {/* Multi-Category Selector */}
+            <div className="relative flex flex-col gap-0.5" ref={categoryMenuRef}>
+              <label className="text-[10px] font-bold text-slate-500 font-sans uppercase">Categorías (Multi-Selección)</label>
+              <button
+                type="button"
+                onClick={() => setShowCategoryMenu(prev => !prev)}
+                className="bg-white border border-slate-300 rounded-lg py-1 px-2.5 text-xs text-slate-800 font-sans focus:border-winter-inventarioStart focus:outline-none flex items-center justify-between gap-1 text-left shadow-sm"
               >
-                <option value="TODAS">TODAS LAS CATEGORÍAS</option>
-                {categories.map(cat => (
-                  <option key={cat} value={cat}>{cat}</option>
-                ))}
-              </select>
+                <span className="truncate font-bold">
+                  {selectedCategories.length === 0
+                    ? 'TODAS LAS CATEGORÍAS'
+                    : selectedCategories.length === 1
+                      ? selectedCategories[0]
+                      : `${selectedCategories.length} SELECCIONADAS (${selectedCategories.join(', ')})`}
+                </span>
+                <ChevronDown className={`w-3.5 h-3.5 text-slate-400 flex-shrink-0 transition-transform ${showCategoryMenu ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showCategoryMenu && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40 bg-transparent cursor-default"
+                    onClick={() => setShowCategoryMenu(false)}
+                  />
+                  <div className="absolute top-full left-0 mt-1 w-full min-w-[240px] bg-white border border-slate-200 rounded-xl shadow-xl z-50 p-2 text-xs font-sans text-slate-700 max-h-64 overflow-y-auto space-y-1">
+                  <label className="flex items-center gap-2 p-1.5 hover:bg-slate-50 rounded-lg cursor-pointer font-bold border-b border-slate-100 text-slate-900">
+                    <input
+                      type="checkbox"
+                      checked={selectedCategories.length === 0}
+                      onChange={() => setSelectedCategories([])}
+                      className="rounded text-winter-inventarioStart focus:ring-winter-inventarioStart w-3.5 h-3.5 cursor-pointer"
+                    />
+                    <span>TODAS LAS CATEGORÍAS</span>
+                  </label>
+                  {categories.map(cat => {
+                    const isChecked = selectedCategories.includes(cat);
+                    return (
+                      <label key={cat} className="flex items-center gap-2 p-1.5 hover:bg-slate-50 rounded-lg cursor-pointer transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {
+                            if (isChecked) {
+                              setSelectedCategories(selectedCategories.filter(c => c !== cat));
+                            } else {
+                              setSelectedCategories([...selectedCategories, cat]);
+                            }
+                          }}
+                          className="rounded text-winter-inventarioStart focus:ring-winter-inventarioStart w-3.5 h-3.5 cursor-pointer"
+                        />
+                        <span className="truncate font-medium">{cat}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </>
+            )}
             </div>
 
             {/* Stock Existence Filter */}
@@ -1359,11 +1701,14 @@ export default function Inventario({
               <select
                 value={filterStock}
                 onChange={(e) => setFilterStock(e.target.value as any)}
-                className="bg-white border border-slate-300 rounded-lg py-1 px-2 text-xs text-slate-800 font-sans focus:border-winter-inventarioStart focus:outline-none"
+                className="bg-white border border-slate-300 rounded-lg py-1 px-2 text-xs text-slate-800 font-sans font-bold focus:border-winter-inventarioStart focus:outline-none shadow-sm"
               >
                 <option value="todos">TODOS LOS PRODUCTOS</option>
                 <option value="con_existencia">CON EXISTENCIA (&gt; 0)</option>
                 <option value="sin_existencia">SIN EXISTENCIA (0)</option>
+                <option value="menor_5">EXISTENCIA MENOR O IGUAL A 5 (≤ 5)</option>
+                <option value="menor_10">EXISTENCIA MENOR O IGUAL A 10 (≤ 10)</option>
+                <option value="menor_15">EXISTENCIA MENOR O IGUAL A 15 (≤ 15)</option>
               </select>
             </div>
 
@@ -1413,7 +1758,7 @@ export default function Inventario({
                         </td>
                       </tr>
                     ) : (
-                      sortedProducts.map(p => {
+                      paginatedProducts.map(p => {
                         const isLowStock = p.stock_actual <= p.stock_minimo;
                         return (
                           <tr 
@@ -1459,6 +1804,72 @@ export default function Inventario({
                   </tbody>
                 </table>
               </div>
+
+              {/* PAGINATION CONTROLS */}
+              {sortedProducts.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 border-t border-slate-200 px-4 py-2 text-xs font-sans text-slate-600">
+                  <div className="flex items-center gap-2">
+                    <span>Mostrar:</span>
+                    <select
+                      value={pageSize}
+                      onChange={(e) => {
+                        setPageSize(Number(e.target.value));
+                        setCurrentPage(1);
+                      }}
+                      className="bg-white border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none font-sans font-bold"
+                    >
+                      <option value={25}>25 por página</option>
+                      <option value={50}>50 por página</option>
+                      <option value={100}>100 por página</option>
+                      <option value={250}>250 por página</option>
+                      <option value={sortedProducts.length}>Mostrar Todos ({sortedProducts.length})</option>
+                    </select>
+                    <span className="text-slate-400">
+                      Mostrando {Math.min((currentPage - 1) * pageSize + 1, sortedProducts.length)} - {Math.min(currentPage * pageSize, sortedProducts.length)} de {sortedProducts.length} productos
+                    </span>
+                  </div>
+
+                  {totalPages > 1 && (
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage(1)}
+                        disabled={currentPage === 1}
+                        className="px-2 py-1 bg-white border border-slate-300 rounded disabled:opacity-40 hover:bg-slate-100 transition-all"
+                      >
+                        «
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        disabled={currentPage === 1}
+                        className="px-2.5 py-1 bg-white border border-slate-300 rounded disabled:opacity-40 hover:bg-slate-100 transition-all"
+                      >
+                        Anterior
+                      </button>
+                      <span className="px-3 py-1 bg-sky-100 text-sky-800 rounded font-mono">
+                        Pág {currentPage} / {totalPages}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        disabled={currentPage === totalPages}
+                        className="px-2.5 py-1 bg-white border border-slate-300 rounded disabled:opacity-40 hover:bg-slate-100 transition-all"
+                      >
+                        Siguiente
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage(totalPages)}
+                        disabled={currentPage === totalPages}
+                        className="px-2 py-1 bg-white border border-slate-300 rounded disabled:opacity-40 hover:bg-slate-100 transition-all"
+                      >
+                        »
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Sidebar Operations Column */}

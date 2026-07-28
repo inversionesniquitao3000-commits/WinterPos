@@ -329,6 +329,14 @@ app.get('/api/sync/poll', async (req, res) => {
       result.sessionClosed = userClosedElsewhere;
     }
 
+    // 5. Company config sync: check if client's company name/RIF differs
+    const companyConfig = await getCompanyConfig();
+    const clientConfigName = req.query.config_name || '';
+    const clientConfigRif = req.query.config_rif || '';
+    if (companyConfig && (companyConfig.nombre_comercio !== clientConfigName || companyConfig.rif !== clientConfigRif)) {
+      result.config = companyConfig;
+    }
+
     res.json(result);
   } catch (err) {
     console.error('Error en /api/sync/poll:', err.message);

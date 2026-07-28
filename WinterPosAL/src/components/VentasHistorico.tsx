@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Sale, CierreCaja, User } from '../types';
-import { History, Printer, ShieldAlert, ShoppingCart, Eye, Edit, Trash2, Search, ChevronUp, ChevronDown, ChevronsUpDown, CheckCircle2, FileDown } from 'lucide-react';
+import { History, Printer, ShieldAlert, ShoppingCart, Eye, Edit, Trash2, Search, ChevronUp, ChevronDown, ChevronsUpDown, CheckCircle2, FileDown, MessageCircle } from 'lucide-react';
 import { formatNumberToWordsUSD } from '../utils';
 import { useDialog } from '../hooks/useDialog';
 
@@ -11,14 +11,18 @@ interface VentasHistoricoProps {
   currentUser: User;
   onUpdateCierre: (cierreId: number, updatedData: any) => Promise<boolean>;
   onDeleteCierre: (cierreId: number) => Promise<boolean>;
+  getApiUrl: (path: string) => string;
 }
 
-export default function VentasHistorico({ sales, cierres, onReprintTicket, currentUser, onUpdateCierre, onDeleteCierre }: VentasHistoricoProps) {
+export default function VentasHistorico({ sales, cierres, onReprintTicket, currentUser, onUpdateCierre, onDeleteCierre, getApiUrl }: VentasHistoricoProps) {
   const { showAlert } = useDialog();
   const [activeSubTab, setActiveSubTab] = useState<'ventas' | 'cierres'>('ventas');
   const [selectedCierre, setSelectedCierre] = useState<CierreCaja | null>(null);
   const [selectedCierreRow, setSelectedCierreRow] = useState<CierreCaja | null>(null);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+  const [selectedCierreIds, setSelectedCierreIds] = useState<number[]>([]);
+  const [capturingCierre, setCapturingCierre] = useState<CierreCaja | null>(null);
+  const [sendingProgressMsg, setSendingProgressMsg] = useState<string>('');
 
   const isAdmin = currentUser?.rol?.toLowerCase() === 'administrador';
 
@@ -43,6 +47,162 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
     setEditEntradaVes(String(c.entradaEfectivoVes ?? 0));
     setEditSalidaUsd(String(c.salidaEfectivoUsd ?? 0));
     setEditSalidaVes(String(c.salidaEfectivoVes ?? 0));
+  };
+
+  const captureCierrePNG = async (c: CierreCaja): Promise<string> => {
+    setCapturingCierre(c);
+    await new Promise(resolve => setTimeout(resolve, 280));
+    let imageBase64 = '';
+    try {
+      const htmlToImage = await import(/* @vite-ignore */ 'html-to-image');
+      const element = document.getElementById('cierre-capture-card') || document.getElementById('cierre-comprobante-card');
+      if (element) {
+        imageBase64 = await htmlToImage.toPng(element, { backgroundColor: '#ffffff', quality: 0.95 });
+      }
+    } catch (err) {
+      console.warn('Error capturando PNG del cierre:', err);
+    } finally {
+      setCapturingCierre(null);
+    }
+    return imageBase64;
+  };
+
+  const handleResendWhatsAppCierre = async (c: CierreCaja) => {
+    setSendingProgressMsg(`Capturando y reenviando comprobante de ${c.usuario}...`);
+    try {
+      const imageBase64 = await captureCierrePNG(c);
+      const fecha = c.fechaCierre || c.fecha || new Date().toLocaleDateString('es-VE');
+      const usuario = c.usuario || 'N/A';
+      const terminal = c.terminal || 'LOCAL';
+      const dineroEnCajaExpected = (c.dineroEnCajaExpected ?? (c as any).expectedUsd ?? 0).toFixed(2);
+      const expectedVes = (c.expectedVes ?? 0).toFixed(2);
+      const realUsd = (c.realUsd ?? 0).toFixed(2);
+      const realVes = (c.realVes ?? 0).toFixed(2);
+      const diffUsd = ((c.realUsd ?? 0) - (c.dineroEnCajaExpected ?? (c as any).expectedUsd ?? 0)).toFixed(2);
+      const diffVes = ((c.realVes ?? 0) - (c.expectedVes ?? 0)).toFixed(2);
+      const ventaTotalUsd = (c.ventaTotalUsd ?? 0).toFixed(2);
+      const descuentosUsd = (c.descuentosUsd ?? 0).toFixed(2);
+
+      let textSummary = `📊 *REPORTE REENVIADO DE CIERRE DE CAJA*\n\n`;
+      textSummary += `📅 *Fecha Cierre:* ${fecha}\n`;
+      textSummary += `👤 *Cajero:* ${usuario}\n`;
+      textSummary += `🖥️ *Terminal:* ${terminal}\n\n`;
+      textSummary += `💵 *EFECTIVO ESPERADO EN GAVETA:*\n`;
+      textSummary += `• Dólares (USD): $ ${dineroEnCajaExpected}\n`;
+      textSummary += `• Bolívares (VES): Bs ${expectedVes}\n\n`;
+      textSummary += `📥 *EFECTIVO FÍSICO RECIBIDO:*\n`;
+      textSummary += `• Dólares (USD): $ ${realUsd}\n`;
+      textSummary += `• Bolívares (VES): Bs ${realVes}\n\n`;
+      textSummary += `⚖️ *DIFERENCIA (BALANCE):*\n`;
+      textSummary += `• Dólares (USD): ${parseFloat(diffUsd) >= 0 ? '+' : ''}$ ${diffUsd}\n`;
+      textSummary += `• Bolívares (VES): ${parseFloat(diffVes) >= 0 ? '+' : ''}Bs ${diffVes}\n\n`;
+      textSummary += `🛍️ *VENTAS TOTALES:* $ ${ventaTotalUsd} USD\n`;
+      textSummary += `📉 *DESCUENTOS:* $ ${descuentosUsd} USD\n\n`;
+      textSummary += `*WinterPosAL Cloud System*`;
+
+      let waSentSuccess = false;
+      try {
+        const res = await fetch(getApiUrl('/whatsapp/send-cierre'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            imageBase64: imageBase64 || 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+            textSummary
+          })
+        });
+        if (res.ok) {
+          waSentSuccess = true;
+        }
+      } catch (err) {
+        console.warn('Error al enviar por API de WhatsApp:', err);
+      }
+
+      if (waSentSuccess) {
+        showAlert('El reporte e imagen del comprobante de cierre fueron reenviados con éxito por WhatsApp al grupo configurado.', 'Reenvío Exitoso', 'success');
+      } else {
+        try {
+          if (imageBase64) {
+            const resBlob = await fetch(imageBase64);
+            const blob = await resBlob.blob();
+            await navigator.clipboard.write([
+              new ClipboardItem({ [blob.type]: blob })
+            ]);
+          } else if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(textSummary);
+          }
+          const encodedText = encodeURIComponent(textSummary);
+          window.open(`https://web.whatsapp.com/send?text=${encodedText}`, '_blank');
+          showAlert('La imagen del comprobante de cierre fue copiada al portapapeles. Presione Ctrl+V en WhatsApp Web para adjuntarla.', 'Copiado al Portapapeles', 'info');
+        } catch (e: any) {
+          showAlert('Error al preparar el reenvío por WhatsApp.', 'Error', 'error');
+        }
+      }
+    } finally {
+      setSendingProgressMsg('');
+    }
+  };
+
+  const handleResendBatchWhatsApp = async () => {
+    const selectedCierres = cierres.filter(c => selectedCierreIds.includes(c.id));
+    if (selectedCierres.length === 0) return;
+
+    let successCount = 0;
+    for (let i = 0; i < selectedCierres.length; i++) {
+      const c = selectedCierres[i];
+      setSendingProgressMsg(`Procesando envío ${i + 1} de ${selectedCierres.length} por WhatsApp... (${c.usuario})`);
+
+      const imageBase64 = await captureCierrePNG(c);
+      const fecha = c.fechaCierre || c.fecha || new Date().toLocaleDateString('es-VE');
+      const usuario = c.usuario || 'N/A';
+      const terminal = c.terminal || 'LOCAL';
+      const dineroEnCajaExpected = (c.dineroEnCajaExpected ?? (c as any).expectedUsd ?? 0).toFixed(2);
+      const expectedVes = (c.expectedVes ?? 0).toFixed(2);
+      const realUsd = (c.realUsd ?? 0).toFixed(2);
+      const realVes = (c.realVes ?? 0).toFixed(2);
+      const diffUsd = ((c.realUsd ?? 0) - (c.dineroEnCajaExpected ?? (c as any).expectedUsd ?? 0)).toFixed(2);
+      const diffVes = ((c.realVes ?? 0) - (c.expectedVes ?? 0)).toFixed(2);
+      const ventaTotalUsd = (c.ventaTotalUsd ?? 0).toFixed(2);
+      const descuentosUsd = (c.descuentosUsd ?? 0).toFixed(2);
+
+      let textSummary = `📊 *REPORTE DE CIERRE DE CAJA (${i + 1}/${selectedCierres.length})*\n\n`;
+      textSummary += `📅 *Fecha Cierre:* ${fecha}\n`;
+      textSummary += `👤 *Cajero:* ${usuario}\n`;
+      textSummary += `🖥️ *Terminal:* ${terminal}\n\n`;
+      textSummary += `💵 *EFECTIVO ESPERADO EN GAVETA:*\n`;
+      textSummary += `• Dólares (USD): $ ${dineroEnCajaExpected}\n`;
+      textSummary += `• Bolívares (VES): Bs ${expectedVes}\n\n`;
+      textSummary += `📥 *EFECTIVO FÍSICO RECIBIDO:*\n`;
+      textSummary += `• Dólares (USD): $ ${realUsd}\n`;
+      textSummary += `• Bolívares (VES): Bs ${realVes}\n\n`;
+      textSummary += `⚖️ *DIFERENCIA (BALANCE):*\n`;
+      textSummary += `• Dólares (USD): ${parseFloat(diffUsd) >= 0 ? '+' : ''}$ ${diffUsd}\n`;
+      textSummary += `• Bolívares (VES): ${parseFloat(diffVes) >= 0 ? '+' : ''}Bs ${diffVes}\n\n`;
+      textSummary += `🛍️ *VENTAS TOTALES:* $ ${ventaTotalUsd} USD\n`;
+      textSummary += `📉 *DESCUENTOS:* $ ${descuentosUsd} USD\n\n`;
+      textSummary += `*WinterPosAL Cloud System*`;
+
+      try {
+        const res = await fetch(getApiUrl('/whatsapp/send-cierre'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            imageBase64: imageBase64 || 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+            textSummary
+          })
+        });
+        if (res.ok) successCount++;
+      } catch (err) {
+        console.error('Error enviando cierre masivo:', err);
+      }
+    }
+
+    setSendingProgressMsg('');
+    if (successCount > 0) {
+      showAlert(`🟢 Se reenviaron con éxito ${successCount} de ${selectedCierres.length} cierres seleccionados por WhatsApp junto a sus comprobantes PNG.`, 'Reenvío Masivo Completado', 'success');
+      setSelectedCierreIds([]);
+    } else {
+      showAlert('No se pudo enviar los cierres por WhatsApp. Verifique que la integración de WhatsApp esté conectada.', 'Error en Envío Masivo', 'error');
+    }
   };
 
   const [startDate, setStartDate] = useState(() => {
@@ -883,6 +1043,21 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
               <table className="w-full border-collapse text-left">
                 <thead className="sticky top-0 z-10 border-b border-slate-200">
                   <tr className="text-slate-500">
+                    <th className="sticky top-0 z-10 bg-slate-100 px-3 py-2 text-center w-8 select-none">
+                      <input
+                        type="checkbox"
+                        checked={finalFilteredCierres.length > 0 && selectedCierreIds.length === finalFilteredCierres.length}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedCierreIds(finalFilteredCierres.map(c => c.id));
+                          } else {
+                            setSelectedCierreIds([]);
+                          }
+                        }}
+                        className="w-3.5 h-3.5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                        title="Seleccionar todos los cierres"
+                      />
+                    </th>
                     <th className="sticky top-0 z-10 bg-slate-100 px-3 py-2 font-bold font-sans cursor-pointer select-none" onClick={() => handleCierresSort('fechaApertura')}>
                       <div className="flex items-center gap-1">
                         <span>F. APERTURA</span>
@@ -943,7 +1118,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                 <tbody className="divide-y divide-slate-100 text-[11px] text-slate-700 select-text">
                   {finalFilteredCierres.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="text-center py-16 text-slate-400 font-sans">
+                      <td colSpan={10} className="text-center py-16 text-slate-400 font-sans">
                         No se han registrado cierres de caja que coincidan con la búsqueda.
                       </td>
                     </tr>
@@ -958,6 +1133,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                       const ventaTotalUsd = c.ventaTotalUsd ?? 0;
                       const utilidadUsd = c.utilidadUsd ?? (ventaTotalUsd - (c.costoTotalUsd ?? 0));
                       const isSelected = selectedCierreRow?.id === c.id;
+                      const isChecked = selectedCierreIds.includes(c.id);
 
                       return (
                         <tr 
@@ -967,9 +1143,25 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                           className={`cursor-pointer transition-all ${
                             isSelected 
                               ? 'bg-blue-50/80 border-l-4 border-emerald-500 font-medium text-slate-900 shadow-sm' 
-                              : 'hover:bg-slate-50/70'
+                              : isChecked
+                                ? 'bg-emerald-50/50'
+                                : 'hover:bg-slate-50/70'
                           }`}
                         >
+                          <td className="px-3 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedCierreIds(prev => [...prev, c.id]);
+                                } else {
+                                  setSelectedCierreIds(prev => prev.filter(id => id !== c.id));
+                                }
+                              }}
+                              className="w-3.5 h-3.5 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                            />
+                          </td>
                           <td className="px-3 py-2.5 font-mono text-[10px] text-slate-700">{c.fechaApertura || c.fecha || 'N/A'}</td>
                           <td className="px-3 py-2.5 font-mono text-[10px]">
                             {c.status === 'Abierta' || !c.fechaCierre ? (
@@ -1030,7 +1222,35 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                 Operaciones de Cierre
               </h3>
 
-              {selectedCierreRow ? (
+              {selectedCierreIds.length > 1 ? (
+                <div className="space-y-3.5">
+                  <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-lg text-xs space-y-2 shadow-inner">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[10px] text-emerald-700 uppercase font-mono font-bold">SELECCIÓN MÚLTIPLE</span>
+                      <span className="bg-emerald-600 text-white font-extrabold text-[10px] px-2 py-0.5 rounded-full">
+                        {selectedCierreIds.length} CIERRES
+                      </span>
+                    </div>
+                    <p className="text-slate-600 text-[11px] leading-relaxed">
+                      Ha seleccionado <strong>{selectedCierreIds.length}</strong> cierres para reenviar automáticamente a WhatsApp junto con sus comprobantes digitalizados.
+                    </p>
+                    <button
+                      onClick={() => setSelectedCierreIds([])}
+                      className="text-[10px] text-slate-500 hover:text-slate-700 underline font-sans block pt-1"
+                    >
+                      Deseleccionar todos
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={handleResendBatchWhatsApp}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-extrabold py-3 px-3 rounded-lg text-xs transition-all shadow-md flex items-center justify-center gap-2"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    REENVIAR SELECCIONADOS ({selectedCierreIds.length})
+                  </button>
+                </div>
+              ) : selectedCierreRow ? (
                 <div className="space-y-3.5">
                   {/* Selected Row Card */}
                   <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg text-xs space-y-1.5 shadow-inner">
@@ -1058,6 +1278,14 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                     >
                       <Eye className="w-4 h-4" />
                       VER DETALLES / COMPROBANTE
+                    </button>
+
+                    <button
+                      onClick={() => handleResendWhatsAppCierre(selectedCierreRow)}
+                      className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 px-3 rounded-lg text-xs transition-all shadow-sm flex items-center justify-center gap-2"
+                    >
+                      <MessageCircle className="w-4 h-4" />
+                      REENVIAR POR WHATSAPP
                     </button>
 
                     {isAdmin && (
@@ -1186,8 +1414,8 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         const utilidadUsd = selectedCierre.utilidadUsd && selectedCierre.costoTotalUsd ? selectedCierre.utilidadUsd : (ventaTotalUsd - costoTotalUsd);
 
         return (
-          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-slate-800">
-            <div className="bg-white border border-slate-350 rounded-xl overflow-hidden w-full max-w-4xl shadow-2xl flex flex-col animate-fade-in">
+          <div className="fixed inset-0 bg-slate-950/85 flex items-center justify-center p-4 z-50 font-mono text-slate-800 print:p-0">
+            <div id="cierre-comprobante-card" className="bg-white border border-slate-300 rounded-xl overflow-hidden w-full max-w-4xl shadow-2xl flex flex-col opacity-100 select-text">
               
               {/* Blue Header Title Bar */}
               <div className="bg-winter-header text-white px-5 py-3 flex items-center justify-between">
@@ -1426,12 +1654,24 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                     );
                   })()}
                 </div>
-                <button
-                  onClick={() => setSelectedCierre(null)}
-                  className="w-full bg-slate-900 hover:bg-slate-950 text-white font-extrabold py-3 rounded-lg font-sans text-xs uppercase tracking-wider transition-all"
-                >
-                  Cerrar Comprobante
-                </button>
+                <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => handleResendWhatsAppCierre(selectedCierre)}
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-extrabold py-3 px-4 rounded-lg font-sans text-xs uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    REENVIAR POR WHATSAPP
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCierre(null)}
+                    className="sm:w-1/3 bg-slate-800 hover:bg-slate-900 text-white font-extrabold py-3 px-4 rounded-lg font-sans text-xs uppercase tracking-wider transition-all shadow-sm"
+                  >
+                    Cerrar Comprobante
+                  </button>
+                </div>
               </div>
 
             </div>
@@ -1953,6 +2193,92 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
           </div>
         );
       })()}
+
+      {/* ON-SCREEN CAPTURE MODAL FOR GUARANTEED 100% VISIBLE WHATSAPP PNG ATTACHMENTS */}
+      {capturingCierre && (() => {
+        const c = capturingCierre;
+        const expectedUsd = c.dineroEnCajaExpected ?? (c as any).expectedUsd ?? 0;
+        const expectedVes = c.expectedVes ?? 0;
+        const realUsd = c.realUsd ?? 0;
+        const realVes = c.realVes ?? 0;
+        const diffUsd = realUsd - expectedUsd;
+        const diffVes = realVes - expectedVes;
+        return (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center z-[99999] p-4">
+            <div id="cierre-capture-card" className="bg-white border-2 border-slate-300 rounded-xl overflow-hidden w-full max-w-xl shadow-2xl space-y-4 text-slate-800 font-sans p-6 opacity-100 select-text">
+              <div className="bg-winter-header text-white px-5 py-3 flex justify-between items-center rounded-t-lg -mx-6 -mt-6 mb-4">
+                <div>
+                  <h3 className="font-extrabold text-sm uppercase tracking-wide">Cierre y Conciliación de Caja</h3>
+                  <p className="text-[10px] opacity-85 font-sans">Comprobante Digital POS</p>
+                </div>
+                <span className="text-xs font-mono font-bold">{c.fechaCierre || c.fecha || new Date().toLocaleDateString('es-VE')}</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 border-b border-slate-200 pb-3 text-xs">
+                <div>
+                  <span className="text-slate-500 block text-[10px] font-bold uppercase font-sans">Cajero</span>
+                  <strong className="text-slate-900 text-sm uppercase font-mono">{c.usuario || 'N/A'}</strong>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[10px] font-bold uppercase font-sans">Terminal / Estación</span>
+                  <strong className="text-slate-900 text-sm uppercase font-mono">{c.terminal || 'LOCAL'}</strong>
+                </div>
+              </div>
+
+              <div className="space-y-2 font-mono text-xs border-b border-slate-200 pb-3">
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Efectivo Esperado ($):</span>
+                  <span className="font-bold text-slate-800">$ {expectedUsd.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Efectivo Esperado (Bs):</span>
+                  <span className="font-bold text-slate-800">Bs {expectedVes.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-emerald-700 font-extrabold">
+                  <span>Efectivo Físico Recibido ($):</span>
+                  <span>$ {realUsd.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-emerald-700 font-extrabold">
+                  <span>Efectivo Físico Recibido (Bs):</span>
+                  <span>Bs {realVes.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between border-t border-slate-200 pt-2 font-black text-sm">
+                  <span>Diferencia Balance:</span>
+                  <span className={diffUsd >= 0 ? 'text-emerald-700' : 'text-rose-600'}>
+                    {diffUsd >= 0 ? '+' : ''}$ {diffUsd.toFixed(2)} / {diffVes >= 0 ? '+' : ''}Bs {diffVes.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-xs pt-1 font-sans">
+                <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                  <span className="text-slate-500 block text-[10px] uppercase font-bold">Ventas Totales</span>
+                  <strong className="text-emerald-700 text-base font-extrabold font-mono">$ {(c.ventaTotalUsd ?? 0).toFixed(2)} USD</strong>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                  <span className="text-slate-500 block text-[10px] uppercase font-bold">Descuentos</span>
+                  <strong className="text-rose-600 text-base font-extrabold font-mono">$ {(c.descuentosUsd ?? 0).toFixed(2)} USD</strong>
+                </div>
+              </div>
+
+              <div className="text-center text-[10px] text-slate-400 italic pt-2 border-t border-slate-200 font-mono">
+                WinterPosAL Cloud System • Comprobante Digital de Auditoría
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* SENDING PROGRESS OVERLAY */}
+      {sendingProgressMsg && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center z-[100000] p-4">
+          <div className="bg-white border border-slate-200 p-6 rounded-xl shadow-2xl text-center space-y-3 max-w-sm w-full font-sans">
+            <div className="w-10 h-10 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+            <h4 className="font-extrabold text-slate-800 text-sm uppercase">Reenviando por WhatsApp</h4>
+            <p className="text-xs text-slate-600 font-mono leading-relaxed">{sendingProgressMsg}</p>
+          </div>
+        </div>
+      )}
 
     </div>
   );

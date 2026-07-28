@@ -3182,7 +3182,7 @@ export default function CajaPOS({
             <div className="flex justify-between items-center border-b border-slate-200 pb-2.5 flex-shrink-0">
               <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
                 <XCircle className="w-4 h-4 text-red-500" />
-                CONCILIACIÓN Y ARQUEO DE CAJA
+                CONCILIACIÓN Y CIERRE DE CAJA
               </h3>
               <button onClick={() => { setShowCierreModal(false); setCierreResult(null); }} className="text-slate-400 hover:text-slate-655">✕ Cerrar [ESC]</button>
             </div>
@@ -3222,9 +3222,10 @@ export default function CajaPOS({
 
                 <button
                   type="submit"
-                  className="w-full bg-red-650 hover:bg-red-700 text-white py-3 rounded-lg font-bold font-sans text-xs tracking-wider transition-all shadow-[0_4px_10px_rgba(220,38,38,0.2)]"
+                  className="w-full bg-red-600 hover:bg-red-700 active:scale-[0.99] text-white py-3 rounded-lg font-extrabold font-sans text-xs tracking-wider transition-all shadow-md shadow-red-200 flex items-center justify-center gap-2"
                 >
-                  EJECUTAR ARQUEO FINAL
+                  <XCircle className="w-4 h-4" />
+                  EJECUTAR CIERRE FINAL
                 </button>
               </form>
             ) : (

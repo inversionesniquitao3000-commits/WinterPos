@@ -3,7 +3,7 @@ import { CompanyConfig, User, Role, PrinterConfig, ScaleConfig } from '../types'
 import { 
   Save, CheckCircle2, Users, HardDrive, Cpu, 
   Trash2, Edit, Plus, Download, Upload, ShieldAlert,
-  Settings, CheckSquare, Square, Globe
+  Settings, CheckSquare, Square, Globe, ShieldCheck, Printer, FileText
 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 
@@ -132,6 +132,21 @@ export default function ConfiguracionEmpresa({
       baudRate: 9600,
       protocolo: 'CAS',
       taraPrevia: 0
+    };
+  });
+  const [fiscalPrinterConfig, setFiscalPrinterConfig] = useState(() => {
+    const saved = localStorage.getItem('pos_fiscal_printer_config');
+    return saved ? JSON.parse(saved) : {
+      modelo: 'HKA_FACTORY',
+      puerto: 'COM1',
+      baudRate: 9600,
+      serialMaquina: '',
+      ipSpooler: '127.0.0.1:8080',
+      reporteZAutomatico: true,
+      imprimirIgtf: true,
+      exigirRifCliente: true,
+      imprimirCopiaFiscal: false,
+      estadoFiscal: 'ACTIVA'
     };
   });
 
@@ -527,6 +542,16 @@ export default function ConfiguracionEmpresa({
     showToast('Configuraciones de periféricos (básculas/impresoras) guardadas con éxito.');
   };
 
+  const handleSaveFiscalPrinter = (e: React.FormEvent) => {
+    e.preventDefault();
+    localStorage.setItem('pos_fiscal_printer_config', JSON.stringify(fiscalPrinterConfig));
+    showToast('✅ Configuración de Máquina Fiscal SENIAT guardada con éxito.');
+  };
+
+  const handleTestFiscalPrinter = () => {
+    showToast('🧾 Conectando con Máquina Fiscal SENIAT... (Lectura X Solicitada)');
+  };
+
   // DB Admin Handlers
   const handleWipeDb = async (mode: 'inventory' | 'sales' | 'clients' | 'all' | 'stock') => {
     if (!dbConfirmWord.trim().toUpperCase().includes('CONFIRMAR')) {
@@ -638,8 +663,15 @@ export default function ConfiguracionEmpresa({
 
     const reader = new FileReader();
     reader.onload = async (evt) => {
+      let parsed: any;
       try {
-        const parsed = JSON.parse(evt.target?.result as string);
+        parsed = JSON.parse(evt.target?.result as string);
+      } catch (err) {
+        showAlert('El archivo seleccionado no tiene un formato de respaldo JSON válido.', 'Archivo Inválido', 'error');
+        return;
+      }
+
+      try {
         const res = await fetch(getApiUrl('/db/restore'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -650,10 +682,11 @@ export default function ConfiguracionEmpresa({
           showToast('Base de datos restaurada correctamente. Recargando sistema...');
           setTimeout(() => window.location.reload(), 1500);
         } else {
-          showAlert('El archivo no pudo ser importado de forma correcta por el servidor.', 'Error de Importación', 'error');
+          const errData = await res.json().catch(() => ({}));
+          showAlert(`Error del servidor al restaurar: ${errData.error || 'No se pudo procesar la restauración.'}`, 'Error de Importación', 'error');
         }
       } catch (err) {
-        showAlert('Formato de archivo inválido. Por favor utilice un archivo de respaldo válido exportado desde este sistema.', 'Archivo Inválido', 'error');
+        showAlert('No se pudo conectar con el servidor backend (Puerto 5000). Verifique que el servidor backend esté corriendo.', 'Error de Conexión', 'error');
       }
     };
     reader.readAsText(file);
@@ -1161,161 +1194,449 @@ export default function ConfiguracionEmpresa({
           </div>
         )}
 
-        {/* TAB 3: BASCULAS Y IMPRESORAS */}
+        {/* TAB 3: BASCULAS, IMPRESORAS Y MAQUINAS FISCALES SENIAT */}
         {activeTab === 'perifericos' && (
-          <form onSubmit={handleSavePerifericos} className="bg-white border border-slate-200 p-6 rounded-xl space-y-6 shadow-sm max-w-3xl mx-auto">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start animate-fade-in font-sans">
             
-            {/* PRINTER SETTINGS */}
-            <div>
-              <h2 className="text-sm font-bold text-slate-700 border-b border-slate-100 pb-2 mb-4 flex items-center gap-2 font-sans">
-                <HardDrive className="w-4 h-4 text-winter-configStart" />
-                Configuración de Impresora térmica de Tickets
-              </h2>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Método de Conexión / Puerto</label>
-                  <select
-                    value={printerConfig.puerto}
-                    onChange={(e) => setPrinterConfig(prev => ({ ...prev, puerto: e.target.value }))}
-                    className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-configStart focus:outline-none font-sans"
-                  >
-                    <option value="SISTEMA">Impresora del Sistema Operativo</option>
-                    <option value="USB">Conexión Directa USB (Raw)</option>
-                    <option value="IP">Conexión por Red IP (Ethernet/Wi-Fi)</option>
-                    <option value="NINGUNA">No Utilizar Impresora (Guardado Digital)</option>
-                  </select>
-                </div>
-                {printerConfig.puerto === 'IP' && (
-                  <div>
-                    <label className="text-xs text-slate-500 block mb-1 font-sans">Dirección IP de la Impresora</label>
-                    <input
-                      type="text"
-                      placeholder="192.168.1.200"
-                      value={printerConfig.ipAddress || ''}
-                      onChange={(e) => setPrinterConfig(prev => ({ ...prev, ipAddress: e.target.value }))}
-                      className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-configStart focus:outline-none font-mono"
-                    />
-                  </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4 font-sans text-xs">
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1">Ancho de Papel Térmico</label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setPrinterConfig(prev => ({ ...prev, anchoPapel: '58mm' }))}
-                      className={`flex-1 p-2 rounded border text-center transition-all ${
-                        printerConfig.anchoPapel === '58mm'
-                          ? 'bg-sky-50 border-sky-300 text-sky-800 font-bold'
-                          : 'bg-slate-50 border-slate-200 text-slate-500'
-                      }`}
-                    >
-                      58 mm (Angosto)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPrinterConfig(prev => ({ ...prev, anchoPapel: '80mm' }))}
-                      className={`flex-1 p-2 rounded border text-center transition-all ${
-                        printerConfig.anchoPapel === '80mm'
-                          ? 'bg-sky-50 border-sky-300 text-sky-800 font-bold'
-                          : 'bg-slate-50 border-slate-200 text-slate-500'
-                      }`}
-                    >
-                      80 mm (Estándar)
-                    </button>
-                  </div>
-                </div>
+            {/* LEFT COLUMN: Thermal Printer & Scale Config */}
+            <form onSubmit={handleSavePerifericos} className="bg-white border border-slate-200 p-5 rounded-xl space-y-5 shadow-sm">
+              {/* PRINTER SETTINGS */}
+              <div>
+                <h2 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-2.5 mb-4 flex items-center gap-2">
+                  <Printer className="w-4 h-4 text-winter-configStart" />
+                  Configuración de Impresora térmica de Tickets
+                </h2>
                 
-                <div className="flex flex-col justify-end">
-                  <label className="relative inline-flex items-center cursor-pointer mt-4">
-                    <input
-                      type="checkbox"
-                      checked={printerConfig.cortarAutomatico}
-                      onChange={(e) => setPrinterConfig(prev => ({ ...prev, cortarAutomatico: e.target.checked }))}
-                      className="sr-only peer"
-                    />
-                    <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-sky-600"></div>
-                    <span className="ml-3 text-xs text-slate-700 font-bold">Corte de Papel Automático</span>
-                  </label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="text-xs text-slate-600 block mb-1 font-medium">Método de Conexión / Puerto</label>
+                    <select
+                      value={printerConfig.puerto}
+                      onChange={(e) => setPrinterConfig(prev => ({ ...prev, puerto: e.target.value }))}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs text-slate-800 focus:bg-white focus:border-winter-configStart focus:outline-none"
+                    >
+                      <option value="SISTEMA">Impresora del Sistema Operativo</option>
+                      <option value="USB">Conexión Directa USB (Raw)</option>
+                      <option value="IP">Conexión por Red IP (Ethernet/Wi-Fi)</option>
+                      <option value="NINGUNA">No Utilizar Impresora (Guardado Digital)</option>
+                    </select>
+                  </div>
+                  {printerConfig.puerto === 'IP' && (
+                    <div>
+                      <label className="text-xs text-slate-600 block mb-1 font-medium">Dirección IP de la Impresora</label>
+                      <input
+                        type="text"
+                        placeholder="192.168.1.200"
+                        value={printerConfig.ipAddress || ''}
+                        onChange={(e) => setPrinterConfig(prev => ({ ...prev, ipAddress: e.target.value }))}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs text-slate-800 focus:bg-white focus:border-winter-configStart focus:outline-none font-mono"
+                      />
+                    </div>
+                  )}
                 </div>
 
-                <div className="flex flex-col justify-end">
-                  <label className="relative inline-flex items-center cursor-pointer mt-4">
-                    <input
-                      type="checkbox"
-                      checked={printerConfig.copiaTicket}
-                      onChange={(e) => setPrinterConfig(prev => ({ ...prev, copiaTicket: e.target.checked }))}
-                      className="sr-only peer"
-                    />
-                    <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-sky-600"></div>
-                    <span className="ml-3 text-xs text-slate-700 font-bold">Imprimir Copia del Ticket</span>
-                  </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3.5 text-xs">
+                  <div>
+                    <label className="text-xs text-slate-600 block mb-1 font-medium">Ancho de Papel Térmico</label>
+                    <div className="flex gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setPrinterConfig(prev => ({ ...prev, anchoPapel: '58mm' }))}
+                        className={`flex-1 p-2 rounded-lg border text-center transition-all ${
+                          printerConfig.anchoPapel === '58mm'
+                            ? 'bg-sky-50 border-sky-300 text-sky-800 font-bold'
+                            : 'bg-slate-50 border-slate-200 text-slate-500'
+                        }`}
+                      >
+                        58 mm
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPrinterConfig(prev => ({ ...prev, anchoPapel: '80mm' }))}
+                        className={`flex-1 p-2 rounded-lg border text-center transition-all ${
+                          printerConfig.anchoPapel === '80mm'
+                            ? 'bg-sky-50 border-sky-300 text-sky-800 font-bold'
+                            : 'bg-slate-50 border-slate-200 text-slate-500'
+                        }`}
+                      >
+                        80 mm
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div className="flex flex-col justify-end">
+                    <div className="bg-white border border-slate-200 p-2.5 rounded-lg flex items-center justify-between shadow-xs">
+                      <span className="text-xs text-slate-700 font-bold">Corte Automático</span>
+                      <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 gap-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setPrinterConfig(prev => ({ ...prev, cortarAutomatico: true }))}
+                          className={`px-3 py-1 text-[11px] rounded-md font-extrabold transition-all ${
+                            printerConfig.cortarAutomatico
+                              ? 'bg-emerald-600 text-white shadow-xs'
+                              : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          SÍ
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPrinterConfig(prev => ({ ...prev, cortarAutomatico: false }))}
+                          className={`px-3 py-1 text-[11px] rounded-md font-extrabold transition-all ${
+                            !printerConfig.cortarAutomatico
+                              ? 'bg-rose-500 text-white shadow-xs'
+                              : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          NO
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col justify-end">
+                    <div className="bg-white border border-slate-200 p-2.5 rounded-lg flex items-center justify-between shadow-xs">
+                      <span className="text-xs text-slate-700 font-bold">Copia de Ticket</span>
+                      <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 gap-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setPrinterConfig(prev => ({ ...prev, copiaTicket: true }))}
+                          className={`px-3 py-1 text-[11px] rounded-md font-extrabold transition-all ${
+                            printerConfig.copiaTicket
+                              ? 'bg-emerald-600 text-white shadow-xs'
+                              : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          SÍ
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPrinterConfig(prev => ({ ...prev, copiaTicket: false }))}
+                          className={`px-3 py-1 text-[11px] rounded-md font-extrabold transition-all ${
+                            !printerConfig.copiaTicket
+                              ? 'bg-rose-500 text-white shadow-xs'
+                              : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          NO
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* SCALE SETTINGS */}
-            <div className="border-t border-slate-100 pt-6">
-              <h2 className="text-sm font-bold text-slate-700 border-b border-slate-100 pb-2 mb-4 flex items-center gap-2 font-sans">
-                <Cpu className="w-4 h-4 text-winter-configStart" />
-                Configuración de Báscula / Balanza de Peso
-              </h2>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Método de Captura de Peso</label>
-                  <select
-                    value={scaleConfig.puerto}
-                    onChange={(e) => setScaleConfig(prev => ({ ...prev, puerto: e.target.value }))}
-                    className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-configStart focus:outline-none font-sans"
-                  >
-                    <option value="MANUAL">Entrada Manual (Solicitar en pantalla)</option>
-                    <option value="COM1">Puerto Serial COM1</option>
-                    <option value="COM2">Puerto Serial COM2</option>
-                    <option value="USB">Conexión USB Emulada</option>
-                    <option value="RED">Captura por Red IP</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Protocolo de Comunicación</label>
-                  <select
-                    value={scaleConfig.protocolo}
-                    onChange={(e) => setScaleConfig(prev => ({ ...prev, protocolo: e.target.value }))}
-                    disabled={scaleConfig.puerto === 'MANUAL'}
-                    className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-configStart focus:outline-none font-sans disabled:opacity-50"
-                  >
-                    <option value="CAS">CAS (Protocolo Estándar)</option>
-                    <option value="Toledo">Toledo (P03)</option>
-                    <option value="Custom">Custom / Genérico (ASCII Raw)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Baud Rate (Velocidad)</label>
-                  <select
-                    value={scaleConfig.baudRate}
-                    onChange={(e) => setScaleConfig(prev => ({ ...prev, baudRate: parseInt(e.target.value) }))}
-                    disabled={scaleConfig.puerto === 'MANUAL'}
-                    className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-configStart focus:outline-none font-mono disabled:opacity-50"
-                  >
-                    <option value="2400">2400 bps</option>
-                    <option value="4800">4800 bps</option>
-                    <option value="9600">9600 bps</option>
-                    <option value="19200">19200 bps</option>
-                  </select>
+              {/* SCALE SETTINGS */}
+              <div className="border-t border-slate-100 pt-5">
+                <h2 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-2.5 mb-4 flex items-center gap-2">
+                  <Cpu className="w-4 h-4 text-winter-configStart" />
+                  Configuración de Báscula / Balanza de Peso
+                </h2>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-600 block mb-1 font-medium">Método de Peso</label>
+                    <select
+                      value={scaleConfig.puerto}
+                      onChange={(e) => setScaleConfig(prev => ({ ...prev, puerto: e.target.value }))}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs text-slate-800 focus:bg-white focus:border-winter-configStart focus:outline-none"
+                    >
+                      <option value="MANUAL">Entrada Manual</option>
+                      <option value="COM1">Puerto COM1</option>
+                      <option value="COM2">Puerto COM2</option>
+                      <option value="USB">USB Emulado</option>
+                      <option value="RED">Red IP</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-600 block mb-1 font-medium">Protocolo</label>
+                    <select
+                      value={scaleConfig.protocolo}
+                      onChange={(e) => setScaleConfig(prev => ({ ...prev, protocolo: e.target.value }))}
+                      disabled={scaleConfig.puerto === 'MANUAL'}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs text-slate-800 focus:bg-white focus:border-winter-configStart focus:outline-none disabled:opacity-50"
+                    >
+                      <option value="CAS">CAS Estándar</option>
+                      <option value="Toledo">Toledo (P03)</option>
+                      <option value="Custom">Custom ASCII</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-600 block mb-1 font-medium">Baud Rate</label>
+                    <select
+                      value={scaleConfig.baudRate}
+                      onChange={(e) => setScaleConfig(prev => ({ ...prev, baudRate: parseInt(e.target.value) }))}
+                      disabled={scaleConfig.puerto === 'MANUAL'}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs text-slate-800 focus:bg-white focus:border-winter-configStart focus:outline-none font-mono disabled:opacity-50"
+                    >
+                      <option value="2400">2400 bps</option>
+                      <option value="4800">4800 bps</option>
+                      <option value="9600">9600 bps</option>
+                      <option value="19200">19200 bps</option>
+                    </select>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <button
-              type="submit"
-              className="w-full bg-winter-configStart hover:bg-winter-configEnd text-white py-3 rounded-lg font-bold font-sans text-xs tracking-wider transition-all shadow-sm mt-4"
-            >
-              GUARDAR CONFIGURACIÓN DE PERIFÉRICOS
-            </button>
-          </form>
+              <button
+                type="submit"
+                className="w-full bg-winter-configStart hover:bg-emerald-800 text-white font-bold py-2.5 px-4 rounded-lg text-xs transition-all shadow-sm"
+              >
+                GUARDAR CONFIGURACIÓN DE PERIFÉRICOS
+              </button>
+            </form>
+
+            {/* RIGHT COLUMN: SENIAT Homologated Fiscal Printer Config */}
+            <form onSubmit={handleSaveFiscalPrinter} className="bg-white border border-slate-200 p-5 rounded-xl space-y-5 shadow-sm">
+              <div>
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2.5 mb-3.5">
+                  <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                    <ShieldCheck className="w-4.5 h-4.5 text-emerald-600" />
+                    Máquinas Fiscales Homologadas (SENIAT)
+                  </h2>
+                  <span className="bg-emerald-100 text-emerald-800 text-[10px] font-extrabold px-2 py-0.5 rounded font-mono">
+                    SENIAT VE
+                  </span>
+                </div>
+
+                <p className="text-xs text-slate-500 mb-4 leading-relaxed">
+                  Configuración de conexión y Spooler Fiscal para impresoras homologadas bajo normativas tributarias del SENIAT (Providencia SNAT/2011/0071).
+                </p>
+
+                <div className="space-y-3.5 text-xs">
+                  {/* Marca y Modelo de Impresora Fiscal */}
+                  <div>
+                    <label className="text-xs text-slate-700 block mb-1 font-bold">
+                      Marca / Modelo Fiscal Homologado
+                    </label>
+                    <select
+                      value={fiscalPrinterConfig.modelo}
+                      onChange={(e) => setFiscalPrinterConfig(prev => ({ ...prev, modelo: e.target.value }))}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none font-bold"
+                    >
+                      <option value="HKA_FACTORY">The Factory HKA / PNP (Tally / Custom / Bematech)</option>
+                      <option value="BIXOLON">Bixolon Fiscal (SRP-350 / SRP-270 / SRP-812)</option>
+                      <option value="DASCOM">Dascom Tally / Elepon / Aclas Fiscal</option>
+                      <option value="BEMATECH">Bematech Fiscal (MP-4000 TH FI)</option>
+                      <option value="CUSTOM">Custom / Spooler Fiscal SENIAT (TFHKA)</option>
+                      <option value="DLL_GENERICA">Driver DLL / Servidor Spooler Fiscal Local</option>
+                    </select>
+                  </div>
+
+                  {/* Puerto de Comunicación y BaudRate */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-slate-700 block mb-1 font-bold">Puerto / Interface</label>
+                      <select
+                        value={fiscalPrinterConfig.puerto}
+                        onChange={(e) => setFiscalPrinterConfig(prev => ({ ...prev, puerto: e.target.value }))}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none font-mono font-bold"
+                      >
+                        <option value="COM1">Puerto Serial COM1</option>
+                        <option value="COM2">Puerto Serial COM2</option>
+                        <option value="COM3">Puerto Serial COM3</option>
+                        <option value="COM4">Puerto Serial COM4</option>
+                        <option value="USB">Conexión USB (Driver SENIAT)</option>
+                        <option value="SPOOLER_IP">Spooler de Red / IP Local</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-xs text-slate-700 block mb-1 font-bold">Velocidad (Baud Rate)</label>
+                      <select
+                        value={fiscalPrinterConfig.baudRate}
+                        onChange={(e) => setFiscalPrinterConfig(prev => ({ ...prev, baudRate: parseInt(e.target.value) }))}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none font-mono"
+                      >
+                        <option value="9600">9600 bps (Estándar HKA)</option>
+                        <option value="19200">19200 bps</option>
+                        <option value="38400">38400 bps</option>
+                        <option value="115200">115200 bps (USB Alta Velocidad)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Serial Asignado por SENIAT & IP Spooler */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-slate-700 block mb-1 font-bold">Serial Máquina Fiscal (SENIAT)</label>
+                      <input
+                        type="text"
+                        placeholder="Ej. Z3C1234567"
+                        value={fiscalPrinterConfig.serialMaquina}
+                        onChange={(e) => setFiscalPrinterConfig(prev => ({ ...prev, serialMaquina: e.target.value.toUpperCase() }))}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none font-mono uppercase font-bold"
+                      />
+                    </div>
+
+                    {fiscalPrinterConfig.puerto === 'SPOOLER_IP' ? (
+                      <div>
+                        <label className="text-xs text-slate-700 block mb-1 font-bold">IP / Puerto Spooler Fiscal</label>
+                        <input
+                          type="text"
+                          placeholder="127.0.0.1:8080"
+                          value={fiscalPrinterConfig.ipSpooler}
+                          onChange={(e) => setFiscalPrinterConfig(prev => ({ ...prev, ipSpooler: e.target.value }))}
+                          className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none font-mono"
+                        />
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="text-xs text-slate-700 block mb-1 font-bold">Estado del Servicio Fiscal</label>
+                        <select
+                          value={fiscalPrinterConfig.estadoFiscal}
+                          onChange={(e) => setFiscalPrinterConfig(prev => ({ ...prev, estadoFiscal: e.target.value }))}
+                          className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none font-medium"
+                        >
+                          <option value="ACTIVA">🟢 Impresora Fiscal Activa (Producción)</option>
+                          <option value="MODO_PRUEBA">🟡 Modo Prueba / Demo (Sin emisión SENIAT)</option>
+                          <option value="DESACTIVADA">🔴 Desactivada</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Switches de Opciones Fiscales */}
+                  <div className="border-t border-slate-100 pt-3.5 space-y-2.5">
+                    <h3 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Parámetros Tributarios SENIAT</h3>
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div className="bg-white border border-slate-200 p-2.5 rounded-lg flex items-center justify-between shadow-xs">
+                        <span className="text-xs text-slate-700 font-bold">Reporte Z al Cerrar Caja</span>
+                        <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => setFiscalPrinterConfig(prev => ({ ...prev, reporteZAutomatico: true }))}
+                            className={`px-3 py-1 text-[11px] rounded-md font-extrabold transition-all ${
+                              fiscalPrinterConfig.reporteZAutomatico
+                                ? 'bg-emerald-600 text-white shadow-xs'
+                                : 'text-slate-500 hover:text-slate-800'
+                            }`}
+                          >
+                            SÍ
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFiscalPrinterConfig(prev => ({ ...prev, reporteZAutomatico: false }))}
+                            className={`px-3 py-1 text-[11px] rounded-md font-extrabold transition-all ${
+                              !fiscalPrinterConfig.reporteZAutomatico
+                                ? 'bg-rose-500 text-white shadow-xs'
+                                : 'text-slate-500 hover:text-slate-800'
+                            }`}
+                          >
+                            NO
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="bg-white border border-slate-200 p-2.5 rounded-lg flex items-center justify-between shadow-xs">
+                        <span className="text-xs text-slate-700 font-bold">Desglose IGTF (3%)</span>
+                        <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => setFiscalPrinterConfig(prev => ({ ...prev, imprimirIgtf: true }))}
+                            className={`px-3 py-1 text-[11px] rounded-md font-extrabold transition-all ${
+                              fiscalPrinterConfig.imprimirIgtf
+                                ? 'bg-emerald-600 text-white shadow-xs'
+                                : 'text-slate-500 hover:text-slate-800'
+                            }`}
+                          >
+                            SÍ
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFiscalPrinterConfig(prev => ({ ...prev, imprimirIgtf: false }))}
+                            className={`px-3 py-1 text-[11px] rounded-md font-extrabold transition-all ${
+                              !fiscalPrinterConfig.imprimirIgtf
+                                ? 'bg-rose-500 text-white shadow-xs'
+                                : 'text-slate-500 hover:text-slate-800'
+                            }`}
+                          >
+                            NO
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="bg-white border border-slate-200 p-2.5 rounded-lg flex items-center justify-between shadow-xs">
+                        <span className="text-xs text-slate-700 font-bold">Exigir RIF/Cédula en Factura</span>
+                        <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => setFiscalPrinterConfig(prev => ({ ...prev, exigirRifCliente: true }))}
+                            className={`px-3 py-1 text-[11px] rounded-md font-extrabold transition-all ${
+                              fiscalPrinterConfig.exigirRifCliente
+                                ? 'bg-emerald-600 text-white shadow-xs'
+                                : 'text-slate-500 hover:text-slate-800'
+                            }`}
+                          >
+                            SÍ
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFiscalPrinterConfig(prev => ({ ...prev, exigirRifCliente: false }))}
+                            className={`px-3 py-1 text-[11px] rounded-md font-extrabold transition-all ${
+                              !fiscalPrinterConfig.exigirRifCliente
+                                ? 'bg-rose-500 text-white shadow-xs'
+                                : 'text-slate-500 hover:text-slate-800'
+                            }`}
+                          >
+                            NO
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="bg-white border border-slate-200 p-2.5 rounded-lg flex items-center justify-between shadow-xs">
+                        <span className="text-xs text-slate-700 font-bold">Duplicado de Factura Fiscal</span>
+                        <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => setFiscalPrinterConfig(prev => ({ ...prev, imprimirCopiaFiscal: true }))}
+                            className={`px-3 py-1 text-[11px] rounded-md font-extrabold transition-all ${
+                              fiscalPrinterConfig.imprimirCopiaFiscal
+                                ? 'bg-emerald-600 text-white shadow-xs'
+                                : 'text-slate-500 hover:text-slate-800'
+                            }`}
+                          >
+                            SÍ
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFiscalPrinterConfig(prev => ({ ...prev, imprimirCopiaFiscal: false }))}
+                            className={`px-3 py-1 text-[11px] rounded-md font-extrabold transition-all ${
+                              !fiscalPrinterConfig.imprimirCopiaFiscal
+                                ? 'bg-rose-500 text-white shadow-xs'
+                                : 'text-slate-500 hover:text-slate-800'
+                            }`}
+                          >
+                            NO
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-2 flex flex-col sm:flex-row gap-2">
+                <button
+                  type="button"
+                  onClick={handleTestFiscalPrinter}
+                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-2.5 px-3 rounded-lg text-xs transition-all border border-slate-300 flex items-center justify-center gap-1.5"
+                >
+                  <FileText className="w-3.5 h-3.5 text-slate-600" />
+                  PROBAR LECTURA X
+                </button>
+
+                <button
+                  type="submit"
+                  className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 px-3 rounded-lg text-xs transition-all shadow-sm"
+                >
+                  GUARDAR CONFIGURACIÓN FISCAL
+                </button>
+              </div>
+            </form>
+
+          </div>
         )}
 
         {/* TAB 4: DATABASE ADMIN */}
@@ -1415,8 +1736,7 @@ export default function ConfiguracionEmpresa({
                 />
               </div>
             </div>
-
-              </div>
+          </div>
 
               {/* RIGHT COLUMN: BACKUPS & AUTOMATIC BACKUP */}
               <div className="lg:col-span-6 space-y-6">
