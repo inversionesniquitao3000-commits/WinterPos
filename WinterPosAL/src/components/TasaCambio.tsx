@@ -9,10 +9,11 @@ interface TasaCambioProps {
   tasaHistory: TasaHistoryItem[];
   currentUser: User;
   isServer?: boolean;
+  getApiUrl?: (path: string) => string;
   onUpdateTasa: (newDia: number, newVuelto: number) => void;
 }
 
-export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUser: _currentUser, isServer = true, onUpdateTasa }: TasaCambioProps) {
+export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUser: _currentUser, isServer = true, getApiUrl, onUpdateTasa }: TasaCambioProps) {
   const { showAlert } = useDialog();
   const [inputDia, setInputDia] = useState(tasaDia > 0 ? tasaDia.toString() : '');
   const [inputVuelto, setInputVuelto] = useState(tasaVuelto > 0 ? tasaVuelto.toString() : '');
@@ -28,8 +29,8 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
     setBcvLoading(true);
     setBcvError('');
     try {
-      const baseUrl = window.location.port === '5173' ? 'http://localhost:5000' : '';
-      const res = await fetch(`${baseUrl}/api/bcv`);
+      const url = getApiUrl ? getApiUrl('/bcv') : '/api/bcv';
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         if (data) {
