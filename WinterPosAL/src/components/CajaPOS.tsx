@@ -103,10 +103,14 @@ export default function CajaPOS({
   onLogout
 }: CajaPOSProps) {
   const { showAlert, showConfirm } = useDialog();
-  // Opening/Closing state
   const [showAperturaModal, setShowAperturaModal] = useState(!cajaAbierta);
   const [aperturaUsdVal, setAperturaUsdVal] = useState('');
   const [aperturaVesVal, setAperturaVesVal] = useState('');
+
+  // Sync showAperturaModal whenever cajaAbierta prop changes
+  useEffect(() => {
+    setShowAperturaModal(!cajaAbierta);
+  }, [cajaAbierta]);
   
   const [showCierreModal, setShowCierreModal] = useState(false);
   const [cierreRealUsd, setCierreRealUsd] = useState('0');
