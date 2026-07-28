@@ -475,6 +475,15 @@ app.put('/api/cajas/cierres/:id', async (req, res) => {
   }
 });
 // USER CRUD ENDPOINTS
+app.get('/api/users', async (req, res) => {
+  try {
+    const users = await getUsers();
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/users', async (req, res) => {
   try {
     const saved = await saveUser(req.body);

@@ -50,6 +50,7 @@ try {
     ALTER TABLE Ventas_Detalle DROP CONSTRAINT IF EXISTS ventas_detalle_tipo_precio_check;
     ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS clave VARCHAR(100) DEFAULT 'admin';
     ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS permisos TEXT;
+    ALTER TABLE Usuarios ALTER COLUMN rol TYPE VARCHAR(100) USING rol::text;
     ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS estacion_nombre VARCHAR(50) DEFAULT 'CAJA_PRINCIPAL';
     ALTER TABLE Movimientos_Caja ADD COLUMN IF NOT EXISTS estacion_nombre VARCHAR(50) DEFAULT 'CAJA_PRINCIPAL';
     ALTER TABLE Productos ADD COLUMN IF NOT EXISTS a_granel BOOLEAN DEFAULT FALSE;
@@ -692,7 +693,7 @@ export async function deleteClient(id) {
 // --- USER & ROLE CRUD & DATABASE MANAGEMENT FUNCTIONS ---
 
 export async function saveUser(u) {
-  const permsStr = JSON.stringify(u.permisos);
+  const permsStr = JSON.stringify(u.permisos || {});
   if (usePostgres) {
     try {
       const res = await pool.query(
@@ -701,10 +702,19 @@ export async function saveUser(u) {
       );
       if (res.rowCount > 0) {
         const r = res.rows[0];
-        return { ...r, permisos: r.permisos ? JSON.parse(r.permisos) : null };
+        return {
+          id: r.id,
+          usuario: r.usuario,
+          nombre: r.nombre,
+          rol: r.rol,
+          estado: r.estado,
+          clave: r.clave,
+          permisos: r.permisos ? (typeof r.permisos === 'string' ? JSON.parse(r.permisos) : r.permisos) : null
+        };
       }
     } catch (err) {
       console.error('Error en saveUser (Postgres):', err.message);
+      throw err;
     }
   }
   const users = readJsonFile('users.json', mockUsers);
@@ -723,7 +733,7 @@ export async function saveUser(u) {
 }
 
 export async function updateUser(id, u) {
-  const permsStr = JSON.stringify(u.permisos);
+  const permsStr = JSON.stringify(u.permisos || {});
   if (usePostgres) {
     try {
       const res = await pool.query(
@@ -732,10 +742,19 @@ export async function updateUser(id, u) {
       );
       if (res.rowCount > 0) {
         const r = res.rows[0];
-        return { ...r, permisos: r.permisos ? JSON.parse(r.permisos) : null };
+        return {
+          id: r.id,
+          usuario: r.usuario,
+          nombre: r.nombre,
+          rol: r.rol,
+          estado: r.estado,
+          clave: r.clave,
+          permisos: r.permisos ? (typeof r.permisos === 'string' ? JSON.parse(r.permisos) : r.permisos) : null
+        };
       }
     } catch (err) {
       console.error('Error en updateUser (Postgres):', err.message);
+      throw err;
     }
   }
   const users = readJsonFile('users.json', mockUsers);
@@ -810,7 +829,21 @@ export async function getRoles() {
         return res.rows.map(r => ({
           id: r.id,
           nombre: r.nombre,
-          permisos: r.permisos ? JSON.parse(r.permisos) : {}
+          permisos: r.permisos ? (typeof r.permisos === 'string' ? JSON.parse(r.permisos) : r.permisos) : {}
+        }));
+      } else {
+        console.log('Seeding default roles to Postgres database...');
+        for (const role of defaultRoles) {
+          await pool.query(
+            'INSERT INTO Roles (nombre, permisos) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+            [role.nombre, JSON.stringify(role.permisos)]
+          );
+        }
+        const res2 = await pool.query('SELECT id, nombre, permisos FROM Roles ORDER BY id ASC');
+        return res2.rows.map(r => ({
+          id: r.id,
+          nombre: r.nombre,
+          permisos: r.permisos ? (typeof r.permisos === 'string' ? JSON.parse(r.permisos) : r.permisos) : {}
         }));
       }
     } catch (err) {
@@ -821,7 +854,7 @@ export async function getRoles() {
 }
 
 export async function saveRole(r) {
-  const permsStr = JSON.stringify(r.permisos);
+  const permsStr = JSON.stringify(r.permisos || {});
   if (usePostgres) {
     try {
       const res = await pool.query(
@@ -830,10 +863,11 @@ export async function saveRole(r) {
       );
       if (res.rowCount > 0) {
         const row = res.rows[0];
-        return { id: row.id, nombre: row.nombre, permisos: row.permisos ? JSON.parse(row.permisos) : {} };
+        return { id: row.id, nombre: row.nombre, permisos: row.permisos ? (typeof row.permisos === 'string' ? JSON.parse(row.permisos) : row.permisos) : {} };
       }
     } catch (err) {
       console.error('Error en saveRole (Postgres):', err.message);
+      throw err;
     }
   }
   const roles = await getRoles();
@@ -848,7 +882,7 @@ export async function saveRole(r) {
 }
 
 export async function updateRole(id, r) {
-  const permsStr = JSON.stringify(r.permisos);
+  const permsStr = JSON.stringify(r.permisos || {});
   if (usePostgres) {
     try {
       const res = await pool.query(
@@ -857,10 +891,11 @@ export async function updateRole(id, r) {
       );
       if (res.rowCount > 0) {
         const row = res.rows[0];
-        return { id: row.id, nombre: row.nombre, permisos: row.permisos ? JSON.parse(row.permisos) : {} };
+        return { id: row.id, nombre: row.nombre, permisos: row.permisos ? (typeof row.permisos === 'string' ? JSON.parse(row.permisos) : row.permisos) : {} };
       }
     } catch (err) {
       console.error('Error en updateRole (Postgres):', err.message);
+      throw err;
     }
   }
   const roles = await getRoles();
@@ -876,6 +911,7 @@ export async function updateRole(id, r) {
   }
   return null;
 }
+
 
 export async function deleteRole(id) {
   if (usePostgres) {
