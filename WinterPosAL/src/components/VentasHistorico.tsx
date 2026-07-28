@@ -914,6 +914,12 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                       <CierresSortIcon field="diffUsd" />
                     </div>
                   </th>
+                  <th className="sticky top-0 z-10 bg-slate-100 px-3 py-1.5 text-center font-bold font-sans cursor-pointer select-none" onClick={() => handleCierresSort('status')}>
+                    <div className="flex items-center justify-center gap-1">
+                      <span>ESTATUS</span>
+                      <CierresSortIcon field="status" />
+                    </div>
+                  </th>
                   <th className="sticky top-0 z-10 bg-slate-100 px-4 py-1.5 text-right font-bold font-sans text-emerald-600 cursor-pointer select-none" onClick={() => handleCierresSort('utilidadUsd')}>
                     <div className="flex items-center justify-end gap-1">
                       <span>UTILIDAD</span>
@@ -923,13 +929,15 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                   <th className="sticky top-0 z-10 bg-slate-100 px-4 py-1.5 text-center"></th>
                 </tr>
               </thead>
+
               <tbody className="divide-y divide-slate-100 text-[11px] text-slate-700 select-text">
                 {finalFilteredCierres.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="text-center py-12 text-slate-400 font-sans">
+                    <td colSpan={9} className="text-center py-12 text-slate-400 font-sans">
                       No se han registrado cierres de caja que coincidan con la búsqueda.
                     </td>
                   </tr>
+
                 ) : (
                   finalFilteredCierres.map(c => {
                     const dineroEnCajaExpected = c.dineroEnCajaExpected ?? (c as any).expectedUsd ?? 0;
@@ -967,7 +975,20 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                         <td className="px-4 py-1 text-right font-mono text-emerald-600 font-extrabold">
                           ${utilidadUsd.toFixed(2)}
                         </td>
+                        <td className="px-3 py-1 text-center font-sans">
+                          {c.status === 'Abierta' ? (
+                            <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200/70 px-2 py-0.5 rounded-full text-[9px] font-bold">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                              ABIERTA
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded-full text-[9px] font-bold">
+                              CERRADA
+                            </span>
+                          )}
+                        </td>
                         <td className="px-4 py-1 text-center">
+
                           <div className="flex items-center justify-center gap-1.5">
                             <button
                               onClick={() => setSelectedCierre(c)}
