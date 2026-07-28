@@ -101,13 +101,10 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
 
     if (ok && onClearHistory) {
       await onClearHistory();
-      showAlert({
-        title: 'Historial Vaciado',
-        message: 'Se ha eliminado todo el historial de tasas de cambio exitosamente.',
-        variant: 'success'
-      });
+      showAlert('Se ha eliminado todo el historial de tasas de cambio exitosamente.', 'Historial Vaciado', 'success');
     }
   };
+
 
 
   // Filtering states
