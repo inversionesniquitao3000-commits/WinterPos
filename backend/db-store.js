@@ -1140,41 +1140,15 @@ export async function getTasaHistory() {
         LEFT JOIN Usuarios u ON t.usuario_id = u.id 
         ORDER BY t.fecha_actualizacion ASC, t.id ASC
       `);
-      if (res.rowCount > 0) {
-        const list = res.rows.map(r => ({
-          id: r.id,
-          tasa_cobro: parseFloat(r.tasa_cobro),
-          tasa_vuelto: parseFloat(r.tasa_vuelto),
-          fecha_actualizacion: getLocalISODateString(new Date(r.fecha_actualizacion)),
-          usuario: r.usuario || 'SISTEMA'
-        }));
-        // Sort explicitly by date timestamp to guarantee latest rate is at array end
-        return list.sort((a, b) => new Date(a.fecha_actualizacion).getTime() - new Date(b.fecha_actualizacion).getTime() || Number(a.id) - Number(b.id));
-      } else {
-        console.log('Seeding default exchange rates to Postgres database...');
-        const localTasas = readJsonFile('tasa_history.json', mockTasaHistory);
-        for (const t of localTasas) {
-          await pool.query(
-            `INSERT INTO Tasas_Cambio (tasa_cobro, tasa_vuelto, fecha_actualizacion, usuario_id)
-             VALUES ($1, $2, $3, $4)`,
-            [t.tasa_cobro, t.tasa_vuelto, new Date(), 1]
-          );
-        }
-        const res2 = await pool.query(`
-          SELECT t.id, t.tasa_cobro, t.tasa_vuelto, t.fecha_actualizacion, u.nombre as usuario 
-          FROM Tasas_Cambio t 
-          LEFT JOIN Usuarios u ON t.usuario_id = u.id 
-          ORDER BY t.fecha_actualizacion ASC, t.id ASC
-        `);
-        const list2 = res2.rows.map(r => ({
-          id: r.id,
-          tasa_cobro: parseFloat(r.tasa_cobro),
-          tasa_vuelto: parseFloat(r.tasa_vuelto),
-          fecha_actualizacion: getLocalISODateString(new Date(r.fecha_actualizacion)),
-          usuario: r.usuario || 'SISTEMA'
-        }));
-        return list2.sort((a, b) => new Date(a.fecha_actualizacion).getTime() - new Date(b.fecha_actualizacion).getTime() || Number(a.id) - Number(b.id));
-      }
+      const list = res.rows.map(r => ({
+        id: r.id,
+        tasa_cobro: parseFloat(r.tasa_cobro),
+        tasa_vuelto: parseFloat(r.tasa_vuelto),
+        fecha_actualizacion: getLocalISODateString(new Date(r.fecha_actualizacion)),
+        usuario: r.usuario || 'SISTEMA'
+      }));
+      // Sort explicitly by date timestamp to guarantee latest rate is at array end
+      return list.sort((a, b) => new Date(a.fecha_actualizacion).getTime() - new Date(b.fecha_actualizacion).getTime() || Number(a.id) - Number(b.id));
     } catch (err) {
       console.error('Error en getTasaHistory (Postgres):', err.message);
     }
@@ -1185,19 +1159,30 @@ export async function getTasaHistory() {
 export async function saveTasa(t) {
   if (usePostgres) {
     try {
-      // Find database user ID or default to admin (id 1)
-      const userRes = await pool.query('SELECT id FROM Usuarios LIMIT 1');
-      const userId = userRes.rowCount > 0 ? userRes.rows[0].id : 1;
+      let userId = parseInt(t.usuarioId || t.usuario_id);
+      if (isNaN(userId) || userId <= 0) {
+        if (t.usuario) {
+          const uRes = await pool.query('SELECT id FROM Usuarios WHERE nombre = $1 OR usuario = $2 LIMIT 1', [t.usuario, t.usuario]);
+          if (uRes.rowCount > 0) userId = uRes.rows[0].id;
+        }
+      }
+      if (isNaN(userId) || userId <= 0) userId = 1;
       
       const res = await pool.query(
         `INSERT INTO Tasas_Cambio (tasa_cobro, tasa_vuelto, fecha_actualizacion, usuario_id)
          VALUES ($1, $2, CURRENT_TIMESTAMP, $3) RETURNING id, fecha_actualizacion`,
         [t.tasa_cobro, t.tasa_vuelto, userId]
       );
+
+      const opRes = await pool.query('SELECT nombre FROM Usuarios WHERE id = $1', [userId]);
+      const opName = opRes.rowCount > 0 ? opRes.rows[0].nombre : (t.usuario || 'SISTEMA');
+
       return { 
-        ...t, 
         id: res.rows[0].id,
-        fecha_actualizacion: getLocalISODateString(new Date(res.rows[0].fecha_actualizacion))
+        tasa_cobro: parseFloat(t.tasa_cobro),
+        tasa_vuelto: parseFloat(t.tasa_vuelto),
+        fecha_actualizacion: getLocalISODateString(new Date(res.rows[0].fecha_actualizacion)),
+        usuario: opName
       };
     } catch (err) {
       console.error('Error en saveTasa (Postgres):', err.message);
@@ -1205,11 +1190,26 @@ export async function saveTasa(t) {
     }
   }
   const history = readJsonFile('tasa_history.json', mockTasaHistory);
-  const newItem = { ...t, id: Date.now() };
+  const newItem = { ...t, id: Date.now(), fecha_actualizacion: getLocalISODateString() };
   history.push(newItem);
   writeJsonFile('tasa_history.json', history);
   return newItem;
 }
+
+export async function clearTasaHistory() {
+  if (usePostgres) {
+    try {
+      await pool.query('TRUNCATE TABLE Tasas_Cambio RESTART IDENTITY');
+      return true;
+    } catch (err) {
+      console.error('Error en clearTasaHistory (Postgres):', err.message);
+      throw err;
+    }
+  }
+  writeJsonFile('tasa_history.json', []);
+  return true;
+}
+
 
 export async function getMovements() {
   if (usePostgres) {

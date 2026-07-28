@@ -572,20 +572,29 @@ export default function App() {
   const tasaVuelto = currentTasa ? currentTasa.tasa_vuelto : 40.00;
 
   const handleUpdateTasa = async (newDia: number, newVuelto: number) => {
-    const newItem: TasaHistoryItem = {
-      id: Date.now(),
+    const newItem = {
       tasa_cobro: newDia,
       tasa_vuelto: newVuelto,
-      fecha_actualizacion: getLocalISODateString(),
+      usuarioId: currentUser?.id,
       usuario: currentUser?.nombre || 'SISTEMA'
     };
     const saved = await postApiData('/tasas', newItem);
     if (saved) {
       setTasaHistory(prev => [...prev, saved]);
-    } else {
-      setTasaHistory(prev => [...prev, newItem]);
     }
   };
+
+  const handleClearTasaHistory = async () => {
+    try {
+      const res = await fetch(getApiUrl('/tasas/clear'), { method: 'DELETE' });
+      if (res.ok) {
+        setTasaHistory([]);
+      }
+    } catch (err) {
+      console.error('Error al vaciar historial de tasas:', err);
+    }
+  };
+
 
   const handleAddProduct = async (prod: Product) => {
     const saved = await postApiData('/productos', prod);
@@ -1577,8 +1586,10 @@ export default function App() {
               isServer={terminalName === 'CAJA_01' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'}
               getApiUrl={getApiUrl}
               onUpdateTasa={handleUpdateTasa}
+              onClearHistory={handleClearTasaHistory}
             />
           )}
+
 
           {activeTab === 'config' && (
             <ConfiguracionEmpresa

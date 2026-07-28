@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { TasaHistoryItem, User } from '../types';
-import { TrendingUp, Clock, Shuffle, FileDown, Search, Calendar, RefreshCw, Layers } from 'lucide-react';
+import { TrendingUp, Clock, Shuffle, FileDown, Search, Calendar, RefreshCw, Layers, Trash2 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 
 interface TasaCambioProps {
@@ -11,10 +11,12 @@ interface TasaCambioProps {
   isServer?: boolean;
   getApiUrl?: (path: string) => string;
   onUpdateTasa: (newDia: number, newVuelto: number) => void;
+  onClearHistory?: () => Promise<void>;
 }
 
-export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUser: _currentUser, isServer = true, getApiUrl, onUpdateTasa }: TasaCambioProps) {
-  const { showAlert } = useDialog();
+export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUser, isServer = true, getApiUrl, onUpdateTasa, onClearHistory }: TasaCambioProps) {
+  const { showAlert, showConfirm } = useDialog();
+
   const [inputDia, setInputDia] = useState(tasaDia > 0 ? tasaDia.toString() : '');
   const [inputVuelto, setInputVuelto] = useState(tasaVuelto > 0 ? tasaVuelto.toString() : '');
   const [errorMsg, setErrorMsg] = useState('');
@@ -79,6 +81,31 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
       setInputDia(valStr);
     } else {
       setInputVuelto(valStr);
+    }
+  };
+
+  const isAdmin = Boolean(
+    currentUser && (
+      currentUser.rol?.toUpperCase().includes('ADMIN') || 
+      currentUser.rol === 'ADMINISTRADOR' || 
+      currentUser.rol === 'ADMIN'
+    )
+  );
+
+  const handleConfirmClearHistory = async () => {
+    const ok = await showConfirm(
+      '¿Está seguro de eliminar de forma permanente todo el historial de cambios de tasa en la base de datos central? Esta acción no se puede deshacer.',
+      'Vaciar Historial de Tasas',
+      { confirmLabel: 'Sí, Vaciar Historial', isDanger: true }
+    );
+
+    if (ok && onClearHistory) {
+      await onClearHistory();
+      showAlert({
+        title: 'Historial Vaciado',
+        message: 'Se ha eliminado todo el historial de tasas de cambio exitosamente.',
+        variant: 'success'
+      });
     }
   };
 
@@ -545,13 +572,27 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
                 <Clock className="w-4 h-4 text-winter-clientesStart" />
                 Historial de Modificaciones del Tipo de Cambio
               </h2>
-              <span className="text-[10px] bg-slate-200 border border-slate-300 px-2.5 py-0.5 rounded text-slate-600 font-sans">
-                {displayedHistory.length === filteredHistory.length 
-                  ? `${filteredHistory.length} registros` 
-                  : `Mostrando ${displayedHistory.length} de ${filteredHistory.length} registros`
-                }
-              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] bg-slate-200 border border-slate-300 px-2.5 py-0.5 rounded text-slate-600 font-sans">
+                  {displayedHistory.length === filteredHistory.length 
+                    ? `${filteredHistory.length} registros` 
+                    : `Mostrando ${displayedHistory.length} de ${filteredHistory.length} registros`
+                  }
+                </span>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={handleConfirmClearHistory}
+                    className="flex items-center gap-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-3 py-1 rounded text-[11px] font-bold font-sans transition-all shadow-sm"
+                    title="Vaciar todo el historial de tipo de cambio en la base de datos (Exclusivo Administrador)"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Vaciar Historial</span>
+                  </button>
+                )}
+              </div>
             </div>
+
 
             {/* FILTERS SECTION */}
             <div className="bg-slate-50 border-b border-slate-200 px-5 py-3 grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">

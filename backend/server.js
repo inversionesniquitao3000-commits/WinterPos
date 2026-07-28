@@ -4,12 +4,13 @@ import dotenv from 'dotenv';
 import {
   getCompanyConfig, saveCompanyConfig, getUsers, getProducts, saveProduct,
   updateProductStock, updateProductPrices, updateProductPricesBulk, getClients, saveClient, registerAbono,
-  getTasaHistory, saveTasa, getMovements, saveMovement, getPriceHistory, savePriceHistory,
+  getTasaHistory, saveTasa, clearTasaHistory, getMovements, saveMovement, getPriceHistory, savePriceHistory,
   getSales, saveSale, getCierres, abrirCaja, cerrarCaja, getCajaEstado, registrarCajaMovimiento, updateCierre, deleteCierre,
   updateClient, deleteClient, getAbonos, deleteProduct, updateProduct, saveProductsBulk,
   saveUser, updateUser, deleteUser, getRoles, saveRole, updateRole, deleteRole, wipeDatabase, backupDatabase, restoreDatabase,
   readJsonFile, writeJsonFile
 } from './db-store.js';
+
 import { 
   initWhatsAppClient, getWhatsAppStatus, saveWhatsAppConfig, sendCierreReport 
 } from './whatsapp-service.js';
@@ -189,6 +190,11 @@ app.get('/api/tasas', async (req, res) => {
 app.post('/api/tasas', async (req, res) => {
   const saved = await saveTasa(req.body);
   res.json(saved);
+});
+
+app.delete('/api/tasas/clear', async (req, res) => {
+  await clearTasaHistory();
+  res.json({ success: true });
 });
 
 app.get('/api/movements', async (req, res) => {
