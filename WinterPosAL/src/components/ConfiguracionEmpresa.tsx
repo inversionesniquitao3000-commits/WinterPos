@@ -134,7 +134,18 @@ export default function ConfiguracionEmpresa({
       taraPrevia: 0
     };
   });
-  const [fiscalPrinterConfig, setFiscalPrinterConfig] = useState(() => {
+  const [fiscalPrinterConfig, setFiscalPrinterConfig] = useState<{
+    modelo: string;
+    puerto: string;
+    baudRate: number;
+    serialMaquina: string;
+    ipSpooler: string;
+    reporteZAutomatico: boolean;
+    imprimirIgtf: boolean;
+    exigirRifCliente: boolean;
+    imprimirCopiaFiscal: boolean;
+    estadoFiscal: string;
+  }>(() => {
     const saved = localStorage.getItem('pos_fiscal_printer_config');
     return saved ? JSON.parse(saved) : {
       modelo: 'HKA_FACTORY',

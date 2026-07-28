@@ -1638,7 +1638,7 @@ export default function App() {
                 }
                 return false;
               }}
-              onDeleteCierre={async (cierreId: number) => {
+              onDeleteCierre={async (cierreId: number): Promise<boolean> => {
                 try {
                   const res = await fetch(getApiUrl(`/cajas/cierres/${cierreId}`), {
                     method: 'DELETE'
@@ -1650,6 +1650,7 @@ export default function App() {
                 } catch (e) {
                   console.error('Error eliminando cierre:', e);
                 }
+                return false;
               }}
               getApiUrl={getApiUrl}
             />
