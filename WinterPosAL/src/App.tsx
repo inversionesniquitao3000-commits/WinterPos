@@ -493,6 +493,22 @@ export default function App() {
             setShiftAbonosUsd(cajaData.shiftAbonosUsd || 0);
             setShiftEntradasUsd(cajaData.shiftEntradasUsd || 0);
             setShiftSalidasUsd(cajaData.shiftSalidasUsd || 0);
+          } else {
+            // Explicitly reset caja state for fresh session so user is prompted for Apertura
+            setCajaAbierta(false);
+            setMontoAperturaUsd(0);
+            setMontoAperturaVes(0);
+            setCajaVentasUsd(0);
+            setCajaVentasVes(0);
+            setCajaMovimientosUsd(0);
+            setCajaMovimientosVes(0);
+            setShiftSales([]);
+            setShiftAbonosUsd(0);
+            setShiftEntradasUsd(0);
+            setShiftSalidasUsd(0);
+            localStorage.removeItem('pos_caja_abierta');
+            localStorage.removeItem('pos_apertura_usd');
+            localStorage.removeItem('pos_apertura_ves');
           }
         }
 

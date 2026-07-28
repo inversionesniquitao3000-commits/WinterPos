@@ -68,7 +68,7 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
     );
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     
@@ -79,9 +79,21 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
 
     setIsLoading(true);
     
-    setTimeout(() => {
+    try {
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const apiUrl = isLocalhost ? 'http://localhost:5000/api/users' : `http://${window.location.hostname}:5000/api/users`;
+      
+      let usersToTest = systemUsers;
+      const resUsers = await fetch(apiUrl);
+      if (resUsers.ok) {
+        const uData = await resUsers.json();
+        if (Array.isArray(uData) && uData.length > 0) {
+          usersToTest = uData;
+        }
+      }
+
       setIsLoading(false);
-      const matched = systemUsers.find(
+      const matched = usersToTest.find(
         u => u.usuario.toLowerCase() === username.trim().toLowerCase() && password === (u.clave || 'admin')
       );
       
@@ -94,7 +106,21 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
       } else {
         setErrorMsg('Usuario o contraseña incorrectos. Verifique sus credenciales.');
       }
-    }, 800);
+    } catch (err) {
+      setIsLoading(false);
+      const matched = systemUsers.find(
+        u => u.usuario.toLowerCase() === username.trim().toLowerCase() && password === (u.clave || 'admin')
+      );
+      if (matched) {
+        if (matched.estado === 'Inactivo') {
+          setErrorMsg('Su usuario se encuentra inactivo. Consulte al Administrador.');
+        } else {
+          onLoginSuccess(matched);
+        }
+      } else {
+        setErrorMsg('Usuario o contraseña incorrectos. Verifique sus credenciales.');
+      }
+    }
   };
 
   return (
