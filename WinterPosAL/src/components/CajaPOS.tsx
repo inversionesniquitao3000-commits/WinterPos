@@ -103,14 +103,20 @@ export default function CajaPOS({
   onLogout
 }: CajaPOSProps) {
   const { showAlert, showConfirm } = useDialog();
+  const [isClosingCaja, setIsClosingCaja] = useState(false);
   const [showAperturaModal, setShowAperturaModal] = useState(!cajaAbierta);
   const [aperturaUsdVal, setAperturaUsdVal] = useState('');
   const [aperturaVesVal, setAperturaVesVal] = useState('');
 
   // Sync showAperturaModal whenever cajaAbierta prop changes
   useEffect(() => {
-    setShowAperturaModal(!cajaAbierta);
-  }, [cajaAbierta]);
+    if (isClosingCaja) {
+      setShowAperturaModal(false);
+    } else {
+      setShowAperturaModal(!cajaAbierta);
+    }
+  }, [cajaAbierta, isClosingCaja]);
+
   
   const [showCierreModal, setShowCierreModal] = useState(false);
   const [cierreRealUsd, setCierreRealUsd] = useState('0');
@@ -1538,7 +1544,10 @@ export default function CajaPOS({
 
   const handleConfirmCierre = async () => {
     if (!cierreResult) return;
+    setIsClosingCaja(true);
+    setShowAperturaModal(false);
     setIsSendingWa(true);
+
 
     const realUsd = parseFloat(cierreRealUsd) || 0;
     const realVes = parseFloat(cierreRealVes) || 0;
@@ -1660,20 +1669,17 @@ export default function CajaPOS({
     setCierreResult(null);
 
     if (waCierreStatus.enabled && sendToWhatsApp && fallbackTriggered) {
-      showAlert(
+      await showAlert(
         '⚠️ El reporte no pudo enviarse automáticamente por WhatsApp (sin conexión o bot inactivo).\n\n' +
-        'El cierre se guardó con éxito en el sistema. Hemos copiado la imagen/información al portapapeles para que la pegues (Ctrl+V) manualmente en su grupo.',
+        'El cierre se guardó con éxito en el sistema. Hemos copiado la información al portapapeles.',
         'Cierre Guardado con Alerta',
         'warning'
       );
-      setTimeout(() => window.location.reload(), 3000);
     } else if (waCierreStatus.enabled && sendToWhatsApp && waSuccess) {
-      showAlert('¡Cierre registrado y notificado exitosamente por WhatsApp al grupo!', 'Cierre Exitoso', 'success');
-      setTimeout(() => window.location.reload(), 1500);
-    } else {
-      window.location.reload();
+      await showAlert('¡Cierre registrado y notificado exitosamente por WhatsApp al grupo!', 'Cierre Exitoso', 'success');
     }
   };
+
 
   const handleSaveCajaMovement = (e: React.FormEvent) => {
     e.preventDefault();

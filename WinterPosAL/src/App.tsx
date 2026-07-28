@@ -1128,8 +1128,10 @@ export default function App() {
     localStorage.removeItem('pos_apertura_fecha');
 
     await postApiData('/cajas/cerrar', newCierre);
+    setCurrentUser(null);
     return newCierre;
   };
+
 
   const handleRegisterCajaMovement = async (type: 'Entrada' | 'Salida' | 'Devolucion', description: string, usd: number, ves: number) => {
     const mult = type === 'Entrada' ? 1 : -1;
