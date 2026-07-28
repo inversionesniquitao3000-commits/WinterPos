@@ -382,6 +382,26 @@ export default function CajaPOS({
   const [selectedSeller, setSelectedSeller] = useState<string>(currentUser.nombre);
   
   const [searchProdTerm, setSearchProdTerm] = useState('');
+  const [searchSelectedIndex, setSearchSelectedIndex] = useState<number>(-1);
+  const searchDropdownRef = useRef<HTMLDivElement>(null);
+
+  const searchSuggestions = useMemo(() => {
+    const term = searchProdTerm.trim().toLowerCase();
+    if (!term) return [];
+    return products.filter(p =>
+      p.description.toLowerCase().includes(term) ||
+      p.barcode.toLowerCase().includes(term)
+    );
+  }, [products, searchProdTerm]);
+
+  useEffect(() => {
+    if (searchSelectedIndex >= 0 && searchDropdownRef.current) {
+      const activeItem = searchDropdownRef.current.children[searchSelectedIndex] as HTMLElement;
+      if (activeItem) {
+        activeItem.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }, [searchSelectedIndex]);
   
   const [saleItems, setSaleItems] = useState<SaleItem[]>(() => {
     try {
@@ -1752,34 +1772,51 @@ export default function CajaPOS({
                 type="text"
                 placeholder="Escriba código o descripción..."
                 value={searchProdTerm}
-                onChange={(e) => setSearchProdTerm(e.target.value)}
+                onChange={(e) => {
+                  setSearchProdTerm(e.target.value);
+                  setSearchSelectedIndex(-1);
+                }}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
+                  if (e.key === 'ArrowDown') {
+                    if (searchSuggestions.length > 0) {
+                      e.preventDefault();
+                      setSearchSelectedIndex(prev => (prev < searchSuggestions.length - 1 ? prev + 1 : 0));
+                    }
+                  } else if (e.key === 'ArrowUp') {
+                    if (searchSuggestions.length > 0) {
+                      e.preventDefault();
+                      setSearchSelectedIndex(prev => (prev > 0 ? prev - 1 : searchSuggestions.length - 1));
+                    }
+                  } else if (e.key === 'Escape') {
+                    setSearchSelectedIndex(-1);
+                  } else if (e.key === 'Enter') {
                     e.preventDefault();
                     e.stopPropagation();
                     const term = searchProdTerm.trim();
                     if (!term) return;
 
-                    // Search for exact barcode/code match first
-                    let matched = products.find(p => p.barcode.toUpperCase() === term.toUpperCase() || p.id.toString() === term);
+                    let matched: Product | undefined;
 
-                    // If no exact match, try the first product in the filtered list
-                    if (!matched) {
-                      const filtered = products.filter(p => 
-                        p.description.toLowerCase().includes(term.toLowerCase()) || 
-                        p.barcode.toLowerCase().includes(term.toLowerCase())
-                      );
-                      if (filtered.length === 1) {
-                        matched = filtered[0];
+                    if (searchSelectedIndex >= 0 && searchSelectedIndex < searchSuggestions.length) {
+                      matched = searchSuggestions[searchSelectedIndex];
+                    } else {
+                      // Search for exact barcode/code match first
+                      matched = products.find(p => p.barcode.toUpperCase() === term.toUpperCase() || p.id.toString() === term);
+
+                      // If no exact match, try the first product in the filtered list
+                      if (!matched && searchSuggestions.length === 1) {
+                        matched = searchSuggestions[0];
                       }
                     }
 
                     if (matched) {
                       handleAddProduct(matched);
                       setSearchProdTerm('');
+                      setSearchSelectedIndex(-1);
                     } else {
                       showToast(`Código "${term}" no registrado o inexistente en el inventario.`, 'error');
                       setSearchProdTerm('');
+                      setSearchSelectedIndex(-1);
                     }
                   }
                 }}
@@ -1787,45 +1824,52 @@ export default function CajaPOS({
               />
               
               {/* Autocomplete Dropdown - Light Styled */}
-              {searchProdTerm && (
-                <div className="absolute left-0 right-0 top-11 bg-white border border-slate-250 rounded max-h-48 overflow-y-auto z-40 shadow-2xl divide-y divide-slate-100">
-                  {products
-                    .filter(p => p.description.toLowerCase().includes(searchProdTerm.toLowerCase()) || p.barcode.toLowerCase().includes(searchProdTerm.toLowerCase()))
-                    .map(p => {
-                      const hasStock = p.stock_actual > 0;
-                      const priceVES = p.precio_detalle_usd * tasaDia;
-                      return (
-                        <button
-                          key={p.id}
-                          type="button"
-                          disabled={!hasStock}
-                          onClick={() => {
-                            if (!hasStock) return;
-                            handleAddProduct(p);
-                            setSearchProdTerm('');
-                          }}
-                          className={`w-full text-left p-2.5 text-[11px] font-sans block transition-all ${
-                            hasStock 
+              {searchProdTerm && searchSuggestions.length > 0 && (
+                <div 
+                  ref={searchDropdownRef}
+                  className="absolute left-0 right-0 top-11 bg-white border border-slate-250 rounded max-h-48 overflow-y-auto z-40 shadow-2xl divide-y divide-slate-100"
+                >
+                  {searchSuggestions.map((p, idx) => {
+                    const hasStock = p.stock_actual > 0;
+                    const priceVES = p.precio_detalle_usd * tasaDia;
+                    const isSelected = idx === searchSelectedIndex;
+
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        disabled={!hasStock}
+                        onMouseEnter={() => setSearchSelectedIndex(idx)}
+                        onClick={() => {
+                          if (!hasStock) return;
+                          handleAddProduct(p);
+                          setSearchProdTerm('');
+                          setSearchSelectedIndex(-1);
+                        }}
+                        className={`w-full text-left p-2.5 text-[11px] font-sans block transition-all ${
+                          isSelected
+                            ? 'bg-blue-100 text-slate-900 border-l-4 border-winter-blueBtn font-semibold shadow-inner'
+                            : hasStock 
                               ? 'hover:bg-slate-100 text-slate-800 hover:text-slate-900' 
-                              : 'opacity-50 cursor-not-allowed text-slate-400 bg-slate-55'
-                          }`}
-                        >
-                          <span className="font-mono text-slate-500 font-bold mr-1.5">{p.barcode}</span>
-                          <span className={`${!hasStock ? 'line-through' : ''}`}>{p.description}</span>
-                          {hasStock ? (
-                            <span className="float-right text-emerald-600 font-bold font-mono text-right flex flex-col items-end">
-                              <span>${p.precio_detalle_usd.toFixed(2)} <span className="text-slate-550 font-normal text-[9px] font-sans">/ Bs {priceVES.toFixed(2)}</span></span>
-                              <span className="text-[9px] text-slate-500 font-sans font-semibold">Stock: {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}</span>
-                            </span>
-                          ) : (
-                            <span className="float-right text-red-500 font-bold font-mono text-right flex flex-col items-end">
-                              <span>SIN STOCK</span>
-                              <span className="text-[9px] text-slate-400 font-sans font-normal">Stock: {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}</span>
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
+                              : 'opacity-50 cursor-not-allowed text-slate-400 bg-slate-50'
+                        }`}
+                      >
+                        <span className="font-mono text-slate-500 font-bold mr-1.5">{p.barcode}</span>
+                        <span className={`${!hasStock ? 'line-through' : ''}`}>{p.description}</span>
+                        {hasStock ? (
+                          <span className="float-right text-emerald-600 font-bold font-mono text-right flex flex-col items-end">
+                            <span>${p.precio_detalle_usd.toFixed(2)} <span className="text-slate-550 font-normal text-[9px] font-sans">/ Bs {priceVES.toFixed(2)}</span></span>
+                            <span className="text-[9px] text-slate-500 font-sans font-semibold">Stock: {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}</span>
+                          </span>
+                        ) : (
+                          <span className="float-right text-red-500 font-bold font-mono text-right flex flex-col items-end">
+                            <span>SIN STOCK</span>
+                            <span className="text-[9px] text-slate-400 font-sans font-normal">Stock: {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}</span>
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
