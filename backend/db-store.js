@@ -76,16 +76,35 @@ try {
       nombre VARCHAR(100) UNIQUE,
       permisos TEXT
     );
+    CREATE TABLE IF NOT EXISTS Tasas_Cambio (
+      id SERIAL PRIMARY KEY,
+      tasa_cobro NUMERIC(10,2) NOT NULL,
+      tasa_vuelto NUMERIC(10,2) NOT NULL,
+      fecha_actualizacion VARCHAR(50) NOT NULL,
+      usuario_id INT REFERENCES Usuarios(id) ON DELETE SET NULL
+    );
     -- Resincronizar secuencias de claves primarias para evitar colisiones de llaves duplicadas (usuarios_pkey, etc.)
     SELECT setval(pg_get_serial_sequence('Usuarios', 'id'), COALESCE((SELECT MAX(id) FROM Usuarios), 1));
     SELECT setval(pg_get_serial_sequence('Roles', 'id'), COALESCE((SELECT MAX(id) FROM Roles), 1));
     SELECT setval(pg_get_serial_sequence('Productos', 'id'), COALESCE((SELECT MAX(id) FROM Productos), 1));
     SELECT setval(pg_get_serial_sequence('Clientes', 'id'), COALESCE((SELECT MAX(id) FROM Clientes), 1));
     SELECT setval(pg_get_serial_sequence('Ventas', 'id'), COALESCE((SELECT MAX(id) FROM Ventas), 1));
+    SELECT setval(pg_get_serial_sequence('Tasas_Cambio', 'id'), COALESCE((SELECT MAX(id) FROM Tasas_Cambio), 1));
     -- Asegurar que todos los cierres tengan fecha_cierre asignada y estatus 'Cerrada' si ya tienen detalles de conciliación
     UPDATE Cajas_Apertura_Cierre SET fecha_cierre = COALESCE(fecha_cierre, fecha_apertura, CURRENT_TIMESTAMP) WHERE fecha_cierre IS NULL;
     UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada' WHERE (monto_cierre_real_usd IS NOT NULL OR detalles_json IS NOT NULL) AND (estatus IS NULL OR estatus = 'Abierta');
   `);
+
+  // Seed default initial rates if Tasas_Cambio is empty
+  const tasaCheck = await client.query('SELECT COUNT(*) FROM Tasas_Cambio');
+  if (parseInt(tasaCheck.rows[0].count) === 0) {
+    for (const m of mockTasaHistory) {
+      await client.query(
+        'INSERT INTO Tasas_Cambio (tasa_cobro, tasa_vuelto, fecha_actualizacion, usuario_id) VALUES ($1, $2, $3, 1)',
+        [m.tasa_cobro, m.tasa_vuelto, m.fecha_actualizacion || getLocalISODateString()]
+      );
+    }
+  }
 
   // Alter enum type outside of main multi-statement query to prevent implicit transaction block errors in Postgres
   try {
@@ -1190,10 +1209,11 @@ export async function saveTasa(t) {
       }
       if (isNaN(userId) || userId <= 0) userId = 1;
       
+      const nowStr = getLocalISODateString();
       const res = await pool.query(
         `INSERT INTO Tasas_Cambio (tasa_cobro, tasa_vuelto, fecha_actualizacion, usuario_id)
-         VALUES ($1, $2, CURRENT_TIMESTAMP, $3) RETURNING id, fecha_actualizacion`,
-        [t.tasa_cobro, t.tasa_vuelto, userId]
+         VALUES ($1, $2, $3, $4) RETURNING id, fecha_actualizacion`,
+        [t.tasa_cobro, t.tasa_vuelto, nowStr, userId]
       );
 
       const opRes = await pool.query('SELECT nombre FROM Usuarios WHERE id = $1', [userId]);
@@ -1203,7 +1223,7 @@ export async function saveTasa(t) {
         id: res.rows[0].id,
         tasa_cobro: parseFloat(t.tasa_cobro),
         tasa_vuelto: parseFloat(t.tasa_vuelto),
-        fecha_actualizacion: getLocalISODateString(new Date(res.rows[0].fecha_actualizacion)),
+        fecha_actualizacion: getLocalISODateString(res.rows[0].fecha_actualizacion),
         usuario: opName
       };
     } catch (err) {
