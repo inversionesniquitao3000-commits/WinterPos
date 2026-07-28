@@ -1701,6 +1701,27 @@ export async function updateCierre(id, updated) {
   return null;
 }
 
+export async function deleteCierre(id) {
+  if (usePostgres) {
+    try {
+      const cierreId = parseInt(id);
+      await pool.query('DELETE FROM Cajas_Apertura_Cierre WHERE id = $1', [cierreId]);
+      return true;
+    } catch (err) {
+      console.error('Error en deleteCierre (Postgres):', err.message);
+      throw err;
+    }
+  }
+  const cierres = readJsonFile('cierres.json', []);
+  const initialLength = cierres.length;
+  const filtered = cierres.filter(c => String(c.id) !== String(id));
+  if (filtered.length !== initialLength) {
+    writeJsonFile('cierres.json', filtered);
+    return true;
+  }
+  return false;
+}
+
 export async function getCajaEstado() {
   if (usePostgres) {
     try {

@@ -5,7 +5,7 @@ import {
   getCompanyConfig, saveCompanyConfig, getUsers, getProducts, saveProduct,
   updateProductStock, updateProductPrices, updateProductPricesBulk, getClients, saveClient, registerAbono,
   getTasaHistory, saveTasa, getMovements, saveMovement, getPriceHistory, savePriceHistory,
-  getSales, saveSale, getCierres, abrirCaja, cerrarCaja, getCajaEstado, registrarCajaMovimiento, updateCierre,
+  getSales, saveSale, getCierres, abrirCaja, cerrarCaja, getCajaEstado, registrarCajaMovimiento, updateCierre, deleteCierre,
   updateClient, deleteClient, getAbonos, deleteProduct, updateProduct, saveProductsBulk,
   saveUser, updateUser, deleteUser, getRoles, saveRole, updateRole, deleteRole, wipeDatabase, backupDatabase, restoreDatabase,
   readJsonFile, writeJsonFile
@@ -242,10 +242,14 @@ app.get('/api/sales/last-invoice', async (req, res) => {
 app.get('/api/sync/poll', async (req, res) => {
   try {
     const sinceId = parseInt(req.query.since_id) || 0;
-    const lastTasaId = parseInt(req.query.last_tasa_id) || 0;
     const terminal = req.query.terminal || null;
     const usuario = req.query.usuario || null;
     const sessionSince = req.query.session_since || null;
+
+    // Tasas sync parameters (immune to sequential vs timestamp ID mismatches)
+    const clientTasaCobro = parseFloat(req.query.last_tasa_cobro) || 0;
+    const clientTasaVuelto = parseFloat(req.query.last_tasa_vuelto) || 0;
+    const clientTasasCount = parseInt(req.query.tasas_count) || 0;
 
     // Cierres sync parameters
     const clientCierreCount = parseInt(req.query.cierres_count) || 0;
@@ -270,10 +274,23 @@ app.get('/api/sync/poll', async (req, res) => {
       });
     }
 
-    // 2. Tasa changes: if any tasa has id > lastTasaId, send the full updated list
+    // 2. Tasa changes: compare by quantity and latest tasa values to avoid mixed ID bugs (sequential vs Date.now)
     const tasas = await getTasaHistory();
-    const maxTasaId = tasas.length > 0 ? Math.max(...tasas.map(t => t.id)) : 0;
-    if (maxTasaId > lastTasaId) {
+    const serverTasasCount = tasas.length;
+    const latestTasa = tasas.length > 0 ? tasas[tasas.length - 1] : null;
+
+    let tasasChanged = false;
+    if (serverTasasCount !== clientTasasCount) {
+      tasasChanged = true;
+    } else if (latestTasa) {
+      // Use epsilon-like comparison or standard != for float check
+      if (Math.abs(latestTasa.tasa_cobro - clientTasaCobro) > 0.0001 || 
+          Math.abs(latestTasa.tasa_vuelto - clientTasaVuelto) > 0.0001) {
+        tasasChanged = true;
+      }
+    }
+
+    if (tasasChanged) {
       result.tasas = tasas;
     }
 
@@ -312,6 +329,7 @@ app.get('/api/sync/poll', async (req, res) => {
     res.json({ sales: [], tasas: null, cierres: null, sessionClosed: false, serverTime: new Date().toISOString() });
   }
 });
+
 
 import https from 'https';
 
@@ -432,6 +450,15 @@ app.post('/api/cajas/movimiento', async (req, res) => {
 app.get('/api/cajas/cierres', async (req, res) => {
   const cierres = await getCierres();
   res.json(cierres);
+});
+
+app.delete('/api/cajas/cierres/:id', async (req, res) => {
+  try {
+    const success = await deleteCierre(req.params.id);
+    res.json({ success });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.put('/api/cajas/cierres/:id', async (req, res) => {

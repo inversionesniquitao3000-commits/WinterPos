@@ -331,7 +331,12 @@ export default function App() {
       try {
         // Calculate max known IDs from current state
         const maxSaleId = sales.reduce((max, s) => Math.max(max, s.id || 0), 0);
-        const maxTasaId = tasaHistory.reduce((max, t) => Math.max(max, t.id || 0), 0);
+        
+        // Calculate latest active rate details (immune to mixed sequential/timestamp IDs)
+        const currentTasaObj = tasaHistory[tasaHistory.length - 1];
+        const lastTasaCobro = currentTasaObj ? currentTasaObj.tasa_cobro : 0;
+        const lastTasaVuelto = currentTasaObj ? currentTasaObj.tasa_vuelto : 0;
+        const tasasCount = tasaHistory.length;
         
         // Calculate cierres parameters
         const cierresCount = cierres.length;
@@ -340,7 +345,9 @@ export default function App() {
 
         const params = new URLSearchParams({
           since_id: String(maxSaleId),
-          last_tasa_id: String(maxTasaId),
+          last_tasa_cobro: String(lastTasaCobro),
+          last_tasa_vuelto: String(lastTasaVuelto),
+          tasas_count: String(tasasCount),
           cierres_count: String(cierresCount),
           last_cierre_id: String(maxCierreId),
           cierres_signature: String(cierresSig),
@@ -1503,7 +1510,22 @@ export default function App() {
                 }
                 return false;
               }}
+              onDeleteCierre={async (cierreId: number) => {
+                try {
+                  const res = await fetch(getApiUrl(`/cajas/cierres/${cierreId}`), {
+                    method: 'DELETE'
+                  });
+                  if (res.ok) {
+                    setCierres(prev => prev.filter(c => c.id !== cierreId));
+                    return true;
+                  }
+                } catch (e) {
+                  console.error('Error eliminando cierre:', e);
+                }
+                return false;
+              }}
             />
+
           )}
 
           {activeTab === 'clientes' && (

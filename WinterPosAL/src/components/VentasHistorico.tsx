@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Sale, CierreCaja, User } from '../types';
-import { History, Printer, ShieldAlert, ShoppingCart, Eye, Edit, Search, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
+import { History, Printer, ShieldAlert, ShoppingCart, Eye, Edit, Trash2, Search, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { formatNumberToWordsUSD } from '../utils';
 import { useDialog } from '../hooks/useDialog';
 
@@ -10,9 +10,10 @@ interface VentasHistoricoProps {
   onReprintTicket: (sale: Sale) => void;
   currentUser: User;
   onUpdateCierre: (cierreId: number, updatedData: any) => Promise<boolean>;
+  onDeleteCierre: (cierreId: number) => Promise<boolean>;
 }
 
-export default function VentasHistorico({ sales, cierres, onReprintTicket, currentUser, onUpdateCierre }: VentasHistoricoProps) {
+export default function VentasHistorico({ sales, cierres, onReprintTicket, currentUser, onUpdateCierre, onDeleteCierre }: VentasHistoricoProps) {
   const { showAlert } = useDialog();
   const [activeSubTab, setActiveSubTab] = useState<'ventas' | 'cierres'>('ventas');
   const [selectedCierre, setSelectedCierre] = useState<CierreCaja | null>(null);
@@ -977,17 +978,38 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                               Ver
                             </button>
                             {isAdmin && (
-                              <button
-                                onClick={() => handleStartEditCierre(c)}
-                                className="bg-amber-50 border border-amber-200 text-amber-700 px-2 py-1 rounded hover:bg-amber-100 hover:text-amber-800 transition-all shadow-sm flex items-center gap-1 font-sans text-[10px]"
-                                title="Corregir Apertura, Recibidos y Movimientos"
-                              >
-                                <Edit className="w-3.5 h-3.5 text-amber-600" />
-                                Editar
-                              </button>
+                              <>
+                                <button
+                                  onClick={() => handleStartEditCierre(c)}
+                                  className="bg-amber-50 border border-amber-200 text-amber-700 px-2 py-1 rounded hover:bg-amber-100 hover:text-amber-800 transition-all shadow-sm flex items-center gap-1 font-sans text-[10px]"
+                                  title="Corregir Apertura, Recibidos y Movimientos"
+                                >
+                                  <Edit className="w-3.5 h-3.5 text-amber-600" />
+                                  Editar
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    const confirmDelete = window.confirm('¿Está seguro de eliminar este cierre de caja de forma permanente? Esta acción no se puede deshacer.');
+                                    if (confirmDelete) {
+                                      const ok = await onDeleteCierre(c.id);
+                                      if (ok) {
+                                        showAlert('Cierre de caja eliminado exitosamente.', 'Operación Completada', 'success');
+                                      } else {
+                                        showAlert('No se pudo eliminar el cierre de caja.', 'Error', 'error');
+                                      }
+                                    }
+                                  }}
+                                  className="bg-rose-50 border border-rose-200 text-rose-700 px-2 py-1 rounded hover:bg-rose-100 hover:text-rose-800 transition-all shadow-sm flex items-center gap-1 font-sans text-[10px]"
+                                  title="Eliminar este Cierre permanentemente"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                                  Eliminar
+                                </button>
+                              </>
                             )}
                           </div>
                         </td>
+
                       </tr>
                     );
                   })
