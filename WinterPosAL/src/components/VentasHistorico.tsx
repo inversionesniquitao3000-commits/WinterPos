@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Sale, CierreCaja, User } from '../types';
-import { History, Printer, ShieldAlert, ShoppingCart, Eye, Edit, Trash2, Search, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
+import { History, Printer, ShieldAlert, ShoppingCart, Eye, Edit, Trash2, Search, ChevronUp, ChevronDown, ChevronsUpDown, CheckCircle2, FileDown } from 'lucide-react';
 import { formatNumberToWordsUSD } from '../utils';
 import { useDialog } from '../hooks/useDialog';
 
