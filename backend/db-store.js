@@ -1603,7 +1603,6 @@ export async function getCierres() {
           ...parsedDetails
         };
       });
-
     } catch (err) {
       console.error('Error en getCierres (Postgres):', err.message);
     }
@@ -1614,15 +1613,17 @@ export async function getCierres() {
 export async function abrirCaja(usd, ves, usuarioId, terminal) {
   if (usePostgres) {
     try {
-      const userId = usuarioId || 1;
+      const userId = (typeof usuarioId === 'number' && usuarioId > 0) ? usuarioId : 1;
+      const termName = terminal || 'CAJA_PRINCIPAL';
       const res = await pool.query(
         `INSERT INTO Cajas_Apertura_Cierre (usuario_id, estacion_nombre, monto_apertura_usd, monto_apertura_ves, estatus)
          VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-        [userId, terminal || 'CAJA_PRINCIPAL', usd, ves, 'Abierta']
+        [userId, termName, usd, ves, 'Abierta']
       );
       return res.rows[0].id;
     } catch (err) {
       console.error('Error en abrirCaja (Postgres):', err.message);
+      throw err;
     }
   }
   const activeCheck = readJsonFile('caja_activa.json', { abierta: false });
@@ -1644,13 +1645,10 @@ export async function cerrarCaja(cierre) {
   if (usePostgres) {
     try {
       const termName = cierre.terminal || cierre.estacion_nombre || 'CAJA_PRINCIPAL';
-      let activeCaja = await pool.query(
-        "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND (estacion_nombre = $1 OR estacion_nombre = 'CAJA_PRINCIPAL') ORDER BY id DESC LIMIT 1",
+      const activeCaja = await pool.query(
+        "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",
         [termName]
       );
-      if (activeCaja.rowCount === 0) {
-        activeCaja = await pool.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
-      }
       if (activeCaja.rowCount > 0) {
         const cajaId = activeCaja.rows[0].id;
         
@@ -1671,10 +1669,10 @@ export async function cerrarCaja(cierre) {
             detalles_json = $7
            WHERE id = $8`,
           [
-            cierre.expectedUsd, 
-            cierre.expectedVes, 
-            cierre.realUsd, 
-            cierre.realVes, 
+            cierre.expectedUsd || cierre.dineroEnCajaExpected || 0, 
+            cierre.expectedVes || 0, 
+            cierre.realUsd || 0, 
+            cierre.realVes || 0, 
             ventaTotalUsd, 
             utilidadUsd, 
             detallesJson, 
@@ -1685,6 +1683,7 @@ export async function cerrarCaja(cierre) {
       }
     } catch (err) {
       console.error('Error en cerrarCaja (Postgres):', err.message);
+      throw err;
     }
   }
   const cierres = readJsonFile('cierres.json', []);
@@ -1787,13 +1786,10 @@ export async function getCajaEstado(terminal) {
   if (usePostgres) {
     try {
       const myTerminal = terminal || 'CAJA_PRINCIPAL';
-      let activeRes = await pool.query(
-        "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND (estacion_nombre = $1 OR estacion_nombre = 'CAJA_PRINCIPAL') ORDER BY id DESC LIMIT 1",
+      const activeRes = await pool.query(
+        "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",
         [myTerminal]
       );
-      if (activeRes.rowCount === 0) {
-        activeRes = await pool.query("SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
-      }
       if (activeRes.rowCount === 0) {
         return { abierta: false };
       }
@@ -1906,8 +1902,8 @@ export async function getCajaEstado(terminal) {
       
       return {
         abierta: true,
-        aperturaUsd: parseFloat(caja.monto_apertura_usd),
-        aperturaVes: parseFloat(caja.monto_apertura_ves),
+        aperturaUsd: parseFloat(caja.monto_apertura_usd || 0),
+        aperturaVes: parseFloat(caja.monto_apertura_ves || 0),
         fechaApertura: getLocalISODateString(new Date(caja.fecha_apertura)),
         ventasUsd: salesCashUsd,
         ventasVes: salesCashVes,
@@ -1986,7 +1982,11 @@ export async function getCajaEstado(terminal) {
 export async function registrarCajaMovimiento(tipo, descripcion, usd, ves, terminal) {
   if (usePostgres) {
     try {
-      const activeCaja = await pool.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
+      const termName = terminal || 'CAJA_PRINCIPAL';
+      const activeCaja = await pool.query(
+        "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",
+        [termName]
+      );
       if (activeCaja.rowCount > 0) {
         const cajaId = activeCaja.rows[0].id;
         // In Postgres we allow 'Devolucion' check constraint
@@ -1994,12 +1994,13 @@ export async function registrarCajaMovimiento(tipo, descripcion, usd, ves, termi
         await pool.query(
           `INSERT INTO Movimientos_Caja (caja_id, tipo, descripcion, monto_usd, monto_ves, estacion_nombre)
            VALUES ($1, $2, $3, $4, $5, $6)`,
-          [cajaId, typeDb, descripcion, usd, ves, terminal || 'CAJA_PRINCIPAL']
+          [cajaId, typeDb, descripcion, usd, ves, termName]
         );
         return true;
       }
     } catch (err) {
       console.error('Error en registrarCajaMovimiento (Postgres):', err.message);
+      throw err;
     }
   }
   const activeCheck = readJsonFile('caja_activa.json', { abierta: false });
