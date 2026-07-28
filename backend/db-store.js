@@ -1626,6 +1626,13 @@ export async function abrirCaja(usd, ves, usuarioId, terminal, usuarioNombre) {
       if (isNaN(userId) || userId <= 0) userId = 1;
 
       const termName = terminal || 'CAJA_PRINCIPAL';
+
+      // Auto-close any previous stale open session for this terminal to ensure 1 clean active session
+      await pool.query(
+        "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = CURRENT_TIMESTAMP WHERE estacion_nombre = $1 AND estatus = 'Abierta'",
+        [termName]
+      );
+
       const res = await pool.query(
         `INSERT INTO Cajas_Apertura_Cierre (usuario_id, estacion_nombre, monto_apertura_usd, monto_apertura_ves, estatus)
          VALUES ($1, $2, $3, $4, $5) RETURNING id`,

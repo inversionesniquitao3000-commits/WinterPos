@@ -976,40 +976,46 @@ export default function App() {
 
 
   const handleAbrirCaja = async (usd: number, ves: number) => {
-    setCajaAbierta(true);
-    setMontoAperturaUsd(usd);
-    setMontoAperturaVes(ves);
-    setCajaVentasUsd(0);
-    setCajaVentasVes(0);
-    setCajaMovimientosUsd(0);
-    setCajaMovimientosVes(0);
-    
-    // Reset shift metrics
-    setShiftSales([]);
-    setShiftAbonosUsd(0);
-    setShiftEntradasUsd(0);
-    setShiftSalidasUsd(0);
-    localStorage.removeItem('pos_shift_sales');
-    localStorage.removeItem('pos_shift_abonos');
-    localStorage.removeItem('pos_shift_entradas');
-    localStorage.removeItem('pos_shift_salidas');
+    try {
+      // 1. First persist opening record to central PostgreSQL server
+      await postApiData('/cajas/abrir', { 
+        usd, 
+        ves, 
+        usuarioId: currentUser?.id, 
+        usuarioNombre: currentUser?.nombre, 
+        terminal: terminalName 
+      });
 
-    localStorage.setItem('pos_caja_abierta', 'true');
-    localStorage.setItem('pos_apertura_usd', usd.toString());
-    localStorage.setItem('pos_apertura_ves', ves.toString());
-    localStorage.setItem('pos_ventas_usd', '0');
-    localStorage.setItem('pos_ventas_ves', '0');
-    localStorage.setItem('pos_movimientos_usd', '0');
-    localStorage.setItem('pos_movimientos_ves', '0');
-    localStorage.setItem('pos_apertura_fecha', getLocalISODateString());
+      // 2. Set active state and local cache
+      setCajaAbierta(true);
+      setMontoAperturaUsd(usd);
+      setMontoAperturaVes(ves);
+      setCajaVentasUsd(0);
+      setCajaVentasVes(0);
+      setCajaMovimientosUsd(0);
+      setCajaMovimientosVes(0);
+      
+      // Reset shift metrics
+      setShiftSales([]);
+      setShiftAbonosUsd(0);
+      setShiftEntradasUsd(0);
+      setShiftSalidasUsd(0);
+      localStorage.removeItem('pos_shift_sales');
+      localStorage.removeItem('pos_shift_abonos');
+      localStorage.removeItem('pos_shift_entradas');
+      localStorage.removeItem('pos_shift_salidas');
 
-    await postApiData('/cajas/abrir', { 
-      usd, 
-      ves, 
-      usuarioId: currentUser?.id, 
-      usuarioNombre: currentUser?.nombre, 
-      terminal: terminalName 
-    });
+      localStorage.setItem('pos_caja_abierta', 'true');
+      localStorage.setItem('pos_apertura_usd', usd.toString());
+      localStorage.setItem('pos_apertura_ves', ves.toString());
+      localStorage.setItem('pos_ventas_usd', '0');
+      localStorage.setItem('pos_ventas_ves', '0');
+      localStorage.setItem('pos_movimientos_usd', '0');
+      localStorage.setItem('pos_movimientos_ves', '0');
+      localStorage.setItem('pos_apertura_fecha', getLocalISODateString());
+    } catch (err) {
+      console.error('Error al aperturar caja:', err);
+    }
   };
 
   const handleCerrarCaja = async (
