@@ -17,6 +17,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
   const { showAlert } = useDialog();
   const [activeSubTab, setActiveSubTab] = useState<'ventas' | 'cierres'>('ventas');
   const [selectedCierre, setSelectedCierre] = useState<CierreCaja | null>(null);
+  const [selectedCierreRow, setSelectedCierreRow] = useState<CierreCaja | null>(null);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
 
   const isAdmin = currentUser?.rol?.toLowerCase() === 'administrador';
@@ -844,199 +845,258 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
       )}
 
       {activeSubTab === 'cierres' && (
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col h-[500px]">
-          <div className="bg-slate-50 border-b border-slate-200 px-4 py-2 flex flex-wrap justify-between items-center gap-3">
-            <div className="flex items-center gap-4 flex-grow">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5 font-sans whitespace-nowrap">
-                <ShieldAlert className="w-4 h-4 text-slate-450" />
-                Historial de Cierres de Caja Ejecutados
-              </span>
-              <div className="relative w-full max-w-xs">
-                <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
-                  <Search className="w-3.5 h-3.5" />
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-[520px]">
+          {/* LEFT COLUMN: Clean Cierres Table */}
+          <div className="lg:col-span-9 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col h-[520px]">
+            <div className="bg-slate-50 border-b border-slate-200 px-4 py-2 flex flex-wrap justify-between items-center gap-3 flex-shrink-0">
+              <div className="flex items-center gap-4 flex-grow">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5 font-sans whitespace-nowrap">
+                  <ShieldAlert className="w-4 h-4 text-winter-blueBtn" />
+                  Historial de Cierres de Caja Ejecutados
                 </span>
-                <input
-                  type="text"
-                  placeholder="Buscar cierre, cajero, terminal..."
-                  value={cierresSearchTerm}
-                  onChange={(e) => setCierresSearchTerm(e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded pl-8 pr-2.5 py-1 text-[11px] text-slate-800 focus:outline-none focus:border-slate-500 font-sans shadow-sm"
-                />
+                <div className="relative w-full max-w-xs">
+                  <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                    <Search className="w-3.5 h-3.5" />
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="Buscar cierre, cajero, terminal..."
+                    value={cierresSearchTerm}
+                    onChange={(e) => setCierresSearchTerm(e.target.value)}
+                    className="w-full bg-white border border-slate-300 rounded pl-8 pr-2.5 py-1 text-[11px] text-slate-800 focus:outline-none focus:border-winter-blueBtn font-sans shadow-sm"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] bg-emerald-50 text-emerald-700 font-extrabold px-2.5 py-1 rounded border border-emerald-200/60 font-sans">
+                  Utilidad Total: <span className="font-mono text-emerald-800 text-xs">${totalUtilidadFiltered.toFixed(2)}</span>
+                </span>
+                <span className="text-[10px] bg-slate-200 text-slate-600 font-bold px-2 py-0.5 rounded border border-slate-300">
+                  {finalFilteredCierres.length} cierres
+                </span>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] bg-emerald-50 text-emerald-700 font-extrabold px-2 py-0.5 rounded border border-emerald-200/60 font-sans">
-                Utilidad Total: <span className="font-mono text-emerald-800 text-xs">${totalUtilidadFiltered.toFixed(2)}</span>
-              </span>
-              <span className="text-[10px] bg-slate-200 text-slate-600 px-2 py-0.5 rounded border border-slate-300">
-                {finalFilteredCierres.length} cierres
-              </span>
+
+            <div className="flex-grow overflow-y-auto">
+              <table className="w-full border-collapse text-left">
+                <thead className="sticky top-0 z-10 border-b border-slate-200">
+                  <tr className="text-slate-500">
+                    <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2 font-bold font-sans cursor-pointer select-none" onClick={() => handleCierresSort('fechaCierre')}>
+                      <div className="flex items-center gap-1">
+                        <span>FECHA CIERRE</span>
+                        <CierresSortIcon field="fechaCierre" />
+                      </div>
+                    </th>
+                    <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2 font-bold font-sans cursor-pointer select-none" onClick={() => handleCierresSort('usuario')}>
+                      <div className="flex items-center gap-1">
+                        <span>CAJERO / ESTACIÓN</span>
+                        <CierresSortIcon field="usuario" />
+                      </div>
+                    </th>
+                    <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2 text-right font-bold font-sans cursor-pointer select-none" onClick={() => handleCierresSort('aperturaUsd')}>
+                      <div className="flex items-center justify-end gap-1">
+                        <span>APERTURA ($ / Bs)</span>
+                        <CierresSortIcon field="aperturaUsd" />
+                      </div>
+                    </th>
+                    <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2 text-right font-bold font-sans cursor-pointer select-none" onClick={() => handleCierresSort('ventaTotalUsd')}>
+                      <div className="flex items-center justify-end gap-1">
+                        <span>VENTAS NETAS</span>
+                        <CierresSortIcon field="ventaTotalUsd" />
+                      </div>
+                    </th>
+                    <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2 text-right font-bold font-sans cursor-pointer select-none" onClick={() => handleCierresSort('realUsd')}>
+                      <div className="flex items-center justify-end gap-1">
+                        <span>FÍSICO ($ / Bs)</span>
+                        <CierresSortIcon field="realUsd" />
+                      </div>
+                    </th>
+                    <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2 text-right font-bold font-sans cursor-pointer select-none" onClick={() => handleCierresSort('diffUsd')}>
+                      <div className="flex items-center justify-end gap-1">
+                        <span>DIF. USD</span>
+                        <CierresSortIcon field="diffUsd" />
+                      </div>
+                    </th>
+                    <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2 text-right font-bold font-sans text-emerald-600 cursor-pointer select-none" onClick={() => handleCierresSort('utilidadUsd')}>
+                      <div className="flex items-center justify-end gap-1">
+                        <span>UTILIDAD</span>
+                        <CierresSortIcon field="utilidadUsd" />
+                      </div>
+                    </th>
+                    <th className="sticky top-0 z-10 bg-slate-100 px-3 py-2 text-center font-bold font-sans cursor-pointer select-none" onClick={() => handleCierresSort('status')}>
+                      <div className="flex items-center justify-center gap-1">
+                        <span>ESTATUS</span>
+                        <CierresSortIcon field="status" />
+                      </div>
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-slate-100 text-[11px] text-slate-700 select-text">
+                  {finalFilteredCierres.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="text-center py-16 text-slate-400 font-sans">
+                        No se han registrado cierres de caja que coincidan con la búsqueda.
+                      </td>
+                    </tr>
+                  ) : (
+                    finalFilteredCierres.map(c => {
+                      const dineroEnCajaExpected = c.dineroEnCajaExpected ?? (c as any).expectedUsd ?? 0;
+                      const realUsd = c.realUsd ?? 0;
+                      const realVes = c.realVes ?? 0;
+                      const diffUsd = realUsd - dineroEnCajaExpected;
+                      const aperturaUsd = c.aperturaUsd ?? 0;
+                      const aperturaVes = c.aperturaVes ?? 0;
+                      const ventaTotalUsd = c.ventaTotalUsd ?? 0;
+                      const utilidadUsd = c.utilidadUsd ?? (ventaTotalUsd - (c.costoTotalUsd ?? 0));
+                      const isSelected = selectedCierreRow?.id === c.id;
+
+                      return (
+                        <tr 
+                          key={c.id} 
+                          onClick={() => setSelectedCierreRow(c)}
+                          onDoubleClick={() => setSelectedCierre(c)}
+                          className={`cursor-pointer transition-all ${
+                            isSelected 
+                              ? 'bg-blue-50/80 border-l-4 border-emerald-500 font-medium text-slate-900 shadow-sm' 
+                              : 'hover:bg-slate-50/70'
+                          }`}
+                        >
+                          <td className="px-4 py-2.5 font-mono">{c.fechaCierre || c.fecha || 'N/A'}</td>
+                          <td className="px-4 py-2.5 font-sans font-medium uppercase text-slate-800">
+                            {c.usuario}
+                            {c.terminal && (
+                              <span className="ml-1.5 text-[8px] bg-slate-100 text-slate-500 border border-slate-200 px-1 py-0.2 rounded font-mono normal-case">
+                                {c.terminal.replace('CAJA_', 'C')}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono text-slate-600">
+                            <div>${aperturaUsd.toFixed(2)}</div>
+                            <div className="text-[9px] text-slate-400">Bs {aperturaVes.toFixed(2)}</div>
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono font-bold">${ventaTotalUsd.toFixed(2)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-slate-700 font-semibold">
+                            <div>${realUsd.toFixed(2)}</div>
+                            <div className="text-[9px] text-purple-650">Bs {realVes.toFixed(2)}</div>
+                          </td>
+                          <td className={`px-4 py-2.5 text-right font-mono font-bold ${diffUsd >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            ${diffUsd.toFixed(2)}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono text-emerald-600 font-extrabold">
+                            ${utilidadUsd.toFixed(2)}
+                          </td>
+                          <td className="px-3 py-2.5 text-center font-sans">
+                            {c.status === 'Abierta' ? (
+                              <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200/70 px-2 py-0.5 rounded-full text-[9px] font-bold">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                ABIERTA
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded-full text-[9px] font-bold">
+                                CERRADA
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
 
-          <div className="flex-grow overflow-y-auto">
-            <table className="w-full border-collapse text-left">
-              <thead className="sticky top-0 z-10 border-b border-slate-200">
-                <tr className="text-slate-500">
-                  <th className="sticky top-0 z-10 bg-slate-100 px-4 py-1.5 font-bold font-sans cursor-pointer select-none" onClick={() => handleCierresSort('fechaCierre')}>
-                    <div className="flex items-center gap-1">
-                      <span>FECHA CIERRE</span>
-                      <CierresSortIcon field="fechaCierre" />
-                    </div>
-                  </th>
-                  <th className="sticky top-0 z-10 bg-slate-100 px-4 py-1.5 font-bold font-sans cursor-pointer select-none" onClick={() => handleCierresSort('usuario')}>
-                    <div className="flex items-center gap-1">
-                      <span>CAJERO</span>
-                      <CierresSortIcon field="usuario" />
-                    </div>
-                  </th>
-                  <th className="sticky top-0 z-10 bg-slate-100 px-4 py-1.5 text-right font-bold font-sans cursor-pointer select-none" onClick={() => handleCierresSort('aperturaUsd')}>
-                    <div className="flex items-center justify-end gap-1">
-                      <span>APERTURA ($ / Bs)</span>
-                      <CierresSortIcon field="aperturaUsd" />
-                    </div>
-                  </th>
-                  <th className="sticky top-0 z-10 bg-slate-100 px-4 py-1.5 text-right font-bold font-sans cursor-pointer select-none" onClick={() => handleCierresSort('ventaTotalUsd')}>
-                    <div className="flex items-center justify-end gap-1">
-                      <span>VENTAS NETAS</span>
-                      <CierresSortIcon field="ventaTotalUsd" />
-                    </div>
-                  </th>
-                  <th className="sticky top-0 z-10 bg-slate-100 px-4 py-1.5 text-right font-bold font-sans cursor-pointer select-none" onClick={() => handleCierresSort('realUsd')}>
-                    <div className="flex items-center justify-end gap-1">
-                      <span>FISICO ($ / Bs)</span>
-                      <CierresSortIcon field="realUsd" />
-                    </div>
-                  </th>
-                  <th className="sticky top-0 z-10 bg-slate-100 px-4 py-1.5 text-right font-bold font-sans cursor-pointer select-none" onClick={() => handleCierresSort('diffUsd')}>
-                    <div className="flex items-center justify-end gap-1">
-                      <span>DIF USD</span>
-                      <CierresSortIcon field="diffUsd" />
-                    </div>
-                  </th>
-                  <th className="sticky top-0 z-10 bg-slate-100 px-3 py-1.5 text-center font-bold font-sans cursor-pointer select-none" onClick={() => handleCierresSort('status')}>
-                    <div className="flex items-center justify-center gap-1">
-                      <span>ESTATUS</span>
-                      <CierresSortIcon field="status" />
-                    </div>
-                  </th>
-                  <th className="sticky top-0 z-10 bg-slate-100 px-4 py-1.5 text-right font-bold font-sans text-emerald-600 cursor-pointer select-none" onClick={() => handleCierresSort('utilidadUsd')}>
-                    <div className="flex items-center justify-end gap-1">
-                      <span>UTILIDAD</span>
-                      <CierresSortIcon field="utilidadUsd" />
-                    </div>
-                  </th>
-                  <th className="sticky top-0 z-10 bg-slate-100 px-4 py-1.5 text-center"></th>
-                </tr>
-              </thead>
+          {/* RIGHT COLUMN: Operations & Actions Panel (Like Inventory) */}
+          <div className="lg:col-span-3 bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between h-[520px] font-sans">
+            <div className="space-y-4">
+              <h3 className="text-xs font-black text-slate-700 uppercase tracking-wider border-b border-slate-100 pb-2.5 flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                Operaciones de Cierre
+              </h3>
 
-              <tbody className="divide-y divide-slate-100 text-[11px] text-slate-700 select-text">
-                {finalFilteredCierres.length === 0 ? (
-                  <tr>
-                    <td colSpan={9} className="text-center py-12 text-slate-400 font-sans">
-                      No se han registrado cierres de caja que coincidan con la búsqueda.
-                    </td>
-                  </tr>
+              {selectedCierreRow ? (
+                <div className="space-y-3.5">
+                  {/* Selected Row Card */}
+                  <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg text-xs space-y-1.5 shadow-inner">
+                    <div className="text-[9px] text-slate-400 uppercase font-mono font-bold">CIERRE SELECCIONADO</div>
+                    <strong className="text-slate-800 font-bold block text-[13px]">{selectedCierreRow.fechaCierre || selectedCierreRow.fecha}</strong>
+                    <div className="text-slate-600 text-[11px] font-medium uppercase">
+                      Cajero: <span className="text-slate-900 font-bold">{selectedCierreRow.usuario}</span>
+                      {selectedCierreRow.terminal && (
+                        <span className="ml-1 text-[9px] bg-slate-200 text-slate-700 px-1 py-0.2 rounded font-mono">
+                          {selectedCierreRow.terminal}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex justify-between border-t border-slate-200/80 pt-1.5 mt-1 font-mono text-[11px]">
+                      <span>Venta Total:</span>
+                      <strong className="text-emerald-700 font-bold">${(selectedCierreRow.ventaTotalUsd || 0).toFixed(2)}</strong>
+                    </div>
+                  </div>
 
-                ) : (
-                  finalFilteredCierres.map(c => {
-                    const dineroEnCajaExpected = c.dineroEnCajaExpected ?? (c as any).expectedUsd ?? 0;
-                    const realUsd = c.realUsd ?? 0;
-                    const realVes = c.realVes ?? 0;
-                    const diffUsd = realUsd - dineroEnCajaExpected;
-                    const aperturaUsd = c.aperturaUsd ?? 0;
-                    const aperturaVes = c.aperturaVes ?? 0;
-                    const ventaTotalUsd = c.ventaTotalUsd ?? 0;
-                    const utilidadUsd = c.utilidadUsd ?? (ventaTotalUsd - (c.costoTotalUsd ?? 0));
+                  {/* Action Buttons */}
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => setSelectedCierre(selectedCierreRow)}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-3 rounded-lg text-xs transition-all shadow-sm flex items-center justify-center gap-2"
+                    >
+                      <Eye className="w-4 h-4" />
+                      VER DETALLES / COMPROBANTE
+                    </button>
 
-                    return (
-                      <tr key={c.id} className="hover:bg-slate-50/50">
-                        <td className="px-4 py-1 font-mono">{c.fechaCierre || c.fecha || 'N/A'}</td>
-                        <td className="px-4 py-1 font-sans font-medium uppercase text-slate-800">
-                          {c.usuario}
-                          {c.terminal && (
-                            <span className="ml-1.5 text-[8px] bg-slate-100 text-slate-500 border border-slate-200 px-1 py-0.2 rounded font-mono normal-case">
-                              {c.terminal.replace('CAJA_', 'C')}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-1 text-right font-mono text-slate-600">
-                          <div>${aperturaUsd.toFixed(2)}</div>
-                          <div className="text-[9px] text-slate-400">Bs {aperturaVes.toFixed(2)}</div>
-                        </td>
-                        <td className="px-4 py-1 text-right font-mono font-bold">${ventaTotalUsd.toFixed(2)}</td>
-                        <td className="px-4 py-1 text-right font-mono text-slate-700 font-semibold">
-                          <div>${realUsd.toFixed(2)}</div>
-                          <div className="text-[9px] text-purple-650">Bs {realVes.toFixed(2)}</div>
-                        </td>
-                        <td className={`px-4 py-1 text-right font-mono font-bold ${diffUsd >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          ${diffUsd.toFixed(2)}
-                        </td>
-                        <td className="px-4 py-1 text-right font-mono text-emerald-600 font-extrabold">
-                          ${utilidadUsd.toFixed(2)}
-                        </td>
-                        <td className="px-3 py-1 text-center font-sans">
-                          {c.status === 'Abierta' ? (
-                            <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200/70 px-2 py-0.5 rounded-full text-[9px] font-bold">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                              ABIERTA
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded-full text-[9px] font-bold">
-                              CERRADA
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-1 text-center">
+                    {isAdmin && (
+                      <>
+                        <button
+                          onClick={() => handleStartEditCierre(selectedCierreRow)}
+                          className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-2.5 px-3 rounded-lg text-xs transition-all shadow-sm flex items-center justify-center gap-2"
+                        >
+                          <Edit className="w-4 h-4" />
+                          EDITAR / CORREGIR CIERRE
+                        </button>
 
-                          <div className="flex items-center justify-center gap-1.5">
-                            <button
-                              onClick={() => setSelectedCierre(c)}
-                              className="bg-slate-100 border border-slate-200 text-slate-600 px-2 py-1 rounded hover:bg-slate-100 hover:text-slate-800 transition-all shadow-sm flex items-center gap-1 font-sans text-[10px]"
-                              title="Ver Comprobante de Cierre Completo"
-                            >
-                              <Eye className="w-3.5 h-3.5 text-winter-blueBtn" />
-                              Ver
-                            </button>
-                            {isAdmin && (
-                              <>
-                                <button
-                                  onClick={() => handleStartEditCierre(c)}
-                                  className="bg-amber-50 border border-amber-200 text-amber-700 px-2 py-1 rounded hover:bg-amber-100 hover:text-amber-800 transition-all shadow-sm flex items-center gap-1 font-sans text-[10px]"
-                                  title="Corregir Apertura, Recibidos y Movimientos"
-                                >
-                                  <Edit className="w-3.5 h-3.5 text-amber-600" />
-                                  Editar
-                                </button>
-                                <button
-                                  onClick={async () => {
-                                    const confirmDelete = window.confirm('¿Está seguro de eliminar este cierre de caja de forma permanente? Esta acción no se puede deshacer.');
-                                    if (confirmDelete) {
-                                      const ok = await onDeleteCierre(c.id);
-                                      if (ok) {
-                                        showAlert('Cierre de caja eliminado exitosamente.', 'Operación Completada', 'success');
-                                      } else {
-                                        showAlert('No se pudo eliminar el cierre de caja.', 'Error', 'error');
-                                      }
-                                    }
-                                  }}
-                                  className="bg-rose-50 border border-rose-200 text-rose-700 px-2 py-1 rounded hover:bg-rose-100 hover:text-rose-800 transition-all shadow-sm flex items-center gap-1 font-sans text-[10px]"
-                                  title="Eliminar este Cierre permanentemente"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                                  Eliminar
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </td>
+                        <button
+                          onClick={async () => {
+                            const confirmDelete = window.confirm('¿Está seguro de eliminar este cierre de caja de forma permanente? Esta acción no se puede deshacer.');
+                            if (confirmDelete) {
+                              const ok = await onDeleteCierre(selectedCierreRow.id);
+                              if (ok) {
+                                setSelectedCierreRow(null);
+                                showAlert('Cierre de caja eliminado exitosamente.', 'Operación Completada', 'success');
+                              } else {
+                                showAlert('No se pudo eliminar el cierre de caja.', 'Error', 'error');
+                              }
+                            }
+                          }}
+                          className="w-full bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold py-2.5 px-3 rounded-lg text-xs transition-all flex items-center justify-center gap-2"
+                        >
+                          <Trash2 className="w-4 h-4 text-rose-600" />
+                          ELIMINAR CIERRE
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-slate-50 border border-dashed border-slate-200 p-6 rounded-xl text-center space-y-2.5 text-slate-400 my-auto">
+                  <Eye className="w-8 h-8 mx-auto opacity-35" />
+                  <p className="text-[11.5px] leading-relaxed font-sans font-medium text-slate-500">
+                    Seleccione un cierre de la tabla para habilitar las opciones de auditoría y edición.
+                  </p>
+                </div>
+              )}
+            </div>
 
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+            {/* Bottom PDF Download Action */}
+            <div className="border-t border-slate-100 pt-3 mt-2">
+              <button
+                onClick={handleDownloadCierresReport}
+                className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-2.5 px-3 rounded-lg text-xs transition-all flex items-center justify-center gap-2 shadow-sm"
+              >
+                <FileDown className="w-4 h-4" />
+                REPORTE GENERAL EN PDF
+              </button>
+            </div>
           </div>
         </div>
       )}
