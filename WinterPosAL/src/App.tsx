@@ -360,12 +360,8 @@ export default function App() {
         if (!res.ok) return;
         const data = await res.json();
 
-        // 1. Session closed on another terminal → force logout
-        if (data.sessionClosed) {
-          alert('⚠️ Tu turno fue cerrado desde otro equipo. Debes iniciar sesión nuevamente para continuar.');
-          handleLogout();
-          return; // Stop processing, user is logged out
-        }
+        // 1. Session closed on another terminal → update cierres list without kicking out user
+        // (Allows all terminals to continue working independently without losing data)
 
         // 2. New sales from other terminals
         if (data.sales && data.sales.length > 0) {
@@ -481,8 +477,8 @@ export default function App() {
           setAbonos(abonosData);
         }
 
-        // Fetch active caja state
-        const cajaRes = await fetch(getApiUrl('/cajas/estado'));
+        // Fetch active caja state for this specific terminal
+        const cajaRes = await fetch(getApiUrl(`/cajas/estado?terminal=${encodeURIComponent(terminalName)}`));
         if (cajaRes.ok) {
           const cajaData = await cajaRes.json();
           if (cajaData.abierta) {

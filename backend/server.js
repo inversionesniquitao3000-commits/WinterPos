@@ -426,7 +426,8 @@ app.post('/api/sales', async (req, res) => {
 });
 
 app.get('/api/cajas/estado', async (req, res) => {
-  const state = await getCajaEstado();
+  const terminal = req.query.terminal || req.query.estacion_nombre;
+  const state = await getCajaEstado(terminal);
   res.json(state);
 });
 

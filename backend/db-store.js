@@ -1384,7 +1384,14 @@ export async function saveSale(s) {
       
       // Get IDs
       const clientRes = await clientTarget.query('SELECT id FROM Clientes WHERE cedula_rif = $1', [s.client.cedula_rif]);
-      const activeCaja = await clientTarget.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
+      const myTerminal = s.terminal || s.estacion_nombre || 'CAJA_PRINCIPAL';
+      let activeCaja = await clientTarget.query(
+        "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND (estacion_nombre = $1 OR estacion_nombre = 'CAJA_PRINCIPAL') ORDER BY id DESC LIMIT 1",
+        [myTerminal]
+      );
+      if (activeCaja.rowCount === 0) {
+        activeCaja = await clientTarget.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
+      }
       
       let userId = 1;
       if (s.usuario) {
@@ -1600,7 +1607,14 @@ export async function abrirCaja(usd, ves, usuarioId, terminal) {
 export async function cerrarCaja(cierre) {
   if (usePostgres) {
     try {
-      const activeCaja = await pool.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
+      const termName = cierre.terminal || cierre.estacion_nombre || 'CAJA_PRINCIPAL';
+      let activeCaja = await pool.query(
+        "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND (estacion_nombre = $1 OR estacion_nombre = 'CAJA_PRINCIPAL') ORDER BY id DESC LIMIT 1",
+        [termName]
+      );
+      if (activeCaja.rowCount === 0) {
+        activeCaja = await pool.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
+      }
       if (activeCaja.rowCount > 0) {
         const cajaId = activeCaja.rows[0].id;
         
@@ -1733,10 +1747,17 @@ export async function deleteCierre(id) {
   return false;
 }
 
-export async function getCajaEstado() {
+export async function getCajaEstado(terminal) {
   if (usePostgres) {
     try {
-      const activeRes = await pool.query("SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
+      const myTerminal = terminal || 'CAJA_PRINCIPAL';
+      let activeRes = await pool.query(
+        "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND (estacion_nombre = $1 OR estacion_nombre = 'CAJA_PRINCIPAL') ORDER BY id DESC LIMIT 1",
+        [myTerminal]
+      );
+      if (activeRes.rowCount === 0) {
+        activeRes = await pool.query("SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
+      }
       if (activeRes.rowCount === 0) {
         return { abierta: false };
       }
