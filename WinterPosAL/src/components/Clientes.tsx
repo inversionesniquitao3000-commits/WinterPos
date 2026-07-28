@@ -10,6 +10,7 @@ import { useDialog } from '../hooks/useDialog';
 interface ClientesProps {
   clients: Client[];
   currentUser: User;
+  cajaAbierta?: boolean;
   onAddClient: (newClient: Client) => void;
   onRegisterAbono: (
     clientId: number, 
@@ -27,6 +28,7 @@ interface ClientesProps {
 export default function Clientes({ 
   clients, 
   currentUser: _currentUser, 
+  cajaAbierta: _cajaAbierta = true,
   onAddClient, 
   onRegisterAbono, 
   onUpdateClient, 

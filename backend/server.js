@@ -433,7 +433,9 @@ app.post('/api/sales', async (req, res) => {
 
 app.get('/api/cajas/estado', async (req, res) => {
   const terminal = req.query.terminal || req.query.estacion_nombre;
-  const state = await getCajaEstado(terminal);
+  const usuarioId = req.query.usuarioId || req.query.usuario_id;
+  const usuarioNombre = req.query.usuarioNombre || req.query.usuario;
+  const state = await getCajaEstado(terminal, usuarioId, usuarioNombre);
   res.json(state);
 });
 

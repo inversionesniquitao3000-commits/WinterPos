@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { TasaHistoryItem, User } from '../types';
 import { TrendingUp, Clock, Shuffle, FileDown, Search, Calendar, RefreshCw, Layers, Trash2 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';

@@ -8,7 +8,12 @@ import {
 
 dotenv.config();
 
-const { Pool } = pg;
+const { Pool, types } = pg;
+// Force pg to return timestamp strings directly without shifting to UTC Date objects
+types.setTypeParser(1114, str => str); // TIMESTAMP
+types.setTypeParser(1184, str => str); // TIMESTAMPTZ
+types.setTypeParser(1082, str => str); // DATE
+
 const DATA_DIR = path.resolve('./data');
 
 // Ensure data directory exists for JSON storage
@@ -18,6 +23,16 @@ if (!fs.existsSync(DATA_DIR)) {
 
 // Local timezone Date/Time formatter helper
 function getLocalISODateString(d = new Date()) {
+  if (!d) return '';
+  if (typeof d === 'string') {
+    const cleaned = d.replace('T', ' ').substring(0, 16);
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(cleaned)) {
+      return cleaned;
+    }
+    const parsed = new Date(d);
+    if (!isNaN(parsed.getTime())) d = parsed;
+    else return cleaned;
+  }
   const pad = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
@@ -61,8 +76,12 @@ try {
       nombre VARCHAR(100) UNIQUE,
       permisos TEXT
     );
-    -- Secuencia global para numeración atómica de facturas (evita colisiones multi-terminal)
-    CREATE SEQUENCE IF NOT EXISTS seq_factura START 1;
+    -- Resincronizar secuencias de claves primarias para evitar colisiones de llaves duplicadas (usuarios_pkey, etc.)
+    SELECT setval(pg_get_serial_sequence('Usuarios', 'id'), COALESCE((SELECT MAX(id) FROM Usuarios), 1));
+    SELECT setval(pg_get_serial_sequence('Roles', 'id'), COALESCE((SELECT MAX(id) FROM Roles), 1));
+    SELECT setval(pg_get_serial_sequence('Productos', 'id'), COALESCE((SELECT MAX(id) FROM Productos), 1));
+    SELECT setval(pg_get_serial_sequence('Clientes', 'id'), COALESCE((SELECT MAX(id) FROM Clientes), 1));
+    SELECT setval(pg_get_serial_sequence('Ventas', 'id'), COALESCE((SELECT MAX(id) FROM Ventas), 1));
     -- Asegurar que todos los cierres tengan fecha_cierre asignada y estatus 'Cerrada' si ya tienen detalles de conciliación
     UPDATE Cajas_Apertura_Cierre SET fecha_cierre = COALESCE(fecha_cierre, fecha_apertura, CURRENT_TIMESTAMP) WHERE fecha_cierre IS NULL;
     UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada' WHERE (monto_cierre_real_usd IS NOT NULL OR detalles_json IS NOT NULL) AND (estatus IS NULL OR estatus = 'Abierta');
@@ -209,6 +228,7 @@ export async function getUsers() {
             [u.id, u.usuario, clave, u.nombre, u.rol, u.estado || 'Activo', JSON.stringify(perms)]
           );
         }
+        await pool.query("SELECT setval(pg_get_serial_sequence('Usuarios', 'id'), COALESCE((SELECT MAX(id) FROM Usuarios), 1))");
         const res2 = await pool.query('SELECT id, usuario, nombre, rol, estado, clave, permisos FROM Usuarios ORDER BY id ASC');
         return res2.rows.map(r => ({
           id: r.id,
@@ -697,9 +717,10 @@ export async function saveUser(u) {
   const permsStr = JSON.stringify(u.permisos || {});
   if (usePostgres) {
     try {
+      await pool.query("SELECT setval(pg_get_serial_sequence('Usuarios', 'id'), COALESCE((SELECT MAX(id) FROM Usuarios), 1))");
       const res = await pool.query(
         'INSERT INTO Usuarios (usuario, nombre, rol, estado, clave, permisos) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-        [u.usuario, u.nombre, u.rol, u.estado || 'Activo', u.clave || 'admin', permsStr]
+        [u.usuario, u.nombre, u.rol, u.estado || 'Activo', u.clave || '', permsStr]
       );
       if (res.rowCount > 0) {
         const r = res.rows[0];
@@ -858,6 +879,7 @@ export async function saveRole(r) {
   const permsStr = JSON.stringify(r.permisos || {});
   if (usePostgres) {
     try {
+      await pool.query("SELECT setval(pg_get_serial_sequence('Roles', 'id'), COALESCE((SELECT MAX(id) FROM Roles), 1))");
       const res = await pool.query(
         'INSERT INTO Roles (nombre, permisos) VALUES ($1, $2) RETURNING *',
         [r.nombre, permsStr]
@@ -1582,8 +1604,8 @@ export async function getCierres() {
             console.error('Error parsing detalles_json', e);
           }
         }
-        const fApertura = r.fecha_apertura ? getLocalISODateString(new Date(r.fecha_apertura)) : getLocalISODateString();
-        const fCierre = r.fecha_cierre ? getLocalISODateString(new Date(r.fecha_cierre)) : (parsedDetails.fechaCierre || parsedDetails.fecha || fApertura);
+        const fApertura = r.fecha_apertura ? getLocalISODateString(r.fecha_apertura) : getLocalISODateString();
+        const fCierre = r.estatus === 'Abierta' || !r.fecha_cierre ? null : getLocalISODateString(r.fecha_cierre);
 
         const cajeroName = parsedDetails.usuario || r.usuario || 'SISTEMA';
 
@@ -1591,7 +1613,7 @@ export async function getCierres() {
           id: r.id,
           fechaApertura: fApertura,
           fechaCierre: fCierre,
-          fecha: fCierre,
+          fecha: fCierre || fApertura,
           aperturaUsd: parseFloat(r.monto_apertura_usd),
           aperturaVes: parseFloat(r.monto_apertura_ves),
           realUsd: r.monto_cierre_real_usd ? parseFloat(r.monto_cierre_real_usd) : 0,
@@ -1626,17 +1648,18 @@ export async function abrirCaja(usd, ves, usuarioId, terminal, usuarioNombre) {
       if (isNaN(userId) || userId <= 0) userId = 1;
 
       const termName = terminal || 'CAJA_PRINCIPAL';
+      const nowStr = getLocalISODateString();
 
-      // Auto-close any previous stale open session for this terminal to ensure 1 clean active session
+      // Auto-close any previous stale open session for THIS user on THIS terminal
       await pool.query(
-        "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = CURRENT_TIMESTAMP WHERE estacion_nombre = $1 AND estatus = 'Abierta'",
-        [termName]
+        "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = $3 WHERE estacion_nombre = $1 AND usuario_id = $2 AND estatus = 'Abierta'",
+        [termName, userId, nowStr]
       );
 
       const res = await pool.query(
-        `INSERT INTO Cajas_Apertura_Cierre (usuario_id, estacion_nombre, monto_apertura_usd, monto_apertura_ves, estatus)
-         VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-        [userId, termName, usd, ves, 'Abierta']
+        `INSERT INTO Cajas_Apertura_Cierre (usuario_id, estacion_nombre, monto_apertura_usd, monto_apertura_ves, estatus, fecha_apertura)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+        [userId, termName, usd, ves, 'Abierta', nowStr]
       );
       return res.rows[0].id;
     } catch (err) {
@@ -1664,76 +1687,58 @@ export async function cerrarCaja(cierre) {
   if (usePostgres) {
     try {
       const termName = cierre.terminal || cierre.estacion_nombre || 'CAJA_PRINCIPAL';
-      const activeCaja = await pool.query(
-        "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",
-        [termName]
-      );
+      let userId = parseInt(cierre.usuarioId || cierre.usuario_id);
+      if (isNaN(userId) || userId <= 0) {
+        if (cierre.usuario) {
+          const uRes = await pool.query('SELECT id FROM Usuarios WHERE nombre = $1 OR usuario = $2 LIMIT 1', [cierre.usuario, cierre.usuario]);
+          if (uRes.rowCount > 0) userId = uRes.rows[0].id;
+        }
+      }
+
+      let activeCaja;
+      if (!isNaN(userId) && userId > 0) {
+        activeCaja = await pool.query(
+          "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 AND usuario_id = $2 ORDER BY id DESC LIMIT 1",
+          [termName, userId]
+        );
+      } else {
+        activeCaja = await pool.query(
+          "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",
+          [termName]
+        );
+      }
       if (activeCaja.rowCount > 0) {
         const cajaId = activeCaja.rows[0].id;
-        
-        let userId = parseInt(cierre.usuarioId || cierre.usuario_id);
-        if (isNaN(userId) || userId <= 0) {
-          if (cierre.usuario) {
-            const uRes = await pool.query('SELECT id FROM Usuarios WHERE nombre = $1 OR usuario = $2 LIMIT 1', [cierre.usuario, cierre.usuario]);
-            if (uRes.rowCount > 0) userId = uRes.rows[0].id;
-          }
-        }
 
         const ventaTotalUsd = cierre.ventaTotalUsd ?? 0;
         const utilidadUsd = cierre.utilidadUsd ?? 0;
         const detallesJson = JSON.stringify(cierre);
+        const nowStr = getLocalISODateString();
 
-        if (!isNaN(userId) && userId > 0) {
-          await pool.query(
-            `UPDATE Cajas_Apertura_Cierre SET 
-              usuario_id = $1,
-              fecha_cierre = CURRENT_TIMESTAMP, 
-              monto_cierre_esperado_usd = $2, 
-              monto_cierre_esperado_ves = $3, 
-              monto_cierre_real_usd = $4, 
-              monto_cierre_real_ves = $5, 
-              estatus = 'Cerrada',
-              venta_total_usd = $6,
-              utilidad_usd = $7,
-              detalles_json = $8
-             WHERE id = $9`,
-            [
-              userId,
-              cierre.expectedUsd || cierre.dineroEnCajaExpected || 0, 
-              cierre.expectedVes || 0, 
-              cierre.realUsd || 0, 
-              cierre.realVes || 0, 
-              ventaTotalUsd, 
-              utilidadUsd, 
-              detallesJson, 
-              cajaId
-            ]
-          );
-        } else {
-          await pool.query(
-            `UPDATE Cajas_Apertura_Cierre SET 
-              fecha_cierre = CURRENT_TIMESTAMP, 
-              monto_cierre_esperado_usd = $1, 
-              monto_cierre_esperado_ves = $2, 
-              monto_cierre_real_usd = $3, 
-              monto_cierre_real_ves = $4, 
-              estatus = 'Cerrada',
-              venta_total_usd = $5,
-              utilidad_usd = $6,
-              detalles_json = $7
-             WHERE id = $8`,
-            [
-              cierre.expectedUsd || cierre.dineroEnCajaExpected || 0, 
-              cierre.expectedVes || 0, 
-              cierre.realUsd || 0, 
-              cierre.realVes || 0, 
-              ventaTotalUsd, 
-              utilidadUsd, 
-              detallesJson, 
-              cajaId
-            ]
-          );
-        }
+        await pool.query(
+          `UPDATE Cajas_Apertura_Cierre SET 
+            fecha_cierre = $9, 
+            monto_cierre_esperado_usd = $1, 
+            monto_cierre_esperado_ves = $2, 
+            monto_cierre_real_usd = $3, 
+            monto_cierre_real_ves = $4, 
+            estatus = 'Cerrada',
+            venta_total_usd = $5,
+            utilidad_usd = $6,
+            detalles_json = $7
+           WHERE id = $8`,
+          [
+            cierre.expectedUsd || cierre.dineroEnCajaExpected || 0, 
+            cierre.expectedVes || 0, 
+            cierre.realUsd || 0, 
+            cierre.realVes || 0, 
+            ventaTotalUsd, 
+            utilidadUsd, 
+            detallesJson, 
+            cajaId,
+            nowStr
+          ]
+        );
         return true;
       }
     } catch (err) {
@@ -1791,16 +1796,17 @@ export async function updateCierre(id, updated) {
           updated.realUsd, 
           updated.realVes,
           updated.expectedUsd || updated.dineroEnCajaExpected,
-          updated.expectedVes,
-          updated.ventaTotalUsd || updated.ventasTotalesUsd,
-          updated.utilidadUsd,
+          updated.expectedVes || 0,
+          updated.ventaTotalUsd || 0,
+          updated.utilidadUsd || 0,
           detallesJson,
           cierreId
         ]
       );
-      return updated;
+      return true;
     } catch (err) {
       console.error('Error en updateCierre (Postgres):', err.message);
+      throw err;
     }
   }
   const cierres = readJsonFile('cierres.json', []);
@@ -1838,14 +1844,30 @@ export async function deleteCierre(id) {
   return false;
 }
 
-export async function getCajaEstado(terminal) {
+export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
   if (usePostgres) {
     try {
       const myTerminal = terminal || 'CAJA_PRINCIPAL';
-      const activeRes = await pool.query(
-        "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",
-        [myTerminal]
-      );
+      let userId = parseInt(usuarioId);
+      if (isNaN(userId) || userId <= 0) {
+        if (usuarioNombre) {
+          const uRes = await pool.query('SELECT id FROM Usuarios WHERE nombre = $1 OR usuario = $2 LIMIT 1', [usuarioNombre, usuarioNombre]);
+          if (uRes.rowCount > 0) userId = uRes.rows[0].id;
+        }
+      }
+
+      let activeRes;
+      if (!isNaN(userId) && userId > 0) {
+        activeRes = await pool.query(
+          "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 AND usuario_id = $2 ORDER BY id DESC LIMIT 1",
+          [myTerminal, userId]
+        );
+      } else {
+        activeRes = await pool.query(
+          "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",
+          [myTerminal]
+        );
+      }
       if (activeRes.rowCount === 0) {
         return { abierta: false };
       }
@@ -1960,7 +1982,7 @@ export async function getCajaEstado(terminal) {
         abierta: true,
         aperturaUsd: parseFloat(caja.monto_apertura_usd || 0),
         aperturaVes: parseFloat(caja.monto_apertura_ves || 0),
-        fechaApertura: getLocalISODateString(new Date(caja.fecha_apertura)),
+        fechaApertura: getLocalISODateString(caja.fecha_apertura),
         ventasUsd: salesCashUsd,
         ventasVes: salesCashVes,
         movimientosUsd: totalMovUsd,

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   mockUsers, mockProducts, mockClients, mockTasaHistory, 
   mockConfig, mockMovements 
@@ -90,55 +90,57 @@ export default function App() {
   });
 
   const [cajaAbierta, setCajaAbierta] = useState<boolean>(() => {
-    return localStorage.getItem('pos_caja_abierta') === 'true';
+    const savedUser = localStorage.getItem('pos_current_user');
+    if (savedUser) {
+      try {
+        const u = JSON.parse(savedUser);
+        if (u && u.id) {
+          return localStorage.getItem(`pos_caja_abierta_u_${u.id}`) === 'true';
+        }
+      } catch (_) {}
+    }
+    return false;
   });
   const [montoAperturaUsd, setMontoAperturaUsd] = useState<number>(() => {
-    return parseFloat(localStorage.getItem('pos_apertura_usd') || '0');
+    const savedUser = localStorage.getItem('pos_current_user');
+    if (savedUser) {
+      try {
+        const u = JSON.parse(savedUser);
+        if (u && u.id) {
+          return parseFloat(localStorage.getItem(`pos_apertura_usd_u_${u.id}`) || '0');
+        }
+      } catch (_) {}
+    }
+    return 0;
   });
   const [montoAperturaVes, setMontoAperturaVes] = useState<number>(() => {
-    return parseFloat(localStorage.getItem('pos_apertura_ves') || '0');
+    const savedUser = localStorage.getItem('pos_current_user');
+    if (savedUser) {
+      try {
+        const u = JSON.parse(savedUser);
+        if (u && u.id) {
+          return parseFloat(localStorage.getItem(`pos_apertura_ves_u_${u.id}`) || '0');
+        }
+      } catch (_) {}
+    }
+    return 0;
   });
 
   // Current session totals for Cash (USD/VES)
-  const [cajaVentasUsd, setCajaVentasUsd] = useState<number>(() => {
-    return parseFloat(localStorage.getItem('pos_ventas_usd') || '0');
-  });
-  const [cajaVentasVes, setCajaVentasVes] = useState<number>(() => {
-    return parseFloat(localStorage.getItem('pos_ventas_ves') || '0');
-  });
-  const [cajaMovimientosUsd, setCajaMovimientosUsd] = useState<number>(() => {
-    return parseFloat(localStorage.getItem('pos_movimientos_usd') || '0'); 
-  });
-  const [cajaMovimientosVes, setCajaMovimientosVes] = useState<number>(() => {
-    return parseFloat(localStorage.getItem('pos_movimientos_ves') || '0'); 
-  });
+  const [cajaVentasUsd, setCajaVentasUsd] = useState<number>(0);
+  const [cajaVentasVes, setCajaVentasVes] = useState<number>(0);
+  const [cajaMovimientosUsd, setCajaMovimientosUsd] = useState<number>(0);
+  const [cajaMovimientosVes, setCajaMovimientosVes] = useState<number>(0);
 
   // Shift logs states for detailed closing reports
-  const [shiftSales, setShiftSales] = useState<Sale[]>(() => {
-    const saved = localStorage.getItem('pos_shift_sales');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [shiftAbonosUsd, setShiftAbonosUsd] = useState<number>(() => {
-    return parseFloat(localStorage.getItem('pos_shift_abonos') || '0');
-  });
-  const [shiftEntradasUsd, setShiftEntradasUsd] = useState<number>(() => {
-    return parseFloat(localStorage.getItem('pos_shift_entradas') || '0');
-  });
-  const [shiftEntradasVes, setShiftEntradasVes] = useState<number>(() => {
-    return parseFloat(localStorage.getItem('pos_shift_entradas_ves') || '0');
-  });
-  const [shiftSalidasUsd, setShiftSalidasUsd] = useState<number>(() => {
-    return parseFloat(localStorage.getItem('pos_shift_salidas') || '0');
-  });
-  const [shiftSalidasVes, setShiftSalidasVes] = useState<number>(() => {
-    return parseFloat(localStorage.getItem('pos_shift_salidas_ves') || '0');
-  });
-  const [shiftDevolucionesUsd, setShiftDevolucionesUsd] = useState<number>(() => {
-    return parseFloat(localStorage.getItem('pos_shift_devoluciones') || '0');
-  });
-  const [shiftDevolucionesVes, setShiftDevolucionesVes] = useState<number>(() => {
-    return parseFloat(localStorage.getItem('pos_shift_devoluciones_ves') || '0');
-  });
+  const [shiftSales, setShiftSales] = useState<Sale[]>([]);
+  const [shiftAbonosUsd, setShiftAbonosUsd] = useState<number>(0);
+  const [shiftEntradasUsd, setShiftEntradasUsd] = useState<number>(0);
+  const [shiftEntradasVes, setShiftEntradasVes] = useState<number>(0);
+  const [shiftSalidasUsd, setShiftSalidasUsd] = useState<number>(0);
+  const [shiftSalidasVes, setShiftSalidasVes] = useState<number>(0);
+  const [shiftDevolucionesUsd, setShiftDevolucionesUsd] = useState<number>(0);
+  const [shiftDevolucionesVes, setShiftDevolucionesVes] = useState<number>(0);
 
   const [lanIP, setLanIP] = useState('192.168.1.100');
   const [dbMode, setDbMode] = useState('local');
@@ -392,13 +394,37 @@ export default function App() {
       }
     };
 
-    const interval = setInterval(pollSync, 10000);
+    pollSync();
+    const interval = setInterval(pollSync, 1000);
     return () => clearInterval(interval);
   }, [currentUser, lanIP, dbMode, sales, tasaHistory, cierres]);
 
   // Load all initial data from centralized backend database
   useEffect(() => {
     if (!currentUser) return;
+
+    // Synchronously set user shift state from local storage immediately so UI doesn't delay or flicker
+    const uKey = `u_${currentUser.id}`;
+    const localOpen = localStorage.getItem(`pos_caja_abierta_${uKey}`) === 'true';
+    setCajaAbierta(localOpen);
+    if (localOpen) {
+      setMontoAperturaUsd(parseFloat(localStorage.getItem(`pos_apertura_usd_${uKey}`) || '0'));
+      setMontoAperturaVes(parseFloat(localStorage.getItem(`pos_apertura_ves_${uKey}`) || '0'));
+      setCajaVentasUsd(parseFloat(localStorage.getItem(`pos_ventas_usd_${uKey}`) || '0'));
+      setCajaVentasVes(parseFloat(localStorage.getItem(`pos_ventas_ves_${uKey}`) || '0'));
+      setCajaMovimientosUsd(parseFloat(localStorage.getItem(`pos_movimientos_usd_${uKey}`) || '0'));
+      setCajaMovimientosVes(parseFloat(localStorage.getItem(`pos_movimientos_ves_${uKey}`) || '0'));
+      const savedSales = localStorage.getItem(`pos_shift_sales_${uKey}`);
+      setShiftSales(savedSales ? JSON.parse(savedSales) : []);
+    } else {
+      setMontoAperturaUsd(0);
+      setMontoAperturaVes(0);
+      setCajaVentasUsd(0);
+      setCajaVentasVes(0);
+      setCajaMovimientosUsd(0);
+      setCajaMovimientosVes(0);
+      setShiftSales([]);
+    }
 
     const loadAllData = async () => {
       console.log('Intentando conectar al servidor central:', getApiUrl('/status'));
@@ -477,8 +503,8 @@ export default function App() {
           setAbonos(abonosData);
         }
 
-        // Fetch active caja state for this specific terminal
-        const cajaRes = await fetch(getApiUrl(`/cajas/estado?terminal=${encodeURIComponent(terminalName)}`));
+        // Fetch active caja state for this specific user & terminal
+        const cajaRes = await fetch(getApiUrl(`/cajas/estado?terminal=${encodeURIComponent(terminalName)}&usuarioId=${currentUser.id}&usuarioNombre=${encodeURIComponent(currentUser.nombre)}`));
         if (cajaRes.ok) {
           const cajaData = await cajaRes.json();
           if (cajaData.abierta) {
@@ -506,6 +532,10 @@ export default function App() {
             setShiftAbonosUsd(0);
             setShiftEntradasUsd(0);
             setShiftSalidasUsd(0);
+            const uKey = `u_${currentUser.id}`;
+            localStorage.removeItem(`pos_caja_abierta_${uKey}`);
+            localStorage.removeItem(`pos_apertura_usd_${uKey}`);
+            localStorage.removeItem(`pos_apertura_ves_${uKey}`);
             localStorage.removeItem('pos_caja_abierta');
             localStorage.removeItem('pos_apertura_usd');
             localStorage.removeItem('pos_apertura_ves');
@@ -986,7 +1016,9 @@ export default function App() {
 
   const handleAbrirCaja = async (usd: number, ves: number) => {
     try {
-      // 1. First persist opening record to central PostgreSQL server
+      const uKey = currentUser ? `u_${currentUser.id}` : 'guest';
+
+      // 1. Send opening request to centralized server
       await postApiData('/cajas/abrir', { 
         usd, 
         ves, 
@@ -1009,19 +1041,24 @@ export default function App() {
       setShiftAbonosUsd(0);
       setShiftEntradasUsd(0);
       setShiftSalidasUsd(0);
-      localStorage.removeItem('pos_shift_sales');
-      localStorage.removeItem('pos_shift_abonos');
-      localStorage.removeItem('pos_shift_entradas');
-      localStorage.removeItem('pos_shift_salidas');
+      localStorage.removeItem(`pos_shift_sales_${uKey}`);
+      localStorage.removeItem(`pos_shift_abonos_${uKey}`);
+      localStorage.removeItem(`pos_shift_entradas_${uKey}`);
+      localStorage.removeItem(`pos_shift_salidas_${uKey}`);
 
-      localStorage.setItem('pos_caja_abierta', 'true');
-      localStorage.setItem('pos_apertura_usd', usd.toString());
-      localStorage.setItem('pos_apertura_ves', ves.toString());
-      localStorage.setItem('pos_ventas_usd', '0');
-      localStorage.setItem('pos_ventas_ves', '0');
-      localStorage.setItem('pos_movimientos_usd', '0');
-      localStorage.setItem('pos_movimientos_ves', '0');
-      localStorage.setItem('pos_apertura_fecha', getLocalISODateString());
+      localStorage.setItem(`pos_caja_abierta_${uKey}`, 'true');
+      localStorage.setItem(`pos_apertura_usd_${uKey}`, usd.toString());
+      localStorage.setItem(`pos_apertura_ves_${uKey}`, ves.toString());
+      localStorage.setItem(`pos_ventas_usd_${uKey}`, '0');
+      localStorage.setItem(`pos_ventas_ves_${uKey}`, '0');
+      localStorage.setItem(`pos_movimientos_usd_${uKey}`, '0');
+      localStorage.setItem(`pos_movimientos_ves_${uKey}`, '0');
+      localStorage.setItem(`pos_apertura_fecha_${uKey}`, getLocalISODateString());
+      
+      // Clean up legacy global keys
+      localStorage.removeItem('pos_caja_abierta');
+      localStorage.removeItem('pos_apertura_usd');
+      localStorage.removeItem('pos_apertura_ves');
     } catch (err) {
       console.error('Error al aperturar caja:', err);
     }
@@ -1032,6 +1069,7 @@ export default function App() {
     realVes: number,
     details?: CierreDetails
   ): Promise<CierreCaja> => {
+    const uKey = currentUser ? `u_${currentUser.id}` : 'guest';
     const expectedUsd = montoAperturaUsd + cajaVentasUsd + cajaMovimientosUsd;
     const expectedVes = montoAperturaVes + cajaVentasVes + cajaMovimientosVes;
     
@@ -1048,7 +1086,7 @@ export default function App() {
       id: Date.now(),
       fecha: getLocalISODateString(),
       fechaCierre: getLocalISODateString(),
-      fechaApertura: localStorage.getItem('pos_apertura_fecha') || getLocalISODateString(),
+      fechaApertura: localStorage.getItem(`pos_apertura_fecha_${uKey}`) || localStorage.getItem('pos_apertura_fecha') || getLocalISODateString(),
       usuario: currentUser?.nombre || 'SISTEMA',
       usuarioId: currentUser?.id,
       terminal: terminalName,
@@ -1100,7 +1138,7 @@ export default function App() {
     setCajaMovimientosUsd(0);
     setCajaMovimientosVes(0);
 
-    // Clear active shift logs
+    // Clear active shift logs for this user
     setShiftSales([]);
     setShiftAbonosUsd(0);
     setShiftEntradasUsd(0);
@@ -1109,15 +1147,25 @@ export default function App() {
     setShiftSalidasVes(0);
     setShiftDevolucionesUsd(0);
     setShiftDevolucionesVes(0);
-    localStorage.removeItem('pos_shift_sales');
-    localStorage.removeItem('pos_shift_abonos');
-    localStorage.removeItem('pos_shift_entradas');
-    localStorage.removeItem('pos_shift_entradas_ves');
-    localStorage.removeItem('pos_shift_salidas');
-    localStorage.removeItem('pos_shift_salidas_ves');
-    localStorage.removeItem('pos_shift_devoluciones');
-    localStorage.removeItem('pos_shift_devoluciones_ves');
+    localStorage.removeItem(`pos_shift_sales_${uKey}`);
+    localStorage.removeItem(`pos_shift_abonos_${uKey}`);
+    localStorage.removeItem(`pos_shift_entradas_${uKey}`);
+    localStorage.removeItem(`pos_shift_entradas_ves_${uKey}`);
+    localStorage.removeItem(`pos_shift_salidas_${uKey}`);
+    localStorage.removeItem(`pos_shift_salidas_ves_${uKey}`);
+    localStorage.removeItem(`pos_shift_devoluciones_${uKey}`);
+    localStorage.removeItem(`pos_shift_devoluciones_ves_${uKey}`);
 
+    localStorage.removeItem(`pos_caja_abierta_${uKey}`);
+    localStorage.removeItem(`pos_apertura_usd_${uKey}`);
+    localStorage.removeItem(`pos_apertura_ves_${uKey}`);
+    localStorage.removeItem(`pos_ventas_usd_${uKey}`);
+    localStorage.removeItem(`pos_ventas_ves_${uKey}`);
+    localStorage.removeItem(`pos_movimientos_usd_${uKey}`);
+    localStorage.removeItem(`pos_movimientos_ves_${uKey}`);
+    localStorage.removeItem(`pos_apertura_fecha_${uKey}`);
+
+    // Clear legacy global keys
     localStorage.removeItem('pos_caja_abierta');
     localStorage.removeItem('pos_apertura_usd');
     localStorage.removeItem('pos_apertura_ves');
@@ -1314,6 +1362,7 @@ export default function App() {
       return;
     }
     setCurrentUser(null);
+    setActiveTab('caja');
   };
 
   const hasModulePermission = (modulo: string, accion: 'ver' | 'crear' | 'editar' | 'eliminar' = 'ver') => {
@@ -1362,6 +1411,23 @@ export default function App() {
 
         {/* Right rates and network details */}
         <div className="flex items-center gap-4 text-[10px] font-sans">
+          {cajaAbierta ? (
+            <div className="bg-emerald-950/60 border border-emerald-500/40 text-emerald-400 font-extrabold px-3 py-1.5 rounded flex items-center gap-1.5 font-mono">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>CAJA ABIERTA (${montoAperturaUsd.toFixed(2)})</span>
+            </div>
+          ) : (
+            <div className="bg-amber-950/60 border border-amber-500/40 text-amber-300 font-extrabold px-3 py-1.5 rounded flex items-center gap-2 font-mono">
+              <span>⚠️ MODO CONSULTA</span>
+              <button
+                onClick={() => setActiveTab('caja')}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-black px-2 py-0.5 rounded text-[9px] uppercase transition-all shadow"
+              >
+                Aperturar Caja
+              </button>
+            </div>
+          )}
+
           <div className="bg-slate-900 border border-slate-750 px-3 py-1.5 rounded flex items-center gap-2">
             <TrendingUp className="w-3.5 h-3.5 text-emerald-450" />
             <span className="text-slate-300 font-mono">Tasa BCV: <strong className="text-emerald-455">{tasaDia.toFixed(2)}</strong> Bs</span>
@@ -1569,6 +1635,7 @@ export default function App() {
             <Clientes
               clients={clients}
               currentUser={currentUser}
+              cajaAbierta={cajaAbierta}
               onAddClient={handleAddClient}
               onRegisterAbono={handleRegisterAbono}
               onUpdateClient={handleUpdateClient}

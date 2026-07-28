@@ -74,7 +74,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
   };
 
   // Cierres sorting states
-  type CierresSortField = 'fechaCierre' | 'usuario' | 'aperturaUsd' | 'ventaTotalUsd' | 'realUsd' | 'diffUsd' | 'utilidadUsd';
+  type CierresSortField = 'fechaApertura' | 'fechaCierre' | 'usuario' | 'aperturaUsd' | 'ventaTotalUsd' | 'realUsd' | 'diffUsd' | 'utilidadUsd' | 'status';
   const [cierresSortField, setCierresSortField] = useState<CierresSortField>('fechaCierre');
   const [cierresSortDir, setCierresSortDir] = useState<'asc' | 'desc'>('desc');
 
@@ -179,9 +179,11 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
   const filteredCierres = useMemo(() => {
     if (!filterEnabled) return cierres;
     return cierres.filter(c => {
-      const closingDate = c.fechaCierre || c.fecha || "";
-      if (!closingDate) return false;
-      const dateStr = closingDate.substring(0, 10); // "YYYY-MM-DD"
+      const targetDate = (c.status === 'Abierta' || !c.fechaCierre) 
+        ? (c.fechaApertura || c.fecha || "") 
+        : (c.fechaCierre || c.fecha || "");
+      if (!targetDate) return false;
+      const dateStr = targetDate.substring(0, 10); // "YYYY-MM-DD"
       return dateStr >= startDate && dateStr <= endDate;
     });
   }, [cierres, startDate, endDate, filterEnabled]);
@@ -881,9 +883,15 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
               <table className="w-full border-collapse text-left">
                 <thead className="sticky top-0 z-10 border-b border-slate-200">
                   <tr className="text-slate-500">
-                    <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2 font-bold font-sans cursor-pointer select-none" onClick={() => handleCierresSort('fechaCierre')}>
+                    <th className="sticky top-0 z-10 bg-slate-100 px-3 py-2 font-bold font-sans cursor-pointer select-none" onClick={() => handleCierresSort('fechaApertura')}>
                       <div className="flex items-center gap-1">
-                        <span>FECHA CIERRE</span>
+                        <span>F. APERTURA</span>
+                        <CierresSortIcon field="fechaApertura" />
+                      </div>
+                    </th>
+                    <th className="sticky top-0 z-10 bg-slate-100 px-3 py-2 font-bold font-sans cursor-pointer select-none" onClick={() => handleCierresSort('fechaCierre')}>
+                      <div className="flex items-center gap-1">
+                        <span>F. CIERRE</span>
                         <CierresSortIcon field="fechaCierre" />
                       </div>
                     </th>
@@ -935,7 +943,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                 <tbody className="divide-y divide-slate-100 text-[11px] text-slate-700 select-text">
                   {finalFilteredCierres.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="text-center py-16 text-slate-400 font-sans">
+                      <td colSpan={9} className="text-center py-16 text-slate-400 font-sans">
                         No se han registrado cierres de caja que coincidan con la búsqueda.
                       </td>
                     </tr>
@@ -962,7 +970,14 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                               : 'hover:bg-slate-50/70'
                           }`}
                         >
-                          <td className="px-4 py-2.5 font-mono">{c.fechaCierre || c.fecha || 'N/A'}</td>
+                          <td className="px-3 py-2.5 font-mono text-[10px] text-slate-700">{c.fechaApertura || c.fecha || 'N/A'}</td>
+                          <td className="px-3 py-2.5 font-mono text-[10px]">
+                            {c.status === 'Abierta' || !c.fechaCierre ? (
+                              <span className="text-amber-700 font-bold text-[9px] bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded font-sans uppercase">-- EN CURSO --</span>
+                            ) : (
+                              <span className="text-slate-700">{c.fechaCierre}</span>
+                            )}
+                          </td>
                           <td className="px-4 py-2.5 font-sans font-medium uppercase text-slate-800">
                             {c.usuario}
                             {c.terminal && (

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { CompanyConfig, User, Role, PrinterConfig, ScaleConfig } from '../types';
 import { 
   Save, CheckCircle2, Users, HardDrive, Cpu, 
@@ -317,25 +317,23 @@ export default function ConfiguracionEmpresa({
     setUserForm({
       usuario: '',
       nombre: '',
-      rol: 'Vendedor',
-      clave: 'admin',
+      rol: 'ADMINISTRADOR',
+      clave: '',
       estado: 'Activo',
       permisos: getEmptyPerms()
     });
+    // Default to admin permissions when starting new user form with ADMINISTRADOR role
+    handleApplyRolePermissions('ADMINISTRADOR');
     setShowUserModal(true);
   };
 
   const handleOpenEditUser = (u: User) => {
     setEditingUser(u);
-    let rolVal = u.rol;
-    if (u.rol.toLowerCase() === 'administrador') rolVal = 'Administrador';
-    if (u.rol.toLowerCase() === 'vendedor' || u.rol.toLowerCase() === 'cajero / vendedor') rolVal = 'Cajero / Vendedor';
-
     setUserForm({
       usuario: u.usuario,
       nombre: u.nombre,
-      rol: rolVal,
-      clave: u.clave || 'admin',
+      rol: u.rol?.toUpperCase() || 'ADMINISTRADOR',
+      clave: u.clave || '',
       estado: u.estado,
       permisos: u.permisos || getEmptyPerms()
     });
@@ -353,7 +351,7 @@ export default function ConfiguracionEmpresa({
       const body = {
         usuario: userForm.usuario.toLowerCase().trim(),
         nombre: userForm.nombre.trim(),
-        rol: userForm.rol,
+        rol: userForm.rol?.toUpperCase(),
         clave: userForm.clave,
         estado: userForm.estado,
         permisos: userForm.permisos
@@ -418,9 +416,12 @@ export default function ConfiguracionEmpresa({
   };
 
   const handleOpenEditRole = (r: Role) => {
-    setEditingRole(r);
+    setEditingRole({
+      ...r,
+      nombre: r.nombre?.toUpperCase()
+    });
     setRoleForm({
-      nombre: r.nombre,
+      nombre: r.nombre?.toUpperCase(),
       permisos: r.permisos || getEmptyPerms()
     });
     setShowRoleModal(true);
@@ -435,12 +436,13 @@ export default function ConfiguracionEmpresa({
 
     try {
       const body = {
-        nombre: roleForm.nombre.trim(),
+        nombre: roleForm.nombre.trim().toUpperCase(),
         permisos: roleForm.permisos
       };
 
-      const url = editingRole ? getApiUrl(`/roles/${editingRole.id}`) : getApiUrl('/roles');
-      const method = editingRole ? 'PUT' : 'POST';
+      const isVirtualAdmin = editingRole && editingRole.id === -1;
+      const url = (editingRole && !isVirtualAdmin) ? getApiUrl(`/roles/${editingRole.id}`) : getApiUrl('/roles');
+      const method = (editingRole && !isVirtualAdmin) ? 'PUT' : 'POST';
 
       const res = await fetch(url, {
         method,
@@ -462,7 +464,11 @@ export default function ConfiguracionEmpresa({
     }
   };
 
-  const handleDeleteRole = async (id: number) => {
+  const handleDeleteRole = async (id: number, roleName?: string) => {
+    if (roleName?.trim().toUpperCase() === 'ADMINISTRADOR' || id === -1) {
+      showAlert('El perfil Administrador es el rol base del sistema y no se puede eliminar.', 'Operación No Permitida', 'warning');
+      return;
+    }
     const ok = await showConfirm(
       '¿Está seguro de eliminar este perfil de rol? Los usuarios asignados a este rol perderán sus permisos.',
       'Eliminar Perfil de Rol',
@@ -481,15 +487,33 @@ export default function ConfiguracionEmpresa({
   };
 
   const handleApplyRolePermissions = (roleName: string) => {
-    const role = roleList.find(r => 
-      r.nombre.toLowerCase() === roleName.toLowerCase() ||
-      (roleName.toLowerCase() === 'cajero / vendedor' && r.nombre.toLowerCase() === 'vendedor') ||
-      (roleName.toLowerCase() === 'vendedor' && r.nombre.toLowerCase() === 'cajero / vendedor')
-    );
+    if (roleName.trim().toUpperCase() === 'ADMINISTRADOR') {
+      const adminRole = roleList.find(r => r.nombre.trim().toUpperCase() === 'ADMINISTRADOR');
+      if (adminRole) {
+        setUserForm(prev => ({
+          ...prev,
+          rol: 'ADMINISTRADOR',
+          permisos: { ...adminRole.permisos }
+        }));
+      } else {
+        const fullPerms: any = {};
+        MODULOS_PERMISOS.forEach(m => {
+          fullPerms[m.id] = { ver: true, crear: true, editar: true, eliminar: true, admin: true };
+        });
+        setUserForm(prev => ({
+          ...prev,
+          rol: 'ADMINISTRADOR',
+          permisos: fullPerms
+        }));
+      }
+      return;
+    }
+
+    const role = roleList.find(r => r.nombre.trim().toUpperCase() === roleName.trim().toUpperCase());
     if (role) {
       setUserForm(prev => ({
         ...prev,
-        rol: role.nombre,
+        rol: role.nombre.toUpperCase(),
         permisos: { ...role.permisos }
       }));
     }
@@ -1071,40 +1095,63 @@ export default function ConfiguracionEmpresa({
                       </tr>
                     </thead>
                     <tbody>
-                      {roleList.map(r => {
-                        const activeModules = Object.keys(r.permisos || {}).filter(m => r.permisos[m].ver);
-                        return (
-                          <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50/50 text-xs">
-                            <td className="py-3 px-3 font-bold text-slate-700 uppercase">{r.nombre}</td>
-                            <td className="py-3 px-3 text-slate-500 font-sans">
-                              {activeModules.length === 0 ? 'Sin permisos' : activeModules.map(m => {
-                                const modName = MODULOS_PERMISOS.find(x => x.id === m)?.label || m;
-                                return (
-                                  <span key={m} className="inline-block bg-slate-100 text-slate-700 text-[10px] px-2 py-0.5 rounded mr-1 mb-1 font-bold font-mono">
-                                    {modName.split(' ')[1] || modName}
-                                  </span>
-                                );
-                              })}
-                            </td>
-                            <td className="py-3 px-3 text-right flex justify-end gap-2">
-                              <button
-                                onClick={() => handleOpenEditRole(r)}
-                                className="text-slate-400 hover:text-sky-600 p-1 transition-all"
-                                title="Editar Perfil"
-                              >
-                                <Edit className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => handleDeleteRole(r.id)}
-                                className="text-slate-400 hover:text-rose-600 p-1 transition-all"
-                                title="Eliminar Perfil"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
+                      {(() => {
+                        const hasAdminRole = roleList.some(r => r.nombre?.trim().toLowerCase() === 'administrador');
+                        const displayRoles = hasAdminRole ? roleList : [
+                          {
+                            id: -1,
+                            nombre: 'Administrador',
+                            permisos: MODULOS_PERMISOS.reduce((acc, m) => {
+                              acc[m.id] = { ver: true, crear: true, editar: true, eliminar: true, admin: true };
+                              return acc;
+                            }, {} as any)
+                          },
+                          ...roleList
+                        ];
+
+                        return displayRoles.map(r => {
+                          const isSystemAdmin = r.nombre?.trim().toLowerCase() === 'administrador';
+                          const activeModules = Object.keys(r.permisos || {}).filter(m => r.permisos[m]?.ver);
+                          return (
+                            <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50/50 text-xs">
+                              <td className="py-3 px-3 font-bold text-slate-700 uppercase flex items-center gap-2">
+                                <span>{r.nombre}</span>
+                                {isSystemAdmin && (
+                                  <span className="bg-sky-100 text-sky-800 text-[9px] font-extrabold px-1.5 py-0.5 rounded">SISTEMA</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-3 text-slate-500 font-sans">
+                                {activeModules.length === 0 ? 'Sin permisos' : activeModules.map(m => {
+                                  const modName = MODULOS_PERMISOS.find(x => x.id === m)?.label || m;
+                                  return (
+                                    <span key={m} className="inline-block bg-slate-100 text-slate-700 text-[10px] px-2 py-0.5 rounded mr-1 mb-1 font-bold font-mono">
+                                      {modName.split(' ')[1] || modName}
+                                    </span>
+                                  );
+                                })}
+                              </td>
+                              <td className="py-3 px-3 text-right flex justify-end gap-2">
+                                <button
+                                  onClick={() => handleOpenEditRole(r)}
+                                  className="text-slate-400 hover:text-sky-600 p-1 transition-all"
+                                  title="Editar Perfil"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                                {!isSystemAdmin && (
+                                  <button
+                                    onClick={() => handleDeleteRole(r.id, r.nombre)}
+                                    className="text-slate-400 hover:text-rose-600 p-1 transition-all"
+                                    title="Eliminar Perfil"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        });
+                      })()}
                     </tbody>
                   </table>
                 </div>
@@ -1838,7 +1885,8 @@ export default function ConfiguracionEmpresa({
                   type="text"
                   required
                   disabled={!!editingUser}
-                  placeholder="ej. ale"
+                  placeholder=""
+                  autoComplete="off"
                   value={userForm.usuario}
                   onChange={(e) => setUserForm(prev => ({ ...prev, usuario: e.target.value }))}
                   className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs focus:bg-white focus:border-winter-configStart focus:outline-none font-mono"
@@ -1849,7 +1897,8 @@ export default function ConfiguracionEmpresa({
                 <input
                   type="text"
                   required
-                  placeholder="ej. Alejandra Olivar"
+                  placeholder=""
+                  autoComplete="off"
                   value={userForm.nombre}
                   onChange={(e) => setUserForm(prev => ({ ...prev, nombre: e.target.value }))}
                   className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs focus:bg-white focus:border-winter-configStart focus:outline-none font-sans"
@@ -1862,8 +1911,9 @@ export default function ConfiguracionEmpresa({
                 <label className="text-[10px] text-slate-500 block mb-1 font-sans">Contraseña / PIN</label>
                 <input
                   type="password"
-                  required
-                  placeholder="admin"
+                  required={!editingUser}
+                  placeholder=""
+                  autoComplete="new-password"
                   value={userForm.clave}
                   onChange={(e) => setUserForm(prev => ({ ...prev, clave: e.target.value }))}
                   className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs focus:bg-white focus:border-winter-configStart focus:outline-none font-mono"
@@ -1872,20 +1922,22 @@ export default function ConfiguracionEmpresa({
               <div>
                 <label className="text-[10px] text-slate-500 block mb-1 font-sans">Perfil / Rol Base</label>
                 <select
-                  value={userForm.rol}
+                  value={userForm.rol?.toUpperCase()}
                   onChange={(e) => {
-                    const val = e.target.value;
+                    const val = e.target.value.toUpperCase();
                     setUserForm(prev => ({ ...prev, rol: val }));
                     handleApplyRolePermissions(val);
                   }}
-                  className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs focus:bg-white focus:border-winter-configStart focus:outline-none font-sans"
+                  className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs focus:bg-white focus:border-winter-configStart focus:outline-none font-sans font-bold"
                 >
                   <option value="">Seleccione...</option>
-                  <option value="Administrador">Administrador</option>
-                  <option value="Cajero / Vendedor">Cajero / Vendedor</option>
-                  {roleList.filter(r => r.nombre?.toLowerCase() !== 'administrador' && r.nombre?.toLowerCase() !== 'cajero / vendedor' && r.nombre?.toLowerCase() !== 'vendedor').map(r => (
-                    <option key={r.id} value={r.nombre}>{r.nombre}</option>
-                  ))}
+                  <option value="ADMINISTRADOR">ADMINISTRADOR</option>
+                  {roleList
+                    .filter(r => r.nombre?.trim().toUpperCase() !== 'ADMINISTRADOR')
+                    .map(r => (
+                      <option key={r.id} value={r.nombre.toUpperCase()}>{r.nombre.toUpperCase()}</option>
+                    ))
+                  }
                 </select>
               </div>
               <div>
@@ -1993,10 +2045,12 @@ export default function ConfiguracionEmpresa({
               <input
                 type="text"
                 required
-                placeholder="ej. Supervisor, Auditor"
+                disabled={editingRole?.nombre?.trim().toUpperCase() === 'ADMINISTRADOR'}
+                placeholder=""
+                autoComplete="off"
                 value={roleForm.nombre}
-                onChange={(e) => setRoleForm(prev => ({ ...prev, nombre: e.target.value }))}
-                className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs focus:bg-white focus:border-winter-configStart focus:outline-none font-sans font-bold"
+                onChange={(e) => setRoleForm(prev => ({ ...prev, nombre: e.target.value.toUpperCase() }))}
+                className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs focus:bg-white focus:border-winter-configStart focus:outline-none font-sans font-bold disabled:bg-slate-100 disabled:text-slate-500 uppercase"
               />
             </div>
 

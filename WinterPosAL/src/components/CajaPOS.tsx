@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Product, Client, User, CompanyConfig, SaleItem, Payment, Sale, CierreCaja, CierreDetails, Abono } from '../types';
 import { 
   ShoppingBag, Search, Trash2, 
@@ -104,18 +104,20 @@ export default function CajaPOS({
 }: CajaPOSProps) {
   const { showAlert, showConfirm } = useDialog();
   const [isClosingCaja, setIsClosingCaja] = useState(false);
+  const [userDismissedApertura, setUserDismissedApertura] = useState(false);
   const [showAperturaModal, setShowAperturaModal] = useState(!cajaAbierta);
   const [aperturaUsdVal, setAperturaUsdVal] = useState('');
   const [aperturaVesVal, setAperturaVesVal] = useState('');
 
   // Sync showAperturaModal whenever cajaAbierta prop changes
   useEffect(() => {
-    if (isClosingCaja) {
+    if (isClosingCaja || cajaAbierta) {
       setShowAperturaModal(false);
-    } else {
-      setShowAperturaModal(!cajaAbierta);
+      setUserDismissedApertura(false);
+    } else if (!userDismissedApertura) {
+      setShowAperturaModal(true);
     }
-  }, [cajaAbierta, isClosingCaja]);
+  }, [cajaAbierta, isClosingCaja, userDismissedApertura]);
 
   
   const [showCierreModal, setShowCierreModal] = useState(false);
@@ -1711,6 +1713,28 @@ export default function CajaPOS({
   return (
     <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 font-mono text-xs text-slate-800">
       
+      {/* WARNING BANNER: MODO CONSULTA */}
+      {!cajaAbierta && (
+        <div className="xl:col-span-4 bg-amber-50 border border-amber-300 rounded-xl p-3.5 flex flex-col md:flex-row items-center justify-between gap-3 shadow-sm font-sans mb-1">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+            <div>
+              <span className="text-xs font-bold text-amber-900 block">Modo Solo Consulta Activo (Caja Cerrada)</span>
+              <span className="text-[11px] text-amber-800 block">Puede consultar catálogo, inventario, ventas pasadas y tasas. Para procesar cobros debe aperturar caja.</span>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setUserDismissedApertura(false);
+              setShowAperturaModal(true);
+            }}
+            className="bg-amber-600 hover:bg-amber-700 text-white font-extrabold px-3.5 py-1.5 rounded-lg text-xs tracking-wide transition-all shadow whitespace-nowrap"
+          >
+            Aperturar Caja Ahora
+          </button>
+        </div>
+      )}
+
       {/* LEFT TERMINAL AREA: PRODUCTS SELECTION & SALE TABLE */}
       <div className="xl:col-span-3 space-y-4 flex flex-col h-[calc(100vh-180px)]">
         
@@ -2198,14 +2222,24 @@ export default function CajaPOS({
 
               <button
                 type="submit"
-                className="w-full bg-winter-blueBtn hover:bg-winter-blueBtnHover text-white py-3 rounded-lg font-bold font-sans text-xs tracking-wider transition-all"
+                className="w-full bg-winter-blueBtn hover:bg-winter-blueBtnHover text-white py-3 rounded-lg font-bold font-sans text-xs tracking-wider transition-all shadow"
               >
                 CONFIRMAR E INICIAR APERTURA
               </button>
               <button
                 type="button"
+                onClick={() => {
+                  setUserDismissedApertura(true);
+                  setShowAperturaModal(false);
+                }}
+                className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold py-2.5 rounded-lg font-sans text-xs tracking-wider transition-all shadow"
+              >
+                INGRESAR EN MODO CONSULTA (SIN APERTURA)
+              </button>
+              <button
+                type="button"
                 onClick={onLogout}
-                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-655 border border-slate-300 py-2.5 rounded-lg font-bold font-sans text-xs tracking-wider transition-all mt-2.5"
+                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-655 border border-slate-300 py-2 rounded-lg font-bold font-sans text-xs tracking-wider transition-all mt-1"
               >
                 CANCELAR Y CERRAR SESIÓN
               </button>

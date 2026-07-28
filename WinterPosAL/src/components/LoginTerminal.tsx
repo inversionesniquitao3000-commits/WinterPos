@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Shield, Network, Eye, EyeOff } from 'lucide-react';
 import { User, CompanyConfig } from '../types';
 import { useDialog } from '../hooks/useDialog';

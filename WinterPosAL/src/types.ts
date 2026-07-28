@@ -194,6 +194,7 @@ export interface CierreDetails {
   devolucionVentasUsd?: number;
   devolucionVentasVes?: number;
   ventaTotalUsd?: number;
+  terminal?: string;
 }
 
 export interface CierreCaja {
@@ -204,6 +205,7 @@ export interface CierreCaja {
   costoTotalUsd?: number;
   utilidadUsd?: number;
   usuario: string;
+  usuarioId?: number;
   aperturaUsd: number;
   aperturaVes: number;
   terminal?: string;
