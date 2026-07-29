@@ -543,9 +543,9 @@ export default function Clientes({
               <th style="width: 80px; text-align: center;">Posición</th>
               <th>Nombre / Razón Social</th>
               <th>Identificación (ID)</th>
-              <th class="text-right">Compras Totales</th>
+              <th style="text-align: center;">Compras Totales</th>
               <th style="text-align: center;">Transacciones</th>
-              <th class="text-right">Compra Promedio</th>
+              <th style="text-align: center;">Compra Promedio</th>
             </tr>
           </thead>
           <tbody>
@@ -556,9 +556,9 @@ export default function Clientes({
                 <td style="text-align: center; font-weight: bold;">${idx + 1}</td>
                 <td style="text-transform: uppercase;">${r.nombre}</td>
                 <td>${r.cedula_rif}</td>
-                <td class="text-right" style="font-weight: bold; color: #1e3a8a;">$${r.totalSpent.toFixed(2)}</td>
+                <td style="text-align: center; font-weight: bold; color: #1e3a8a;">$${r.totalSpent.toFixed(2)}</td>
                 <td style="text-align: center;">${r.salesCount}</td>
-                <td class="text-right">$${r.avgSale.toFixed(2)}</td>
+                <td style="text-align: center;">$${r.avgSale.toFixed(2)}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -865,20 +865,20 @@ export default function Clientes({
                           <SortIcon field="telefono" />
                         </div>
                       </th>
-                      <th className="px-3 py-2 cursor-pointer select-none font-sans uppercase font-bold text-right" onClick={() => handleSort('limite_credito')}>
-                        <div className="flex items-center justify-end gap-1">
+                      <th className="px-3 py-2 cursor-pointer select-none font-sans uppercase font-bold text-center" onClick={() => handleSort('limite_credito')}>
+                        <div className="flex items-center justify-center gap-1">
                           <span>Límite Crédito</span>
                           <SortIcon field="limite_credito" />
                         </div>
                       </th>
-                      <th className="px-3 py-2 cursor-pointer select-none font-sans uppercase font-bold text-right" onClick={() => handleSort('credito_disponible')}>
-                        <div className="flex items-center justify-end gap-1">
+                      <th className="px-3 py-2 cursor-pointer select-none font-sans uppercase font-bold text-center" onClick={() => handleSort('credito_disponible')}>
+                        <div className="flex items-center justify-center gap-1">
                           <span>Crédito Disponible</span>
                           <SortIcon field="credito_disponible" />
                         </div>
                       </th>
-                      <th className="px-3 py-2 cursor-pointer select-none font-sans uppercase font-bold text-right" onClick={() => handleSort('saldo_pendiente')}>
-                        <div className="flex items-center justify-end gap-1">
+                      <th className="px-3 py-2 cursor-pointer select-none font-sans uppercase font-bold text-center" onClick={() => handleSort('saldo_pendiente')}>
+                        <div className="flex items-center justify-center gap-1">
                           <span>Saldo Pendiente</span>
                           <SortIcon field="saldo_pendiente" />
                         </div>
@@ -907,9 +907,9 @@ export default function Clientes({
                             <td className="px-3 py-2.5 font-sans font-medium uppercase">{c.nombre}</td>
                             <td className="px-3 py-2.5 font-mono font-bold text-slate-500">{c.cedula_rif}</td>
                             <td className="px-3 py-2.5 font-sans">{c.telefono || 'N/A'}</td>
-                            <td className="px-3 py-2.5 text-right font-mono">${c.limite_credito.toFixed(2)}</td>
-                            <td className="px-3 py-2.5 text-right font-mono text-slate-600">${c.credito_disponible.toFixed(2)}</td>
-                            <td className={`px-3 py-2.5 text-right font-mono font-extrabold ${c.saldo_pendiente > 0.01 ? 'text-red-550' : 'text-slate-400'}`}>
+                            <td className="px-3 py-2.5 text-center font-mono">${c.limite_credito.toFixed(2)}</td>
+                            <td className="px-3 py-2.5 text-center font-mono text-slate-600">${c.credito_disponible.toFixed(2)}</td>
+                            <td className={`px-3 py-2.5 text-center font-mono font-extrabold ${c.saldo_pendiente > 0.01 ? 'text-red-550' : 'text-slate-400'}`}>
                               ${c.saldo_pendiente.toFixed(2)}
                             </td>
                             {/* Descuento */}
@@ -1106,9 +1106,9 @@ export default function Clientes({
                       <th className="px-4 py-2 text-center font-sans uppercase w-16">Posición</th>
                       <th className="px-4 py-2 font-sans uppercase">Nombre / Razón Social</th>
                       <th className="px-4 py-2 font-sans uppercase">Identificación (ID)</th>
-                      <th className="px-4 py-2 text-right font-sans uppercase">Compras Totales</th>
+                      <th className="px-4 py-2 text-center font-sans uppercase">Compras Totales</th>
                       <th className="px-4 py-2 text-center font-sans uppercase">Transacciones</th>
-                      <th className="px-4 py-2 text-right font-sans uppercase">Compra Promedio</th>
+                      <th className="px-4 py-2 text-center font-sans uppercase">Compra Promedio</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -1138,9 +1138,9 @@ export default function Clientes({
                             <td className="px-4 py-2.5 text-center font-bold text-slate-600">{posBadge}</td>
                             <td className="px-4 py-2.5 font-sans font-medium uppercase">{r.nombre}</td>
                             <td className="px-4 py-2.5 font-mono">{r.cedula_rif}</td>
-                            <td className="px-4 py-2.5 text-right font-mono font-extrabold text-blue-600">${r.totalSpent.toFixed(2)}</td>
+                            <td className="px-4 py-2.5 text-center font-mono font-extrabold text-blue-600">${r.totalSpent.toFixed(2)}</td>
                             <td className="px-4 py-2.5 text-center font-mono">{r.salesCount}</td>
-                            <td className="px-4 py-2.5 text-right font-mono text-slate-600">${r.avgSale.toFixed(2)}</td>
+                            <td className="px-4 py-2.5 text-center font-mono text-slate-600">${r.avgSale.toFixed(2)}</td>
                           </tr>
                         );
                       })

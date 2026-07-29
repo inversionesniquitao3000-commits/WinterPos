@@ -391,6 +391,36 @@ export default function App() {
     }
   }, [activeTab, lanIP, dbMode]);
 
+  // Refresh sales (facturas/transacciones) and cierres de caja automatically when entering the ventas tab
+  useEffect(() => {
+    if (activeTab === 'ventas') {
+      const fetchVentasData = async () => {
+        try {
+          const salesRes = await fetch(getApiUrl('/sales'));
+          if (salesRes.ok) {
+            const salesData = await salesRes.json();
+            setSales(salesData);
+            localStorage.setItem('pos_sales_log', JSON.stringify(salesData));
+          }
+        } catch (err) {
+          console.error('Error al actualizar ventas al entrar al módulo:', err);
+        }
+
+        try {
+          const cierresRes = await fetch(getApiUrl('/cajas/cierres'));
+          if (cierresRes.ok) {
+            const cierresData = await cierresRes.json();
+            setCierres(cierresData);
+            localStorage.setItem('pos_cierres_log', JSON.stringify(cierresData));
+          }
+        } catch (err) {
+          console.error('Error al actualizar cierres de caja al entrar al módulo:', err);
+        }
+      };
+      fetchVentasData();
+    }
+  }, [activeTab, lanIP, dbMode]);
+
   // Load initial company config and users on mount (so Login screen updates immediately)
   useEffect(() => {
     const fetchInitialConfigAndUsers = async () => {

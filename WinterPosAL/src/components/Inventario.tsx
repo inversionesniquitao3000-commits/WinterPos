@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Product, InventoryMovement, PriceAdjustmentHistory, User, CompanyConfig } from '../types';
-import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown } from 'lucide-react';
+import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr } from '../utils';
 import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
@@ -78,6 +78,7 @@ export default function Inventario({
     precio_mayor_usd: number;
   }[]>([]);
   const [invoiceSearchTerm, setInvoiceSearchTerm] = useState('');
+  const [invoiceAuxItemIndex, setInvoiceAuxItemIndex] = useState<number | null>(null);
 
   const showToast = (msg: string) => {
     setSuccessMsg(msg);
@@ -99,10 +100,7 @@ export default function Inventario({
     direction: 'asc' | 'desc';
   }
 
-  const [sortRules, setSortRules] = useState<SortRule[]>([
-    { field: 'categoria', direction: 'asc' },
-    { field: 'existencia', direction: 'asc' }
-  ]);
+  const [sortRules, setSortRules] = useState<SortRule[]>([]);
 
   const handleSort = (field: SortRule['field']) => {
     setSortRules(prev => {
@@ -131,7 +129,9 @@ export default function Inventario({
       <button
         type="button"
         onClick={() => handleSort(field)}
-        className={`flex items-center gap-1 hover:text-winter-inventarioStart transition-colors font-sans uppercase font-bold focus:outline-none whitespace-nowrap ${align === 'right' ? 'justify-end ml-auto' : ''}`}
+        className={`flex items-center gap-1 hover:text-winter-inventarioStart transition-colors font-sans uppercase font-bold focus:outline-none whitespace-nowrap ${
+          align === 'right' ? 'justify-end ml-auto' : align === 'center' ? 'justify-center mx-auto' : ''
+        }`}
       >
         <span>{label}</span>
         {isSorted ? (
@@ -159,11 +159,14 @@ export default function Inventario({
   const [showAdjustModal, setShowAdjustModal] = useState(false);
   const [showPriceModal, setShowPriceModal] = useState(false);
   const [showNewProdModal, setShowNewProdModal] = useState(false);
+  const [showEditProdModal, setShowEditProdModal] = useState(false);
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [showCategoriesModal, setShowCategoriesModal] = useState(false);
   const [showQuickAddModal, setShowQuickAddModal] = useState(false);
   const [quickAddName, setQuickAddName] = useState('');
   const [quickAddTarget, setQuickAddTarget] = useState<'new' | 'edit'>('new');
+  const [showReportMenu, setShowReportMenu] = useState(false);
+  const reportMenuRef = useRef<HTMLDivElement>(null);
 
   const [showGeneralAdjustModal, setShowGeneralAdjustModal] = useState(false);
   const [adjustScope, setAdjustScope] = useState<'todos' | 'categoria' | 'seleccionados'>('todos');
@@ -197,26 +200,115 @@ export default function Inventario({
   const [historySortField, setHistorySortField] = useState<string>('date');
   const [historySortOrder, setHistorySortOrder] = useState<'asc' | 'desc'>('desc');
 
-  // Escape key listener to close modals
+  // Hierarchical Escape key listener (closes top-most open modal first)
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setShowAdjustModal(false);
-        setShowPriceModal(false);
-        setShowNewProdModal(false);
-        setShowEditProdModal(false);
-        setShowBulkModal(false);
-        setShowCategoriesModal(false);
+      if (e.key !== 'Escape') return;
+
+      // 1. Quick Add Category Modal (z-[80])
+      if (showQuickAddModal) {
         setShowQuickAddModal(false);
-        setShowGeneralAdjustModal(false);
-        setShowInvoiceLoadModal(false);
+        return;
+      }
+
+      // 2. Invoice Item Auxiliar de Precios Modal (z-[85])
+      if (invoiceAuxItemIndex !== null) {
+        setInvoiceAuxItemIndex(null);
+        return;
+      }
+
+      // 3. New Product Modal (z-[70])
+      if (showNewProdModal) {
+        setShowNewProdModal(false);
+        return;
+      }
+
+      // 4. Grouped Kardex movements detail
+      if (selectedGroupedMovements !== null) {
         setSelectedGroupedMovements(null);
+        return;
+      }
+
+      // 5. Single Kardex movement detail
+      if (selectedMovementDetail !== null) {
+        setSelectedMovementDetail(null);
+        return;
+      }
+
+      // 6. Invoice Load Modal (z-[50])
+      if (showInvoiceLoadModal) {
+        setShowInvoiceLoadModal(false);
+        return;
+      }
+
+      // 7. General Adjust Modal
+      if (showGeneralAdjustModal) {
+        setShowGeneralAdjustModal(false);
         setGeneralAdjustSearch('');
+        return;
+      }
+
+      // 8. Categories Management Modal
+      if (showCategoriesModal) {
+        setShowCategoriesModal(false);
+        return;
+      }
+
+      // 9. Bulk Import Modal
+      if (showBulkModal) {
+        setShowBulkModal(false);
+        return;
+      }
+
+      // 10. Edit Product Modal
+      if (showEditProdModal) {
+        setShowEditProdModal(false);
+        return;
+      }
+
+      // 11. Adjust Stock Modal
+      if (showAdjustModal) {
+        setShowAdjustModal(false);
+        setSelectedProduct(null);
+        return;
+      }
+
+      // 12. Edit Price Modal
+      if (showPriceModal) {
+        setShowPriceModal(false);
+        setSelectedProduct(null);
+        return;
+      }
+
+      // 13. Dropdown menus
+      if (showCategoryMenu) {
+        setShowCategoryMenu(false);
+        return;
+      }
+      if (showReportMenu) {
+        setShowReportMenu(false);
+        return;
       }
     };
+
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
-  }, []);
+  }, [
+    showQuickAddModal,
+    invoiceAuxItemIndex,
+    showNewProdModal,
+    selectedGroupedMovements,
+    selectedMovementDetail,
+    showInvoiceLoadModal,
+    showGeneralAdjustModal,
+    showCategoriesModal,
+    showBulkModal,
+    showEditProdModal,
+    showAdjustModal,
+    showPriceModal,
+    showCategoryMenu,
+    showReportMenu
+  ]);
 
   const prevProductsLengthRef = useRef(products.length);
 
@@ -588,6 +680,19 @@ export default function Inventario({
     localStorage.setItem('pos_categories', JSON.stringify(categories));
   }, [categories]);
 
+  const allCategories = useMemo(() => {
+    const catSet = new Set<string>();
+    categories.forEach(c => {
+      if (c && c.trim()) catSet.add(c.trim().toUpperCase());
+    });
+    products.forEach(p => {
+      if (p.category && p.category.trim()) {
+        catSet.add(p.category.trim().toUpperCase());
+      }
+    });
+    return Array.from(catSet).sort((a, b) => a.localeCompare(b));
+  }, [categories, products]);
+
   // Categories management modal states
   const [newCategoryName, setNewCategoryName] = useState('');
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
@@ -596,7 +701,7 @@ export default function Inventario({
   const handleCreateCategory = () => {
     if (!newCategoryName.trim()) return;
     const cleanName = newCategoryName.trim().toUpperCase();
-    if (categories.includes(cleanName)) {
+    if (allCategories.includes(cleanName)) {
       showAlert('La categoría ya existe.', 'Categoría Duplicada', 'warning');
       return;
     }
@@ -608,7 +713,7 @@ export default function Inventario({
   const handleExecuteQuickAdd = () => {
     if (!quickAddName.trim()) return;
     const cleanName = quickAddName.trim().toUpperCase();
-    if (categories.includes(cleanName)) {
+    if (allCategories.includes(cleanName)) {
       showAlert('La categoría ya existe en el sistema.', 'Categoría Duplicada', 'warning');
       return;
     }
@@ -630,7 +735,7 @@ export default function Inventario({
       setEditingCategory(null);
       return;
     }
-    if (categories.includes(cleanName)) {
+    if (allCategories.includes(cleanName)) {
       showAlert('Ese nombre de categoría ya existe.', 'Categoría Duplicada', 'warning');
       return;
     }
@@ -873,7 +978,6 @@ export default function Inventario({
   const [newVencimiento, setNewVencimiento] = useState('');
 
   // Edit product modal state
-  const [showEditProdModal, setShowEditProdModal] = useState(false);
   const [editClave, setEditClave] = useState('');
   const [editBarcode, setEditBarcode] = useState('');
   const [editDesc, setEditDesc] = useState('');
@@ -1019,7 +1123,7 @@ export default function Inventario({
         p.barcode.toLowerCase().includes(term);
         
       const matchesCategory = selectedCategories.length === 0 ||
-        selectedCategories.includes(p.category.toUpperCase());
+        selectedCategories.includes((p.category || '').trim().toUpperCase());
       
       const matchesStock = 
         filterStock === 'todos' ? true :
@@ -1246,12 +1350,13 @@ export default function Inventario({
     setNewVencimiento('');
   };
 
-  // Report menu states
-  const [showReportMenu, setShowReportMenu] = useState(false);
-  const reportMenuRef = useRef<HTMLDivElement>(null);
+
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
+      if (categoryMenuRef.current && !categoryMenuRef.current.contains(e.target as Node)) {
+        setShowCategoryMenu(false);
+      }
       if (reportMenuRef.current && !reportMenuRef.current.contains(e.target as Node)) {
         setShowReportMenu(false);
       }
@@ -1809,12 +1914,7 @@ export default function Inventario({
               </button>
 
               {showCategoryMenu && (
-                <>
-                  <div
-                    className="fixed inset-0 z-40 bg-transparent cursor-default"
-                    onClick={() => setShowCategoryMenu(false)}
-                  />
-                  <div className="absolute top-full left-0 mt-1 w-full min-w-[240px] bg-white border border-slate-200 rounded-xl shadow-xl z-50 p-2 text-xs font-sans text-slate-700 max-h-64 overflow-y-auto space-y-1">
+                <div className="absolute top-full left-0 mt-1 w-full min-w-[240px] bg-white border border-slate-200 rounded-xl shadow-xl z-50 p-2 text-xs font-sans text-slate-700 max-h-64 overflow-y-auto space-y-1">
                   <label className="flex items-center gap-2 p-1.5 hover:bg-slate-50 rounded-lg cursor-pointer font-bold border-b border-slate-100 text-slate-900">
                     <input
                       type="checkbox"
@@ -1824,7 +1924,7 @@ export default function Inventario({
                     />
                     <span>TODAS LAS CATEGORÍAS</span>
                   </label>
-                  {categories.map(cat => {
+                  {allCategories.map(cat => {
                     const isChecked = selectedCategories.includes(cat);
                     return (
                       <label key={cat} className="flex items-center gap-2 p-1.5 hover:bg-slate-50 rounded-lg cursor-pointer transition-colors">
@@ -1845,8 +1945,7 @@ export default function Inventario({
                     );
                   })}
                 </div>
-              </>
-            )}
+              )}
             </div>
 
             {/* Stock Existence Filter */}
@@ -1968,20 +2067,20 @@ export default function Inventario({
                       <th className="px-2 py-1.5 font-sans uppercase">
                         {renderSortHeader('Categoría', 'categoria')}
                       </th>
-                      <th className="px-2 py-1.5 text-right font-sans uppercase">
-                        {renderSortHeader('Stock Mínimo', 'stock_minimo', 'right')}
+                      <th className="px-2 py-1.5 text-center font-sans uppercase">
+                        {renderSortHeader('Stock Mínimo', 'stock_minimo', 'center')}
                       </th>
-                      <th className="px-2 py-1.5 text-right text-slate-800 font-sans uppercase">
-                        {renderSortHeader('Existencia', 'existencia', 'right')}
+                      <th className="px-2 py-1.5 text-center text-slate-800 font-sans uppercase">
+                        {renderSortHeader('Existencia', 'existencia', 'center')}
                       </th>
-                      <th className="px-2 py-1.5 text-right font-sans uppercase">
-                        {renderSortHeader('P. Costo', 'precio_costo', 'right')}
+                      <th className="px-2 py-1.5 text-center font-sans uppercase">
+                        {renderSortHeader('P. Costo', 'precio_costo', 'center')}
                       </th>
-                      <th className="px-2 py-1.5 text-right text-emerald-600 font-sans uppercase">
-                        {renderSortHeader('P. Detalle', 'precio_detalle', 'right')}
+                      <th className="px-2 py-1.5 text-center text-emerald-600 font-sans uppercase">
+                        {renderSortHeader('P. Detalle', 'precio_detalle', 'center')}
                       </th>
-                      <th className="px-2 py-1.5 text-right font-sans uppercase">
-                        {renderSortHeader('P. Mayor', 'precio_mayor', 'right')}
+                      <th className="px-2 py-1.5 text-center font-sans uppercase">
+                        {renderSortHeader('P. Mayor', 'precio_mayor', 'center')}
                       </th>
                     </tr>
                   </thead>
@@ -2022,13 +2121,13 @@ export default function Inventario({
                               )}
                             </td>
                             <td className="px-2 py-1 font-sans truncate" title={p.category}>{p.category}</td>
-                            <td className="px-2 py-1 text-right font-mono text-slate-500">{formatStockVal(p.stock_minimo, p.a_granel)}</td>
-                            <td className={`px-2 py-1 text-right font-black font-mono ${isLowStock ? 'text-red-500 animate-pulse font-bold' : 'text-slate-800'}`}>
+                            <td className="px-2 py-1 text-center font-mono text-slate-500">{formatStockVal(p.stock_minimo, p.a_granel)}</td>
+                            <td className={`px-2 py-1 text-center font-black font-mono ${isLowStock ? 'text-red-500 animate-pulse font-bold' : 'text-slate-800'}`}>
                               {formatStockVal(p.stock_actual, p.a_granel)}
                             </td>
-                            <td className="px-2 py-1 text-right font-mono text-slate-600">${p.precio_costo_usd.toFixed(2)}</td>
-                            <td className="px-2 py-1 text-right font-mono text-emerald-600 font-bold">${p.precio_detalle_usd.toFixed(2)}</td>
-                            <td className="px-2 py-1 text-right font-mono text-slate-600">
+                            <td className="px-2 py-1 text-center font-mono text-slate-600">${p.precio_costo_usd.toFixed(2)}</td>
+                            <td className="px-2 py-1 text-center font-mono text-emerald-600 font-bold">${p.precio_detalle_usd.toFixed(2)}</td>
+                            <td className="px-2 py-1 text-center font-mono text-slate-600">
                               ${p.precio_mayor_usd.toFixed(2)}
                               <span className="text-[8px] text-slate-400 block font-sans">x{p.cantidad_mayorista}</span>
                             </td>
@@ -2930,7 +3029,7 @@ export default function Inventario({
       {showNewProdModal && isMinimized && (
         <div 
           onClick={() => setIsMinimized(false)}
-          className="fixed bottom-4 right-4 bg-winter-inventarioStart hover:bg-winter-inventarioEnd text-white px-4 py-3 rounded-lg shadow-2xl z-50 flex items-center gap-3 cursor-pointer animate-bounce font-mono text-xs border border-white/20 select-none"
+          className="fixed bottom-4 right-4 bg-winter-inventarioStart hover:bg-winter-inventarioEnd text-white px-4 py-3 rounded-lg shadow-2xl z-[70] flex items-center gap-3 cursor-pointer animate-bounce font-mono text-xs border border-white/20 select-none"
         >
           <Plus className="w-4 h-4" />
           <span>[+] RESTAURAR REGISTRO: {newClave.toUpperCase() || 'NUEVO PRODUCTO'}</span>
@@ -2938,7 +3037,7 @@ export default function Inventario({
       )}
 
       {showNewProdModal && !isMinimized && (
-        <div className="fixed inset-0 bg-slate-950/20 pointer-events-none flex items-center justify-center p-4 z-50 animate-fade-in font-mono text-slate-800">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-[70] animate-fade-in font-mono text-slate-800">
           <div 
             style={{ transform: `translate(${dragPos.x}px, ${dragPos.y}px)` }}
             className={`bg-white border border-slate-200 rounded-xl overflow-hidden w-full ${isAuxExpandedNew ? 'max-w-2xl sm:max-w-3xl' : 'max-w-xl'} shadow-2xl p-6 space-y-4 pointer-events-auto select-none transition-all duration-300 max-h-[92vh] overflow-y-auto`}
@@ -3005,7 +3104,7 @@ export default function Inventario({
                       onChange={(e) => setNewCat(e.target.value)}
                       className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none"
                     >
-                      {categories.map(cat => (
+                      {allCategories.map(cat => (
                         <option key={cat} value={cat}>{cat}</option>
                       ))}
                     </select>
@@ -3252,7 +3351,7 @@ export default function Inventario({
                       onChange={(e) => setEditCat(e.target.value)}
                       className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none"
                     >
-                      {categories.map(cat => (
+                      {allCategories.map(cat => (
                         <option key={cat} value={cat}>{cat}</option>
                       ))}
                     </select>
@@ -3726,13 +3825,13 @@ export default function Inventario({
               <div className="space-y-2">
                 <label className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold font-mono block">Categorías Existentes</label>
                 <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-[40vh] overflow-y-auto bg-slate-50/50">
-                  {categories.length === 0 ? (
+                  {allCategories.length === 0 ? (
                     <div className="p-4 text-center text-slate-400 text-xs italic">
                       No hay categorías registradas en el sistema.
                     </div>
                   ) : (
-                    categories.map(cat => {
-                      const activeCount = products.filter(p => p.category === cat && p.estado === 'Activo').length;
+                    allCategories.map(cat => {
+                      const activeCount = products.filter(p => (p.category || '').trim().toUpperCase() === cat && p.estado === 'Activo').length;
                       const isEditing = editingCategory === cat;
 
                       return (
@@ -3828,7 +3927,7 @@ export default function Inventario({
 
       {/* QUICK ADD CATEGORY MODAL */}
       {showQuickAddModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[80] flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-sm w-full overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
             {/* Header */}
             <div className="bg-gradient-to-r from-emerald-600 to-emerald-700 px-5 py-3 flex justify-between items-center text-white">
@@ -3989,7 +4088,7 @@ export default function Inventario({
                           onChange={(e) => setSelectedScopeCategory(e.target.value)}
                           className="w-full bg-slate-50 border border-slate-350 rounded p-2 text-xs text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none"
                         >
-                          {categories.map(cat => (
+                          {allCategories.map(cat => (
                             <option key={cat} value={cat}>{cat}</option>
                           ))}
                         </select>
@@ -4366,9 +4465,9 @@ export default function Inventario({
                     <table className="w-full text-left border-collapse text-xs">
                       <thead className="bg-slate-100 text-[10px] uppercase text-slate-500 font-mono sticky top-0 z-10 border-b border-slate-200">
                         <tr>
-                          <th className="px-3 py-2 w-[32%]">Producto</th>
-                          <th className="px-2 py-2 text-right w-[13%]">Exist.</th>
-                          <th className="px-2 py-2 text-right w-[13%]">A Agregar</th>
+                          <th className="px-3 py-2 w-[34%]">Producto</th>
+                          <th className="px-2 py-2 text-center w-[12%]">Exist.</th>
+                          <th className="px-2 py-2 text-center w-[14%] bg-emerald-100/90 text-emerald-900 font-black border-b-2 border-emerald-500 tracking-wider">A AGREGAR 📦</th>
                           <th className="px-2 py-2 text-right w-[13%]">Costo $</th>
                           <th className="px-2 py-2 text-right w-[13%]">Detalle $</th>
                           <th className="px-2 py-2 text-right w-[12%]">Mayor $</th>
@@ -4379,15 +4478,27 @@ export default function Inventario({
                         {invoiceProducts.map((item, index) => (
                           <tr key={item.product.id} className="hover:bg-slate-55/40">
                             <td className="px-3 py-2 font-sans">
-                              <p className="font-bold text-slate-750 truncate max-w-[150px]" title={item.product.description}>
-                                {item.product.description}
-                              </p>
-                              <span className="text-[9px] text-slate-400 font-mono block">{item.product.barcode}</span>
+                              <div className="flex items-center justify-between gap-1.5">
+                                <div className="min-w-0 pr-1">
+                                  <p className="font-bold text-slate-800 text-xs truncate max-w-[130px]" title={item.product.description}>
+                                    {item.product.description}
+                                  </p>
+                                  <span className="text-[9px] text-slate-400 font-mono block">{item.product.barcode}</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setInvoiceAuxItemIndex(index)}
+                                  className="bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-800 p-1.5 rounded transition-all shadow-xs flex-shrink-0 active:scale-95"
+                                  title="Abrir Auxiliar de Cálculo de Precios para este producto"
+                                >
+                                  <Calculator className="w-3.5 h-3.5 text-amber-700" />
+                                </button>
+                              </div>
                             </td>
-                            <td className="px-2 py-2 text-right font-mono text-slate-500 font-bold select-none">
+                            <td className="px-2 py-2 text-center font-mono text-slate-700 font-bold select-none">
                               {formatStockVal(item.product.stock_actual, item.product.a_granel)}
                             </td>
-                            <td className="px-2 py-2 text-right">
+                            <td className="px-2 py-2 text-center bg-emerald-50/50">
                               <input
                                 type="number"
                                 min="0.001"
@@ -4397,7 +4508,7 @@ export default function Inventario({
                                   const val = parseFloat(e.target.value) || 0;
                                   setInvoiceProducts(prev => prev.map((it, idx) => idx === index ? { ...it, qty: val } : it));
                                 }}
-                                className="w-16 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-right text-xs font-mono font-bold focus:bg-white focus:outline-none"
+                                className="w-16 bg-emerald-100/70 border-2 border-emerald-500 rounded px-1.5 py-1 text-center text-xs font-mono font-black text-emerald-950 focus:bg-white focus:border-emerald-600 focus:ring-2 focus:ring-emerald-400 shadow-sm"
                               />
                             </td>
                             <td className="px-2 py-2 text-right">
@@ -4514,6 +4625,53 @@ export default function Inventario({
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* AUXILIAR DE PRECIOS PARA ÍTEM DE FACTURA */}
+      {invoiceAuxItemIndex !== null && invoiceProducts[invoiceAuxItemIndex] && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-[85] flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-amber-300 max-w-4xl w-full p-5 space-y-4 font-sans animate-in fade-in zoom-in duration-200 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+              <div>
+                <h3 className="text-xs font-extrabold text-amber-900 uppercase tracking-wider flex items-center gap-2 font-mono">
+                  <Calculator className="w-4 h-4 text-amber-600" />
+                  AUXILIAR DE CÁLCULO DE PRECIOS - {invoiceProducts[invoiceAuxItemIndex].product.description}
+                </h3>
+                <span className="text-[10px] text-slate-500 font-mono">Código: {invoiceProducts[invoiceAuxItemIndex].product.barcode}</span>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setInvoiceAuxItemIndex(null)} 
+                className="text-slate-400 hover:text-slate-700 font-bold text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <AuxiliarCalculoPrecios
+              initialCost={invoiceProducts[invoiceAuxItemIndex].precio_costo_usd.toString()}
+              initialDetail={invoiceProducts[invoiceAuxItemIndex].precio_detalle_usd.toString()}
+              initialMayor={invoiceProducts[invoiceAuxItemIndex].precio_mayor_usd.toString()}
+              tasaBCV={bcvRateUSD || parseFloat(localStorage.getItem('pos_bcv_usd') || '0') || 0}
+              tasaFallback={tasaDia || parseFloat(localStorage.getItem('pos_tasa_activa') || '0') || 0}
+              taxActive={!invoiceProducts[invoiceAuxItemIndex].product.exento_impuesto}
+              taxPct={invoiceProducts[invoiceAuxItemIndex].product.porcentaje_impuesto || 16}
+              onApplyPrices={({ cost, detail, mayor }) => {
+                const costNum = parseFloat(cost) || 0;
+                const detailNum = parseFloat(detail) || 0;
+                const mayorNum = parseFloat(mayor) || 0;
+                setInvoiceProducts(prev => prev.map((it, idx) => idx === invoiceAuxItemIndex ? {
+                  ...it,
+                  precio_costo_usd: costNum,
+                  precio_detalle_usd: detailNum,
+                  precio_mayor_usd: mayorNum
+                } : it));
+                setInvoiceAuxItemIndex(null);
+                showToast('✅ Precios calculados y aplicados correctamente a la factura.');
+              }}
+            />
           </div>
         </div>
       )}

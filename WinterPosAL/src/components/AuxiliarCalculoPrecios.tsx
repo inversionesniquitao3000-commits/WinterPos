@@ -215,7 +215,7 @@ export default function AuxiliarCalculoPrecios({
             <div className={`grid grid-cols-1 ${currency === 'VES' ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-2`}>
               {/* Total Cost Input (Strictly max 2 decimals) */}
               <div>
-                <label className="text-[10px] font-bold text-slate-600 block mb-0.5">
+                <label className="text-[10px] font-bold text-slate-600 block mb-0.5 whitespace-nowrap">
                   Monto Total Pagado (Máx 2 dec.)
                 </label>
                 <div className="relative flex items-center">
