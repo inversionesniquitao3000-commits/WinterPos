@@ -266,6 +266,8 @@ app.get('/api/sync/poll', async (req, res) => {
       sales: [],
       tasas: null,        // null = no changes; array = full updated list
       cierres: null,      // null = no changes; array = full updated list
+      clients: null,      // null = no changes; array = full updated list
+      products: null,     // null = no changes; array = full updated list
       sessionClosed: false,
       serverTime: new Date().toISOString()
     };
@@ -335,6 +337,30 @@ app.get('/api/sync/poll', async (req, res) => {
     const clientConfigRif = req.query.config_rif || '';
     if (companyConfig && (companyConfig.nombre_comercio !== clientConfigName || companyConfig.rif !== clientConfigRif)) {
       result.config = companyConfig;
+    }
+
+    // 6. Clients sync: check count & signature
+    const clientClientsCount = parseInt(req.query.clients_count) || 0;
+    const clientClientsSig = parseFloat(req.query.clients_sig) || 0;
+    const clients = await getClients();
+    const serverClientsSig = clients.reduce((acc, c) => acc + (c.id || 0) + (c.limite_credito || 0) + (c.saldo_pendiente || 0), 0);
+    const roundedServerClientsSig = Math.round(serverClientsSig * 100) / 100;
+    const roundedClientClientsSig = Math.round(clientClientsSig * 100) / 100;
+
+    if (clients.length !== clientClientsCount || roundedServerClientsSig !== roundedClientClientsSig) {
+      result.clients = clients;
+    }
+
+    // 7. Products sync: check count & signature
+    const clientProductsCount = parseInt(req.query.products_count) || 0;
+    const clientProductsSig = parseFloat(req.query.products_sig) || 0;
+    const products = await getProducts();
+    const serverProductsSig = products.reduce((acc, p) => acc + (p.id || 0) + (p.stock_actual || 0) + (p.precio_detalle_usd || 0), 0);
+    const roundedServerProductsSig = Math.round(serverProductsSig * 100) / 100;
+    const roundedClientProductsSig = Math.round(clientProductsSig * 100) / 100;
+
+    if (products.length !== clientProductsCount || roundedServerProductsSig !== roundedClientProductsSig) {
+      result.products = products;
     }
 
     res.json(result);

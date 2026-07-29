@@ -363,6 +363,14 @@ export default function App() {
         const maxCierreId = cierres.reduce((max, c) => Math.max(max, c.id || 0), 0);
         const cierresSig = cierres.reduce((acc, c) => acc + (c.realUsd || 0) + (c.realVes || 0), 0);
 
+        // Calculate clients parameters
+        const clientsCount = clients.length;
+        const clientsSig = clients.reduce((acc, c) => acc + (c.id || 0) + (c.limite_credito || 0) + (c.saldo_pendiente || 0), 0);
+
+        // Calculate products parameters
+        const productsCount = products.length;
+        const productsSig = products.reduce((acc, p) => acc + (p.id || 0) + (p.stock_actual || 0) + (p.precio_detalle_usd || 0), 0);
+
         const params = new URLSearchParams({
           since_id: String(maxSaleId),
           last_tasa_cobro: String(lastTasaCobro),
@@ -371,6 +379,10 @@ export default function App() {
           cierres_count: String(cierresCount),
           last_cierre_id: String(maxCierreId),
           cierres_signature: String(cierresSig),
+          clients_count: String(clientsCount),
+          clients_sig: String(clientsSig),
+          products_count: String(productsCount),
+          products_sig: String(productsSig),
           config_name: companyConfig?.nombre_comercio || '',
           config_rif: companyConfig?.rif || '',
           terminal: myTerminal,
@@ -413,6 +425,18 @@ export default function App() {
           console.log('[Sync] Historial de cierres de caja actualizado desde el servidor central.');
           setCierres(data.cierres);
         }
+
+        // 5. Clients list updated from another terminal
+        if (data.clients) {
+          console.log('[Sync] Catálogo de clientes actualizado desde otra terminal.');
+          setClients(data.clients);
+        }
+
+        // 6. Products catalog updated from another terminal
+        if (data.products) {
+          console.log('[Sync] Catálogo de productos actualizado desde otra terminal.');
+          setProducts(data.products);
+        }
       } catch (_) {
         // Silent fail — polling is best-effort
       }
@@ -421,7 +445,7 @@ export default function App() {
     pollSync();
     const interval = setInterval(pollSync, 1000);
     return () => clearInterval(interval);
-  }, [currentUser, lanIP, dbMode, sales, tasaHistory, cierres, companyConfig]);
+  }, [currentUser, lanIP, dbMode, sales, tasaHistory, cierres, companyConfig, clients, products]);
 
   // Load all initial data from centralized backend database
   useEffect(() => {
