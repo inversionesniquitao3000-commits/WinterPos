@@ -320,6 +320,77 @@ export default function App() {
     if (currentUser) fetchLastInvoice();
   }, [currentUser, lanIP, dbMode]);
 
+  // Refresh clients automatically when entering the clients tab
+  useEffect(() => {
+    if (activeTab === 'clientes') {
+      const fetchClients = async () => {
+        try {
+          const res = await fetch(getApiUrl('/clientes'));
+          if (res.ok) {
+            const data = await res.json();
+            setClients(data);
+          }
+        } catch (err) {
+          console.error('Error al actualizar clientes al entrar al módulo:', err);
+        }
+      };
+      fetchClients();
+    }
+  }, [activeTab, lanIP, dbMode]);
+
+  // Refresh products, movements, and price history automatically when entering the inventario tab
+  useEffect(() => {
+    if (activeTab === 'inventario') {
+      const fetchInventarioData = async () => {
+        try {
+          const productsRes = await fetch(getApiUrl('/productos'));
+          if (productsRes.ok) {
+            const productsData = await productsRes.json();
+            setProducts(productsData.map((p: any) => ({
+              ...p,
+              stock_actual: parseFloat(p.stock_actual) || 0,
+              stock_minimo: parseFloat(p.stock_minimo) || 0,
+            })));
+          }
+        } catch (err) {
+          console.error('Error al actualizar productos al entrar al inventario:', err);
+        }
+
+        try {
+          const movementsRes = await fetch(getApiUrl('/movements'));
+          if (movementsRes.ok) {
+            const movementsData = await movementsRes.json();
+            setMovements(movementsData);
+          }
+        } catch (err) {
+          console.error('Error al actualizar movimientos al entrar al inventario:', err);
+        }
+
+        try {
+          const priceRes = await fetch(getApiUrl('/price-history'));
+          if (priceRes.ok) {
+            const priceData = await priceRes.json();
+            const normalized = priceData.map((h: any) => ({
+              id: h.id,
+              date: h.date,
+              productCode: h.productCode,
+              productDescription: h.productDescription || '',
+              type: h.type || h.priceType || 'Costo',
+              precio_anterior: parseFloat(h.precio_anterior ?? h.oldPrice ?? 0),
+              precio_nuevo: parseFloat(h.precio_nuevo ?? h.newPrice ?? 0),
+              motivo: h.motivo || '',
+              usuario: h.usuario || 'SISTEMA'
+            }));
+            setPriceHistory(normalized);
+          }
+        } catch (err) {
+          console.error('Error al actualizar historial de precios al entrar al inventario:', err);
+        }
+      };
+      fetchInventarioData();
+    }
+  }, [activeTab, lanIP, dbMode]);
+
   // Load initial company config and users on mount (so Login screen updates immediately)
   useEffect(() => {
     const fetchInitialConfigAndUsers = async () => {
@@ -813,6 +884,142 @@ export default function App() {
 
     await postApiData('/productos/stock', { id: prodId, stock_actual: nextStock });
     await postApiData('/movements', newMov);
+  };
+
+  const handleUpdateProductStockBulk = async (
+    updates: {
+      prodId: number;
+      qty: number;
+      precio_costo_usd: number;
+      precio_detalle_usd: number;
+      precio_mayor_usd: number;
+    }[],
+    reason: string
+  ) => {
+    try {
+      const updatedProducts = [...products];
+      const newMovements: InventoryMovement[] = [];
+      const newPriceLogs: PriceAdjustmentHistory[] = [];
+
+      for (const update of updates) {
+        const productIndex = updatedProducts.findIndex(p => p.id === update.prodId);
+        if (productIndex === -1) continue;
+        const product = updatedProducts[productIndex];
+
+        const cleanQty = product.a_granel ? update.qty : Math.round(update.qty);
+        let nextStock = product.stock_actual + cleanQty;
+        if (!product.a_granel) {
+          nextStock = Math.round(nextStock);
+        }
+        nextStock = Math.max(0, nextStock);
+
+        const oldCost = product.precio_costo_usd;
+        const oldDetail = product.precio_detalle_usd;
+        const oldMayor = product.precio_mayor_usd;
+
+        let costChanged = update.precio_costo_usd !== oldCost;
+        let detailChanged = update.precio_detalle_usd !== oldDetail;
+        let mayorChanged = update.precio_mayor_usd !== oldMayor;
+
+        updatedProducts[productIndex] = {
+          ...product,
+          stock_actual: nextStock,
+          precio_costo_usd: update.precio_costo_usd,
+          precio_detalle_usd: update.precio_detalle_usd,
+          precio_mayor_usd: update.precio_mayor_usd
+        };
+
+        const newMov: InventoryMovement = {
+          id: Date.now() + Math.random(),
+          date: getLocalISODateString(),
+          productCode: product.barcode,
+          productDescription: product.description,
+          type: 'Entrada',
+          qty: cleanQty,
+          stock_anterior: product.stock_actual,
+          stock_posterior: nextStock,
+          motivo: reason,
+          usuario: currentUser?.nombre || 'SISTEMA'
+        };
+        newMovements.push(newMov);
+
+        const adjDate = getLocalISODateString();
+        const user = currentUser?.nombre || 'SISTEMA';
+
+        if (costChanged) {
+          newPriceLogs.push({
+            id: Date.now() + Math.random(),
+            date: adjDate,
+            productCode: product.barcode,
+            productDescription: product.description,
+            type: 'Costo',
+            precio_anterior: oldCost,
+            precio_nuevo: update.precio_costo_usd,
+            motivo: `Carga por Factura: ${reason}`,
+            usuario: user
+          });
+        }
+        if (detailChanged) {
+          newPriceLogs.push({
+            id: Date.now() + Math.random() + 0.1,
+            date: adjDate,
+            productCode: product.barcode,
+            productDescription: product.description,
+            type: 'Detalle',
+            precio_anterior: oldDetail,
+            precio_nuevo: update.precio_detalle_usd,
+            motivo: `Carga por Factura: ${reason}`,
+            usuario: user
+          });
+        }
+        if (mayorChanged) {
+          newPriceLogs.push({
+            id: Date.now() + Math.random() + 0.2,
+            date: adjDate,
+            productCode: product.barcode,
+            productDescription: product.description,
+            type: 'Mayorista',
+            precio_anterior: oldMayor,
+            precio_nuevo: update.precio_mayor_usd,
+            motivo: `Carga por Factura: ${reason}`,
+            usuario: user
+          });
+        }
+      }
+
+      setProducts(updatedProducts);
+      setMovements(prev => [...prev, ...newMovements]);
+      if (newPriceLogs.length > 0) {
+        setPriceHistory(prev => [...prev, ...newPriceLogs]);
+      }
+
+      // Save stocks
+      await Promise.all(updates.map(update => {
+        const prod = updatedProducts.find(p => p.id === update.prodId);
+        if (!prod) return Promise.resolve();
+        return postApiData('/productos/stock', { id: update.prodId, stock_actual: prod.stock_actual });
+      }));
+
+      // Save prices in bulk using existing endpoint
+      const priceUpdates = updates.map(update => ({
+        id: update.prodId,
+        cost: update.precio_costo_usd,
+        detail: update.precio_detalle_usd,
+        mayor: update.precio_mayor_usd
+      }));
+      await postApiData('/productos/precios/bulk', {
+        updates: priceUpdates,
+        historyLogs: newPriceLogs
+      });
+
+      // Save movements
+      await Promise.all(newMovements.map(mov => postApiData('/movements', mov)));
+
+      return true;
+    } catch (err) {
+      console.error('Error al actualizar inventario en lote:', err);
+      return false;
+    }
   };
 
   const handleUpdateProductPrices = async (
@@ -1432,10 +1639,10 @@ export default function App() {
     <div className="h-screen bg-winter-bg text-slate-800 flex flex-col overflow-hidden font-mono selection:bg-winter-blueBtn selection:text-white">
       
       {/* HEADER SECTION - WinterPOS Colors */}
-      <header className="bg-winter-header border-b border-slate-700/20 px-6 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 select-none relative z-20 shadow-md text-white flex-shrink-0">
+      <header className="bg-winter-header border-b border-slate-700/20 px-6 py-4 flex flex-row items-center justify-between gap-4 select-none relative z-20 shadow-md text-white flex-shrink-0">
         
         {/* Left operator info */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-shrink-0">
           <div className="w-10 h-10 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center text-emerald-450 font-black shadow-inner">
             <Cpu className="w-5 h-5 text-emerald-455" />
           </div>
@@ -1448,21 +1655,26 @@ export default function App() {
         </div>
 
         {/* Center business brand */}
-        <div className="text-center md:absolute md:left-1/2 md:-translate-x-1/2">
-          <h2 className="text-sm font-extrabold tracking-widest text-winter-yellow uppercase">
+        <div className="text-center flex-grow mx-4 flex flex-col items-center justify-center min-w-0">
+          <h2 className="text-sm font-extrabold tracking-widest text-winter-yellow uppercase truncate w-full" title={companyConfig.nombre_comercio}>
             {companyConfig.nombre_comercio}
           </h2>
-          <span className="text-[10px] text-slate-350 block mt-0.5 font-sans">
+          <span className="text-[10px] text-slate-350 block mt-0.5 font-sans truncate w-full">
             RIF: {companyConfig.rif} | Telf: {companyConfig.telefono}
           </span>
         </div>
 
         {/* Right rates and network details */}
-        <div className="flex items-center gap-4 text-[10px] font-sans">
+        <div className="flex items-center gap-4 text-[10px] font-sans flex-shrink-0">
           {cajaAbierta ? (
-            <div className="bg-emerald-950/60 border border-emerald-500/40 text-emerald-400 font-extrabold px-3 py-1.5 rounded flex items-center gap-1.5 font-mono">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>CAJA ABIERTA (${montoAperturaUsd.toFixed(2)})</span>
+            <div className="bg-emerald-950/60 border border-emerald-500/40 text-emerald-400 font-extrabold px-3 py-1.5 rounded flex flex-col justify-center items-start font-mono leading-none">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>CAJA ABIERTA</span>
+              </div>
+              <span className="text-[9px] text-slate-300 font-normal mt-1 block">
+                Inicio: ${montoAperturaUsd.toFixed(2)} / {montoAperturaVes.toFixed(2)} Bs
+              </span>
             </div>
           ) : (
             <div className="bg-amber-950/60 border border-amber-500/40 text-amber-300 font-extrabold px-3 py-1.5 rounded flex items-center gap-2 font-mono">
@@ -1636,6 +1848,7 @@ export default function App() {
               onUpdateProductPricesBulk={handleUpdateProductPricesBulk}
               onDeleteProduct={handleDeleteProduct}
               onUpdateProduct={handleUpdateProduct}
+              onUpdateProductStockBulk={handleUpdateProductStockBulk}
             />
           )}
 

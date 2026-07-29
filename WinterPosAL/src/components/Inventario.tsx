@@ -20,6 +20,16 @@ interface InventarioProps {
   onUpdateProductPricesBulk: (updates: { id: number; cost: number; detail: number; mayor: number }[], historyLogs: any[]) => Promise<boolean>;
   onDeleteProduct: (prodId: number) => Promise<boolean>;
   onUpdateProduct: (prod: Product) => Promise<boolean>;
+  onUpdateProductStockBulk: (
+    updates: {
+      prodId: number;
+      qty: number;
+      precio_costo_usd: number;
+      precio_detalle_usd: number;
+      precio_mayor_usd: number;
+    }[],
+    reason: string
+  ) => Promise<boolean>;
 }
 
 const formatStockVal = (val: any, aGranel?: boolean) => {
@@ -43,7 +53,8 @@ export default function Inventario({
   onUpdateProductPrices,
   onUpdateProductPricesBulk,
   onDeleteProduct,
-  onUpdateProduct
+  onUpdateProduct,
+  onUpdateProductStockBulk
 }: InventarioProps) {
   const { showAlert, showConfirm } = useDialog();
   const hasPermission = (action: 'ver' | 'crear' | 'editar' | 'eliminar') => {
@@ -55,6 +66,18 @@ export default function Inventario({
   const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'movimientos' | 'precios'>('catalogo');
   const [selectedMovementDetail, setSelectedMovementDetail] = useState<any>(null);
   const [successMsg, setSuccessMsg] = useState('');
+
+  // Estados para Carga por Factura
+  const [showInvoiceLoadModal, setShowInvoiceLoadModal] = useState(false);
+  const [invoiceNumber, setInvoiceNumber] = useState('');
+  const [invoiceProducts, setInvoiceProducts] = useState<{
+    product: Product;
+    qty: number;
+    precio_costo_usd: number;
+    precio_detalle_usd: number;
+    precio_mayor_usd: number;
+  }[]>([]);
+  const [invoiceSearchTerm, setInvoiceSearchTerm] = useState('');
 
   const showToast = (msg: string) => {
     setSuccessMsg(msg);
@@ -71,20 +94,39 @@ export default function Inventario({
   const [filterMinStock, setFilterMinStock] = useState<'todos' | 'bajo_minimo'>('todos');
 
   // Sorting states
-  const [sortField, setSortField] = useState<'existencia' | 'categoria' | 'descripcion' | null>(null);
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  interface SortRule {
+    field: 'descripcion' | 'categoria' | 'stock_minimo' | 'existencia' | 'precio_costo' | 'precio_detalle' | 'precio_mayor';
+    direction: 'asc' | 'desc';
+  }
 
-  const handleSort = (field: 'existencia' | 'categoria' | 'descripcion') => {
-    if (sortField === field) {
-      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortField(field);
-      setSortDirection('asc');
-    }
+  const [sortRules, setSortRules] = useState<SortRule[]>([
+    { field: 'categoria', direction: 'asc' },
+    { field: 'existencia', direction: 'asc' }
+  ]);
+
+  const handleSort = (field: SortRule['field']) => {
+    setSortRules(prev => {
+      const idx = prev.findIndex(r => r.field === field);
+      if (idx === -1) {
+        return [...prev, { field, direction: 'asc' }];
+      } else {
+        const current = prev[idx];
+        if (current.direction === 'asc') {
+          const updated = [...prev];
+          updated[idx] = { ...current, direction: 'desc' };
+          return updated;
+        } else {
+          return prev.filter(r => r.field !== field);
+        }
+      }
+    });
   };
 
-  const renderSortHeader = (label: string, field: 'existencia' | 'categoria' | 'descripcion', align: 'left' | 'right' = 'left') => {
-    const isSorted = sortField === field;
+  const renderSortHeader = (label: string, field: SortRule['field'], align: 'left' | 'right' = 'left') => {
+    const ruleIdx = sortRules.findIndex(r => r.field === field);
+    const isSorted = ruleIdx !== -1;
+    const rule = isSorted ? sortRules[ruleIdx] : null;
+
     return (
       <button
         type="button"
@@ -93,11 +135,16 @@ export default function Inventario({
       >
         <span>{label}</span>
         {isSorted ? (
-          sortDirection === 'asc' ? (
-            <ArrowUp className="w-3.5 h-3.5 text-winter-inventarioStart" />
-          ) : (
-            <ArrowDown className="w-3.5 h-3.5 text-winter-inventarioStart" />
-          )
+          <div className="flex items-center gap-0.5">
+            {rule?.direction === 'asc' ? (
+              <ArrowUp className="w-3.5 h-3.5 text-winter-inventarioStart" />
+            ) : (
+              <ArrowDown className="w-3.5 h-3.5 text-winter-inventarioStart" />
+            )}
+            <span className="text-[9px] bg-sky-100 text-sky-850 rounded-full w-4 h-4 flex items-center justify-center font-sans font-bold leading-none">
+              {ruleIdx + 1}
+            </span>
+          </div>
         ) : (
           <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60" />
         )}
@@ -132,6 +179,10 @@ export default function Inventario({
 
   // History page filters
   const [historySearch, setHistorySearch] = useState('');
+  
+  // Sub-navegación Kardex
+  const [kardexView, setKardexView] = useState<'detallada' | 'resumen'>('detallada');
+  const [selectedGroupedMovements, setSelectedGroupedMovements] = useState<InventoryMovement[] | null>(null);
 
   const getTodayLocalDateStr = () => {
     const d = new Date();
@@ -158,12 +209,70 @@ export default function Inventario({
         setShowCategoriesModal(false);
         setShowQuickAddModal(false);
         setShowGeneralAdjustModal(false);
+        setShowInvoiceLoadModal(false);
+        setSelectedGroupedMovements(null);
         setGeneralAdjustSearch('');
       }
     };
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
   }, []);
+
+  const prevProductsLengthRef = useRef(products.length);
+
+  useEffect(() => {
+    if (showInvoiceLoadModal && products.length > prevProductsLengthRef.current) {
+      const newProduct = products[products.length - 1];
+      if (newProduct) {
+        setInvoiceProducts(prev => {
+          const exists = prev.some(item => item.product.id === newProduct.id);
+          if (exists) return prev;
+          return [...prev, {
+            product: newProduct,
+            qty: 1,
+            precio_costo_usd: newProduct.precio_costo_usd,
+            precio_detalle_usd: newProduct.precio_detalle_usd,
+            precio_mayor_usd: newProduct.precio_mayor_usd
+          }];
+        });
+      }
+    }
+    prevProductsLengthRef.current = products.length;
+  }, [products, showInvoiceLoadModal]);
+
+  const groupedMovements = useMemo(() => {
+    const groups: Record<string, {
+      key: string;
+      date: string;
+      motivo: string;
+      usuario: string;
+      type: string;
+      totalItems: number;
+      totalQty: number;
+      movements: InventoryMovement[];
+    }> = {};
+
+    movements.forEach(m => {
+      const groupKey = `${m.date}_${m.motivo}_${m.usuario}_${m.type}`;
+      if (!groups[groupKey]) {
+        groups[groupKey] = {
+          key: groupKey,
+          date: m.date,
+          motivo: m.motivo,
+          usuario: m.usuario,
+          type: m.type,
+          totalItems: 0,
+          totalQty: 0,
+          movements: []
+        };
+      }
+      groups[groupKey].totalItems += 1;
+      groups[groupKey].totalQty += m.qty;
+      groups[groupKey].movements.push(m);
+    });
+
+    return Object.values(groups).reverse();
+  }, [movements]);
 
   // Bulk Upload state
   const [bulkFile, setBulkFile] = useState<File | null>(null);
@@ -929,28 +1038,61 @@ export default function Inventario({
   }, [products, searchTerm, selectedCategories, filterStock, filterMinStock]);
 
   const sortedProducts = useMemo(() => {
-    if (!sortField) return filteredProducts;
-    
+    if (sortRules.length === 0) return filteredProducts;
+
     return [...filteredProducts].sort((a, b) => {
-      let aVal: any = '';
-      let bVal: any = '';
-      
-      if (sortField === 'existencia') {
-        aVal = a.stock_actual;
-        bVal = b.stock_actual;
-      } else if (sortField === 'categoria') {
-        aVal = a.category.toLowerCase();
-        bVal = b.category.toLowerCase();
-      } else if (sortField === 'descripcion') {
-        aVal = a.description.toLowerCase();
-        bVal = b.description.toLowerCase();
+      for (const rule of sortRules) {
+        let aVal: any = '';
+        let bVal: any = '';
+
+        switch (rule.field) {
+          case 'descripcion':
+            aVal = (a.description || '').toLowerCase();
+            bVal = (b.description || '').toLowerCase();
+            break;
+          case 'categoria':
+            aVal = (a.category || '').toLowerCase();
+            bVal = (b.category || '').toLowerCase();
+            break;
+          case 'stock_minimo':
+            aVal = a.stock_minimo;
+            bVal = b.stock_minimo;
+            break;
+          case 'existencia':
+            aVal = a.stock_actual;
+            bVal = b.stock_actual;
+            break;
+          case 'precio_costo':
+            aVal = a.precio_costo_usd;
+            bVal = b.precio_costo_usd;
+            break;
+          case 'precio_detalle':
+            aVal = a.precio_detalle_usd;
+            bVal = b.precio_detalle_usd;
+            break;
+          case 'precio_mayor':
+            aVal = a.precio_mayor_usd;
+            bVal = b.precio_mayor_usd;
+            break;
+          default:
+            break;
+        }
+
+        if (aVal !== bVal) {
+          if (typeof aVal === 'string' && typeof bVal === 'string') {
+            return rule.direction === 'asc' 
+              ? aVal.localeCompare(bVal)
+              : bVal.localeCompare(aVal);
+          } else {
+            return rule.direction === 'asc'
+              ? (aVal > bVal ? 1 : -1)
+              : (aVal < bVal ? 1 : -1);
+          }
+        }
       }
-      
-      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
-      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [filteredProducts, sortField, sortDirection]);
+  }, [filteredProducts, sortRules]);
 
   const totalPages = Math.ceil(sortedProducts.length / pageSize) || 1;
 
@@ -1147,7 +1289,18 @@ export default function Inventario({
     const minStockFilterLabel = 
       filterMinStock === 'todos' ? 'TODOS' : 'BAJO STOCK MÍNIMO';
 
-    const sortInfo = sortField ? ` (Ordenado por ${sortField} ${sortDirection.toUpperCase()})` : '';
+    const fieldNames: Record<string, string> = {
+      descripcion: 'Descripción',
+      categoria: 'Categoría',
+      stock_minimo: 'Stock Mínimo',
+      existencia: 'Existencia',
+      precio_costo: 'P. Costo',
+      precio_detalle: 'P. Detalle',
+      precio_mayor: 'P. Mayor',
+    };
+    const sortInfo = sortRules.length > 0 
+      ? ` (Ordenado por: ${sortRules.map(r => `${fieldNames[r.field] || r.field} ${r.direction === 'asc' ? '↑' : '↓'}`).join(', ')})`
+      : '';
 
     const totalQtyFormatted = totalFilteredQty.toLocaleString('es-VE', { minimumFractionDigits: 0, maximumFractionDigits: 3 });
 
@@ -1731,24 +1884,105 @@ export default function Inventario({
             
             {/* Catalog Table */}
             <div className="lg:col-span-10 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm h-fit">
+              {/* ORDEN COMBINADO BAR */}
+              {sortRules.length > 0 && (
+                <div className="bg-sky-50/40 border-b border-slate-200 px-4 py-2 flex flex-wrap items-center gap-2 text-xs font-sans text-slate-700">
+                  <div className="flex items-center gap-1 font-bold text-sky-900 mr-2 uppercase tracking-wider text-[10px]">
+                    <ArrowUpDown className="w-3.5 h-3.5 text-sky-700" />
+                    <span>ORDEN COMBINADO ({sortRules.length}):</span>
+                  </div>
+                  
+                  <div className="flex flex-wrap items-center gap-2">
+                    {sortRules.map((rule, idx) => {
+                      const fieldNames: Record<string, string> = {
+                        descripcion: 'Descripción',
+                        categoria: 'Categoría',
+                        stock_minimo: 'Stock Mínimo',
+                        existencia: 'Existencia',
+                        precio_costo: 'P. Costo',
+                        precio_detalle: 'P. Detalle',
+                        precio_mayor: 'P. Mayor',
+                      };
+                      
+                      const fieldName = fieldNames[rule.field] || rule.field;
+                      const directionText = rule.direction === 'asc' ? 'Menor a Mayor' : 'Mayor a Menor';
+                      
+                      return (
+                        <div 
+                          key={rule.field}
+                          className="flex items-center gap-1 bg-white border border-sky-200 rounded-full pl-1.5 pr-1 py-0.5 text-[10.5px] shadow-sm font-sans"
+                        >
+                          <span className="bg-sky-600 text-white rounded-full w-4 h-4 flex items-center justify-center font-bold text-[9px] leading-none">
+                            {idx + 1}
+                          </span>
+                          <span className="font-bold text-slate-800 ml-0.5">{fieldName}</span>
+                          {rule.direction === 'asc' ? (
+                            <ArrowUp className="w-3 h-3 text-sky-600" />
+                          ) : (
+                            <ArrowDown className="w-3 h-3 text-sky-600" />
+                          )}
+                          <span className="text-[9.5px] text-slate-455">({directionText})</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSortRules(prev => prev.filter(r => r.field !== rule.field));
+                            }}
+                            className="w-4 h-4 rounded-full flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-slate-100 transition-colors ml-0.5"
+                            title="Quitar de la ordenación"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    })}
+                    
+                    <button
+                      type="button"
+                      onClick={() => setSortRules([])}
+                      className="text-[10px] text-slate-500 hover:text-red-650 hover:underline font-bold transition-all px-2 py-0.5 ml-1"
+                    >
+                      Limpiar orden
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-xs text-left">
+                <table className="w-full border-collapse text-xs text-left table-fixed min-w-[850px]">
+                  <colgroup>
+                    <col className="w-[12%]" /> {/* Código */}
+                    <col className="w-[30%]" /> {/* Descripción */}
+                    <col className="w-[14%]" /> {/* Categoría */}
+                    <col className="w-[8%]" />  {/* Stock Mínimo */}
+                    <col className="w-[10%]" /> {/* Existencia */}
+                    <col className="w-[8%]" />  {/* P. Costo */}
+                    <col className="w-[9%]" />  {/* P. Detalle */}
+                    <col className="w-[9%]" />  {/* P. Mayor */}
+                  </colgroup>
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr className="text-slate-550 border-b border-slate-200">
-                      <th className="px-2 py-1.5 font-sans uppercase">Código</th>
+                      <th className="px-2 py-1.5 font-sans uppercase truncate">Código</th>
                       <th className="px-2 py-1.5 font-sans uppercase">
                         {renderSortHeader('Descripción', 'descripcion')}
                       </th>
                       <th className="px-2 py-1.5 font-sans uppercase">
                         {renderSortHeader('Categoría', 'categoria')}
                       </th>
-                      <th className="px-2 py-1.5 text-right font-sans uppercase">Stock Mínimo</th>
+                      <th className="px-2 py-1.5 text-right font-sans uppercase">
+                        {renderSortHeader('Stock Mínimo', 'stock_minimo', 'right')}
+                      </th>
                       <th className="px-2 py-1.5 text-right text-slate-800 font-sans uppercase">
                         {renderSortHeader('Existencia', 'existencia', 'right')}
                       </th>
-                      <th className="px-2 py-1.5 text-right font-sans uppercase">P. Costo</th>
-                      <th className="px-2 py-1.5 text-right text-emerald-600 font-sans uppercase">P. Detalle</th>
-                      <th className="px-2 py-1.5 text-right font-sans uppercase">P. Mayor</th>
+                      <th className="px-2 py-1.5 text-right font-sans uppercase">
+                        {renderSortHeader('P. Costo', 'precio_costo', 'right')}
+                      </th>
+                      <th className="px-2 py-1.5 text-right text-emerald-600 font-sans uppercase">
+                        {renderSortHeader('P. Detalle', 'precio_detalle', 'right')}
+                      </th>
+                      <th className="px-2 py-1.5 text-right font-sans uppercase">
+                        {renderSortHeader('P. Mayor', 'precio_mayor', 'right')}
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700 text-[11px]">
@@ -1771,8 +2005,8 @@ export default function Inventario({
                                 : ''
                             }`}
                           >
-                            <td className="px-2 py-1 font-mono font-bold text-slate-450">{p.barcode}</td>
-                            <td className="px-2 py-1 font-sans select-text">
+                            <td className="px-2 py-1 font-mono font-bold text-slate-450 truncate" title={p.barcode}>{p.barcode}</td>
+                            <td className="px-2 py-1 font-sans select-text break-words">
                               <div className="font-bold text-slate-850 text-[11px] leading-tight">{p.description}</div>
                               {(p.a_granel || p.fecha_vencimiento) && (
                                 <div className="flex gap-1.5 mt-0.5 text-[8px] leading-none">
@@ -1787,7 +2021,7 @@ export default function Inventario({
                                 </div>
                               )}
                             </td>
-                            <td className="px-2 py-1 font-sans">{p.category}</td>
+                            <td className="px-2 py-1 font-sans truncate" title={p.category}>{p.category}</td>
                             <td className="px-2 py-1 text-right font-mono text-slate-500">{formatStockVal(p.stock_minimo, p.a_granel)}</td>
                             <td className={`px-2 py-1 text-right font-black font-mono ${isLowStock ? 'text-red-500 animate-pulse font-bold' : 'text-slate-800'}`}>
                               {formatStockVal(p.stock_actual, p.a_granel)}
@@ -1902,6 +2136,22 @@ export default function Inventario({
                     >
                       <Plus className="w-4 h-4 bg-emerald-700/50 rounded-full p-0.5" />
                       <span>Agregar</span>
+                    </button>
+                  )}
+
+                  {/* BUTTON: CARGA POR FACTURA */}
+                  {hasPermission('crear') && (
+                    <button
+                      onClick={() => {
+                        setInvoiceNumber('');
+                        setInvoiceProducts([]);
+                        setInvoiceSearchTerm('');
+                        setShowInvoiceLoadModal(true);
+                      }}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all active:scale-95"
+                    >
+                      <Layers className="w-4 h-4 bg-emerald-700/50 rounded-full p-0.5" />
+                      <span>Carga por Factura</span>
                     </button>
                   )}
 
@@ -2027,48 +2277,220 @@ export default function Inventario({
       {/* MOVIMIENTOS KARDEX PANEL */}
       {activeSubTab === 'movimientos' && (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col h-[500px]">
-          <div className="bg-slate-55 px-5 py-4 border-b border-slate-200 flex justify-between items-center">
-            <h2 className="text-xs font-bold text-slate-600 uppercase tracking-widest flex items-center gap-2 font-sans">
-              <History className="w-4 h-4 text-winter-inventarioStart" />
-              Kardex de Movimientos de Inventario
-            </h2>
+          <div className="bg-slate-55 px-5 py-3 border-b border-slate-200 flex flex-wrap justify-between items-center gap-4">
+            <div className="flex items-center gap-4">
+              <h2 className="text-xs font-bold text-slate-600 uppercase tracking-widest flex items-center gap-2 font-sans">
+                <History className="w-4 h-4 text-winter-inventarioStart" />
+                Kardex de Movimientos de Inventario
+              </h2>
+              
+              {/* Selector de Sub-Navegación */}
+              <div className="flex bg-slate-200 p-0.5 rounded-lg border border-slate-300 text-[10.5px] font-sans">
+                <button
+                  type="button"
+                  onClick={() => setKardexView('detallada')}
+                  className={`px-3 py-1 rounded-md font-bold transition-all ${
+                    kardexView === 'detallada'
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-900'
+                  }`}
+                >
+                  Vista Detallada
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setKardexView('resumen')}
+                  className={`px-3 py-1 rounded-md font-bold transition-all ${
+                    kardexView === 'resumen'
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-900'
+                  }`}
+                >
+                  Vista Resumen
+                </button>
+              </div>
+            </div>
+
             <span className="text-[10px] bg-slate-200 border border-slate-300 px-2.5 py-0.5 rounded text-slate-600 font-sans">
-              {movements.length} transacciones
+              {kardexView === 'detallada' ? movements.length : groupedMovements.length} {kardexView === 'detallada' ? 'transacciones' : 'lotes'}
             </span>
           </div>
 
           <div className="flex-grow overflow-y-auto">
-            <table className="w-full border-collapse text-left">
-              <thead className="sticky top-0 bg-slate-55 border-b border-slate-200 text-slate-550">
-                <tr>
-                  <th className="px-4 py-3 font-sans uppercase">Fecha/Hora</th>
-                  <th className="px-4 py-3 font-sans uppercase">Código</th>
-                  <th className="px-4 py-3 font-sans uppercase">Producto</th>
-                  <th className="px-4 py-3 text-center font-sans uppercase">Tipo Mov.</th>
-                  <th className="px-4 py-3 text-right font-sans uppercase">Cantidad</th>
-                  <th className="px-4 py-3 text-right font-sans uppercase">Stock Ant.</th>
-                  <th className="px-4 py-3 text-right font-sans uppercase">Stock Post.</th>
-                  <th className="px-4 py-3 font-sans uppercase">Justificación / Motivo</th>
-                  <th className="px-4 py-3 font-sans uppercase">Operador</th>
-                  <th className="px-4 py-3 text-center font-sans uppercase">Detalle</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-[11px] text-slate-700">
-                {movements.length === 0 ? (
+            {kardexView === 'detallada' ? (
+              <table className="w-full border-collapse text-left">
+                <thead className="sticky top-0 bg-slate-55 border-b border-slate-200 text-slate-550">
                   <tr>
-                    <td colSpan={10} className="text-center py-8 text-slate-400 font-sans">
-                      No se han registrado movimientos de inventario.
-                    </td>
+                    <th className="px-4 py-3 font-sans uppercase">Fecha/Hora</th>
+                    <th className="px-4 py-3 font-sans uppercase">Código</th>
+                    <th className="px-4 py-3 font-sans uppercase">Producto</th>
+                    <th className="px-4 py-3 text-center font-sans uppercase">Tipo Mov.</th>
+                    <th className="px-4 py-3 text-right font-sans uppercase">Cantidad</th>
+                    <th className="px-4 py-3 text-right font-sans uppercase">Stock Ant.</th>
+                    <th className="px-4 py-3 text-right font-sans uppercase">Stock Post.</th>
+                    <th className="px-4 py-3 font-sans uppercase">Justificación / Motivo</th>
+                    <th className="px-4 py-3 font-sans uppercase">Operador</th>
+                    <th className="px-4 py-3 text-center font-sans uppercase">Detalle</th>
                   </tr>
-                ) : (
-                  [...movements].reverse().map(m => {
-                    let typeColor = 'text-blue-700 bg-blue-50 border-blue-200';
-                    if (m.type === 'Entrada') typeColor = 'text-green-700 bg-green-50 border-green-200';
-                    if (m.type === 'Salida') typeColor = 'text-orange-700 bg-orange-50 border-orange-200';
-                    if (m.type === 'Merma') typeColor = 'text-red-700 bg-red-50 border-red-200 font-bold';
-                    if (m.type === 'Devolucion' || m.type === 'Devolución') typeColor = 'text-yellow-700 bg-yellow-50 border-yellow-250 font-bold';
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-[11px] text-slate-700">
+                  {movements.length === 0 ? (
+                    <tr>
+                      <td colSpan={10} className="text-center py-8 text-slate-400 font-sans">
+                        No se han registrado movimientos de inventario.
+                      </td>
+                    </tr>
+                  ) : (
+                    [...movements].reverse().map(m => {
+                      let typeColor = 'text-blue-700 bg-blue-50 border-blue-200';
+                      if (m.type === 'Entrada') typeColor = 'text-green-700 bg-green-50 border-green-200';
+                      if (m.type === 'Salida') typeColor = 'text-orange-700 bg-orange-50 border-orange-200';
+                      if (m.type === 'Merma') typeColor = 'text-red-700 bg-red-50 border-red-200 font-bold';
+                      if (m.type === 'Devolucion' || m.type === 'Devolución') typeColor = 'text-yellow-700 bg-yellow-50 border-yellow-250 font-bold';
 
-                    // Check if product is a granel (bulk)
+                      const relatedProd = products.find(p => p.barcode === m.productCode || p.description === m.productDescription);
+                      const isBulk = relatedProd?.a_granel === true || (m as any).a_granel === true;
+
+                      const formatKardexVal = (numVal: number, showSign: boolean = false) => {
+                        const val = typeof numVal === 'number' ? numVal : (parseFloat(numVal) || 0);
+                        const formatted = isBulk ? val.toFixed(3) : (Math.round(val * 1000) / 1000 % 1 === 0 ? Math.round(val).toString() : val.toFixed(3));
+                        if (showSign && val > 0) return `+${formatted}`;
+                        return formatted;
+                      };
+
+                      return (
+                        <tr key={m.id} className="hover:bg-slate-55/50">
+                          <td className="px-4 py-2.5 font-mono text-slate-450">{m.date}</td>
+                          <td className="px-4 py-2.5 font-mono font-bold text-slate-500">{m.productCode}</td>
+                          <td className="px-4 py-2.5 font-sans">{m.productDescription}</td>
+                          <td className="px-4 py-2.5 text-center">
+                            <span className={`px-2 py-0.5 rounded border text-[9px] ${typeColor}`}>
+                              {m.type}
+                            </span>
+                          </td>
+                          <td className={`px-4 py-2.5 text-right font-black font-mono ${m.qty > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {formatKardexVal(m.qty, true)}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono text-slate-450">{formatKardexVal(m.stock_anterior)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono text-slate-600">{formatKardexVal(m.stock_posterior)}</td>
+                          <td className="px-4 py-2.5 text-slate-655 italic font-sans">{m.motivo}</td>
+                          <td className="px-4 py-2.5 font-sans">{m.usuario}</td>
+                          <td className="px-4 py-2.5 text-center">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedMovementDetail(m)}
+                              className="text-sky-600 hover:text-sky-850 hover:underline font-bold font-sans text-[10px]"
+                            >
+                              Ver
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            ) : (
+              <table className="w-full border-collapse text-left">
+                <thead className="sticky top-0 bg-slate-55 border-b border-slate-200 text-slate-550">
+                  <tr>
+                    <th className="px-4 py-3 font-sans uppercase">Fecha/Hora (Minuto)</th>
+                    <th className="px-4 py-3 font-sans uppercase">Tipo Mov.</th>
+                    <th className="px-4 py-3 font-sans uppercase">Justificación / Motivo</th>
+                    <th className="px-4 py-3 text-right font-sans uppercase">Total Ítems</th>
+                    <th className="px-4 py-3 text-right font-sans uppercase">Cantidad Total</th>
+                    <th className="px-4 py-3 font-sans uppercase">Operador</th>
+                    <th className="px-4 py-3 text-center font-sans uppercase">Detalle</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-[11px] text-slate-700">
+                  {groupedMovements.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="text-center py-8 text-slate-400 font-sans">
+                        No se han registrado lotes de movimientos.
+                      </td>
+                    </tr>
+                  ) : (
+                    groupedMovements.map(g => {
+                      let typeColor = 'text-blue-700 bg-blue-50 border-blue-200';
+                      if (g.type === 'Entrada') typeColor = 'text-green-700 bg-green-50 border-green-200';
+                      if (g.type === 'Salida') typeColor = 'text-orange-700 bg-orange-50 border-orange-200';
+                      if (g.type === 'Merma') typeColor = 'text-red-700 bg-red-50 border-red-200 font-bold';
+                      if (g.type === 'Devolucion' || g.type === 'Devolución') typeColor = 'text-yellow-700 bg-yellow-50 border-yellow-250 font-bold';
+
+                      return (
+                        <tr key={g.key} className="hover:bg-slate-55/50">
+                          <td className="px-4 py-2.5 font-mono text-slate-450">{g.date}</td>
+                          <td className="px-4 py-2.5">
+                            <span className={`px-2 py-0.5 rounded border text-[9px] ${typeColor}`}>
+                              {g.type}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2.5 text-slate-655 italic font-sans font-bold">{g.motivo}</td>
+                          <td className="px-4 py-2.5 text-right font-mono font-bold text-slate-600">{g.totalItems}</td>
+                          <td className={`px-4 py-2.5 text-right font-black font-mono ${g.totalQty > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {g.totalQty > 0 ? `+${g.totalQty}` : g.totalQty}
+                          </td>
+                          <td className="px-4 py-2.5 font-sans">{g.usuario}</td>
+                          <td className="px-4 py-2.5 text-center">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedGroupedMovements(g.movements)}
+                              className="bg-sky-50 border border-sky-250 text-sky-700 hover:bg-sky-100/80 px-2.5 py-1 rounded font-bold font-sans text-[10px] active:scale-95 transition-all shadow-sm"
+                            >
+                              Ver Detalle
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* DETALLE DE MOVIMIENTO AGRUPADO POPUP */}
+      {selectedGroupedMovements && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-3xl w-full max-h-[75vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-sky-600 to-sky-700 px-5 py-3 flex justify-between items-center text-white">
+              <h3 className="text-xs font-extrabold uppercase tracking-wider font-mono flex items-center gap-2">
+                <History className="w-3.5 h-3.5" />
+                Detalle de Lote - {selectedGroupedMovements[0]?.motivo}
+              </h3>
+              <button 
+                onClick={() => setSelectedGroupedMovements(null)} 
+                className="text-white/80 hover:text-white text-base focus:outline-none"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Info Row */}
+            <div className="bg-slate-50 border-b border-slate-200 px-5 py-2.5 flex justify-between text-[10px] font-sans text-slate-500">
+              <span>Fecha: <strong className="text-slate-700 font-mono">{selectedGroupedMovements[0]?.date}</strong></span>
+              <span>Operador: <strong className="text-slate-700 uppercase">{selectedGroupedMovements[0]?.usuario}</strong></span>
+              <span>Tipo: <strong className="text-slate-700 uppercase">{selectedGroupedMovements[0]?.type}</strong></span>
+            </div>
+
+            {/* Content Table */}
+            <div className="flex-1 overflow-y-auto min-h-0">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead className="bg-slate-100 text-[10px] uppercase text-slate-500 font-mono sticky top-0 z-10 border-b border-slate-200">
+                  <tr>
+                    <th className="px-4 py-2">Código</th>
+                    <th className="px-4 py-2">Producto</th>
+                    <th className="px-4 py-2 text-right">Cantidad</th>
+                    <th className="px-4 py-2 text-right">Stock Ant.</th>
+                    <th className="px-4 py-2 text-right">Stock Post.</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-sans text-slate-700">
+                  {selectedGroupedMovements.map(m => {
                     const relatedProd = products.find(p => p.barcode === m.productCode || p.description === m.productDescription);
                     const isBulk = relatedProd?.a_granel === true || (m as any).a_granel === true;
 
@@ -2080,37 +2502,31 @@ export default function Inventario({
                     };
 
                     return (
-                      <tr key={m.id} className="hover:bg-slate-55/50">
-                        <td className="px-4 py-2.5 font-mono text-slate-450">{m.date}</td>
-                        <td className="px-4 py-2.5 font-mono font-bold text-slate-500">{m.productCode}</td>
-                        <td className="px-4 py-2.5 font-sans">{m.productDescription}</td>
-                        <td className="px-4 py-2.5 text-center">
-                          <span className={`px-2 py-0.5 rounded border text-[9px] ${typeColor}`}>
-                            {m.type}
-                          </span>
-                        </td>
-                        <td className={`px-4 py-2.5 text-right font-black font-mono ${m.qty > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      <tr key={m.id} className="hover:bg-slate-55/30">
+                        <td className="px-4 py-2 font-mono font-bold text-slate-500">{m.productCode}</td>
+                        <td className="px-4 py-2">{m.productDescription}</td>
+                        <td className={`px-4 py-2 text-right font-bold font-mono ${m.qty > 0 ? 'text-green-600' : 'text-red-600'}`}>
                           {formatKardexVal(m.qty, true)}
                         </td>
-                        <td className="px-4 py-2.5 text-right font-mono text-slate-450">{formatKardexVal(m.stock_anterior)}</td>
-                        <td className="px-4 py-2.5 text-right font-mono text-slate-600">{formatKardexVal(m.stock_posterior)}</td>
-                        <td className="px-4 py-2.5 text-slate-655 italic font-sans">{m.motivo}</td>
-                        <td className="px-4 py-2.5 font-sans">{m.usuario}</td>
-                        <td className="px-4 py-2.5 text-center">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedMovementDetail(m)}
-                            className="text-sky-600 hover:text-sky-850 hover:underline font-bold font-sans text-[10px]"
-                          >
-                            Ver
-                          </button>
-                        </td>
+                        <td className="px-4 py-2 text-right font-mono text-slate-400">{formatKardexVal(m.stock_anterior)}</td>
+                        <td className="px-4 py-2 text-right font-mono text-slate-600">{formatKardexVal(m.stock_posterior)}</td>
                       </tr>
                     );
-                  })
-                )}
-              </tbody>
-            </table>
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Footer */}
+            <div className="bg-slate-50 px-5 py-3 border-t border-slate-200 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setSelectedGroupedMovements(null)}
+                className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded-lg text-[11px] font-sans font-bold transition-all"
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -3812,6 +4228,295 @@ export default function Inventario({
           </div>
         );
       })()}
+
+      {/* CARGA POR FACTURA MODAL */}
+      {showInvoiceLoadModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[50] flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-5xl w-full h-[85vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-emerald-600 to-emerald-700 px-6 py-4 flex justify-between items-center text-white">
+              <h3 className="text-sm font-extrabold uppercase tracking-wider font-mono flex items-center gap-2">
+                <Layers className="w-4 h-4 bg-emerald-700/50 rounded-full p-0.5" />
+                Carga de Mercancía por Factura
+              </h3>
+              <button 
+                onClick={() => setShowInvoiceLoadModal(false)}
+                className="text-white/80 hover:text-white text-base focus:outline-none"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Factura Input Row */}
+            <div className="bg-slate-50 border-b border-slate-200 px-6 py-3 flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] uppercase tracking-wider text-slate-550 font-extrabold font-mono whitespace-nowrap">Número de Factura:</label>
+                <input
+                  type="text"
+                  placeholder="Ej: FAC-12345..."
+                  value={invoiceNumber}
+                  onChange={(e) => setInvoiceNumber(e.target.value)}
+                  className="bg-white border border-slate-300 rounded px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-600 font-sans font-bold w-64 shadow-sm"
+                />
+              </div>
+            </div>
+
+            {/* Content columns */}
+            <div className="flex-1 flex overflow-hidden min-h-0">
+              {/* Left Column: Product Search */}
+              <div className="w-2/5 p-4 border-r border-slate-200 flex flex-col overflow-hidden min-h-0">
+                <label className="text-[10px] uppercase tracking-wider text-slate-450 font-extrabold font-mono block mb-2">Buscador de Productos</label>
+                <div className="flex gap-2 mb-3">
+                  <div className="relative flex-grow">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 pointer-events-none text-slate-455">
+                      <Search className="w-3.5 h-3.5" />
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="Buscar por código o descripción..."
+                      value={invoiceSearchTerm}
+                      onChange={(e) => setInvoiceSearchTerm(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5 pl-8 text-xs text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white font-sans"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowNewProdModal(true)}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded text-[10px] font-sans uppercase flex items-center gap-1 shadow flex-shrink-0 active:scale-95 transition-all"
+                    title="Registrar un nuevo producto en la base de datos"
+                  >
+                    <Plus className="w-3.5 h-3.5 bg-emerald-750/50 rounded-full p-0.5" />
+                    <span>Nuevo</span>
+                  </button>
+                </div>
+
+                {/* Filter products */}
+                <div className="flex-grow overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-lg bg-white min-h-0">
+                  {(() => {
+                    const filtered = products.filter(p =>
+                      p.description.toLowerCase().includes(invoiceSearchTerm.toLowerCase()) ||
+                      p.barcode.toLowerCase().includes(invoiceSearchTerm.toLowerCase())
+                    );
+
+                    if (filtered.length === 0) {
+                      return (
+                        <div className="p-8 text-center flex flex-col items-center justify-center gap-3">
+                          <p className="text-xs text-slate-450 italic font-sans">No se encontró ningún producto.</p>
+                          <button
+                            type="button"
+                            onClick={() => setShowNewProdModal(true)}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 px-3 rounded text-[10px] font-sans uppercase flex items-center gap-1.5 shadow"
+                          >
+                            <Plus className="w-3 h-3 bg-emerald-700/50 rounded-full p-0.5" />
+                            Registrar Producto
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    return filtered.map(p => {
+                      const isAdded = invoiceProducts.some(item => item.product.id === p.id);
+                      return (
+                        <div key={p.id} className="flex justify-between items-center p-2.5 hover:bg-slate-50/50">
+                          <div className="min-w-0 pr-2">
+                            <p className="font-bold text-slate-700 text-xs truncate max-w-[200px]" title={p.description}>{p.description}</p>
+                            <p className="text-[10px] text-slate-400 font-mono truncate">{p.barcode}</p>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={isAdded}
+                            onClick={() => {
+                              setInvoiceProducts(prev => [
+                                ...prev,
+                                {
+                                  product: p,
+                                  qty: 1,
+                                  precio_costo_usd: p.precio_costo_usd,
+                                  precio_detalle_usd: p.precio_detalle_usd,
+                                  precio_mayor_usd: p.precio_mayor_usd
+                                }
+                              ]);
+                            }}
+                            className={`font-sans font-bold text-[10px] px-2.5 py-1 rounded transition-all flex-shrink-0 ${
+                              isAdded
+                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                            }`}
+                          >
+                            {isAdded ? 'Cargado ✓' : 'Añadir'}
+                          </button>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+
+              {/* Right Column: Invoice Load List */}
+              <div className="w-3/5 p-4 flex flex-col overflow-hidden min-h-0 bg-slate-50">
+                <label className="text-[10px] uppercase tracking-wider text-slate-455 font-extrabold font-mono block mb-2">Lista de Carga de Factura ({invoiceProducts.length} ítems)</label>
+                
+                <div className="flex-grow overflow-auto border border-slate-200 rounded-lg bg-white min-h-0 shadow-inner">
+                  {invoiceProducts.length === 0 ? (
+                    <div className="h-full flex flex-col justify-center items-center p-8 text-center text-slate-400">
+                      <Layers className="w-8 h-8 text-slate-300 mb-2" />
+                      <p className="text-xs font-sans">Añada productos desde el buscador izquierdo para comenzar la carga.</p>
+                    </div>
+                  ) : (
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead className="bg-slate-100 text-[10px] uppercase text-slate-500 font-mono sticky top-0 z-10 border-b border-slate-200">
+                        <tr>
+                          <th className="px-3 py-2 w-[32%]">Producto</th>
+                          <th className="px-2 py-2 text-right w-[13%]">Exist.</th>
+                          <th className="px-2 py-2 text-right w-[13%]">A Agregar</th>
+                          <th className="px-2 py-2 text-right w-[13%]">Costo $</th>
+                          <th className="px-2 py-2 text-right w-[13%]">Detalle $</th>
+                          <th className="px-2 py-2 text-right w-[12%]">Mayor $</th>
+                          <th className="px-2 py-2 text-center w-[4%]"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {invoiceProducts.map((item, index) => (
+                          <tr key={item.product.id} className="hover:bg-slate-55/40">
+                            <td className="px-3 py-2 font-sans">
+                              <p className="font-bold text-slate-750 truncate max-w-[150px]" title={item.product.description}>
+                                {item.product.description}
+                              </p>
+                              <span className="text-[9px] text-slate-400 font-mono block">{item.product.barcode}</span>
+                            </td>
+                            <td className="px-2 py-2 text-right font-mono text-slate-500 font-bold select-none">
+                              {formatStockVal(item.product.stock_actual, item.product.a_granel)}
+                            </td>
+                            <td className="px-2 py-2 text-right">
+                              <input
+                                type="number"
+                                min="0.001"
+                                step="any"
+                                value={item.qty}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 0;
+                                  setInvoiceProducts(prev => prev.map((it, idx) => idx === index ? { ...it, qty: val } : it));
+                                }}
+                                className="w-16 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-right text-xs font-mono font-bold focus:bg-white focus:outline-none"
+                              />
+                            </td>
+                            <td className="px-2 py-2 text-right">
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                value={item.precio_costo_usd}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 0;
+                                  setInvoiceProducts(prev => prev.map((it, idx) => idx === index ? { ...it, precio_costo_usd: val } : it));
+                                }}
+                                className="w-16 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-right text-xs font-mono font-bold focus:bg-white focus:outline-none"
+                              />
+                            </td>
+                            <td className="px-2 py-2 text-right">
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                value={item.precio_detalle_usd}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 0;
+                                  setInvoiceProducts(prev => prev.map((it, idx) => idx === index ? { ...it, precio_detalle_usd: val } : it));
+                                }}
+                                className="w-16 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-right text-xs font-mono font-bold focus:bg-white focus:outline-none"
+                              />
+                            </td>
+                            <td className="px-2 py-2 text-right">
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                value={item.precio_mayor_usd}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 0;
+                                  setInvoiceProducts(prev => prev.map((it, idx) => idx === index ? { ...it, precio_mayor_usd: val } : it));
+                                }}
+                                className="w-16 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-right text-xs font-mono font-bold focus:bg-white focus:outline-none"
+                              />
+                            </td>
+                            <td className="px-2 py-2 text-center">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setInvoiceProducts(prev => prev.filter((_, idx) => idx !== index));
+                                }}
+                                className="text-red-500 hover:text-red-750 text-sm font-bold focus:outline-none"
+                                title="Eliminar ítem"
+                              >
+                                ✕
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex justify-between items-center">
+              <div className="flex flex-col">
+                <span className="text-[10px] uppercase tracking-wider text-slate-450 font-extrabold font-mono">Total Costo de Factura</span>
+                <span className="text-slate-800 font-mono font-black text-sm">
+                  ${invoiceProducts.reduce((acc, it) => acc + (it.qty * it.precio_costo_usd), 0).toFixed(2)}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowInvoiceLoadModal(false)}
+                  className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-5 py-2.5 rounded-lg text-xs font-sans font-bold transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={invoiceProducts.length === 0 || !invoiceNumber.trim()}
+                  onClick={async () => {
+                    const invalidIndex = invoiceProducts.findIndex(
+                      it => it.precio_detalle_usd <= it.precio_costo_usd || it.precio_mayor_usd <= it.precio_costo_usd
+                    );
+
+                    if (invalidIndex !== -1) {
+                      showAlert(`El producto "${invoiceProducts[invalidIndex].product.description}" tiene precios de venta menores o iguales a su precio de costo.`);
+                      return;
+                    }
+
+                    const updates = invoiceProducts.map(it => ({
+                      prodId: it.product.id,
+                      qty: it.qty,
+                      precio_costo_usd: it.precio_costo_usd,
+                      precio_detalle_usd: it.precio_detalle_usd,
+                      precio_mayor_usd: it.precio_mayor_usd
+                    }));
+
+                    const reason = `Carga por Factura: ${invoiceNumber.trim()}`;
+                    const success = await onUpdateProductStockBulk(updates, reason);
+                    if (success) {
+                      showToast(`Se han cargado con éxito ${invoiceProducts.length} productos bajo la Factura: ${invoiceNumber}`);
+                      setShowInvoiceLoadModal(false);
+                      setInvoiceProducts([]);
+                      setInvoiceNumber('');
+                    } else {
+                      showAlert('Ocurrió un error al intentar procesar la carga de la factura.');
+                    }
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-lg text-xs font-sans font-bold transition-all"
+                >
+                  Procesar Carga ({invoiceProducts.length})
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
