@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { Product, InventoryMovement, PriceAdjustmentHistory, User, CompanyConfig } from '../types';
 import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
+import { getLocalDateStr } from '../utils';
 import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
 
 interface InventarioProps {
@@ -255,7 +256,7 @@ export default function Inventario({
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `respaldo_inventario_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute("download", `respaldo_inventario_${getLocalDateStr()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1303,7 +1304,7 @@ export default function Inventario({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    const dateStr = new Date().toISOString().split('T')[0];
+    const dateStr = getLocalDateStr();
     link.setAttribute('download', `reporte_inventario_${dateStr}.csv`);
     document.body.appendChild(link);
     link.click();

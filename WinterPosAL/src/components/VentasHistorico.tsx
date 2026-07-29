@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Sale, CierreCaja, User } from '../types';
 import { History, Printer, ShieldAlert, ShoppingCart, Eye, Edit, Trash2, Search, ChevronUp, ChevronDown, ChevronsUpDown, CheckCircle2, FileDown, MessageCircle } from 'lucide-react';
-import { formatNumberToWordsUSD } from '../utils';
+import { formatNumberToWordsUSD, getLocalDateStr } from '../utils';
 import { useDialog } from '../hooks/useDialog';
 
 interface VentasHistoricoProps {
@@ -205,14 +205,8 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
     }
   };
 
-  const [startDate, setStartDate] = useState(() => {
-    const d = new Date();
-    return d.toISOString().split('T')[0];
-  });
-  const [endDate, setEndDate] = useState(() => {
-    const d = new Date();
-    return d.toISOString().split('T')[0];
-  });
+  const [startDate, setStartDate] = useState(() => getLocalDateStr());
+  const [endDate, setEndDate] = useState(() => getLocalDateStr());
   const [filterEnabled, setFilterEnabled] = useState(true);
 
   // Search inputs

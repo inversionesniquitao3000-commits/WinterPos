@@ -6,6 +6,7 @@ import {
   Settings, CheckSquare, Square, Globe, ShieldCheck, Printer, FileText
 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
+import { getLocalDateStr } from '../utils';
 
 interface ConfiguracionEmpresaProps {
   config: CompanyConfig;
@@ -649,7 +650,7 @@ export default function ConfiguracionEmpresa({
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `winterpos_backup_${new Date().toISOString().split('T')[0]}.json`;
+        a.download = `winterpos_backup_${getLocalDateStr()}.json`;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -1852,7 +1853,7 @@ export default function ConfiguracionEmpresa({
                       <input
                         type="date"
                         value={backupSpecificDate}
-                        min={new Date().toISOString().split('T')[0]}
+                        min={getLocalDateStr()}
                         onChange={(e) => setBackupSpecificDate(e.target.value)}
                         className="bg-white border border-amber-300 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:border-amber-500 font-sans w-full shadow-sm"
                       />
