@@ -81,45 +81,50 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
     
     try {
       const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-      const apiUrl = isLocalhost ? 'http://localhost:5000/api/users' : `http://${window.location.hostname}:5000/api/users`;
-      
-      let usersToTest = systemUsers;
-      const resUsers = await fetch(apiUrl);
-      if (resUsers.ok) {
-        const uData = await resUsers.json();
-        if (Array.isArray(uData) && uData.length > 0) {
-          usersToTest = uData;
-        }
-      }
+      const checkUrl = isLocalhost ? 'http://localhost:5000/api/users/login-check' : `http://${window.location.hostname}:5000/api/users/login-check`;
+      const terminalSaved = localStorage.getItem('pos_terminal_name') || 'LOCAL';
+
+      const checkRes = await fetch(checkUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: username.trim(),
+          password,
+          terminal: terminalSaved
+        })
+      });
 
       setIsLoading(false);
-      const matched = usersToTest.find(
-        u => u.usuario.toLowerCase() === username.trim().toLowerCase() && password === (u.clave || 'admin')
-      );
-      
-      if (matched) {
-        if (matched.estado === 'Inactivo') {
-          setErrorMsg('Su usuario se encuentra inactivo. Consulte al Administrador.');
-        } else {
-          onLoginSuccess(matched);
+
+      if (checkRes.ok) {
+        const checkData = await checkRes.json();
+        if (checkData.success && checkData.user) {
+          onLoginSuccess(checkData.user);
+          return;
         }
       } else {
-        setErrorMsg('Usuario o contraseña incorrectos. Verifique sus credenciales.');
+        const errData = await checkRes.json().catch(() => ({}));
+        if (errData.message) {
+          setErrorMsg(errData.message);
+          return;
+        }
       }
     } catch (err) {
       setIsLoading(false);
-      const matched = systemUsers.find(
-        u => u.usuario.toLowerCase() === username.trim().toLowerCase() && password === (u.clave || 'admin')
-      );
-      if (matched) {
-        if (matched.estado === 'Inactivo') {
-          setErrorMsg('Su usuario se encuentra inactivo. Consulte al Administrador.');
-        } else {
-          onLoginSuccess(matched);
-        }
+      console.warn('Backend no disponible para login-check, usando verificación local de respaldo:', err);
+    }
+
+    const matched = systemUsers.find(
+      u => u.usuario.toLowerCase() === username.trim().toLowerCase() && password === (u.clave || 'admin')
+    );
+    if (matched) {
+      if (matched.estado === 'Inactivo') {
+        setErrorMsg('Su usuario se encuentra inactivo. Consulte al Administrador.');
       } else {
-        setErrorMsg('Usuario o contraseña incorrectos. Verifique sus credenciales.');
+        onLoginSuccess(matched);
       }
+    } else {
+      setErrorMsg('Usuario o contraseña incorrectos. Verifique sus credenciales.');
     }
   };
 

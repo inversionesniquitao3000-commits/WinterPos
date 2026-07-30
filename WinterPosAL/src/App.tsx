@@ -38,15 +38,18 @@ export default function App() {
     return name;
   });
   
-  // App States populated from mock data / local storage
+  // App States populated from local storage / backend API
   const [products, setProducts] = useState<Product[]>(() => {
     const saved = localStorage.getItem('pos_products');
-    return saved ? JSON.parse(saved) : mockProducts;
+    return saved ? JSON.parse(saved) : [];
   });
 
   const [clients, setClients] = useState<Client[]>(() => {
     const saved = localStorage.getItem('pos_clients');
-    return saved ? JSON.parse(saved) : mockClients;
+    if (saved) return JSON.parse(saved);
+    return [
+      { id: 1, cedula_rif: 'V-00000000', nombre: 'CONSUMIDOR FINAL', telefono: '', direccion: 'LOCAL', limite_credito: 0, credito_disponible: 0, porcentaje_descuento: 0, estado: 'Activo', saldo_pendiente: 0 }
+    ];
   });
 
   const [companyConfig, setCompanyConfig] = useState<CompanyConfig>(() => {
@@ -56,12 +59,12 @@ export default function App() {
 
   const [tasaHistory, setTasaHistory] = useState<TasaHistoryItem[]>(() => {
     const saved = localStorage.getItem('pos_tasa_history');
-    return saved ? JSON.parse(saved) : mockTasaHistory;
+    return saved ? JSON.parse(saved) : [];
   });
 
   const [movements, setMovements] = useState<InventoryMovement[]>(() => {
     const saved = localStorage.getItem('pos_movements');
-    return saved ? JSON.parse(saved) : mockMovements;
+    return saved ? JSON.parse(saved) : [];
   });
 
   const [priceHistory, setPriceHistory] = useState<PriceAdjustmentHistory[]>(() => {
@@ -420,6 +423,25 @@ export default function App() {
       fetchVentasData();
     }
   }, [activeTab, lanIP, dbMode]);
+
+  // Refresh rate history (tasas) automatically from database when entering tasa tab or on login
+  useEffect(() => {
+    if (activeTab === 'tasa' || currentUser) {
+      const fetchTasasData = async () => {
+        try {
+          const res = await fetch(getApiUrl('/tasas'));
+          if (res.ok) {
+            const data = await res.json();
+            setTasaHistory(data);
+            localStorage.setItem('pos_tasa_history', JSON.stringify(data));
+          }
+        } catch (err) {
+          console.error('Error al actualizar historial de tasas desde BD:', err);
+        }
+      };
+      fetchTasasData();
+    }
+  }, [activeTab, currentUser, lanIP, dbMode]);
 
   // Load initial company config and users on mount (so Login screen updates immediately)
   useEffect(() => {
@@ -1641,14 +1663,50 @@ export default function App() {
     }
   };
 
+  const confirmLogoutUser = async () => {
+    if (currentUser) {
+      try {
+        await fetch(getApiUrl('/users/logout'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: currentUser.id, username: currentUser.usuario })
+        });
+      } catch (_) {}
+    }
+    setCurrentUser(null);
+    setActiveTab('caja');
+  };
+
   const handleLogout = () => {
     if (cajaAbierta) {
       setShowLogoutConfirm(true);
       return;
     }
-    setCurrentUser(null);
-    setActiveTab('caja');
+    confirmLogoutUser();
   };
+
+  // Periodic active session heartbeat (every 20 seconds) while user is logged in
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const sendHeartbeat = async () => {
+      try {
+        await fetch(getApiUrl('/users/heartbeat'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: currentUser.id,
+            username: currentUser.usuario,
+            terminal: terminalName
+          })
+        });
+      } catch (_) {}
+    };
+
+    sendHeartbeat();
+    const interval = setInterval(sendHeartbeat, 20000);
+    return () => clearInterval(interval);
+  }, [currentUser, terminalName, lanIP, dbMode]);
 
   const hasModulePermission = (modulo: string, accion: 'ver' | 'crear' | 'editar' | 'eliminar' = 'ver') => {
     if (!currentUser) return false;
@@ -2156,7 +2214,7 @@ export default function App() {
                 type="button"
                 onClick={() => {
                   setShowLogoutConfirm(false);
-                  setCurrentUser(null);
+                  confirmLogoutUser();
                 }}
                 className="w-1/2 bg-red-600 hover:bg-red-750 text-white py-2.5 rounded font-bold font-sans text-xs tracking-wider transition-all"
               >

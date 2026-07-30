@@ -67,7 +67,45 @@ export default function ConfiguracionEmpresa({
   const { showAlert, showConfirm } = useDialog();
   // Navigation tabs
   const [activeTab, setActiveTab] = useState<'empresa' | 'usuarios' | 'perifericos' | 'db' | 'whatsapp'>('empresa');
-  const [subTabUsers, setSubTabUsers] = useState<'users' | 'roles'>('users');
+  const [subTabUsers, setSubTabUsers] = useState<'users' | 'roles' | 'sesiones'>('users');
+  const [activeSessionsList, setActiveSessionsList] = useState<any[]>([]);
+
+  const fetchActiveSessions = async () => {
+    try {
+      const res = await fetch(getApiUrl('/users/active-sessions'));
+      if (res.ok) {
+        const data = await res.json();
+        setActiveSessionsList(data);
+      }
+    } catch (_) {}
+  };
+
+  useEffect(() => {
+    if (subTabUsers === 'sesiones') {
+      fetchActiveSessions();
+      const interval = setInterval(fetchActiveSessions, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [subTabUsers]);
+
+  const handleForceDisconnectSession = async (userId: number | string, username: string) => {
+    const ok = await showConfirm(
+      `¿Desea desconectar la sesión activa de "${username}"? El usuario podrá volver a ingresar desde cualquier equipo.`,
+      'Desconectar Usuario',
+      { confirmLabel: 'Desconectar', isDanger: true }
+    );
+    if (ok) {
+      try {
+        await fetch(getApiUrl(`/users/active-sessions/${userId}`), { method: 'DELETE' });
+        setSuccessMsg(`Sesión de ${username} liberada correctamente.`);
+        setTimeout(() => setSuccessMsg(''), 4000);
+        fetchActiveSessions();
+      } catch (_) {
+        setErrorMsg('Error al intentar liberar la sesión.');
+        setTimeout(() => setErrorMsg(''), 4000);
+      }
+    }
+  };
   
   // WhatsApp bot states
   const [waConfig, setWaConfig] = useState({
@@ -1052,6 +1090,22 @@ export default function ConfiguracionEmpresa({
                 <ShieldAlert className="w-4 h-4" />
                 Perfiles y Roles
               </button>
+              <button
+                onClick={() => setSubTabUsers('sesiones')}
+                className={`pb-1 text-xs font-bold font-sans transition-all flex items-center gap-1.5 ${
+                  subTabUsers === 'sesiones'
+                    ? 'border-b-2 border-emerald-600 text-emerald-700 font-extrabold'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                <Globe className="w-4 h-4 text-emerald-600" />
+                Sesiones Activas en Red
+                {activeSessionsList.length > 0 && (
+                  <span className="bg-emerald-100 text-emerald-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                    {activeSessionsList.length}
+                  </span>
+                )}
+              </button>
             </div>
 
             {/* SUBTAB: USERS LIST */}
@@ -1197,6 +1251,77 @@ export default function ConfiguracionEmpresa({
                           );
                         });
                       })()}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* SUBTAB: ACTIVE SESSIONS LIST */}
+            {subTabUsers === 'sesiones' && (
+              <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-800 uppercase font-sans flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      Sesiones Activas en Red ({activeSessionsList.length})
+                    </h3>
+                    <p className="text-[11px] text-slate-500 font-sans mt-0.5">
+                      Muestra los usuarios conectados actualmente en las terminales del sistema.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={fetchActiveSessions}
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold font-sans text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 transition-all"
+                  >
+                    🔄 Actualizar
+                  </button>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left font-sans border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-slate-400 text-[10px] uppercase font-bold">
+                        <th className="py-2.5 px-3">Usuario (Login)</th>
+                        <th className="py-2.5 px-3">Nombre</th>
+                        <th className="py-2.5 px-3">Rol</th>
+                        <th className="py-2.5 px-3">Estación / Equipo</th>
+                        <th className="py-2.5 px-3">Hora Ingreso</th>
+                        <th className="py-2.5 px-3 text-right">Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activeSessionsList.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="py-8 text-center text-slate-400 font-sans italic">
+                            No hay sesiones activas en la red en este momento.
+                          </td>
+                        </tr>
+                      ) : (
+                        activeSessionsList.map(s => (
+                          <tr key={s.userId} className="border-b border-slate-100 hover:bg-slate-50/50 text-xs">
+                            <td className="py-3 px-3 font-mono font-bold text-slate-800 flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                              {s.username}
+                            </td>
+                            <td className="py-3 px-3 text-slate-700 font-medium">{s.nombre}</td>
+                            <td className="py-3 px-3 text-sky-700 font-bold uppercase">{s.rol}</td>
+                            <td className="py-3 px-3 font-mono text-emerald-800 font-bold">{s.terminal}</td>
+                            <td className="py-3 px-3 font-mono text-slate-500">{new Date(s.loginTime).toLocaleTimeString()}</td>
+                            <td className="py-3 px-3 text-right">
+                              <button
+                                type="button"
+                                onClick={() => handleForceDisconnectSession(s.userId, s.username)}
+                                className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 px-2.5 py-1 rounded text-[11px] font-bold transition-all"
+                                title="Desconectar usuario de esta terminal"
+                              >
+                                Desconectar
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -1700,7 +1825,7 @@ export default function ConfiguracionEmpresa({
                 <div className="border border-slate-200 rounded-lg p-4 space-y-3 flex flex-col justify-between">
                   <div>
                     <span className="font-bold text-slate-700 block">Vaciar Registro de Ventas y Facturas</span>
-                    <p className="text-[10px] text-slate-500 font-sans">Elimina todas las transacciones históricas, reinicia folios de factura, limpia cierres de caja, vacía el kardex (movimientos) e historial de precios.</p>
+                    <p className="text-[10px] text-slate-500 font-sans">Elimina todas las transacciones históricas, reinicia folios de factura, limpia cierres de caja y kardex (mantiene intactas las tasas de cambio BCV).</p>
                   </div>
                   <button
                     onClick={() => handleWipeDb('sales')}

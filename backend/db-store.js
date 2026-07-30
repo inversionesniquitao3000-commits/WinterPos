@@ -71,6 +71,7 @@ try {
     ALTER TABLE Productos ADD COLUMN IF NOT EXISTS a_granel BOOLEAN DEFAULT FALSE;
     ALTER TABLE Productos ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(50);
     ALTER TABLE Productos ADD COLUMN IF NOT EXISTS porcentaje_impuesto NUMERIC DEFAULT 0;
+    CREATE SEQUENCE IF NOT EXISTS seq_factura START WITH 1;
     CREATE TABLE IF NOT EXISTS Roles (
       id SERIAL PRIMARY KEY,
       nombre VARCHAR(100) UNIQUE,
@@ -90,21 +91,13 @@ try {
     SELECT setval(pg_get_serial_sequence('Clientes', 'id'), COALESCE((SELECT MAX(id) FROM Clientes), 1));
     SELECT setval(pg_get_serial_sequence('Ventas', 'id'), COALESCE((SELECT MAX(id) FROM Ventas), 1));
     SELECT setval(pg_get_serial_sequence('Tasas_Cambio', 'id'), COALESCE((SELECT MAX(id) FROM Tasas_Cambio), 1));
+    SELECT setval('seq_factura', COALESCE((SELECT MAX(CAST(NULLIF(regexp_replace(factura_nro, '\D', '', 'g'), '') AS INTEGER)) FROM Ventas WHERE factura_nro LIKE 'FAC-%'), 1));
     -- Asegurar que todos los cierres tengan fecha_cierre asignada y estatus 'Cerrada' si ya tienen detalles de conciliación
     UPDATE Cajas_Apertura_Cierre SET fecha_cierre = COALESCE(fecha_cierre, fecha_apertura, CURRENT_TIMESTAMP) WHERE fecha_cierre IS NULL;
     UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada' WHERE (monto_cierre_real_usd IS NOT NULL OR detalles_json IS NOT NULL) AND (estatus IS NULL OR estatus = 'Abierta');
+    -- Eliminar cualquier registro de muestra de tasas si existía previamente
+    DELETE FROM Tasas_Cambio WHERE fecha_actualizacion IN ('2026-07-10 08:15', '2026-07-10 14:00', '2026-07-15 08:05');
   `);
-
-  // Seed default initial rates if Tasas_Cambio is empty
-  const tasaCheck = await client.query('SELECT COUNT(*) FROM Tasas_Cambio');
-  if (parseInt(tasaCheck.rows[0].count) === 0) {
-    for (const m of mockTasaHistory) {
-      await client.query(
-        'INSERT INTO Tasas_Cambio (tasa_cobro, tasa_vuelto, fecha_actualizacion, usuario_id) VALUES ($1, $2, $3, 1)',
-        [m.tasa_cobro, m.tasa_vuelto, m.fecha_actualizacion || getLocalISODateString()]
-      );
-    }
-  }
 
   // Alter enum type outside of main multi-statement query to prevent implicit transaction block errors in Postgres
   try {
@@ -990,7 +983,6 @@ export async function wipeDatabase(options) {
       if (options.wipeSales) {
         await pool.query('TRUNCATE TABLE Ventas, Ventas_Detalle, Pagos_Venta RESTART IDENTITY CASCADE');
         await pool.query('TRUNCATE TABLE Cajas_Apertura_Cierre, Movimientos_Caja RESTART IDENTITY CASCADE');
-        await pool.query('TRUNCATE TABLE Tasas_Cambio RESTART IDENTITY CASCADE');
         await pool.query('TRUNCATE TABLE Movimientos_Inventario RESTART IDENTITY CASCADE');
         await pool.query('TRUNCATE TABLE Historial_Precios RESTART IDENTITY CASCADE');
         writeJsonFile('abonos.json', []);
@@ -1033,7 +1025,6 @@ export async function wipeDatabase(options) {
     writeJsonFile('sales.json', []);
     writeJsonFile('abonos.json', []);
     writeJsonFile('cierres.json', []);
-    writeJsonFile('tasa_history.json', []);
     writeJsonFile('movements.json', []);
     writeJsonFile('price-history.json', []);
     writeJsonFile('price_history.json', []);
@@ -1194,7 +1185,7 @@ export async function getTasaHistory() {
       console.error('Error en getTasaHistory (Postgres):', err.message);
     }
   }
-  return readJsonFile('tasa_history.json', mockTasaHistory);
+  return readJsonFile('tasa_history.json', []);
 }
 
 export async function saveTasa(t) {
@@ -1231,7 +1222,7 @@ export async function saveTasa(t) {
       throw err;
     }
   }
-  const history = readJsonFile('tasa_history.json', mockTasaHistory);
+  const history = readJsonFile('tasa_history.json', []);
   const newItem = { ...t, id: Date.now(), fecha_actualizacion: getLocalISODateString() };
   history.push(newItem);
   writeJsonFile('tasa_history.json', history);
@@ -1489,17 +1480,27 @@ export async function saveSale(s) {
       const clientId = clientRes.rowCount > 0 ? clientRes.rows[0].id : 1;
       const cajaId = activeCaja.rowCount > 0 ? activeCaja.rows[0].id : 1;
       
-      // Insert Sale — factura_nro generated atomically by PostgreSQL sequence (prevents multi-terminal collisions)
-      // Devoluciones keep their DEV- prefix from the frontend; regular sales get a server-assigned number.
+      // Safe sequence generator for invoice numbers (auto-creates seq_factura if missing)
+      const fetchNextSeqFactura = async () => {
+        try {
+          const seqRes = await clientTarget.query("SELECT 'FAC-' || LPAD(nextval('seq_factura')::text, 6, '0') AS factura_nro");
+          return seqRes.rows[0].factura_nro;
+        } catch (seqErr) {
+          if (seqErr.message.includes('seq_factura')) {
+            await clientTarget.query("CREATE SEQUENCE IF NOT EXISTS seq_factura START WITH 1");
+            await clientTarget.query("SELECT setval('seq_factura', COALESCE((SELECT MAX(CAST(NULLIF(regexp_replace(factura_nro, '\\D', '', 'g'), '') AS INTEGER)) FROM Ventas WHERE factura_nro LIKE 'FAC-%'), 1))");
+            const seqRes = await clientTarget.query("SELECT 'FAC-' || LPAD(nextval('seq_factura')::text, 6, '0') AS factura_nro");
+            return seqRes.rows[0].factura_nro;
+          }
+          throw seqErr;
+        }
+      };
+
       let factura_nro = s.factura_nro;
       if (!factura_nro || (!factura_nro.startsWith('DEV-') && !factura_nro.startsWith('FAC-'))) {
-        // Generate from sequence as fallback if no number provided
-        const seqRes = await clientTarget.query("SELECT 'FAC-' || LPAD(nextval('seq_factura')::text, 6, '0') AS factura_nro");
-        factura_nro = seqRes.rows[0].factura_nro;
+        factura_nro = await fetchNextSeqFactura();
       } else if (!factura_nro.startsWith('DEV-')) {
-        // Regular FAC- sale: always use the sequence to guarantee uniqueness
-        const seqRes = await clientTarget.query("SELECT 'FAC-' || LPAD(nextval('seq_factura')::text, 6, '0') AS factura_nro");
-        factura_nro = seqRes.rows[0].factura_nro;
+        factura_nro = await fetchNextSeqFactura();
       }
       const saleRes = await clientTarget.query(
         `INSERT INTO Ventas (factura_nro, cliente_id, usuario_id, caja_id, subtotal_usd, descuento_usd, total_usd, total_ves, estacion_nombre)

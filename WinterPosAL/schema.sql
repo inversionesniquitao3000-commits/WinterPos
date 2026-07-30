@@ -112,6 +112,8 @@ CREATE TABLE Movimientos_Caja (
 -- ==========================================
 -- 8. VENTAS (HISTÓRICO TRANSACCIONAL)
 -- ==========================================
+CREATE SEQUENCE IF NOT EXISTS seq_factura START WITH 1;
+
 CREATE TABLE Ventas (
     id BIGSERIAL PRIMARY KEY,
     factura_nro VARCHAR(50) NOT NULL UNIQUE,

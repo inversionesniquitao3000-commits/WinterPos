@@ -249,8 +249,18 @@ app.get('/api/sync/poll', async (req, res) => {
   try {
     const sinceId = parseInt(req.query.since_id) || 0;
     const terminal = req.query.terminal || null;
-    const usuario = req.query.usuario || null;
     const sessionSince = req.query.session_since || null;
+
+    if (usuario) {
+      cleanExpiredSessions();
+      for (const [id, sess] of activeSessions.entries()) {
+        if (sess.username.toLowerCase() === String(usuario).toLowerCase()) {
+          sess.lastHeartbeat = Date.now();
+          if (terminal) sess.terminal = terminal;
+          activeSessions.set(id, sess);
+        }
+      }
+    }
 
     // Tasas sync parameters (immune to sequential vs timestamp ID mismatches)
     const clientTasaCobro = parseFloat(req.query.last_tasa_cobro) || 0;
@@ -524,6 +534,124 @@ app.get('/api/users', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Active Network Sessions Store (Map: userId -> sessionObj)
+const activeSessions = new Map();
+
+// Helper to clean up expired sessions (older than 45 seconds)
+const cleanExpiredSessions = () => {
+  const now = Date.now();
+  for (const [userId, session] of activeSessions.entries()) {
+    if (now - session.lastHeartbeat > 45000) {
+      activeSessions.delete(userId);
+    }
+  }
+};
+
+// Check & register login endpoint
+app.post('/api/users/login-check', async (req, res) => {
+  try {
+    const { username, password, terminal } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: 'Usuario y contraseña requeridos.' });
+    }
+
+    cleanExpiredSessions();
+
+    const users = await getUsers();
+    const user = users.find(
+      u => u.usuario.toLowerCase() === username.trim().toLowerCase() && password === (u.clave || 'admin')
+    );
+
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Usuario o contraseña incorrectos. Verifique sus credenciales.' });
+    }
+
+    if (user.estado === 'Inactivo') {
+      return res.status(403).json({ success: false, message: 'Su usuario se encuentra inactivo. Consulte al Administrador.' });
+    }
+
+    const isAdmin = user.rol && user.rol.toLowerCase() === 'administrador';
+    const activeTerm = terminal || 'LOCAL';
+
+    // If NOT admin, check if session is already active on another terminal
+    if (!isAdmin) {
+      for (const [id, existing] of activeSessions.entries()) {
+        const isSameUser = String(id) === String(user.id) || existing.username.toLowerCase() === user.usuario.toLowerCase();
+        const isDifferentTerminal = existing.terminal && existing.terminal !== activeTerm;
+        const isHeartbeatFresh = (Date.now() - existing.lastHeartbeat) < 45000;
+
+        if (isSameUser && isDifferentTerminal && isHeartbeatFresh) {
+          return res.status(403).json({
+            success: false,
+            isBlocked: true,
+            message: 'Usuario conectado actualmente en otro equipo.'
+          });
+        }
+      }
+    }
+
+    // Register or update active session
+    activeSessions.set(user.id, {
+      userId: user.id,
+      username: user.usuario,
+      nombre: user.nombre || user.usuario,
+      rol: user.rol,
+      terminal: activeTerm,
+      loginTime: new Date().toISOString(),
+      lastHeartbeat: Date.now()
+    });
+
+    res.json({ success: true, user });
+  } catch (err) {
+    console.error('Error en /api/users/login-check:', err.message);
+    res.status(500).json({ success: false, message: 'Error interno del servidor.' });
+  }
+});
+
+// Logout endpoint
+app.post('/api/users/logout', (req, res) => {
+  const { userId, username } = req.body;
+  cleanExpiredSessions();
+  for (const [id, sess] of activeSessions.entries()) {
+    if (String(id) === String(userId) || (username && sess.username.toLowerCase() === username.toLowerCase())) {
+      activeSessions.delete(id);
+    }
+  }
+  res.json({ success: true });
+});
+
+// Heartbeat endpoint
+app.post('/api/users/heartbeat', (req, res) => {
+  const { userId, username, terminal } = req.body;
+  cleanExpiredSessions();
+  for (const [id, sess] of activeSessions.entries()) {
+    if (String(id) === String(userId) || (username && sess.username.toLowerCase() === String(username).toLowerCase())) {
+      sess.lastHeartbeat = Date.now();
+      if (terminal) sess.terminal = terminal;
+      activeSessions.set(id, sess);
+    }
+  }
+  res.json({ success: true });
+});
+
+// Get active sessions list (for Admin)
+app.get('/api/users/active-sessions', (req, res) => {
+  cleanExpiredSessions();
+  res.json(Array.from(activeSessions.values()));
+});
+
+// Force disconnect user session (Admin action)
+app.delete('/api/users/active-sessions/:userId', (req, res) => {
+  const targetId = req.params.userId;
+  cleanExpiredSessions();
+  for (const [id, sess] of activeSessions.entries()) {
+    if (String(id) === String(targetId) || sess.username.toLowerCase() === String(targetId).toLowerCase()) {
+      activeSessions.delete(id);
+    }
+  }
+  res.json({ success: true });
 });
 
 app.post('/api/users', async (req, res) => {
