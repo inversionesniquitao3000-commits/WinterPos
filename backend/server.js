@@ -116,6 +116,16 @@ app.post('/api/productos/precios/bulk', async (req, res) => {
   res.json({ success });
 });
 
+app.get('/api/price-history', async (req, res) => {
+  const history = await getPriceHistory();
+  res.json(history);
+});
+
+app.post('/api/price-history', async (req, res) => {
+  const saved = await savePriceHistory(req.body);
+  res.json({ success: saved });
+});
+
 app.put('/api/productos/:id', async (req, res) => {
   const updated = await updateProduct(req.body);
   res.json(updated);

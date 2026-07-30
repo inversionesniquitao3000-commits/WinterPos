@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Product, InventoryMovement, PriceAdjustmentHistory, User, CompanyConfig } from '../types';
-import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator } from 'lucide-react';
+import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator, PauseCircle, Play, Trash2, Wand2, Sparkles, ShieldAlert, RotateCcw, AlertTriangle } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr } from '../utils';
 import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
@@ -79,6 +79,133 @@ export default function Inventario({
   }[]>([]);
   const [invoiceSearchTerm, setInvoiceSearchTerm] = useState('');
   const [invoiceAuxItemIndex, setInvoiceAuxItemIndex] = useState<number | null>(null);
+
+  // Cargas de Factura Pausadas (En Espera)
+  interface PausedInvoice {
+    id: string;
+    invoiceNumber: string;
+    date: string;
+    items: {
+      product: Product;
+      qty: number;
+      precio_costo_usd: number;
+      precio_detalle_usd: number;
+      precio_mayor_usd: number;
+    }[];
+  }
+
+  const [pausedInvoices, setPausedInvoices] = useState<PausedInvoice[]>(() => {
+    const saved = localStorage.getItem('pos_paused_invoices');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [showPausedInvoicesModal, setShowPausedInvoicesModal] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('pos_paused_invoices', JSON.stringify(pausedInvoices));
+  }, [pausedInvoices]);
+
+  // Estados para Ajuste Masivo de Stock Físico (Solo Administrador)
+  const [showBulkStockAdjustModal, setShowBulkStockAdjustModal] = useState(false);
+  const [bulkStockScope, setBulkStockScope] = useState<'todos' | 'categoria'>('todos');
+  const [bulkStockCategory, setBulkStockCategory] = useState('ALIMENTOS');
+  const [bulkStockSearch, setBulkStockSearch] = useState('');
+  const [bulkStockReason, setBulkStockReason] = useState('Toma de inventario físico de stock');
+  const [bulkStockCounts, setBulkStockCounts] = useState<{ [prodId: number]: string }>({});
+  const [showCatalogAuditModal, setShowCatalogAuditModal] = useState(false);
+  const [auditFilterTab, setAuditFilterTab] = useState<'todos' | 'sin_categoria' | 'sin_codigo' | 'sin_descripcion' | 'sin_stock_min'>('todos');
+  const [auditDefaultCategory, setAuditDefaultCategory] = useState('ALIMENTOS');
+  const [auditDefaultStockMin, setAuditDefaultStockMin] = useState('5');
+  const [editedAuditProducts, setEditedAuditProducts] = useState<{
+    [id: number]: { barcode?: string; description?: string; category?: string; stock_minimo?: number }
+  }>({});
+
+  const catalogAuditIssues = useMemo(() => {
+    return products.map(p => {
+      const edit = editedAuditProducts[p.id] || {};
+      const cat = edit.category !== undefined ? edit.category : p.category;
+      const code = edit.barcode !== undefined ? edit.barcode : p.barcode;
+      const desc = edit.description !== undefined ? edit.description : p.description;
+      const minStk = edit.stock_minimo !== undefined ? edit.stock_minimo : p.stock_minimo;
+
+      const missingCategory = !cat || !cat.trim() || cat.trim().toUpperCase() === 'SIN CATEGORIA';
+      const missingBarcode = !code || !code.trim();
+      const missingDescription = !desc || !desc.trim();
+      const missingStockMin = minStk === undefined || minStk === null || minStk <= 0;
+
+      const origCat = !p.category || !p.category.trim() || p.category.trim().toUpperCase() === 'SIN CATEGORIA';
+      const origCode = !p.barcode || !p.barcode.trim();
+      const origDesc = !p.description || !p.description.trim();
+      const origMin = !p.stock_minimo || p.stock_minimo <= 0;
+
+      const hasOriginalIssue = origCat || origCode || origDesc || origMin;
+      const isEdited = editedAuditProducts[p.id] !== undefined;
+
+      const hasIssue = hasOriginalIssue || isEdited;
+
+      return {
+        product: p,
+        currentCategory: cat || '',
+        currentBarcode: code || '',
+        currentDescription: desc || '',
+        currentStockMin: minStk || 0,
+        missingCategory,
+        missingBarcode,
+        missingDescription,
+        missingStockMin,
+        hasIssue
+      };
+    }).filter(item => item.hasIssue);
+  }, [products, editedAuditProducts]);
+
+  const catalogAuditIssuesCount = catalogAuditIssues.length;
+
+  // Asistente Inteligente de Corrección de Violaciones de Precios
+  const [showViolationAssistantModal, setShowViolationAssistantModal] = useState(false);
+  const [assistantDetailMargin, setAssistantDetailMargin] = useState('30');
+  const [assistantMayorMargin, setAssistantMayorMargin] = useState('15');
+  const [assistantAuxProduct, setAssistantAuxProduct] = useState<Product | null>(null);
+  const [customPriceOverrides, setCustomPriceOverrides] = useState<{
+    [prodId: number]: { cost?: number; detail?: number; mayor?: number }
+  }>({});
+
+  const handlePauseInvoiceLoad = () => {
+    if (invoiceProducts.length === 0) return;
+
+    const numStr = invoiceNumber.trim() || `Factura #${pausedInvoices.length + 1}`;
+    const newPaused: PausedInvoice = {
+      id: Date.now().toString(),
+      invoiceNumber: numStr,
+      date: new Date().toLocaleString(),
+      items: invoiceProducts
+    };
+
+    setPausedInvoices(prev => [newPaused, ...prev]);
+    showToast(`⏸️ Carga de "${numStr}" puesta en espera (${invoiceProducts.length} ítems).`);
+    setShowInvoiceLoadModal(false);
+    setInvoiceNumber('');
+    setInvoiceProducts([]);
+  };
+
+  const handleResumeInvoiceLoad = (paused: PausedInvoice) => {
+    setInvoiceNumber(paused.invoiceNumber.startsWith('Factura #') ? '' : paused.invoiceNumber);
+    setInvoiceProducts(paused.items);
+    setPausedInvoices(prev => prev.filter(p => p.id !== paused.id));
+    setShowPausedInvoicesModal(false);
+    setShowInvoiceLoadModal(true);
+    showToast(`▶️ Carga de "${paused.invoiceNumber}" reanudada.`);
+  };
+
+  const handleDeletePausedInvoice = async (id: string, num: string) => {
+    const ok = await showConfirm(
+      `¿Desea eliminar la carga en espera "${num}"? Se perderán los ítems seleccionados.`,
+      'Eliminar Carga en Espera',
+      { confirmLabel: 'Eliminar', isDanger: true }
+    );
+    if (ok) {
+      setPausedInvoices(prev => prev.filter(p => p.id !== id));
+      showToast('Carga en espera eliminada.');
+    }
+  };
 
   const showToast = (msg: string) => {
     setSuccessMsg(msg);
@@ -204,6 +331,36 @@ export default function Inventario({
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+
+      // -2. Assistant Auxiliar de Precios Modal (z-[100])
+      if (assistantAuxProduct !== null) {
+        setAssistantAuxProduct(null);
+        return;
+      }
+
+      // -1.8. Bulk Stock Adjust Modal (z-[91])
+      if (showBulkStockAdjustModal) {
+        setShowBulkStockAdjustModal(false);
+        return;
+      }
+
+      // -1.5. Catalog Audit Assistant Modal (z-[92])
+      if (showCatalogAuditModal) {
+        setShowCatalogAuditModal(false);
+        return;
+      }
+
+      // -1. Violation Assistant Modal (z-[95])
+      if (showViolationAssistantModal) {
+        setShowViolationAssistantModal(false);
+        return;
+      }
+
+      // 0. Paused Invoices Modal (z-[90])
+      if (showPausedInvoicesModal) {
+        setShowPausedInvoicesModal(false);
+        return;
+      }
 
       // 1. Quick Add Category Modal (z-[80])
       if (showQuickAddModal) {
@@ -891,9 +1048,10 @@ export default function Inventario({
     let violationsCount = 0;
 
     for (const p of targetProducts) {
-      const nextCost = generalAdjustCost ? computePriceChange(p.precio_costo_usd) : p.precio_costo_usd;
-      const nextDetail = generalAdjustDetail ? computePriceChange(p.precio_detalle_usd) : p.precio_detalle_usd;
-      const nextMayor = generalAdjustMayor ? computePriceChange(p.precio_mayor_usd) : p.precio_mayor_usd;
+      const override = customPriceOverrides[p.id];
+      const nextCost = override?.cost !== undefined ? override.cost : (generalAdjustCost ? computePriceChange(p.precio_costo_usd) : p.precio_costo_usd);
+      const nextDetail = override?.detail !== undefined ? override.detail : (generalAdjustDetail ? computePriceChange(p.precio_detalle_usd) : p.precio_detalle_usd);
+      const nextMayor = override?.mayor !== undefined ? override.mayor : (generalAdjustMayor ? computePriceChange(p.precio_mayor_usd) : p.precio_mayor_usd);
 
       if (nextDetail <= nextCost || nextMayor <= nextCost) {
         violationsCount++;
@@ -906,31 +1064,37 @@ export default function Inventario({
         mayor: nextMayor
       });
 
-      if (generalAdjustCost && p.precio_costo_usd !== nextCost) {
+      const isCustomized = override?.cost !== undefined || override?.detail !== undefined || override?.mayor !== undefined;
+      const baseReason = generalAdjustReason.trim();
+      const finalReason = isCustomized 
+        ? (baseReason ? `${baseReason} (Corrección con Asistente/Auxiliar)` : 'Ajustado con Asistente de Corrección')
+        : baseReason;
+
+      if (p.precio_costo_usd !== nextCost) {
         historyLogs.push({
           productCode: p.barcode,
           priceType: 'Costo',
           oldPrice: p.precio_costo_usd,
           newPrice: nextCost,
-          motivo: generalAdjustReason.trim()
+          motivo: finalReason
         });
       }
-      if (generalAdjustDetail && p.precio_detalle_usd !== nextDetail) {
+      if (p.precio_detalle_usd !== nextDetail) {
         historyLogs.push({
           productCode: p.barcode,
           priceType: 'Detalle',
           oldPrice: p.precio_detalle_usd,
           newPrice: nextDetail,
-          motivo: generalAdjustReason.trim()
+          motivo: finalReason
         });
       }
-      if (generalAdjustMayor && p.precio_mayor_usd !== nextMayor) {
+      if (p.precio_mayor_usd !== nextMayor) {
         historyLogs.push({
           productCode: p.barcode,
           priceType: 'Mayor',
           oldPrice: p.precio_mayor_usd,
           newPrice: nextMayor,
-          motivo: generalAdjustReason.trim()
+          motivo: finalReason
         });
       }
     }
@@ -954,6 +1118,7 @@ export default function Inventario({
     if (success) {
       setShowGeneralAdjustModal(false);
       setSelectedProductIds([]);
+      setCustomPriceOverrides({});
       setGeneralAdjustReason('');
       showToast('Ajuste general de precios aplicado con éxito.');
     } else {
@@ -2247,10 +2412,50 @@ export default function Inventario({
                         setInvoiceSearchTerm('');
                         setShowInvoiceLoadModal(true);
                       }}
-                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all active:scale-95"
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 py-2 px-3 rounded shadow-sm flex items-center justify-between font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all active:scale-95"
                     >
-                      <Layers className="w-4 h-4 bg-emerald-700/50 rounded-full p-0.5" />
-                      <span>Carga por Factura</span>
+                      <div className="flex items-center gap-2">
+                        <Layers className="w-4 h-4 bg-emerald-700/50 rounded-full p-0.5" />
+                        <span>Carga por Factura</span>
+                      </div>
+                      {pausedInvoices.length > 0 && (
+                        <span className="bg-amber-400 text-slate-950 text-[9px] px-1.5 py-0.2 rounded-full font-mono font-black" title={`${pausedInvoices.length} carga(s) en espera`}>
+                          {pausedInvoices.length} en espera
+                        </span>
+                      )}
+                    </button>
+                  )}
+
+                  {/* BUTTON: CARGAS EN ESPERA (PAUSADAS) */}
+                  {hasPermission('crear') && pausedInvoices.length > 0 && (
+                    <button
+                      onClick={() => setShowPausedInvoicesModal(true)}
+                      className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 border border-amber-600 py-2 px-3 rounded shadow flex items-center justify-between font-sans font-extrabold text-[11px] uppercase tracking-wider text-left transition-all active:scale-95"
+                    >
+                      <div className="flex items-center gap-2">
+                        <PauseCircle className="w-4 h-4" />
+                        <span>Cargas en Espera</span>
+                      </div>
+                      <span className="bg-slate-950 text-amber-400 px-1.5 py-0.5 rounded-full text-[10px] font-mono">
+                        {pausedInvoices.length}
+                      </span>
+                    </button>
+                  )}
+
+                  {/* BUTTON: AUDITORÍA DE CATÁLOGO (SI EXISTEN INCONSISTENCIAS) */}
+                  {hasPermission('editar') && catalogAuditIssuesCount > 0 && (
+                    <button
+                      onClick={() => setShowCatalogAuditModal(true)}
+                      className="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 border border-amber-600 py-2 px-3 rounded shadow flex items-center justify-between font-sans font-black text-[11px] uppercase tracking-wider text-left transition-all active:scale-95 animate-pulse"
+                      title="Existen productos con inconsistencias de datos en el catálogo (categoría, código, descripción o stock mínimo)"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-slate-950 fill-current" />
+                        <span>Auditoría Catálogo</span>
+                      </div>
+                      <span className="bg-slate-950 text-amber-400 px-1.5 py-0.5 rounded-full text-[10px] font-mono font-black">
+                        {catalogAuditIssuesCount}
+                      </span>
                     </button>
                   )}
 
@@ -2301,15 +2506,26 @@ export default function Inventario({
                     <span>Resp. Inventario</span>
                   </button>
 
-                  {/* BUTTON 2: STOCK */}
+                  {/* BUTTON 2: STOCK (CON ACCESO A AJUSTE MASIVO SI NO HAY PRODUCTO SELECCIONADO Y ES ADMIN) */}
                   <button
-                    onClick={() => selectedProduct && handleOpenAdjust(selectedProduct)}
-                    disabled={!selectedProduct || !hasPermission('editar')}
+                    onClick={() => {
+                      if (selectedProduct) {
+                        handleOpenAdjust(selectedProduct);
+                      } else if (_currentUser.rol.toLowerCase() === 'administrador') {
+                        setBulkStockCounts({});
+                        setBulkStockSearch('');
+                        setBulkStockReason('Toma de inventario físico de stock');
+                        setShowBulkStockAdjustModal(true);
+                      } else {
+                        showAlert('Debe seleccionar un producto de la tabla para ajustar su stock.', 'Seleccione Producto', 'warning');
+                      }
+                    }}
+                    disabled={!selectedProduct && _currentUser.rol.toLowerCase() !== 'administrador'}
                     className="w-full bg-cyan-600 hover:bg-cyan-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-350 text-white border border-cyan-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all enabled:active:scale-95 disabled:cursor-not-allowed"
-                    title={!selectedProduct ? "Seleccione un producto para ajustar stock" : !hasPermission('editar') ? "No posee permisos para ajustar stock" : "Ajustar stock (Entrada/Salida/Merma)"}
+                    title={!selectedProduct ? (_currentUser.rol.toLowerCase() === 'administrador' ? "Abrir Ajuste Masivo de Stock Físico (Conteo Simultáneo)" : "Seleccione un producto para ajustar stock") : "Ajustar stock del producto seleccionado"}
                   >
                     <RefreshCw className="w-4 h-4 bg-cyan-750/50 disabled:bg-transparent rounded-full p-0.5" />
-                    <span>Ajustar Stock</span>
+                    <span>{selectedProduct ? 'Ajustar Stock' : 'Ajuste Masivo Stock 👑'}</span>
                   </button>
 
                   {/* BUTTON 3: PRECIOS */}
@@ -3990,6 +4206,1149 @@ export default function Inventario({
         </div>
       )}
 
+      {/* MODAL ASISTENTE INTELIGENTE DE CORRECCIÓN DE VIOLACIONES DE MARGEN */}
+      {showViolationAssistantModal && (() => {
+        const targetProducts = getGeneralAdjustTargetProducts();
+        
+        // Compute current preview items & find violations
+        const violatingItems = targetProducts.map(p => {
+          const override = customPriceOverrides[p.id];
+          const nextCost = override?.cost !== undefined ? override.cost : (generalAdjustCost ? computePriceChange(p.precio_costo_usd) : p.precio_costo_usd);
+          const nextDetail = override?.detail !== undefined ? override.detail : (generalAdjustDetail ? computePriceChange(p.precio_detalle_usd) : p.precio_detalle_usd);
+          const nextMayor = override?.mayor !== undefined ? override.mayor : (generalAdjustMayor ? computePriceChange(p.precio_mayor_usd) : p.precio_mayor_usd);
+          
+          const violates = nextDetail <= nextCost || nextMayor <= nextCost;
+          const detailMarginPct = nextCost > 0 ? ((nextDetail - nextCost) / nextCost) * 100 : 0;
+          const mayorMarginPct = nextCost > 0 ? ((nextMayor - nextCost) / nextCost) * 100 : 0;
+          
+          return {
+            p,
+            nextCost,
+            nextDetail,
+            nextMayor,
+            violates,
+            detailMarginPct,
+            mayorMarginPct
+          };
+        }).filter(item => item.violates);
+
+        const applyAutoMarginStrategy = (detailPct: number, mayorPct: number) => {
+          const newOverrides = { ...customPriceOverrides };
+          violatingItems.forEach(({ p, nextCost }) => {
+            const safeCost = nextCost > 0 ? nextCost : p.precio_costo_usd;
+            const targetDetail = Number((safeCost * (1 + detailPct / 100)).toFixed(4));
+            const targetMayor = Number((safeCost * (1 + mayorPct / 100)).toFixed(4));
+
+            newOverrides[p.id] = {
+              ...(newOverrides[p.id] || {}),
+              cost: safeCost,
+              detail: targetDetail,
+              mayor: targetMayor
+            };
+          });
+          setCustomPriceOverrides(newOverrides);
+          showToast(`✨ Se ajustaron ${violatingItems.length} productos con un margen de +${detailPct}% Detalle y +${mayorPct}% Mayor.`);
+        };
+
+        return (
+          <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-[95] flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-4xl w-full h-[85vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200 font-sans">
+              {/* Header */}
+              <div className="bg-gradient-to-r from-amber-500 via-amber-600 to-amber-700 px-6 py-4 flex justify-between items-center text-slate-950 shadow-md">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-slate-950/10 rounded-xl">
+                    <Wand2 className="w-5 h-5 text-slate-950" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black uppercase tracking-wider font-mono text-slate-950">
+                      Asistente Inteligente de Margen y Violaciones
+                    </h3>
+                    <p className="text-[11px] text-slate-900 font-medium">
+                      Ayudante interactivo para resolver precios de venta menores o iguales al costo.
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowViolationAssistantModal(false)}
+                  className="text-slate-950/80 hover:text-slate-950 text-base font-bold focus:outline-none"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Status Banner */}
+              <div className="bg-amber-50 border-b border-amber-200 px-6 py-3 flex flex-wrap justify-between items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="w-5 h-5 text-amber-700 flex-shrink-0" />
+                  <span className="text-xs text-amber-950 font-bold">
+                    {violatingItems.length === 0 ? (
+                      <span className="text-emerald-700 font-extrabold flex items-center gap-1">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        ¡Excelente! No quedan violaciones de precio. Puede aplicar el ajuste.
+                      </span>
+                    ) : (
+                      <span>Quedan <strong className="font-mono underline font-black text-amber-900">{violatingItems.length} violaciones</strong> pendientes por corregir.</span>
+                    )}
+                  </span>
+                </div>
+
+                {Object.keys(customPriceOverrides).length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setCustomPriceOverrides({})}
+                    className="text-[11px] text-red-700 hover:text-red-800 font-bold flex items-center gap-1 bg-red-100/60 px-2.5 py-1 rounded-md transition-all"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Restablecer Correcciones
+                  </button>
+                )}
+              </div>
+
+              {/* Body Section */}
+              <div className="flex-1 flex overflow-hidden min-h-0">
+                {/* Left Column: Quick Action Strategies */}
+                <div className="w-2/5 p-5 border-r border-slate-200 overflow-y-auto space-y-4 bg-slate-50/50">
+                  <label className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold font-mono block">Estrategias Rápidas de Corrección</label>
+                  
+                  {/* Strategy 1: Standard Margins */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2 shadow-xs hover:border-amber-400 transition-all">
+                    <span className="font-extrabold text-xs text-slate-800 block flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 text-amber-600" />
+                      Margen Recomendado (+30% / +15%)
+                    </span>
+                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                      Aplica automáticamente un +30% sobre el costo para Venta Detalle y +15% para Venta Mayor a todos los productos violados.
+                    </p>
+                    <button
+                      type="button"
+                      disabled={violatingItems.length === 0}
+                      onClick={() => applyAutoMarginStrategy(30, 15)}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold py-2 rounded-lg text-xs font-sans transition-all shadow-xs"
+                    >
+                      ⚡ Aplicar (+30% Detalle / +15% Mayor)
+                    </button>
+                  </div>
+
+                  {/* Strategy 2: Custom Margins */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3 shadow-xs hover:border-amber-400 transition-all">
+                    <span className="font-extrabold text-xs text-slate-800 block flex items-center gap-1.5">
+                      <Calculator className="w-4 h-4 text-amber-600" />
+                      Margen Personalizado (%)
+                    </span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[9px] text-slate-500 font-bold block mb-1">Margen Detalle %</label>
+                        <input
+                          type="number"
+                          value={assistantDetailMargin}
+                          onChange={(e) => setAssistantDetailMargin(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1 text-xs font-mono font-bold text-slate-800 focus:bg-white focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] text-slate-500 font-bold block mb-1">Margen Mayor %</label>
+                        <input
+                          type="number"
+                          value={assistantMayorMargin}
+                          onChange={(e) => setAssistantMayorMargin(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1 text-xs font-mono font-bold text-slate-800 focus:bg-white focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={violatingItems.length === 0}
+                      onClick={() => {
+                        const dPct = parseFloat(assistantDetailMargin) || 30;
+                        const mPct = parseFloat(assistantMayorMargin) || 15;
+                        applyAutoMarginStrategy(dPct, mPct);
+                      }}
+                      className="w-full bg-amber-500 hover:bg-amber-600 disabled:bg-slate-200 disabled:text-slate-400 text-slate-950 font-extrabold py-2 rounded-lg text-xs font-sans transition-all shadow-xs"
+                    >
+                      🎯 Aplicar Margen Personalizado
+                    </button>
+                  </div>
+                </div>
+
+                {/* Right Column: Inspection Table */}
+                <div className="w-3/5 p-5 flex flex-col overflow-hidden bg-white">
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold font-mono">
+                      Inspector de Productos con Violación ({violatingItems.length})
+                    </label>
+                  </div>
+
+                  <div className="flex-1 border border-slate-200 rounded-xl overflow-hidden flex flex-col min-h-0 shadow-inner">
+                    <div className="overflow-x-auto flex-1">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead className="bg-slate-100 text-[10px] uppercase text-slate-500 font-mono sticky top-0 z-10 border-b border-slate-200">
+                          <tr>
+                            <th className="px-3 py-2 w-[35%]">Producto</th>
+                            <th className="px-2 py-2 text-right w-[18%]">Costo $</th>
+                            <th className="px-2 py-2 text-right w-[23%]">Detalle $</th>
+                            <th className="px-2 py-2 text-right w-[24%]">Mayor $</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {violatingItems.length === 0 ? (
+                            <tr>
+                              <td colSpan={4} className="py-12 text-center text-slate-400 font-sans italic">
+                                🎉 No hay violaciones pendientes en este momento.
+                              </td>
+                            </tr>
+                          ) : (
+                            violatingItems.map(({ p, nextCost, nextDetail, nextMayor, detailMarginPct }) => {
+                              const hasLocalOverride = customPriceOverrides[p.id] !== undefined;
+
+                              return (
+                                <tr key={p.id} className={`hover:bg-slate-50 ${hasLocalOverride ? 'bg-emerald-50/30' : 'bg-red-50/40'}`}>
+                                  <td className="px-3 py-2 font-sans">
+                                    <p className="font-bold text-slate-800 text-xs truncate max-w-[140px]" title={p.description}>
+                                      {p.description}
+                                    </p>
+                                    <span className="text-[9px] text-slate-400 font-mono block">{p.barcode}</span>
+                                    <span className={`inline-block text-[9px] font-extrabold px-1.5 py-0.2 rounded font-mono mt-0.5 ${
+                                      detailMarginPct <= 0 ? 'bg-red-100 text-red-800' : 'bg-emerald-100 text-emerald-800'
+                                    }`}>
+                                      Margen: {detailMarginPct.toFixed(1)}%
+                                    </span>
+                                  </td>
+                                  <td className="px-2 py-2 text-right">
+                                    <div className="flex items-center justify-end gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => setAssistantAuxProduct(p)}
+                                        className="bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-900 p-1 rounded transition-all flex-shrink-0 active:scale-95"
+                                        title="Abrir Auxiliar de Cálculo de Precios para calcular costo por factura, paquete o divisas"
+                                      >
+                                        <Calculator className="w-3.5 h-3.5 text-amber-700" />
+                                      </button>
+                                      <input
+                                        type="number"
+                                        step="any"
+                                        value={nextCost}
+                                        onChange={(e) => {
+                                          const val = parseFloat(e.target.value) || 0;
+                                          setCustomPriceOverrides(prev => ({
+                                            ...prev,
+                                            [p.id]: {
+                                              ...(prev[p.id] || {}),
+                                              cost: val,
+                                              detail: nextDetail,
+                                              mayor: nextMayor
+                                            }
+                                          }));
+                                        }}
+                                        className="w-16 text-right text-xs font-mono font-bold border border-slate-300 rounded px-1.5 py-0.5 focus:bg-white focus:outline-none"
+                                      />
+                                    </div>
+                                  </td>
+                                  <td className="px-2 py-2 text-right">
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      value={nextDetail}
+                                      onChange={(e) => {
+                                        const val = parseFloat(e.target.value) || 0;
+                                        setCustomPriceOverrides(prev => ({
+                                          ...prev,
+                                          [p.id]: {
+                                            ...(prev[p.id] || {}),
+                                            cost: nextCost,
+                                            detail: val,
+                                            mayor: nextMayor
+                                          }
+                                        }));
+                                      }}
+                                      className={`w-16 text-right text-xs font-mono font-bold border rounded px-1.5 py-0.5 focus:bg-white focus:outline-none ${
+                                        nextDetail <= nextCost ? 'border-red-500 bg-red-50 text-red-700' : 'border-emerald-500 bg-emerald-50 text-emerald-800'
+                                      }`}
+                                    />
+                                  </td>
+                                  <td className="px-2 py-2 text-right">
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      value={nextMayor}
+                                      onChange={(e) => {
+                                        const val = parseFloat(e.target.value) || 0;
+                                        setCustomPriceOverrides(prev => ({
+                                          ...prev,
+                                          [p.id]: {
+                                            ...(prev[p.id] || {}),
+                                            cost: nextCost,
+                                            detail: nextDetail,
+                                            mayor: val
+                                          }
+                                        }));
+                                      }}
+                                      className={`w-16 text-right text-xs font-mono font-bold border rounded px-1.5 py-0.5 focus:bg-white focus:outline-none ${
+                                        nextMayor <= nextCost ? 'border-red-500 bg-red-50 text-red-700' : 'border-emerald-500 bg-emerald-50 text-emerald-800'
+                                      }`}
+                                    />
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex justify-between items-center text-xs">
+                <span className="text-slate-500 font-mono text-[11px]">
+                  Al cerrar esta ventana, los precios ajustados se reflejarán en el resumen global para poder aplicar el cambio.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowViolationAssistantModal(false)}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-2.5 rounded-lg font-sans transition-all shadow-md active:scale-95"
+                >
+                  Confirmar Correcciones
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* AUXILIAR DE CÁLCULO DE PRECIOS DESDE EL ASISTENTE DE VIOLACIONES */}
+      {assistantAuxProduct && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-4xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto font-sans">
+            <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+              <div>
+                <h4 className="text-sm font-black uppercase text-slate-800 font-mono flex items-center gap-2">
+                  <Calculator className="w-4 h-4 text-amber-600" />
+                  Auxiliar de Cálculo de Precios — {assistantAuxProduct.description}
+                </h4>
+                <span className="text-[11px] text-slate-400 font-mono">Código / Clave: {assistantAuxProduct.barcode}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAssistantAuxProduct(null)}
+                className="text-slate-400 hover:text-slate-700 text-base font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <AuxiliarCalculoPrecios
+              tasaBCV={bcvRateUSD}
+              tasaFallback={tasaDia}
+              initialCost={
+                (customPriceOverrides[assistantAuxProduct.id]?.cost !== undefined
+                  ? customPriceOverrides[assistantAuxProduct.id].cost
+                  : assistantAuxProduct.precio_costo_usd
+                ).toString()
+              }
+              initialDetail={
+                (customPriceOverrides[assistantAuxProduct.id]?.detail !== undefined
+                  ? customPriceOverrides[assistantAuxProduct.id].detail
+                  : assistantAuxProduct.precio_detalle_usd
+                ).toString()
+              }
+              initialMayor={
+                (customPriceOverrides[assistantAuxProduct.id]?.mayor !== undefined
+                  ? customPriceOverrides[assistantAuxProduct.id].mayor
+                  : assistantAuxProduct.precio_mayor_usd
+                ).toString()
+              }
+              onApplyPrices={(prices) => {
+                const costVal = parseFloat(prices.cost) || 0;
+                const detailVal = parseFloat(prices.detail) || 0;
+                const mayorVal = parseFloat(prices.mayor) || 0;
+
+                setCustomPriceOverrides(prev => ({
+                  ...prev,
+                  [assistantAuxProduct.id]: {
+                    cost: costVal,
+                    detail: detailVal,
+                    mayor: mayorVal
+                  }
+                }));
+
+                setAssistantAuxProduct(null);
+                showToast(`✅ Precios y costo calculados y aplicados a "${assistantAuxProduct.description}".`);
+              }}
+            />
+
+            <div className="flex justify-end pt-2 border-t border-slate-200">
+              <button
+                type="button"
+                onClick={() => setAssistantAuxProduct(null)}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg text-xs font-sans"
+              >
+                Cancelar / Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL AJUSTE MASIVO DE STOCK FÍSICO (SOLO ADMINISTRADOR) */}
+      {showBulkStockAdjustModal && (() => {
+        if (_currentUser.rol.toLowerCase() !== 'administrador') {
+          return null;
+        }
+
+        const filteredTargetProducts = products.filter(p => {
+          const matchScope = bulkStockScope === 'todos' || (p.category && p.category.toUpperCase() === bulkStockCategory.toUpperCase());
+          const matchSearch = p.description.toLowerCase().includes(bulkStockSearch.toLowerCase()) || p.barcode.toLowerCase().includes(bulkStockSearch.toLowerCase());
+          return matchScope && matchSearch;
+        });
+
+        // Compute items with diffs
+        const itemsWithDiffs = filteredTargetProducts.map(p => {
+          const inputVal = bulkStockCounts[p.id];
+          const hasInput = inputVal !== undefined && inputVal !== '';
+          const realStock = hasInput ? parseFloat(inputVal) || 0 : p.stock_actual;
+          const diff = realStock - p.stock_actual;
+
+          return {
+            p,
+            realStock,
+            diff,
+            hasInput,
+            isChanged: hasInput && Math.abs(diff) > 0.0001
+          };
+        });
+
+        const changedItems = itemsWithDiffs.filter(i => i.isChanged);
+        const countEntradas = changedItems.filter(i => i.diff > 0).length;
+        const countSalidas = changedItems.filter(i => i.diff < 0).length;
+
+        const handlePopulateWithCurrentStock = () => {
+          const newCounts: { [id: number]: string } = {};
+          filteredTargetProducts.forEach(p => {
+            newCounts[p.id] = p.stock_actual.toString();
+          });
+          setBulkStockCounts(newCounts);
+          showToast('📋 Se rellenaron las casillas con el stock actual del sistema.');
+        };
+
+        const handleApplyBulkStockAdjust = async () => {
+          if (!bulkStockReason.trim()) {
+            showAlert('Debe ingresar un motivo u observación obligatoria para la toma de inventario.', 'Motivo Requerido', 'warning');
+            return;
+          }
+
+          if (changedItems.length === 0) {
+            showAlert('No ha realizado cambios en el stock físico de ningún producto.', 'Sin Cambios', 'info');
+            return;
+          }
+
+          const ok = await showConfirm(
+            `¿Confirma aplicar el ajuste físico de stock a los ${changedItems.length} productos modificados? (${countEntradas} Entradas / ${countSalidas} Salidas)`,
+            'Confirmar Ajuste Masivo de Stock',
+            { confirmLabel: 'Aplicar Ajuste Físico' }
+          );
+          if (!ok) return;
+
+          let successCount = 0;
+          for (const { p, diff, realStock } of changedItems) {
+            const type = diff > 0 ? 'Entrada' : 'Salida';
+            const absQty = Math.abs(diff);
+
+            // Execute single stock update which logs Kardex movement
+            await onUpdateProductStock(p.id, type, absQty, `${bulkStockReason.trim()} (Stock Físico Real: ${realStock})`);
+            successCount++;
+          }
+
+          setShowBulkStockAdjustModal(false);
+          setBulkStockCounts({});
+          setBulkStockReason('Toma de inventario físico de stock');
+          showToast(`✅ Ajuste físico de stock aplicado con éxito a ${successCount} productos.`);
+        };
+
+        return (
+          <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-[91] flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-5xl w-full h-[88vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200 font-sans">
+              {/* Header */}
+              <div className="bg-gradient-to-r from-cyan-600 via-cyan-700 to-cyan-800 px-6 py-4 flex justify-between items-center text-white shadow-md">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-white/10 rounded-xl">
+                    <RefreshCw className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black uppercase tracking-wider font-mono text-white flex items-center gap-2">
+                      Ajuste Masivo de Stock Físico (Inventario Físico)
+                      <span className="bg-amber-400 text-slate-950 text-[10px] px-2 py-0.5 rounded-full font-mono font-black">SOLO ADMINISTRADOR 👑</span>
+                    </h3>
+                    <p className="text-[11px] text-cyan-100 font-medium">
+                      Modifique el stock real contado en almacén de forma simultánea para múltiples productos.
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowBulkStockAdjustModal(false)}
+                  className="text-white/80 hover:text-white text-base font-bold focus:outline-none"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Filters & Actions Bar */}
+              <div className="bg-slate-100 border-b border-slate-200 px-6 py-3 flex flex-wrap justify-between items-center gap-3">
+                <div className="flex items-center gap-3">
+                  {/* Scope filter */}
+                  <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg p-1">
+                    <button
+                      type="button"
+                      onClick={() => setBulkStockScope('todos')}
+                      className={`px-3 py-1 rounded text-xs font-extrabold font-sans transition-all ${
+                        bulkStockScope === 'todos' ? 'bg-cyan-600 text-white shadow' : 'text-slate-650 hover:bg-slate-100'
+                      }`}
+                    >
+                      Todos ({products.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBulkStockScope('categoria')}
+                      className={`px-3 py-1 rounded text-xs font-extrabold font-sans transition-all ${
+                        bulkStockScope === 'categoria' ? 'bg-cyan-600 text-white shadow' : 'text-slate-650 hover:bg-slate-100'
+                      }`}
+                    >
+                      Por Categoría
+                    </button>
+                  </div>
+
+                  {bulkStockScope === 'categoria' && (
+                    <select
+                      value={bulkStockCategory}
+                      onChange={(e) => setBulkStockCategory(e.target.value)}
+                      className="bg-white border border-slate-300 rounded px-2.5 py-1 text-xs font-bold text-slate-800 focus:outline-none"
+                    >
+                      {allCategories.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  )}
+
+                  {/* Search */}
+                  <div className="relative w-64">
+                    <input
+                      type="text"
+                      placeholder="Buscar por código o descripción..."
+                      value={bulkStockSearch}
+                      onChange={(e) => setBulkStockSearch(e.target.value)}
+                      className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 pl-8 text-xs text-slate-800 focus:outline-none focus:border-cyan-600 font-sans"
+                    />
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handlePopulateWithCurrentStock}
+                    className="bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold px-3 py-1.5 rounded-lg text-xs font-sans transition-all"
+                    title="Copia el stock actual a las casillas para modificar solo las diferencias"
+                  >
+                    📋 Copiar Stock Actual a Todos
+                  </button>
+
+                  {Object.keys(bulkStockCounts).length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setBulkStockCounts({})}
+                      className="text-[11px] text-red-700 hover:text-red-800 font-bold bg-red-100/70 px-2.5 py-1.5 rounded-lg transition-all"
+                    >
+                      Limpiar Conteo
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Table Section */}
+              <div className="flex-1 overflow-y-auto p-6 bg-slate-50 flex flex-col min-h-0">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-[10px] uppercase font-mono font-extrabold text-slate-450 tracking-wider">
+                    Conteo Físico de Productos ({filteredTargetProducts.length} Mostrados)
+                  </span>
+                  {changedItems.length > 0 && (
+                    <span className="text-xs font-extrabold font-mono bg-cyan-100 text-cyan-900 px-3 py-1 rounded-full border border-cyan-200">
+                      Modificados: {changedItems.length} ({countEntradas} Entradas / {countSalidas} Salidas)
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex-1 border border-slate-250 rounded-xl overflow-hidden bg-white shadow-inner flex flex-col min-h-0">
+                  <div className="overflow-x-auto flex-1">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead className="bg-slate-100 text-[10px] uppercase text-slate-500 font-mono sticky top-0 z-10 border-b border-slate-200">
+                        <tr>
+                          <th className="px-3 py-2.5 w-[30%]">Producto</th>
+                          <th className="px-2 py-2.5 w-[15%]">Categoría</th>
+                          <th className="px-2 py-2.5 text-right w-[18%]">Stock Sistema</th>
+                          <th className="px-2 py-2.5 text-right w-[20%]">Stock Físico (Conteo)</th>
+                          <th className="px-3 py-2.5 text-right w-[17%]">Diferencia</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-sans">
+                        {filteredTargetProducts.map(p => {
+                          const inputVal = bulkStockCounts[p.id];
+                          const hasInput = inputVal !== undefined && inputVal !== '';
+                          const realStock = hasInput ? parseFloat(inputVal) || 0 : p.stock_actual;
+                          const diff = realStock - p.stock_actual;
+                          const isChanged = hasInput && Math.abs(diff) > 0.0001;
+
+                          return (
+                            <tr key={p.id} className={`hover:bg-slate-50 ${isChanged ? (diff > 0 ? 'bg-emerald-50/50' : 'bg-red-50/50') : ''}`}>
+                              <td className="px-3 py-2">
+                                <p className="font-bold text-slate-800 truncate max-w-[220px]" title={p.description}>
+                                  {p.description}
+                                </p>
+                                <span className="text-[9px] text-slate-400 font-mono block">{p.barcode}</span>
+                              </td>
+
+                              <td className="px-2 py-2">
+                                <span className="bg-slate-100 text-slate-700 font-bold text-[10px] px-2 py-0.5 rounded-full font-mono">
+                                  {p.category || 'SIN CATEGORIA'}
+                                </span>
+                              </td>
+
+                              <td className="px-2 py-2 text-right font-mono font-black text-slate-700">
+                                {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}
+                              </td>
+
+                              <td className="px-2 py-2 text-right">
+                                <input
+                                  type="number"
+                                  step={p.a_granel ? '0.001' : '1'}
+                                  placeholder={p.stock_actual.toString()}
+                                  value={inputVal !== undefined ? inputVal : ''}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setBulkStockCounts(prev => ({
+                                      ...prev,
+                                      [p.id]: val
+                                    }));
+                                  }}
+                                  className={`w-24 text-right text-xs font-mono font-bold border rounded px-2 py-1 focus:bg-white focus:outline-none ${
+                                    isChanged ? (diff > 0 ? 'border-emerald-500 bg-emerald-50 text-emerald-900' : 'border-red-500 bg-red-50 text-red-900') : 'border-slate-300 text-slate-800'
+                                  }`}
+                                />
+                              </td>
+
+                              <td className="px-3 py-2 text-right font-mono">
+                                {isChanged ? (
+                                  <span className={`font-black text-xs px-2 py-0.5 rounded ${
+                                    diff > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
+                                  }`}>
+                                    {diff > 0 ? `+${diff.toFixed(p.a_granel ? 3 : 0)} (Entrada)` : `${diff.toFixed(p.a_granel ? 3 : 0)} (Salida)`}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 text-[11px] font-bold">0.00 (Sin cambio)</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex flex-wrap justify-between items-center gap-3 text-xs">
+                <div className="flex flex-col">
+                  <label className="text-[10px] uppercase font-mono font-extrabold text-slate-400">Motivo u Observación del Ajuste</label>
+                  <input
+                    type="text"
+                    value={bulkStockReason}
+                    onChange={(e) => setBulkStockReason(e.target.value)}
+                    placeholder="Escriba la razón de la toma física (Obligatorio)..."
+                    className="bg-white border border-slate-300 rounded px-3 py-1.5 text-xs text-slate-800 font-sans focus:outline-none focus:border-cyan-600 w-80 mt-0.5"
+                  />
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowBulkStockAdjustModal(false)}
+                    className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2.5 rounded-lg font-bold font-sans transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleApplyBulkStockAdjust}
+                    disabled={changedItems.length === 0 || !bulkStockReason.trim()}
+                    className="bg-cyan-600 hover:bg-cyan-700 disabled:bg-slate-300 disabled:text-slate-400 text-white font-black px-6 py-2.5 rounded-lg font-sans transition-all shadow-md active:scale-95 flex items-center gap-2"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    <span>Aplicar Ajuste Físico ({changedItems.length})</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* MODAL ASISTENTE INTELIGENTE DE AUDITORÍA Y CALIDAD DE CATÁLOGO */}
+      {showCatalogAuditModal && (() => {
+        const filteredIssues = catalogAuditIssues.filter(item => {
+          if (auditFilterTab === 'sin_categoria') return item.missingCategory;
+          if (auditFilterTab === 'sin_codigo') return item.missingBarcode;
+          if (auditFilterTab === 'sin_descripcion') return item.missingDescription;
+          if (auditFilterTab === 'sin_stock_min') return item.missingStockMin;
+          return true;
+        });
+
+        const countSinCat = catalogAuditIssues.filter(i => i.missingCategory).length;
+        const countSinCod = catalogAuditIssues.filter(i => i.missingBarcode).length;
+        const countSinDesc = catalogAuditIssues.filter(i => i.missingDescription).length;
+        const countSinMin = catalogAuditIssues.filter(i => i.missingStockMin).length;
+
+        const handleApplyBulkDefaultCategory = () => {
+          if (!auditDefaultCategory.trim()) return;
+          const newEdits = { ...editedAuditProducts };
+          catalogAuditIssues.forEach(({ product, missingCategory }) => {
+            if (missingCategory) {
+              newEdits[product.id] = {
+                ...(newEdits[product.id] || {}),
+                category: auditDefaultCategory.trim().toUpperCase()
+              };
+            }
+          });
+          setEditedAuditProducts(newEdits);
+          showToast(`⚡ Asignada la categoría "${auditDefaultCategory}" a los productos sin categoría.`);
+        };
+
+        const handleApplyBulkDefaultStockMin = () => {
+          const val = parseFloat(auditDefaultStockMin) || 5;
+          const newEdits = { ...editedAuditProducts };
+          catalogAuditIssues.forEach(({ product, missingStockMin }) => {
+            if (missingStockMin) {
+              newEdits[product.id] = {
+                ...(newEdits[product.id] || {}),
+                stock_minimo: val
+              };
+            }
+          });
+          setEditedAuditProducts(newEdits);
+          showToast(`⚡ Asignado Stock Mínimo de ${val} a los productos con stock mínimo cero.`);
+        };
+
+        const handleAutoGenerateBarcodes = () => {
+          const newEdits = { ...editedAuditProducts };
+          catalogAuditIssues.forEach(({ product, missingBarcode }) => {
+            if (missingBarcode) {
+              const code = `PROD-${Math.floor(100000 + Math.random() * 900000)}`;
+              newEdits[product.id] = {
+                ...(newEdits[product.id] || {}),
+                barcode: code
+              };
+            }
+          });
+          setEditedAuditProducts(newEdits);
+          showToast(`⚡ Códigos de barras auto-generados para los productos sin código.`);
+        };
+
+        const handleSaveAllAuditCorrections = async () => {
+          const editedKeys = Object.keys(editedAuditProducts);
+          if (editedKeys.length === 0) {
+            showToast('⚠️ No se han realizado cambios para guardar.');
+            return;
+          }
+
+          let updatedCount = 0;
+          for (const keyStr of editedKeys) {
+            const product = products.find(p => String(p.id) === String(keyStr));
+            const edit = editedAuditProducts[keyStr as any];
+            if (product && edit) {
+              const updatedProd: Product = {
+                ...product,
+                barcode: edit.barcode !== undefined ? edit.barcode.trim() : product.barcode,
+                description: edit.description !== undefined ? edit.description.trim() : product.description,
+                category: edit.category !== undefined ? edit.category.trim().toUpperCase() : product.category,
+                stock_minimo: edit.stock_minimo !== undefined ? edit.stock_minimo : product.stock_minimo
+              };
+              const ok = await onUpdateProduct(updatedProd);
+              if (ok) updatedCount++;
+            }
+          }
+          setEditedAuditProducts({});
+          setShowCatalogAuditModal(false);
+          showToast(`✨ Se guardaron con éxito las correcciones de catálogo para ${updatedCount} productos en la Base de Datos.`);
+        };
+
+        return (
+          <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-[92] flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-5xl w-full h-[88vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200 font-sans">
+              {/* Header */}
+              <div className="bg-gradient-to-r from-amber-500 via-amber-600 to-amber-700 px-6 py-4 flex justify-between items-center text-slate-950 shadow-md">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-slate-950/10 rounded-xl">
+                    <Sparkles className="w-5 h-5 text-slate-950 fill-current" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black uppercase tracking-wider font-mono text-slate-950">
+                      Asistente de Auditoría e Integridad de Catálogo
+                    </h3>
+                    <p className="text-[11px] text-slate-900 font-medium">
+                      Ayudante interactivo para corregir productos sin categoría, sin código, sin descripción o sin stock mínimo.
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowCatalogAuditModal(false)}
+                  className="text-slate-950/80 hover:text-slate-950 text-base font-bold focus:outline-none"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Status & Filter Bar */}
+              <div className="bg-slate-100 border-b border-slate-200 px-6 py-3 flex flex-wrap justify-between items-center gap-3">
+                <div className="flex items-center gap-1.5 overflow-x-auto">
+                  <button
+                    type="button"
+                    onClick={() => setAuditFilterTab('todos')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-extrabold font-sans transition-all flex items-center gap-1.5 ${
+                      auditFilterTab === 'todos' ? 'bg-slate-950 text-amber-400 shadow' : 'bg-white text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    <span>Todos</span>
+                    <span className="bg-amber-400 text-slate-950 px-1.5 py-0.2 rounded-full text-[10px] font-mono font-black">{catalogAuditIssuesCount}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setAuditFilterTab('sin_categoria')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-extrabold font-sans transition-all flex items-center gap-1.5 ${
+                      auditFilterTab === 'sin_categoria' ? 'bg-amber-600 text-white shadow' : 'bg-white text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    <span>Sin Categoría</span>
+                    {countSinCat > 0 && <span className="bg-red-100 text-red-800 px-1.5 py-0.2 rounded-full text-[10px] font-mono">{countSinCat}</span>}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setAuditFilterTab('sin_stock_min')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-extrabold font-sans transition-all flex items-center gap-1.5 ${
+                      auditFilterTab === 'sin_stock_min' ? 'bg-amber-600 text-white shadow' : 'bg-white text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    <span>Stock Mínimo Cero</span>
+                    {countSinMin > 0 && <span className="bg-red-100 text-red-800 px-1.5 py-0.2 rounded-full text-[10px] font-mono">{countSinMin}</span>}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setAuditFilterTab('sin_codigo')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-extrabold font-sans transition-all flex items-center gap-1.5 ${
+                      auditFilterTab === 'sin_codigo' ? 'bg-amber-600 text-white shadow' : 'bg-white text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    <span>Sin Código</span>
+                    {countSinCod > 0 && <span className="bg-red-100 text-red-800 px-1.5 py-0.2 rounded-full text-[10px] font-mono">{countSinCod}</span>}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setAuditFilterTab('sin_descripcion')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-extrabold font-sans transition-all flex items-center gap-1.5 ${
+                      auditFilterTab === 'sin_descripcion' ? 'bg-amber-600 text-white shadow' : 'bg-white text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    <span>Sin Descripción</span>
+                    {countSinDesc > 0 && <span className="bg-red-100 text-red-800 px-1.5 py-0.2 rounded-full text-[10px] font-mono">{countSinDesc}</span>}
+                  </button>
+                </div>
+
+                {Object.keys(editedAuditProducts).length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setEditedAuditProducts({})}
+                    className="text-[11px] text-red-700 hover:text-red-800 font-bold flex items-center gap-1 bg-red-100/70 px-2.5 py-1 rounded-md transition-all"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Limpiar Cambios Locales
+                  </button>
+                )}
+              </div>
+
+              {/* Main Section */}
+              <div className="flex-1 flex overflow-hidden min-h-0">
+                {/* Left Panel: Bulk Actions */}
+                <div className="w-1/3 p-5 border-r border-slate-200 overflow-y-auto space-y-4 bg-slate-50/50">
+                  <label className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold font-mono block">Correcciones Masivas Rápidas</label>
+
+                  {/* Bulk 1: Asignar Categoría */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3 shadow-xs hover:border-amber-400 transition-all">
+                    <span className="font-extrabold text-xs text-slate-800 block flex items-center gap-1.5">
+                      <Tag className="w-4 h-4 text-amber-600" />
+                      Asignar Categoría Masiva
+                    </span>
+                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                      Asigna la categoría elegida a todos los productos que no tienen categoría ({countSinCat}).
+                    </p>
+                    <div className="flex gap-2">
+                      <select
+                        value={auditDefaultCategory}
+                        onChange={(e) => setAuditDefaultCategory(e.target.value)}
+                        className="flex-1 bg-slate-50 border border-slate-300 rounded px-2 py-1 text-xs font-bold text-slate-800 focus:bg-white focus:outline-none"
+                      >
+                        {allCategories.map(cat => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={countSinCat === 0}
+                      onClick={handleApplyBulkDefaultCategory}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold py-2 rounded-lg text-xs font-sans transition-all shadow-xs"
+                    >
+                      ⚡ Asignar a Sin Categoría ({countSinCat})
+                    </button>
+                  </div>
+
+                  {/* Bulk 2: Asignar Stock Mínimo */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3 shadow-xs hover:border-amber-400 transition-all">
+                    <span className="font-extrabold text-xs text-slate-800 block flex items-center gap-1.5">
+                      <Package className="w-4 h-4 text-amber-600" />
+                      Asignar Stock Mínimo Estándar
+                    </span>
+                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                      Establece una cantidad mínima de inventario para alertas a los productos con stock mínimo en 0 ({countSinMin}).
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-slate-600 font-bold whitespace-nowrap">Mínimo Uds:</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={auditDefaultStockMin}
+                        onChange={(e) => setAuditDefaultStockMin(e.target.value)}
+                        className="w-20 bg-slate-50 border border-slate-300 rounded px-2 py-1 text-xs font-mono font-bold text-slate-800 focus:bg-white focus:outline-none"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={countSinMin === 0}
+                      onClick={handleApplyBulkDefaultStockMin}
+                      className="w-full bg-amber-500 hover:bg-amber-600 disabled:bg-slate-200 disabled:text-slate-400 text-slate-950 font-extrabold py-2 rounded-lg text-xs font-sans transition-all shadow-xs"
+                    >
+                      ⚡ Establecer Mínimo ({countSinMin})
+                    </button>
+                  </div>
+
+                  {/* Bulk 3: Auto-Generar Códigos */}
+                  {countSinCod > 0 && (
+                    <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2 shadow-xs hover:border-amber-400 transition-all">
+                      <span className="font-extrabold text-xs text-slate-800 block flex items-center gap-1.5">
+                        <Tag className="w-4 h-4 text-amber-600" />
+                        Auto-Generar Códigos
+                      </span>
+                      <p className="text-[11px] text-slate-500 leading-relaxed">
+                        Crea un código de barras único para los productos sin código ({countSinCod}).
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleAutoGenerateBarcodes}
+                        className="w-full bg-sky-600 hover:bg-sky-700 text-white font-bold py-2 rounded-lg text-xs font-sans transition-all shadow-xs"
+                      >
+                        ⚡ Generar Códigos ({countSinCod})
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Right Panel: Inline Table */}
+                <div className="w-2/3 p-5 flex flex-col overflow-hidden bg-white">
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold font-mono">
+                      Inspector de Inconsistencias ({filteredIssues.length})
+                    </label>
+                  </div>
+
+                  <div className="flex-1 border border-slate-200 rounded-xl overflow-hidden flex flex-col min-h-0 shadow-inner">
+                    <div className="overflow-x-auto flex-1">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead className="bg-slate-100 text-[10px] uppercase text-slate-500 font-mono sticky top-0 z-10 border-b border-slate-200">
+                          <tr>
+                            <th className="px-3 py-2 w-[22%]">Código</th>
+                            <th className="px-3 py-2 w-[32%]">Descripción</th>
+                            <th className="px-2 py-2 w-[26%]">Categoría</th>
+                            <th className="px-2 py-2 w-[20%] text-center">Stk Mínimo</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-sans">
+                          {filteredIssues.length === 0 ? (
+                            <tr>
+                              <td colSpan={4} className="py-12 text-center text-slate-400 italic">
+                                🎉 No se encontraron inconsistencias en este filtro.
+                              </td>
+                            </tr>
+                          ) : (
+                            filteredIssues.map(({ product: p, currentBarcode, currentDescription, currentCategory, currentStockMin, missingCategory, missingBarcode, missingDescription, missingStockMin }) => {
+                              const edit = editedAuditProducts[p.id];
+                              const isEdited = edit !== undefined;
+
+                              return (
+                                <tr key={p.id} className={`hover:bg-slate-50 ${isEdited ? 'bg-emerald-50/40' : 'bg-white'}`}>
+                                  {/* Code */}
+                                  <td className="px-2 py-2">
+                                    <div className="space-y-1">
+                                      <input
+                                        type="text"
+                                        value={currentBarcode}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          setEditedAuditProducts(prev => ({
+                                            ...prev,
+                                            [p.id]: {
+                                              ...(prev[p.id] || {}),
+                                              barcode: val
+                                            }
+                                          }));
+                                        }}
+                                        placeholder="Ingrese código..."
+                                        className={`w-full text-xs font-mono font-bold border rounded px-1.5 py-1 focus:bg-white focus:outline-none ${
+                                          missingBarcode ? 'border-red-400 bg-red-50 text-red-800' : 'border-slate-300 text-slate-800'
+                                        }`}
+                                      />
+                                      {missingBarcode && (
+                                        <span className="text-[9px] text-red-600 font-extrabold block">⚠️ Sin Código</span>
+                                      )}
+                                    </div>
+                                  </td>
+
+                                  {/* Description */}
+                                  <td className="px-2 py-2">
+                                    <div className="space-y-1">
+                                      <input
+                                        type="text"
+                                        value={currentDescription}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          setEditedAuditProducts(prev => ({
+                                            ...prev,
+                                            [p.id]: {
+                                              ...(prev[p.id] || {}),
+                                              description: val
+                                            }
+                                          }));
+                                        }}
+                                        placeholder="Descripción del producto..."
+                                        className={`w-full text-xs font-bold border rounded px-1.5 py-1 focus:bg-white focus:outline-none ${
+                                          missingDescription ? 'border-red-400 bg-red-50 text-red-800' : 'border-slate-300 text-slate-800'
+                                        }`}
+                                      />
+                                      {missingDescription && (
+                                        <span className="text-[9px] text-red-600 font-extrabold block">⚠️ Sin Descripción</span>
+                                      )}
+                                    </div>
+                                  </td>
+
+                                  {/* Category */}
+                                  <td className="px-2 py-2">
+                                    <div className="space-y-1">
+                                      <select
+                                        value={currentCategory}
+                                        onChange={(e) => {
+                                          const val = e.target.value;
+                                          setEditedAuditProducts(prev => ({
+                                            ...prev,
+                                            [p.id]: {
+                                              ...(prev[p.id] || {}),
+                                              category: val
+                                            }
+                                          }));
+                                        }}
+                                        className={`w-full text-xs font-bold border rounded px-1.5 py-1 focus:bg-white focus:outline-none ${
+                                          missingCategory ? 'border-red-400 bg-red-50 text-red-800' : 'border-slate-300 text-slate-800'
+                                        }`}
+                                      >
+                                        <option value="">-- Sin Categoría --</option>
+                                        {allCategories.map(cat => (
+                                          <option key={cat} value={cat}>{cat}</option>
+                                        ))}
+                                      </select>
+                                      {missingCategory && (
+                                        <span className="text-[9px] text-red-600 font-extrabold block">⚠️ Sin Categoría</span>
+                                      )}
+                                    </div>
+                                  </td>
+
+                                  {/* Stock Minimum */}
+                                  <td className="px-2 py-2 text-center">
+                                    <div className="space-y-1 flex flex-col items-center">
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        value={currentStockMin}
+                                        onChange={(e) => {
+                                          const val = parseFloat(e.target.value) || 0;
+                                          setEditedAuditProducts(prev => ({
+                                            ...prev,
+                                            [p.id]: {
+                                              ...(prev[p.id] || {}),
+                                              stock_minimo: val
+                                            }
+                                          }));
+                                        }}
+                                        className={`w-16 text-center text-xs font-mono font-bold border rounded px-1.5 py-1 focus:bg-white focus:outline-none ${
+                                          missingStockMin ? 'border-red-400 bg-red-50 text-red-800' : 'border-slate-300 text-slate-800'
+                                        }`}
+                                      />
+                                      {missingStockMin && (
+                                        <span className="text-[9px] text-red-600 font-extrabold block">⚠️ Stk Mín = 0</span>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex justify-between items-center text-xs">
+                <span className="text-slate-500 font-mono text-[11px]">
+                  {Object.keys(editedAuditProducts).length > 0 ? (
+                    <strong className="text-emerald-700">Se han preparado cambios para {Object.keys(editedAuditProducts).length} productos. Presione Guardar.</strong>
+                  ) : (
+                    'Realice ajustes masivos o edite individualmente y luego presione Guardar.'
+                  )}
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowCatalogAuditModal(false)}
+                    className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded-lg font-bold font-sans transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveAllAuditCorrections}
+                    disabled={Object.keys(editedAuditProducts).length === 0}
+                    className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:text-slate-400 text-white font-bold px-6 py-2 rounded-lg font-sans transition-all shadow-md active:scale-95"
+                  >
+                    Guardar Correcciones ({Object.keys(editedAuditProducts).length})
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* GENERAL ADJUSTMENT MODAL */}
       {showGeneralAdjustModal && (() => {
         const targetProducts = getGeneralAdjustTargetProducts();
@@ -3997,9 +5356,10 @@ export default function Inventario({
         // Check violations
         let violationsCount = 0;
         const updatesPreview = targetProducts.map(p => {
-          const nextCost = generalAdjustCost ? computePriceChange(p.precio_costo_usd) : p.precio_costo_usd;
-          const nextDetail = generalAdjustDetail ? computePriceChange(p.precio_detalle_usd) : p.precio_detalle_usd;
-          const nextMayor = generalAdjustMayor ? computePriceChange(p.precio_mayor_usd) : p.precio_mayor_usd;
+          const override = customPriceOverrides[p.id];
+          const nextCost = override?.cost !== undefined ? override.cost : (generalAdjustCost ? computePriceChange(p.precio_costo_usd) : p.precio_costo_usd);
+          const nextDetail = override?.detail !== undefined ? override.detail : (generalAdjustDetail ? computePriceChange(p.precio_detalle_usd) : p.precio_detalle_usd);
+          const nextMayor = override?.mayor !== undefined ? override.mayor : (generalAdjustMayor ? computePriceChange(p.precio_mayor_usd) : p.precio_mayor_usd);
           
           const violates = nextDetail <= nextCost || nextMayor <= nextCost;
           if (violates) violationsCount++;
@@ -4244,9 +5604,19 @@ export default function Inventario({
                           Resumen Global ({targetProducts.length} Afectados)
                         </label>
                         {violationsCount > 0 && (
-                          <span className="bg-red-100 text-red-700 text-[10px] px-2 py-0.5 rounded font-extrabold animate-pulse">
-                            ⚠️ {violationsCount} Violaciones de Regla Costo/Venta
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="bg-red-100 text-red-700 text-[10px] px-2 py-0.5 rounded font-extrabold animate-pulse">
+                              ⚠️ {violationsCount} Violaciones de Regla Costo/Venta
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setShowViolationAssistantModal(true)}
+                              className="bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black px-2.5 py-1 rounded-md shadow-sm transition-all flex items-center gap-1 font-mono uppercase active:scale-95"
+                            >
+                              <Wand2 className="w-3.5 h-3.5" />
+                              <span>✨ Asistente de Corrección</span>
+                            </button>
+                          </div>
                         )}
                       </div>
 
@@ -4306,6 +5676,16 @@ export default function Inventario({
                   * Todos los precios resultantes serán redondeados a 4 decimales.
                 </span>
                 <div className="flex gap-2">
+                  {violationsCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowViolationAssistantModal(true)}
+                      className="bg-amber-500 hover:bg-amber-600 text-slate-950 px-4 py-2.5 rounded-lg text-xs font-sans font-extrabold flex items-center gap-1.5 shadow-sm transition-all active:scale-95"
+                    >
+                      <Wand2 className="w-4 h-4" />
+                      <span>✨ Asistente de Corrección ({violationsCount})</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setShowGeneralAdjustModal(false)}
@@ -4334,10 +5714,23 @@ export default function Inventario({
           <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-5xl w-full h-[85vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
             {/* Header */}
             <div className="bg-gradient-to-r from-emerald-600 to-emerald-700 px-6 py-4 flex justify-between items-center text-white">
-              <h3 className="text-sm font-extrabold uppercase tracking-wider font-mono flex items-center gap-2">
-                <Layers className="w-4 h-4 bg-emerald-700/50 rounded-full p-0.5" />
-                Carga de Mercancía por Factura
-              </h3>
+              <div className="flex items-center gap-3">
+                <h3 className="text-sm font-extrabold uppercase tracking-wider font-mono flex items-center gap-2">
+                  <Layers className="w-4 h-4 bg-emerald-700/50 rounded-full p-0.5" />
+                  Carga de Mercancía por Factura
+                </h3>
+                {pausedInvoices.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowPausedInvoicesModal(true)}
+                    className="bg-amber-400 hover:bg-amber-300 text-slate-950 text-[10px] font-extrabold px-2.5 py-1 rounded-full font-mono flex items-center gap-1 shadow transition-all active:scale-95"
+                    title="Ver otras cargas en espera"
+                  >
+                    <PauseCircle className="w-3.5 h-3.5" />
+                    <span>Cargas en Espera: {pausedInvoices.length}</span>
+                  </button>
+                )}
+              </div>
               <button 
                 onClick={() => setShowInvoiceLoadModal(false)}
                 className="text-white/80 hover:text-white text-base focus:outline-none"
@@ -4583,9 +5976,21 @@ export default function Inventario({
                 <button
                   type="button"
                   onClick={() => setShowInvoiceLoadModal(false)}
-                  className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-5 py-2.5 rounded-lg text-xs font-sans font-bold transition-all"
+                  className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2.5 rounded-lg text-xs font-sans font-bold transition-all"
                 >
                   Cancelar
+                </button>
+
+                {/* BOTÓN PAUSAR CARGA */}
+                <button
+                  type="button"
+                  disabled={invoiceProducts.length === 0}
+                  onClick={handlePauseInvoiceLoad}
+                  className="bg-amber-500 hover:bg-amber-600 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-transparent text-slate-950 font-extrabold border border-amber-600 px-4 py-2.5 rounded-lg text-xs font-sans flex items-center gap-1.5 transition-all shadow-xs active:scale-95"
+                  title="Poner esta carga en espera para reanudarla más tarde"
+                >
+                  <PauseCircle className="w-4 h-4 text-slate-950" />
+                  <span>Pausar Carga</span>
                 </button>
                 <button
                   type="button"
@@ -4624,6 +6029,94 @@ export default function Inventario({
                   Procesar Carga ({invoiceProducts.length})
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CARGAS EN ESPERA (PAUSADAS) */}
+      {showPausedInvoicesModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[90] flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-2xl w-full overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-amber-500 to-amber-600 px-6 py-4 flex justify-between items-center text-slate-950 font-sans">
+              <h3 className="text-sm font-extrabold uppercase tracking-wider font-mono flex items-center gap-2">
+                <PauseCircle className="w-5 h-5 text-slate-950" />
+                Cargas de Factura en Espera ({pausedInvoices.length})
+              </h3>
+              <button 
+                onClick={() => setShowPausedInvoicesModal(false)}
+                className="text-slate-950/80 hover:text-slate-950 text-base font-bold focus:outline-none"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* List Body */}
+            <div className="p-6 max-h-[60vh] overflow-y-auto space-y-3 bg-slate-50">
+              {pausedInvoices.length === 0 ? (
+                <div className="text-center py-10 text-slate-400">
+                  <PauseCircle className="w-10 h-10 mx-auto text-slate-300 mb-2" />
+                  <p className="text-xs font-sans italic">No hay cargas de factura en espera en este momento.</p>
+                </div>
+              ) : (
+                pausedInvoices.map((p) => {
+                  const totalCost = p.items.reduce((acc, it) => acc + (it.qty * it.precio_costo_usd), 0);
+                  return (
+                    <div key={p.id} className="bg-white border border-slate-250 rounded-xl p-4 shadow-sm hover:border-amber-400 transition-all flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                      <div className="space-y-1 font-sans">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-extrabold text-sm text-slate-800">
+                            {p.invoiceNumber}
+                          </span>
+                          <span className="bg-amber-100 text-amber-900 font-bold text-[10px] px-2 py-0.5 rounded-full font-mono">
+                            {p.items.length} {p.items.length === 1 ? 'producto' : 'productos'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 font-mono">
+                          Pausada el: {p.date}
+                        </p>
+                        <p className="text-xs text-slate-600">
+                          Total Costo Est.: <strong className="font-mono text-emerald-700 font-extrabold">${totalCost.toFixed(2)}</strong>
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 w-full md:w-auto">
+                        <button
+                          type="button"
+                          onClick={() => handleResumeInvoiceLoad(p)}
+                          className="flex-1 md:flex-initial bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 rounded-lg text-xs font-sans uppercase flex items-center justify-center gap-1.5 shadow transition-all active:scale-95"
+                        >
+                          <Play className="w-3.5 h-3.5 fill-current" />
+                          <span>Retomar Carga</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeletePausedInvoice(p.id, p.invoiceNumber)}
+                          className="bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-bold p-2 rounded-lg text-xs transition-all"
+                          title="Eliminar esta carga en espera"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="bg-white border-t border-slate-200 px-6 py-3 flex justify-between items-center text-xs font-sans">
+              <span className="text-slate-500 font-mono text-[11px]">
+                Las cargas pausadas se conservan automáticamente aunque cierre el sistema.
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowPausedInvoicesModal(false)}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-bold transition-all"
+              >
+                Cerrar
+              </button>
             </div>
           </div>
         </div>

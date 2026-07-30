@@ -91,7 +91,7 @@ try {
     SELECT setval(pg_get_serial_sequence('Clientes', 'id'), COALESCE((SELECT MAX(id) FROM Clientes), 1));
     SELECT setval(pg_get_serial_sequence('Ventas', 'id'), COALESCE((SELECT MAX(id) FROM Ventas), 1));
     SELECT setval(pg_get_serial_sequence('Tasas_Cambio', 'id'), COALESCE((SELECT MAX(id) FROM Tasas_Cambio), 1));
-    SELECT setval('seq_factura', COALESCE((SELECT MAX(CAST(NULLIF(regexp_replace(factura_nro, '\D', '', 'g'), '') AS INTEGER)) FROM Ventas WHERE factura_nro LIKE 'FAC-%'), 1));
+    SELECT setval('seq_factura', COALESCE((SELECT MAX(CAST(NULLIF(regexp_replace(factura_nro, '[^0-9]', '', 'g'), '') AS INTEGER)) FROM Ventas WHERE factura_nro LIKE 'FAC-%'), 1));
     -- Asegurar que todos los cierres tengan fecha_cierre asignada y estatus 'Cerrada' si ya tienen detalles de conciliación
     UPDATE Cajas_Apertura_Cierre SET fecha_cierre = COALESCE(fecha_cierre, fecha_apertura, CURRENT_TIMESTAMP) WHERE fecha_cierre IS NULL;
     UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada' WHERE (monto_cierre_real_usd IS NOT NULL OR detalles_json IS NOT NULL) AND (estatus IS NULL OR estatus = 'Abierta');
@@ -351,26 +351,45 @@ export async function saveProduct(p) {
 
 export async function updateProduct(p) {
   const isGranel = !!p.a_granel;
-  const stockMinimo = isGranel ? (p.stock_minimo || 0) : Math.round(p.stock_minimo || 0);
-  const stockActual = isGranel ? (p.stock_actual || 0) : Math.round(p.stock_actual || 0);
+  const stockMinimo = isGranel ? (parseFloat(p.stock_minimo) || 0) : Math.round(parseFloat(p.stock_minimo) || 0);
+  const stockActual = isGranel ? (parseFloat(p.stock_actual) || 0) : Math.round(parseFloat(p.stock_actual) || 0);
+  const category = (p.category || p.categoria || '').trim().toUpperCase();
+  const barcode = (p.barcode || p.codigo_barras_clave || '').trim();
+  const description = (p.description || p.descripcion || '').trim();
+  const prodId = parseInt(p.id) || 0;
 
   if (usePostgres) {
     try {
-      await pool.query(
+      const res = await pool.query(
         `UPDATE Productos 
          SET codigo_barras_clave = $1, descripcion = $2, categoria = $3, stock_minimo = $4, precio_costo_usd = $5, precio_detalle_usd = $6, precio_mayor_usd = $7, cantidad_mayorista = $8, exento_impuesto = $9, imagen_url = $10, estado = $11, a_granel = $12, fecha_vencimiento = $13, porcentaje_impuesto = $14, stock_actual = $15
-         WHERE id = $16`,
-        [p.barcode, p.description, p.category, stockMinimo, p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.cantidad_mayorista || 12, p.exento_impuesto, p.imagen_url, p.estado, p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0, stockActual, p.id]
+         WHERE id = $16 OR (codigo_barras_clave = $1 AND $1 != '') RETURNING *`,
+        [barcode, description, category, stockMinimo, parseFloat(p.precio_costo_usd) || 0, parseFloat(p.precio_detalle_usd) || 0, parseFloat(p.precio_mayor_usd) || 0, parseInt(p.cantidad_mayorista) || 12, !!p.exento_impuesto, p.imagen_url || '', p.estado || 'Activo', isGranel, p.fecha_vencimiento || null, parseFloat(p.porcentaje_impuesto || 0), stockActual, prodId]
       );
-      return { ...p, stock_minimo: stockMinimo, stock_actual: stockActual };
+      if (res.rowCount > 0) {
+        const r = res.rows[0];
+        return {
+          ...p,
+          id: r.id,
+          barcode: r.codigo_barras_clave,
+          description: r.descripcion,
+          category: r.categoria || '',
+          stock_actual: parseFloat(r.stock_actual),
+          stock_minimo: parseFloat(r.stock_minimo),
+          precio_costo_usd: parseFloat(r.precio_costo_usd),
+          precio_detalle_usd: parseFloat(r.precio_detalle_usd),
+          precio_mayor_usd: parseFloat(r.precio_mayor_usd)
+        };
+      }
     } catch (err) {
       console.error('Error en updateProduct (Postgres):', err.message);
+      throw err;
     }
   }
   const products = readJsonFile('products.json', mockProducts);
-  const idx = products.findIndex(item => item.id === p.id);
+  const idx = products.findIndex(item => item.id === prodId || item.id == p.id || (item.barcode && item.barcode === barcode && barcode !== ''));
   if (idx !== -1) {
-    products[idx] = { ...products[idx], ...p, stock_minimo: stockMinimo, stock_actual: stockActual };
+    products[idx] = { ...products[idx], ...p, category, barcode, description, stock_minimo: stockMinimo, stock_actual: stockActual };
     writeJsonFile('products.json', products);
     return products[idx];
   }
@@ -2224,3 +2243,5 @@ export async function saveProductsBulk(products) {
   writeJsonFile('products.json', allProducts);
   return savedList;
 }
+
+
