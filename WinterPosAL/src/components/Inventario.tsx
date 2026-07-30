@@ -118,6 +118,8 @@ export default function Inventario({
   const [editedAuditProducts, setEditedAuditProducts] = useState<{
     [id: number]: { barcode?: string; description?: string; category?: string; stock_minimo?: number }
   }>({});
+  const [isSavingAuditCorrections, setIsSavingAuditCorrections] = useState(false);
+  const [auditSaveProgress, setAuditSaveProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
 
   const catalogAuditIssues = useMemo(() => {
     return products.map(p => {
@@ -346,6 +348,7 @@ export default function Inventario({
 
       // -1.5. Catalog Audit Assistant Modal (z-[92])
       if (showCatalogAuditModal) {
+        if (isSavingAuditCorrections) return;
         setShowCatalogAuditModal(false);
         return;
       }
@@ -451,6 +454,11 @@ export default function Inventario({
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
   }, [
+    assistantAuxProduct,
+    showBulkStockAdjustModal,
+    showCatalogAuditModal,
+    showViolationAssistantModal,
+    showPausedInvoicesModal,
     showQuickAddModal,
     invoiceAuxItemIndex,
     showNewProdModal,
@@ -464,7 +472,8 @@ export default function Inventario({
     showAdjustModal,
     showPriceModal,
     showCategoryMenu,
-    showReportMenu
+    showReportMenu,
+    isSavingAuditCorrections
   ]);
 
   const prevProductsLengthRef = useRef(products.length);
@@ -4959,30 +4968,81 @@ export default function Inventario({
             return;
           }
 
+          setIsSavingAuditCorrections(true);
+          setAuditSaveProgress({ current: 0, total: editedKeys.length });
+
           let updatedCount = 0;
-          for (const keyStr of editedKeys) {
-            const product = products.find(p => String(p.id) === String(keyStr));
-            const edit = editedAuditProducts[keyStr as any];
-            if (product && edit) {
-              const updatedProd: Product = {
-                ...product,
-                barcode: edit.barcode !== undefined ? edit.barcode.trim() : product.barcode,
-                description: edit.description !== undefined ? edit.description.trim() : product.description,
-                category: edit.category !== undefined ? edit.category.trim().toUpperCase() : product.category,
-                stock_minimo: edit.stock_minimo !== undefined ? edit.stock_minimo : product.stock_minimo
-              };
-              const ok = await onUpdateProduct(updatedProd);
-              if (ok) updatedCount++;
+          try {
+            for (let i = 0; i < editedKeys.length; i++) {
+              const keyStr = editedKeys[i];
+              setAuditSaveProgress({ current: i + 1, total: editedKeys.length });
+              const product = products.find(p => String(p.id) === String(keyStr));
+              const edit = editedAuditProducts[keyStr as any];
+              if (product && edit) {
+                const updatedProd: Product = {
+                  ...product,
+                  barcode: edit.barcode !== undefined ? edit.barcode.trim() : product.barcode,
+                  description: edit.description !== undefined ? edit.description.trim() : product.description,
+                  category: edit.category !== undefined ? edit.category.trim().toUpperCase() : product.category,
+                  stock_minimo: edit.stock_minimo !== undefined ? edit.stock_minimo : product.stock_minimo
+                };
+                const ok = await onUpdateProduct(updatedProd);
+                if (ok) updatedCount++;
+              }
             }
+            setEditedAuditProducts({});
+            setShowCatalogAuditModal(false);
+            showToast(`✨ Se guardaron con éxito las correcciones de catálogo para ${updatedCount} productos en la Base de Datos.`);
+          } catch (error) {
+            console.error("Error guardando correcciones de catálogo:", error);
+            showToast("❌ Error al guardar las correcciones de catálogo.");
+          } finally {
+            setIsSavingAuditCorrections(false);
           }
-          setEditedAuditProducts({});
-          setShowCatalogAuditModal(false);
-          showToast(`✨ Se guardaron con éxito las correcciones de catálogo para ${updatedCount} productos en la Base de Datos.`);
         };
 
         return (
           <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-[92] flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-5xl w-full h-[88vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200 font-sans">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-5xl w-full h-[88vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200 font-sans relative">
+              {/* Overlay de procesamiento cuando se guardan correcciones masivas */}
+              {isSavingAuditCorrections && (
+                <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex flex-col items-center justify-center p-6 text-white text-center animate-in fade-in duration-200">
+                  <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-8 max-w-md w-full shadow-2xl space-y-6">
+                    <div className="relative flex items-center justify-center">
+                      <div className="w-16 h-16 rounded-full border-4 border-amber-500/20 border-t-amber-500 animate-spin" />
+                      <RefreshCw className="w-7 h-7 text-amber-400 absolute animate-pulse" />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <h4 className="text-base font-black uppercase tracking-wider text-amber-400 font-mono">
+                        Procesando Correcciones ({auditSaveProgress.current} de {auditSaveProgress.total})
+                      </h4>
+                      <p className="text-xs text-slate-300 leading-relaxed font-sans">
+                        Guardando cambios masivos en la base de datos. Por favor espere sin cerrar ni volver a ejecutar la petición.
+                      </p>
+                    </div>
+
+                    {/* Progress Bar */}
+                    <div className="space-y-1.5">
+                      <div className="w-full bg-slate-800 rounded-full h-3.5 overflow-hidden border border-slate-700 p-0.5">
+                        <div 
+                          className="bg-gradient-to-r from-amber-500 to-emerald-500 h-full transition-all duration-200 rounded-full shadow-md"
+                          style={{ width: `${Math.round((auditSaveProgress.current / Math.max(1, auditSaveProgress.total)) * 100)}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-[11px] font-mono text-amber-300 font-bold">
+                        <span>Progreso</span>
+                        <span>{Math.round((auditSaveProgress.current / Math.max(1, auditSaveProgress.total)) * 100)}%</span>
+                      </div>
+                    </div>
+
+                    <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-[11px] text-amber-300 font-medium">
+                      ⚠️ Para evitar peticiones duplicadas y sobrecarga en el servidor, no cierre esta ventana ni refresque la página.
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Header */}
               <div className="bg-gradient-to-r from-amber-500 via-amber-600 to-amber-700 px-6 py-4 flex justify-between items-center text-slate-950 shadow-md">
                 <div className="flex items-center gap-2.5">
@@ -4999,8 +5059,9 @@ export default function Inventario({
                   </div>
                 </div>
                 <button 
-                  onClick={() => setShowCatalogAuditModal(false)}
-                  className="text-slate-950/80 hover:text-slate-950 text-base font-bold focus:outline-none"
+                  onClick={() => !isSavingAuditCorrections && setShowCatalogAuditModal(false)}
+                  disabled={isSavingAuditCorrections}
+                  className="text-slate-950/80 hover:text-slate-950 text-base font-bold focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   ✕
                 </button>
@@ -5320,7 +5381,9 @@ export default function Inventario({
               {/* Footer */}
               <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex justify-between items-center text-xs">
                 <span className="text-slate-500 font-mono text-[11px]">
-                  {Object.keys(editedAuditProducts).length > 0 ? (
+                  {isSavingAuditCorrections ? (
+                    <strong className="text-amber-700 animate-pulse">⏳ Procesando y guardando correcciones en la base de datos... Por favor espere.</strong>
+                  ) : Object.keys(editedAuditProducts).length > 0 ? (
                     <strong className="text-emerald-700">Se han preparado cambios para {Object.keys(editedAuditProducts).length} productos. Presione Guardar.</strong>
                   ) : (
                     'Realice ajustes masivos o edite individualmente y luego presione Guardar.'
@@ -5330,17 +5393,25 @@ export default function Inventario({
                   <button
                     type="button"
                     onClick={() => setShowCatalogAuditModal(false)}
-                    className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded-lg font-bold font-sans transition-all"
+                    disabled={isSavingAuditCorrections}
+                    className="bg-slate-200 hover:bg-slate-300 disabled:opacity-50 disabled:cursor-not-allowed text-slate-700 px-4 py-2 rounded-lg font-bold font-sans transition-all"
                   >
                     Cancelar
                   </button>
                   <button
                     type="button"
                     onClick={handleSaveAllAuditCorrections}
-                    disabled={Object.keys(editedAuditProducts).length === 0}
-                    className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:text-slate-400 text-white font-bold px-6 py-2 rounded-lg font-sans transition-all shadow-md active:scale-95"
+                    disabled={isSavingAuditCorrections || Object.keys(editedAuditProducts).length === 0}
+                    className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:text-slate-400 text-white font-bold px-6 py-2 rounded-lg font-sans transition-all shadow-md active:scale-95 flex items-center gap-2"
                   >
-                    Guardar Correcciones ({Object.keys(editedAuditProducts).length})
+                    {isSavingAuditCorrections ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Guardando ({auditSaveProgress.current}/{auditSaveProgress.total})...</span>
+                      </>
+                    ) : (
+                      <span>Guardar Correcciones ({Object.keys(editedAuditProducts).length})</span>
+                    )}
                   </button>
                 </div>
               </div>
