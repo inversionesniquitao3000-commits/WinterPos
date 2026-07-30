@@ -44,3 +44,18 @@ Este manual técnico explica paso a paso cómo conectar de manera simultánea m�
 4. La interfaz cargará de inmediato y se conectará automáticamente a la base de datos del servidor central sin requerir configuraciones adicionales.
    * *Nota:* Para operar cómodamente la interfaz de caja desde un teléfono móvil, úselo en **modo horizontal (landscape)**.
    * Para más detalles sobre adaptabilidad móvil, consulte el archivo [Manual_Acceso_Movil_y_Responsividad.md](file:///c:/Users/Casa/.gemini/antigravity-ide/scratch/WinterPos/WinterPosAL/Manuales/Manual_Acceso_Movil_y_Responsividad.md).
+
+---
+
+### SINCRONIZACIÓN Y EXPULSIÓN DE SESIONES AL CERRAR CAJA EN RED LOCAL (LAN)
+1. **Comportamiento Multi-Terminal de Turno**:
+   * Las terminales cliente sincronizan sus ventas, productos, clientes y tasas en segundo plano mediante la API de sincronización unificada `/api/sync/poll`.
+   * Un operador (no administrador) puede mantener sesiones abiertas en varias computadoras cliente compartiendo su misma apertura de caja activa.
+2. **Cierre de Caja Global y Expulsión Remota**:
+   * En el instante en que el operador ejecuta el **Cierre de Caja** en cualquier terminal, el servidor registra el timestamp de cierre.
+   * La rutina de sincronización en red detecta el cierre y emite la orden de expulsión remota a todos los navegadores/clientes de ese usuario.
+   * Las estaciones cliente limpian inmediatamente el carrito de compras no cobrado y redirigen al cajero a la pantalla de login con el aviso correspondiente.
+3. **Excepción de Rol para Administradores**:
+   * El rol `Administrador` está excluido de esta comprobación. Los administradores pueden monitorear y operar en múltiples computadoras sin ser desconectados por eventos de cierre de caja.
+4. **Contingencia por Desconexión de Red**:
+   * Toda llamada a la API que procese dinero o ventas valida previamente el estatus del turno en la base de datos central. Si un cliente estuvo desconectado de la red durante el cierre y vuelve a reconectarse, la API rechazará la transacción e iniciará el procedimiento de cierre de sesión remoto de inmediato.

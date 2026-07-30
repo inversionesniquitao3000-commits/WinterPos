@@ -7,9 +7,10 @@ interface LoginTerminalProps {
   onLoginSuccess: (user: User) => void;
   systemUsers: User[];
   companyConfig: CompanyConfig;
+  sessionNotice?: string;
 }
 
-export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConfig }: LoginTerminalProps) {
+export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConfig, sessionNotice }: LoginTerminalProps) {
   const { showAlert } = useDialog();
   const [showConfig, setShowConfig] = useState(false);
   const [clickCount, setClickCount] = useState(0);
@@ -182,6 +183,14 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
               Bienvenido
             </p>
           </div>
+
+          {/* Session Notice Dialog */}
+          {sessionNotice && (
+            <div className="bg-amber-950/80 border border-amber-500/60 text-amber-200 px-3.5 py-2.5 rounded text-xs font-sans flex items-start gap-2 animate-in fade-in duration-200">
+              <Shield className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+              <span className="font-semibold">{sessionNotice}</span>
+            </div>
+          )}
 
           {/* Error Dialog */}
           {errorMsg && (

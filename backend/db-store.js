@@ -1651,6 +1651,8 @@ export async function getCierres() {
 
         return {
           id: r.id,
+          usuarioId: r.usuario_id || parsedDetails.usuarioId,
+          timestamp: (parsedDetails.id && typeof parsedDetails.id === 'number' && parsedDetails.id > 1000000000000) ? parsedDetails.id : undefined,
           fechaApertura: fApertura,
           fechaCierre: fCierre,
           fecha: fCierre || fApertura,

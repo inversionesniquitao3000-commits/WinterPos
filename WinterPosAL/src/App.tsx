@@ -149,6 +149,7 @@ export default function App() {
   const [dbMode, setDbMode] = useState('local');
   const [reprintSale, setReprintSale] = useState<Sale | null>(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [sessionNotice, setSessionNotice] = useState<string>('');
 
   // Active Pestaña Tab F1-F10
   const [activeTab, setActiveTab] = useState<'caja' | 'inventario' | 'ventas' | 'clientes' | 'tasa' | 'config'>('caja');
@@ -465,34 +466,64 @@ export default function App() {
 
   // Multi-terminal unified sync polling (every 1 second)
   // Syncs: new sales (by ID), tasa changes, cierres updates, company config updates, and session closure detection
-  const sessionStartRef = useRef<string>(new Date().toISOString());
+  const sessionStartRef = useRef<number>(Date.now());
+  const salesRef = useRef(sales);
+  salesRef.current = sales;
+  const cierresRef = useRef(cierres);
+  cierresRef.current = cierres;
+  const clientsRef = useRef(clients);
+  clientsRef.current = clients;
+  const productsRef = useRef(products);
+  productsRef.current = products;
+  const tasaHistoryRef = useRef(tasaHistory);
+  tasaHistoryRef.current = tasaHistory;
+  const companyConfigRef = useRef(companyConfig);
+  companyConfigRef.current = companyConfig;
+  const currentUserRef = useRef(currentUser);
+  currentUserRef.current = currentUser;
 
   useEffect(() => {
+    if (currentUser) {
+      sessionStartRef.current = Date.now();
+    }
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (!currentUser) return;
     const myTerminal = localStorage.getItem('pos_terminal_name') || 'CAJA_01';
 
     const pollSync = async () => {
       try {
+        const user = currentUserRef.current;
+        if (!user) return;
+
+        const safeSales = Array.isArray(salesRef.current) ? salesRef.current : [];
+        const safeCierres = Array.isArray(cierresRef.current) ? cierresRef.current : [];
+        const safeClients = Array.isArray(clientsRef.current) ? clientsRef.current : [];
+        const safeProducts = Array.isArray(productsRef.current) ? productsRef.current : [];
+        const safeTasas = Array.isArray(tasaHistoryRef.current) ? tasaHistoryRef.current : [];
+
         // Calculate max known IDs from current state
-        const maxSaleId = sales.reduce((max, s) => Math.max(max, s.id || 0), 0);
+        const maxSaleId = safeSales.reduce((max, s) => Math.max(max, s?.id || 0), 0);
         
         // Calculate latest active rate details
-        const currentTasaObj = tasaHistory[tasaHistory.length - 1];
-        const lastTasaCobro = currentTasaObj ? currentTasaObj.tasa_cobro : 0;
-        const lastTasaVuelto = currentTasaObj ? currentTasaObj.tasa_vuelto : 0;
-        const tasasCount = tasaHistory.length;
+        const currentTasaObj = safeTasas[safeTasas.length - 1];
+        const lastTasaCobro = currentTasaObj ? (currentTasaObj.tasa_cobro || 0) : 0;
+        const lastTasaVuelto = currentTasaObj ? (currentTasaObj.tasa_vuelto || 0) : 0;
+        const tasasCount = safeTasas.length;
         
         // Calculate cierres parameters
-        const cierresCount = cierres.length;
-        const maxCierreId = cierres.reduce((max, c) => Math.max(max, c.id || 0), 0);
-        const cierresSig = cierres.reduce((acc, c) => acc + (c.realUsd || 0) + (c.realVes || 0), 0);
+        const cierresCount = safeCierres.length;
+        const maxCierreId = safeCierres.reduce((max, c) => Math.max(max, c?.id || 0), 0);
+        const cierresSig = safeCierres.reduce((acc, c) => acc + (c?.realUsd || 0) + (c?.realVes || 0), 0);
 
         // Calculate clients parameters
-        const clientsCount = clients.length;
-        const clientsSig = clients.reduce((acc, c) => acc + (c.id || 0) + (c.limite_credito || 0) + (c.saldo_pendiente || 0), 0);
+        const clientsCount = safeClients.length;
+        const clientsSig = safeClients.reduce((acc, c) => acc + (c?.id || 0) + (c?.limite_credito || 0) + (c?.saldo_pendiente || 0), 0);
 
         // Calculate products parameters
-        const productsCount = products.length;
-        const productsSig = products.reduce((acc, p) => acc + (p.id || 0) + (p.stock_actual || 0) + (p.precio_detalle_usd || 0), 0);
+        const productsCount = safeProducts.length;
+        const productsSig = safeProducts.reduce((acc, p) => acc + (p?.id || 0) + (p?.stock_actual || 0) + (p?.precio_detalle_usd || 0), 0);
 
         const params = new URLSearchParams({
           since_id: String(maxSaleId),
@@ -506,11 +537,12 @@ export default function App() {
           clients_sig: String(clientsSig),
           products_count: String(productsCount),
           products_sig: String(productsSig),
-          config_name: companyConfig?.nombre_comercio || '',
-          config_rif: companyConfig?.rif || '',
+          config_name: companyConfigRef.current?.nombre_comercio || '',
+          config_rif: companyConfigRef.current?.rif || '',
           terminal: myTerminal,
-          usuario: currentUser ? currentUser.nombre : '',
-          session_since: sessionStartRef.current
+          usuario: user ? (user.nombre || user.usuario) : '',
+          usuario_id: user ? String(user.id) : '',
+          session_since: String(sessionStartRef.current)
         });
 
         const res = await fetch(getApiUrl(`/sync/poll?${params.toString()}`));
@@ -534,7 +566,7 @@ export default function App() {
             return trulyNew.length > 0 ? [...prev, ...trulyNew] : prev;
           });
           // Also refresh invoice reference
-          if (currentUser) fetchLastInvoice();
+          if (currentUserRef.current) fetchLastInvoice();
         }
 
         // 3. Tasa updated from another terminal
@@ -560,15 +592,42 @@ export default function App() {
           console.log('[Sync] Catálogo de productos actualizado desde otra terminal.');
           setProducts(data.products);
         }
-      } catch (_) {
-        // Silent fail — polling is best-effort
+
+        // 7. Session closure detection for non-administrators
+        if (data.sessionClosed && user && user.rol.toLowerCase() !== 'administrador') {
+          console.warn('[Sync] Cierre de caja detectado para el usuario actual. Finalizando sesión en la red local.');
+          
+          const uKey = `u_${user.id}`;
+          localStorage.removeItem(`pos_caja_abierta_${uKey}`);
+          localStorage.removeItem(`pos_apertura_usd_${uKey}`);
+          localStorage.removeItem(`pos_apertura_ves_${uKey}`);
+          localStorage.removeItem(`pos_ventas_usd_${uKey}`);
+          localStorage.removeItem(`pos_ventas_ves_${uKey}`);
+          localStorage.removeItem(`pos_movimientos_usd_${uKey}`);
+          localStorage.removeItem(`pos_movimientos_ves_${uKey}`);
+          localStorage.removeItem(`pos_apertura_fecha_${uKey}`);
+          
+          setCajaAbierta(false);
+          setMontoAperturaUsd(0);
+          setMontoAperturaVes(0);
+          setCajaVentasUsd(0);
+          setCajaVentasVes(0);
+          setCajaMovimientosUsd(0);
+          setCajaMovimientosVes(0);
+          setShiftSales([]);
+          
+          setSessionNotice('⚠️ Su turno de caja ha sido cerrado desde la red local. Su sesión fue finalizada. Inicie sesión nuevamente para realizar una nueva apertura.');
+          setCurrentUser(null);
+        }
+      } catch (pollErr) {
+        console.error('[Sync Poll Error]', pollErr);
       }
     };
 
     pollSync();
     const interval = setInterval(pollSync, 1000);
     return () => clearInterval(interval);
-  }, [currentUser, lanIP, dbMode, sales, tasaHistory, cierres, companyConfig, clients, products]);
+  }, [currentUser?.id, lanIP, dbMode]);
 
   // Load all initial data from centralized backend database
   useEffect(() => {
@@ -1663,16 +1722,7 @@ export default function App() {
     }
   };
 
-  const confirmLogoutUser = async () => {
-    if (currentUser) {
-      try {
-        await fetch(getApiUrl('/users/logout'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: currentUser.id, username: currentUser.usuario })
-        });
-      } catch (_) {}
-    }
+  const confirmLogoutUser = () => {
     setCurrentUser(null);
     setActiveTab('caja');
   };
@@ -1691,7 +1741,7 @@ export default function App() {
 
     const sendHeartbeat = async () => {
       try {
-        await fetch(getApiUrl('/users/heartbeat'), {
+        const res = await fetch(getApiUrl('/users/heartbeat'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1700,11 +1750,29 @@ export default function App() {
             terminal: terminalName
           })
         });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.sessionClosed && currentUser && currentUser.rol.toLowerCase() !== 'administrador') {
+            console.warn('[Heartbeat] Cierre de caja detectado. Expulsando sesión remota.');
+            const uKey = `u_${currentUser.id}`;
+            localStorage.removeItem(`pos_caja_abierta_${uKey}`);
+            localStorage.removeItem(`pos_apertura_usd_${uKey}`);
+            localStorage.removeItem(`pos_apertura_ves_${uKey}`);
+            localStorage.removeItem(`pos_ventas_usd_${uKey}`);
+            localStorage.removeItem(`pos_ventas_ves_${uKey}`);
+            localStorage.removeItem(`pos_movimientos_usd_${uKey}`);
+            localStorage.removeItem(`pos_movimientos_ves_${uKey}`);
+            localStorage.removeItem(`pos_apertura_fecha_${uKey}`);
+            setCajaAbierta(false);
+            setSessionNotice('⚠️ Su turno de caja ha sido cerrado desde la red local. Su sesión fue finalizada. Inicie sesión nuevamente para realizar una nueva apertura.');
+            setCurrentUser(null);
+          }
+        }
       } catch (_) {}
     };
 
     sendHeartbeat();
-    const interval = setInterval(sendHeartbeat, 20000);
+    const interval = setInterval(sendHeartbeat, 5000);
     return () => clearInterval(interval);
   }, [currentUser, terminalName, lanIP, dbMode]);
 
@@ -1720,7 +1788,18 @@ export default function App() {
   };
 
   if (!currentUser) {
-    return <LoginTerminal onLoginSuccess={setCurrentUser} systemUsers={users} companyConfig={companyConfig} />;
+    return (
+      <LoginTerminal 
+        onLoginSuccess={(user) => {
+          setSessionNotice('');
+          sessionStartRef.current = Date.now();
+          setCurrentUser(user);
+        }} 
+        systemUsers={users} 
+        companyConfig={companyConfig} 
+        sessionNotice={sessionNotice}
+      />
+    );
   }
 
   return (

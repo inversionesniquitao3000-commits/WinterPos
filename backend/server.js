@@ -27,6 +27,9 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Global in-memory map tracking shift closure timestamps by user ID and username
+const userShiftClosureEvents = new Map();
+
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -261,10 +264,13 @@ app.get('/api/sync/poll', async (req, res) => {
     const terminal = req.query.terminal || null;
     const sessionSince = req.query.session_since || null;
 
-    if (usuario) {
-      cleanExpiredSessions();
+    const usuario = req.query.usuario || null;
+    const usuarioId = req.query.usuario_id || null;
+
+    if (usuario && typeof activeSessions !== 'undefined') {
+      if (typeof cleanExpiredSessions === 'function') cleanExpiredSessions();
       for (const [id, sess] of activeSessions.entries()) {
-        if (sess.username.toLowerCase() === String(usuario).toLowerCase()) {
+        if (sess.username && sess.username.toLowerCase() === String(usuario).toLowerCase()) {
           sess.lastHeartbeat = Date.now();
           if (terminal) sess.terminal = terminal;
           activeSessions.set(id, sess);
@@ -336,19 +342,99 @@ app.get('/api/sync/poll', async (req, res) => {
     }
 
     // 4. Session closure detection: check if this user closed their register
-    //    on a DIFFERENT terminal after the current session started
-    if (usuario && sessionSince) {
-      const sessionStart = new Date(sessionSince);
-      const userClosedElsewhere = cierres.some(c => {
-        if (!c.usuario || !c.fechaCierre) return false;
-        // Same user, different terminal, closed AFTER current session started
-        const isSameUser = c.usuario.toLowerCase() === usuario.toLowerCase();
-        const isDiffTerminal = terminal ? c.terminal !== terminal : false;
-        const closedAfterSession = new Date(c.fechaCierre) > sessionStart;
-        const isClosed = c.status === 'Cerrada';
-        return isSameUser && isDiffTerminal && closedAfterSession && isClosed;
-      });
-      result.sessionClosed = userClosedElsewhere;
+    // Exemption: Users with role 'Administrador' are exempt and never forced out by shift closure.
+    if ((usuario || usuarioId) && sessionSince) {
+      const allUsers = await getUsers();
+      const userObj = allUsers.find(u => 
+        (usuarioId && String(u.id) === String(usuarioId)) ||
+        (u.usuario && u.usuario.toLowerCase().trim() === String(usuario).toLowerCase().trim()) ||
+        (u.nombre && u.nombre.toLowerCase().trim() === String(usuario).toLowerCase().trim())
+      );
+
+      const isAdmin = userObj && userObj.rol && userObj.rol.toLowerCase() === 'administrador';
+
+      if (!isAdmin) {
+        function parseLocalDateToTimestamp(dateStr) {
+          if (!dateStr) return 0;
+          if (typeof dateStr === 'number') return dateStr;
+          const str = String(dateStr).trim();
+          if (!str) return 0;
+          if (/^\d{10,13}$/.test(str)) return parseInt(str);
+
+          const matchIso = str.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
+          if (matchIso) {
+            return new Date(parseInt(matchIso[1]), parseInt(matchIso[2]) - 1, parseInt(matchIso[3]), parseInt(matchIso[4]), parseInt(matchIso[5]), parseInt(matchIso[6] || '0')).getTime();
+          }
+
+          const matchEs = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,\s*|\s+)(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+          if (matchEs) {
+            return new Date(parseInt(matchEs[3]), parseInt(matchEs[2]) - 1, parseInt(matchEs[1]), parseInt(matchEs[4]), parseInt(matchEs[5]), parseInt(matchEs[6] || '0')).getTime();
+          }
+
+          const parsed = new Date(str).getTime();
+          return isNaN(parsed) ? 0 : parsed;
+        }
+
+        let sessionTimeMs = parseInt(sessionSince) || 0;
+        if (sessionTimeMs <= 0) {
+          sessionTimeMs = parseLocalDateToTimestamp(sessionSince);
+        }
+
+        let isClosed = false;
+
+        // Fast path 1: Instant check against in-memory shift closure events map
+        if (userObj) {
+          const closureTimeById = userShiftClosureEvents.get(`id_${userObj.id}`);
+          const closureTimeByName = userShiftClosureEvents.get(`name_${userObj.usuario?.toLowerCase().trim()}`);
+          const closureTimeByNombre = userShiftClosureEvents.get(`name_${userObj.nombre?.toLowerCase().trim()}`);
+
+          if (closureTimeById && sessionTimeMs < closureTimeById) {
+            isClosed = true;
+          } else if (closureTimeByName && sessionTimeMs < closureTimeByName) {
+            isClosed = true;
+          } else if (closureTimeByNombre && sessionTimeMs < closureTimeByNombre) {
+            isClosed = true;
+          }
+        }
+
+        // Fast path 2: Fallback check against database cierres
+        if (!isClosed) {
+          isClosed = cierres.some(c => {
+            if (!c.usuario) return false;
+            if (c.status === 'Abierta') return false;
+
+            const cUser = String(c.usuario).toLowerCase().trim();
+            const reqUser = String(usuario).toLowerCase().trim();
+            const isSameUser = 
+              (userObj && c.usuarioId && String(c.usuarioId) === String(userObj.id)) ||
+              cUser === reqUser || 
+              (userObj && userObj.nombre && cUser === userObj.nombre.toLowerCase().trim()) ||
+              (userObj && userObj.usuario && cUser === userObj.usuario.toLowerCase().trim());
+
+            if (!isSameUser) return false;
+
+            let closureTime = 0;
+            if (typeof c.timestamp === 'number' && c.timestamp > 1000000000000) {
+              closureTime = c.timestamp;
+            }
+            if (!closureTime && c.fechaCierre) {
+              closureTime = parseLocalDateToTimestamp(c.fechaCierre);
+            }
+            if (!closureTime && c.fecha) {
+              closureTime = parseLocalDateToTimestamp(c.fecha);
+            }
+
+            return closureTime > 0 && sessionTimeMs > 0 && sessionTimeMs < (closureTime - 5000);
+          });
+        }
+
+        result.sessionClosed = isClosed;
+        if (isClosed) {
+          console.log(`[Sync] 🔒 Evicción de sesión activa enviada para usuario ${usuario} (ID: ${usuarioId}).`);
+        }
+      } else {
+        result.sessionClosed = false;
+      }
     }
 
     // 5. Company config sync: check if client's company name/RIF differs
@@ -500,7 +586,27 @@ app.post('/api/cajas/abrir', async (req, res) => {
 });
 
 app.post('/api/cajas/cerrar', async (req, res) => {
-  const success = await cerrarCaja(req.body);
+  const cierreData = req.body;
+  const success = await cerrarCaja(cierreData);
+  if (success && cierreData) {
+    const closureTime = Date.now();
+    if (cierreData.usuarioId) {
+      userShiftClosureEvents.set(`id_${cierreData.usuarioId}`, closureTime);
+      activeSessions.delete(cierreData.usuarioId);
+      activeSessions.delete(String(cierreData.usuarioId));
+      activeSessions.delete(parseInt(cierreData.usuarioId));
+    }
+    if (cierreData.usuario) {
+      const uName = String(cierreData.usuario).toLowerCase().trim();
+      userShiftClosureEvents.set(`name_${uName}`, closureTime);
+      for (const [sId, sess] of activeSessions.entries()) {
+        if (sess.username && sess.username.toLowerCase().trim() === uName) {
+          activeSessions.delete(sId);
+        }
+      }
+    }
+    console.log(`[Shift Closure] 🔒 Cierre registrado para usuario ${cierreData.usuario} (ID: ${cierreData.usuarioId}). Evicción de sesiones activas completada.`);
+  }
   res.json({ success });
 });
 
@@ -602,6 +708,11 @@ app.post('/api/users/login-check', async (req, res) => {
       }
     }
 
+    // Clear previous shift closure eviction events for this user so new session can run cleanly
+    if (user.id) userShiftClosureEvents.delete(`id_${user.id}`);
+    if (user.usuario) userShiftClosureEvents.delete(`name_${user.usuario.toLowerCase().trim()}`);
+    if (user.nombre) userShiftClosureEvents.delete(`name_${user.nombre.toLowerCase().trim()}`);
+
     // Register or update active session
     activeSessions.set(user.id, {
       userId: user.id,
@@ -633,9 +744,27 @@ app.post('/api/users/logout', (req, res) => {
 });
 
 // Heartbeat endpoint
-app.post('/api/users/heartbeat', (req, res) => {
+app.post('/api/users/heartbeat', async (req, res) => {
   const { userId, username, terminal } = req.body;
   cleanExpiredSessions();
+
+  if (userId || username) {
+    const allUsers = await getUsers();
+    const userObj = allUsers.find(u => 
+      (userId && String(u.id) === String(userId)) ||
+      (username && u.usuario && u.usuario.toLowerCase().trim() === String(username).toLowerCase().trim())
+    );
+
+    const isAdmin = userObj && userObj.rol && userObj.rol.toLowerCase() === 'administrador';
+    if (!isAdmin) {
+      const cById = userId ? userShiftClosureEvents.get(`id_${userId}`) : null;
+      const cByName = username ? userShiftClosureEvents.get(`name_${String(username).toLowerCase().trim()}`) : null;
+      if (cById || cByName) {
+        return res.json({ success: false, sessionClosed: true, message: 'Shift closed' });
+      }
+    }
+  }
+
   for (const [id, sess] of activeSessions.entries()) {
     if (String(id) === String(userId) || (username && sess.username.toLowerCase() === String(username).toLowerCase())) {
       sess.lastHeartbeat = Date.now();

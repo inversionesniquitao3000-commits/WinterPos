@@ -154,3 +154,16 @@ El módulo de clientes proporciona control sobre cuentas y deudas:
 ### MÓDULO 8: ADMINISTRACIÓN GENERAL DEL SISTEMA
 Para la parametrización de usuarios, matriz de permisos de seguridad, calibración de balanzas/impresoras de tickets, puesta a cero del sistema y control de respaldos (backups), consulte el documento específico:
 * [Manual de Administración Avanzada y Periféricos](file:///c:/Users/Casa/.gemini/antigravity-ide/scratch/WinterPos/WinterPosAL/Manuales/Manual_Administracion_Sistema.md)
+
+---
+
+### MÓDULO 9: CIERRE DE CAJA MULTI-TERMINAL Y EXPULSIÓN DE SESIONES EN RED LOCAL (LAN)
+El sistema gestiona de forma estricta los turnos de caja en redes multi-terminal para asegurar la integridad de las finanzas y el arqueo de efectivo:
+1. **Permisividad de Sesiones Múltiples:** Un mismo usuario (no administrador) puede iniciar sesión simultáneamente en diferentes computadoras o navegadores de la red LAN compartiendo su misma apertura de caja activa.
+2. **Cierre de Caja Global Instantáneo:** Cuando un cajero ejecuta el **Cierre de Caja** en *cualquier* equipo de la red LAN:
+   * El Servidor notifica a todas las demás sesiones activas de ese mismo usuario en la red local.
+   * Cualquier borrador de factura o carrito de venta en progreso en otros equipos se vacía inmediatamente para evitar cobros no autorizados después del cierre.
+   * Todas las demás instancias abiertas son cerradas automáticamente y redirigidas a la pantalla de Login con la alerta: `"⚠️ Su turno de caja ha sido cerrado desde la red local. Su sesión fue finalizada. Inicie sesión nuevamente para realizar una nueva apertura."`
+3. **Excepción Única para Administradores:** Los usuarios con el rol **`Administrador`** están exentos de esta restricción y sus sesiones permanecerán activas de forma permanente a través de múltiples computadoras conectadas al servidor sin verse afectadas por cierres de caja.
+4. **Protección Contingente por Fallas de Red:** Si una laptop cliente pierde la señal Wi-Fi/cableada al momento del cierre, al intentar realizar cualquier cobro o al restablecer la conexión, la API del servidor rechazará la venta con error `403 - Turno Cerrado`, expulsando de inmediato al usuario a la pantalla de inicio de sesión.
+
