@@ -1425,12 +1425,30 @@ export default function CajaPOS({
     const devolucionEfectivoUsd = targetDevolucionUsd;
     const devolucionEfectivoVes = targetDevolucionVes;
     const vueltosEntregadosUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro.startsWith('DEV-')) return acc;
-      return acc + (sale.vueltoUSD || 0);
+      if (sale.factura_nro?.startsWith('DEV-')) return acc;
+      if (typeof sale.vueltoUSD === 'number' && sale.vueltoUSD > 0) return acc + sale.vueltoUSD;
+      if (typeof (sale as any).vuelto_usd === 'number' && (sale as any).vuelto_usd > 0) return acc + (sale as any).vuelto_usd;
+      return acc;
     }, 0);
+
     const vueltosEntregadosVes = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro.startsWith('DEV-')) return acc;
-      return acc + (sale.vueltoVES || 0);
+      if (sale.factura_nro?.startsWith('DEV-')) return acc;
+      if (typeof sale.vueltoVES === 'number' && sale.vueltoVES > 0) return acc + sale.vueltoVES;
+      if (typeof (sale as any).vuelto_ves === 'number' && (sale as any).vuelto_ves > 0) return acc + (sale as any).vuelto_ves;
+      
+      const cashPayUsd = (sale.pagos || []).find((p: any) => p.metodo === 'Efectivo$');
+      const cashPayVes = (sale.pagos || []).find((p: any) => p.metodo === 'EfectivoBs');
+      const cashUsdMonto = cashPayUsd ? (cashPayUsd.montoUSD || cashPayUsd.monto || 0) : 0;
+      const cashVesMonto = cashPayVes ? (cashPayVes.montoVES || cashPayVes.montoBs || (cashPayVes.monto && cashPayVes.monto > 100 ? cashPayVes.monto : 0)) : 0;
+
+      if (cashUsdMonto > sale.totalUSD) {
+        const diffUsd = cashUsdMonto - sale.totalUSD;
+        return acc + parseFloat((diffUsd * tasaDia).toFixed(2));
+      } else if (cashVesMonto > (sale.totalVES || sale.totalUSD * tasaDia)) {
+        const diffVes = cashVesMonto - (sale.totalVES || sale.totalUSD * tasaDia);
+        return acc + parseFloat(diffVes.toFixed(2));
+      }
+      return acc;
     }, 0);
 
     const rawExpectedUsd = aperturaUsd + ventasEfectivoUsd + abonosEfectivoUsd + entradaEfectivoUsd - salidaEfectivoUsd - devolucionEfectivoUsd - vueltosEntregadosUsd;
@@ -1715,32 +1733,8 @@ export default function CajaPOS({
     }
 
     await onCerrarCaja(cierreResult.realUsd, cierreResult.realVes, {
-      terminal: localStorage.getItem('pos_terminal_name') || 'CAJA_01',
-      ventasEfectivoUsd: cierreResult.ventasEfectivoUsd,
-      abonoClientesUsd: cierreResult.abonoClientesUsd,
-      entradaEfectivoUsd: cierreResult.entradaEfectivoUsd,
-      entradaEfectivoVes: cierreResult.entradaEfectivoVes,
-      salidaEfectivoUsd: cierreResult.salidaEfectivoUsd,
-      salidaEfectivoVes: cierreResult.salidaEfectivoVes,
-      devolucionEfectivoUsd: cierreResult.devolucionEfectivoUsd,
-      devolucionEfectivoVes: cierreResult.devolucionEfectivoVes,
-      dineroEnCajaExpected: cierreResult.dineroEnCajaExpected,
-      ventasTotalesUsd: cierreResult.ventasTotalesUsd,
-      descuentosUsd: cierreResult.descuentosUsd,
-      ventaBrutaUsd: cierreResult.ventaBrutaUsd,
-      pagosEfectivoUsd: cierreResult.pagosEfectivoUsd,
-      pagosEfectivoBsUsd: cierreResult.pagosEfectivoBsUsd,
-      pagosEfectivoBsVes: cierreResult.pagosEfectivoBsVes,
-      pagosBiopagoUsd: cierreResult.pagosBiopagoUsd,
-      pagosBiopagoVes: cierreResult.pagosBiopagoVes,
-      pagosPuntoUsd: cierreResult.pagosPuntoUsd,
-      pagosPuntoVes: cierreResult.pagosPuntoVes,
-      pagosTarjetaUsd: cierreResult.pagosTarjetaUsd,
-      pagosCreditoUsd: cierreResult.pagosCreditoUsd,
-      pagosPuntosUsd: cierreResult.pagosPuntosUsd,
-      devolucionVentasUsd: cierreResult.devolucionVentasUsd,
-      devolucionVentasVes: cierreResult.devolucionVentasVes,
-      ventaTotalUsd: cierreResult.ventaTotalUsd
+      ...cierreResult,
+      terminal: localStorage.getItem('pos_terminal_name') || 'CAJA_01'
     });
 
     setIsSendingWa(false);

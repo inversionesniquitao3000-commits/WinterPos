@@ -1458,46 +1458,8 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
           }, 0);
         }
 
-        let vueltosUsd = selectedCierre.vueltosEntregadosUsd ?? 0;
-        let vueltosVes = selectedCierre.vueltosEntregadosVes ?? 0;
-
-        if ((vueltosUsd === 0 || vueltosVes === 0) && sales && sales.length > 0) {
-          const cUser = selectedCierre.usuario ? selectedCierre.usuario.toLowerCase().trim() : '';
-          const fAperturaMs = selectedCierre.fechaApertura ? new Date(selectedCierre.fechaApertura).getTime() : 0;
-          const fCierreMs = (selectedCierre.fechaCierre || selectedCierre.fecha) ? new Date(selectedCierre.fechaCierre || selectedCierre.fecha).getTime() : Date.now();
-
-          const matchingShiftSales = sales.filter(s => {
-            if (cUser && s.usuario && s.usuario.toLowerCase().trim() !== cUser) return false;
-            const sTime = new Date(s.fecha).getTime();
-            if (isNaN(sTime)) return true;
-            const startBoundary = fAperturaMs > 0 ? fAperturaMs - 120000 : 0;
-            const endBoundary = fCierreMs > 0 ? fCierreMs + 120000 : Date.now();
-            return sTime >= startBoundary && sTime <= endBoundary;
-          });
-
-          if (vueltosUsd === 0) {
-            vueltosUsd = matchingShiftSales.reduce((acc, sale) => {
-              if (sale.factura_nro?.startsWith('DEV-')) return acc;
-              if (typeof sale.vueltoUSD === 'number' && sale.vueltoUSD > 0) return acc + sale.vueltoUSD;
-              const cashPayUsd = (sale.pagos || []).find(p => p.metodo === 'Efectivo$');
-              const cashMonto = cashPayUsd ? (cashPayUsd.montoUSD || cashPayUsd.monto) : 0;
-              const diff = cashMonto > sale.totalUSD ? (cashMonto - sale.totalUSD) : 0;
-              return acc + diff;
-            }, 0);
-          }
-
-          if (vueltosVes === 0) {
-            vueltosVes = matchingShiftSales.reduce((acc, sale) => {
-              if (sale.factura_nro?.startsWith('DEV-')) return acc;
-              if (typeof sale.vueltoVES === 'number' && sale.vueltoVES > 0) return acc + sale.vueltoVES;
-              if (typeof (sale as any).vuelto_ves === 'number' && (sale as any).vuelto_ves > 0) return acc + (sale as any).vuelto_ves;
-              const cashPayVes = (sale.pagos || []).find(p => p.metodo === 'EfectivoBs');
-              const cashMontoVes = cashPayVes ? (cashPayVes.montoVES || cashPayVes.montoBs || (cashPayVes.monto && cashPayVes.monto > 100 ? cashPayVes.monto : 0)) : 0;
-              const diff = cashMontoVes > sale.totalVES ? (cashMontoVes - sale.totalVES) : 0;
-              return acc + diff;
-            }, 0);
-          }
-        }
+        const vueltosUsd = selectedCierre.vueltosEntregadosUsd ?? (selectedCierre as any).vueltosUsd ?? (selectedCierre as any).vueltosEntregadosUSD ?? (selectedCierre as any).vueltoUSD ?? 0;
+        const vueltosVes = selectedCierre.vueltosEntregadosVes ?? (selectedCierre as any).vueltosVes ?? (selectedCierre as any).vueltosEntregadosVES ?? (selectedCierre as any).vueltoVES ?? 0;
 
         let subtotalNetoUsd = selectedCierre.ventaBrutaUsd ?? (selectedCierre as any).subtotalUsd ?? 0;
         if (!subtotalNetoUsd && sales && sales.length > 0) {

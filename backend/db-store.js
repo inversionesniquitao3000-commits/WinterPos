@@ -61,6 +61,18 @@ try {
     ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS venta_total_usd NUMERIC DEFAULT 0;
     ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS utilidad_usd NUMERIC DEFAULT 0;
     ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS detalles_json TEXT;
+    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS vuelto_entregado_usd NUMERIC DEFAULT 0;
+    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS vuelto_entregado_ves NUMERIC DEFAULT 0;
+    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS ventas_efectivo_usd NUMERIC DEFAULT 0;
+    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS ventas_efectivo_ves NUMERIC DEFAULT 0;
+    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS abono_clientes_usd NUMERIC DEFAULT 0;
+    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS abono_clientes_ves NUMERIC DEFAULT 0;
+    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS entrada_efectivo_usd NUMERIC DEFAULT 0;
+    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS entrada_efectivo_ves NUMERIC DEFAULT 0;
+    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS salida_efectivo_usd NUMERIC DEFAULT 0;
+    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS salida_efectivo_ves NUMERIC DEFAULT 0;
+    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS devolucion_efectivo_usd NUMERIC DEFAULT 0;
+    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS devolucion_efectivo_ves NUMERIC DEFAULT 0;
     ALTER TABLE Clientes ADD COLUMN IF NOT EXISTS aplica_precio_costo BOOLEAN DEFAULT FALSE;
     ALTER TABLE Ventas_Detalle DROP CONSTRAINT IF EXISTS ventas_detalle_tipo_precio_check;
     ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS clave VARCHAR(100) DEFAULT 'admin';
@@ -1411,6 +1423,7 @@ export async function getSales() {
       // Join clients and payments details
       const salesRes = await pool.query(`
         SELECT v.id, v.factura_nro, v.fecha, v.subtotal_usd, v.descuento_usd, v.total_usd, v.total_ves, v.con_ticket,
+               v.vuelto_usd as "vueltoUSD", v.vuelto_ves as "vueltoVES",
                v.estacion_nombre as terminal, c.cedula_rif as "clientDoc", c.nombre as "clientName", u.nombre as usuario
         FROM Ventas v
         LEFT JOIN Clientes c ON v.cliente_id = c.id
@@ -1468,8 +1481,8 @@ export async function getSales() {
             banco: p.banco || '',
             referencia: p.referencia || ''
           })),
-          vueltoUSD: 0,
-          vueltoVES: 0,
+          vueltoUSD: parseFloat(row.vueltoUSD || '0'),
+          vueltoVES: parseFloat(row.vueltoVES || '0'),
           usuario: row.usuario,
           terminal: row.terminal
         });
@@ -1668,6 +1681,12 @@ export async function getCierres() {
         SELECT c.id, c.fecha_apertura, c.fecha_cierre, c.monto_apertura_usd, c.monto_apertura_ves,
                c.monto_cierre_real_usd, c.monto_cierre_real_ves, c.monto_cierre_esperado_usd, c.monto_cierre_esperado_ves,
                c.venta_total_usd, c.utilidad_usd, c.detalles_json,
+               c.vuelto_entregado_usd, c.vuelto_entregado_ves,
+               c.ventas_efectivo_usd, c.ventas_efectivo_ves,
+               c.abono_clientes_usd, c.abono_clientes_ves,
+               c.entrada_efectivo_usd, c.entrada_efectivo_ves,
+               c.salida_efectivo_usd, c.salida_efectivo_ves,
+               c.devolucion_efectivo_usd, c.devolucion_efectivo_ves,
                u.nombre as usuario, c.estatus, c.estacion_nombre as terminal
         FROM Cajas_Apertura_Cierre c
         LEFT JOIN Usuarios u ON c.usuario_id = u.id
@@ -1687,22 +1706,65 @@ export async function getCierres() {
 
         const cajeroName = parsedDetails.usuario || r.usuario || 'SISTEMA';
 
+        const sqlVueltosUsd = parseFloat(r.vuelto_entregado_usd || '0');
+        const sqlVueltosVes = parseFloat(r.vuelto_entregado_ves || '0');
+
+        const finalVueltosUsd = sqlVueltosUsd > 0 ? sqlVueltosUsd : (parsedDetails.vueltosEntregadosUsd ?? parsedDetails.vueltosUsd ?? parsedDetails.vueltosEntregadosUSD ?? parsedDetails.vueltoUSD ?? 0);
+        const finalVueltosVes = sqlVueltosVes > 0 ? sqlVueltosVes : (parsedDetails.vueltosEntregadosVes ?? parsedDetails.vueltosVes ?? parsedDetails.vueltosEntregadosVES ?? parsedDetails.vueltoVES ?? 0);
+
+        const sqlVentasUsd = parseFloat(r.ventas_efectivo_usd || '0');
+        const sqlVentasVes = parseFloat(r.ventas_efectivo_ves || '0');
+        const finalVentasEfectivoUsd = sqlVentasUsd > 0 ? sqlVentasUsd : (parsedDetails.ventasEfectivoUsd ?? 0);
+        const finalVentasEfectivoVes = sqlVentasVes > 0 ? sqlVentasVes : (parsedDetails.ventasEfectivoVes ?? 0);
+
+        const sqlAbonosUsd = parseFloat(r.abono_clientes_usd || '0');
+        const sqlAbonosVes = parseFloat(r.abono_clientes_ves || '0');
+        const finalAbonosUsd = sqlAbonosUsd > 0 ? sqlAbonosUsd : (parsedDetails.abonoClientesUsd ?? parsedDetails.abonosUsd ?? 0);
+        const finalAbonosVes = sqlAbonosVes > 0 ? sqlAbonosVes : (parsedDetails.abonoClientesVes ?? parsedDetails.abonosVes ?? 0);
+
+        const sqlEntradasUsd = parseFloat(r.entrada_efectivo_usd || '0');
+        const sqlEntradasVes = parseFloat(r.entrada_efectivo_ves || '0');
+        const finalEntradasUsd = sqlEntradasUsd > 0 ? sqlEntradasUsd : (parsedDetails.entradaEfectivoUsd ?? 0);
+        const finalEntradasVes = sqlEntradasVes > 0 ? sqlEntradasVes : (parsedDetails.entradaEfectivoVes ?? 0);
+
+        const sqlSalidasUsd = parseFloat(r.salida_efectivo_usd || '0');
+        const sqlSalidasVes = parseFloat(r.salida_efectivo_ves || '0');
+        const finalSalidasUsd = sqlSalidasUsd > 0 ? sqlSalidasUsd : (parsedDetails.salidaEfectivoUsd ?? 0);
+        const finalSalidasVes = sqlSalidasVes > 0 ? sqlSalidasVes : (parsedDetails.salidaEfectivoVes ?? 0);
+
+        const sqlDevUsd = parseFloat(r.devolucion_efectivo_usd || '0');
+        const sqlDevVes = parseFloat(r.devolucion_efectivo_ves || '0');
+        const finalDevUsd = sqlDevUsd > 0 ? sqlDevUsd : (parsedDetails.devolucionEfectivoUsd ?? 0);
+        const finalDevVes = sqlDevVes > 0 ? sqlDevVes : (parsedDetails.devolucionEfectivoVes ?? 0);
+
         return {
+          ...parsedDetails,
           id: r.id,
           usuarioId: r.usuario_id || parsedDetails.usuarioId,
           timestamp: (parsedDetails.id && typeof parsedDetails.id === 'number' && parsedDetails.id > 1000000000000) ? parsedDetails.id : undefined,
           fechaApertura: fApertura,
           fechaCierre: fCierre,
           fecha: fCierre || fApertura,
-          aperturaUsd: parseFloat(r.monto_apertura_usd),
-          aperturaVes: parseFloat(r.monto_apertura_ves),
+          aperturaUsd: parseFloat(r.monto_apertura_usd || 0),
+          aperturaVes: parseFloat(r.monto_apertura_ves || 0),
           realUsd: r.monto_cierre_real_usd ? parseFloat(r.monto_cierre_real_usd) : 0,
           realVes: r.monto_cierre_real_ves ? parseFloat(r.monto_cierre_real_ves) : 0,
           expectedUsd: r.monto_cierre_esperado_usd ? parseFloat(r.monto_cierre_esperado_usd) : 0,
           expectedVes: r.monto_cierre_esperado_ves ? parseFloat(r.monto_cierre_esperado_ves) : 0,
           ventaTotalUsd: r.venta_total_usd ? parseFloat(r.venta_total_usd) : 0,
           utilidadUsd: r.utilidad_usd ? parseFloat(r.utilidad_usd) : 0,
-          ...parsedDetails,
+          vueltosEntregadosUsd: finalVueltosUsd,
+          vueltosEntregadosVes: finalVueltosVes,
+          ventasEfectivoUsd: finalVentasEfectivoUsd,
+          ventasEfectivoVes: finalVentasEfectivoVes,
+          abonoClientesUsd: finalAbonosUsd,
+          abonoClientesVes: finalAbonosVes,
+          entradaEfectivoUsd: finalEntradasUsd,
+          entradaEfectivoVes: finalEntradasVes,
+          salidaEfectivoUsd: finalSalidasUsd,
+          salidaEfectivoVes: finalSalidasVes,
+          devolucionEfectivoUsd: finalDevUsd,
+          devolucionEfectivoVes: finalDevVes,
           usuario: cajeroName,
           terminal: r.terminal || parsedDetails.terminal || 'CAJA_PRINCIPAL',
           status: r.estatus === 'Abierta' ? 'Abierta' : 'Cerrada',
@@ -1805,7 +1867,19 @@ export async function cerrarCaja(cierre) {
             estatus = 'Cerrada',
             venta_total_usd = $5,
             utilidad_usd = $6,
-            detalles_json = $7
+            detalles_json = $7,
+            vuelto_entregado_usd = $10,
+            vuelto_entregado_ves = $11,
+            ventas_efectivo_usd = $12,
+            ventas_efectivo_ves = $13,
+            abono_clientes_usd = $14,
+            abono_clientes_ves = $15,
+            entrada_efectivo_usd = $16,
+            entrada_efectivo_ves = $17,
+            salida_efectivo_usd = $18,
+            salida_efectivo_ves = $19,
+            devolucion_efectivo_usd = $20,
+            devolucion_efectivo_ves = $21
            WHERE id = $8`,
           [
             cierre.expectedUsd || cierre.dineroEnCajaExpected || 0, 
@@ -1816,7 +1890,19 @@ export async function cerrarCaja(cierre) {
             utilidadUsd, 
             detallesJson, 
             cajaId,
-            nowStr
+            nowStr,
+            cierre.vueltosEntregadosUsd ?? cierre.vueltosUsd ?? 0,
+            cierre.vueltosEntregadosVes ?? cierre.vueltosVes ?? 0,
+            cierre.ventasEfectivoUsd || 0,
+            cierre.ventasEfectivoVes || 0,
+            cierre.abonoClientesUsd || cierre.abonosUsd || 0,
+            cierre.abonoClientesVes || cierre.abonosVes || 0,
+            cierre.entradaEfectivoUsd || 0,
+            cierre.entradaEfectivoVes || 0,
+            cierre.salidaEfectivoUsd || 0,
+            cierre.salidaEfectivoVes || 0,
+            cierre.devolucionEfectivoUsd || 0,
+            cierre.devolucionEfectivoVes || 0
           ]
         );
         return true;
