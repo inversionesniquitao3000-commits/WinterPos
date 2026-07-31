@@ -565,8 +565,29 @@ export default function App() {
             const trulyNew = data.sales.filter((s: any) => !existingIds.has(s.id) && !existingFacs.has(s.factura_nro));
             return trulyNew.length > 0 ? [...prev, ...trulyNew] : prev;
           });
-          // Also refresh invoice reference
-          if (currentUserRef.current) fetchLastInvoice();
+          // Also refresh invoice reference and active shift state for unified closure
+          if (currentUserRef.current) {
+            fetchLastInvoice();
+            const u = currentUserRef.current;
+            fetch(getApiUrl(`/cajas/estado?terminal=${encodeURIComponent(myTerminal)}&usuarioId=${u.id}&usuarioNombre=${encodeURIComponent(u.nombre)}`))
+              .then(r => r.ok ? r.json() : null)
+              .then(cajaData => {
+                if (cajaData && cajaData.abierta) {
+                  setCajaAbierta(true);
+                  setMontoAperturaUsd(cajaData.aperturaUsd || 0);
+                  setMontoAperturaVes(cajaData.aperturaVes || 0);
+                  setCajaVentasUsd(cajaData.ventasUsd || 0);
+                  setCajaVentasVes(cajaData.ventasVes || 0);
+                  setCajaMovimientosUsd(cajaData.movimientosUsd || 0);
+                  setCajaMovimientosVes(cajaData.movimientosVes || 0);
+                  setShiftSales(cajaData.shiftSales || []);
+                  setShiftAbonosUsd(cajaData.shiftAbonosUsd || 0);
+                  setShiftEntradasUsd(cajaData.shiftEntradasUsd || 0);
+                  setShiftSalidasUsd(cajaData.shiftSalidasUsd || 0);
+                }
+              })
+              .catch(() => {});
+          }
         }
 
         // 3. Tasa updated from another terminal

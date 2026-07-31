@@ -1487,14 +1487,7 @@ export async function saveSale(s) {
       // Get IDs
       const clientRes = await clientTarget.query('SELECT id FROM Clientes WHERE cedula_rif = $1', [s.client.cedula_rif]);
       const myTerminal = s.terminal || s.estacion_nombre || 'CAJA_PRINCIPAL';
-      let activeCaja = await clientTarget.query(
-        "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND (estacion_nombre = $1 OR estacion_nombre = 'CAJA_PRINCIPAL') ORDER BY id DESC LIMIT 1",
-        [myTerminal]
-      );
-      if (activeCaja.rowCount === 0) {
-        activeCaja = await clientTarget.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
-      }
-      
+
       let userId = 1;
       if (s.usuario) {
         const userLookup = await clientTarget.query('SELECT id FROM Usuarios WHERE nombre = $1 OR usuario = $2 LIMIT 1', [s.usuario, s.usuario]);
@@ -1507,6 +1500,34 @@ export async function saveSale(s) {
       } else {
         const userRes = await clientTarget.query('SELECT id FROM Usuarios LIMIT 1');
         userId = userRes.rowCount > 0 ? userRes.rows[0].id : 1;
+      }
+
+      const sysConfig = await getCompanyConfig();
+      const compartirApertura = sysConfig.compartir_apertura_caja !== false;
+
+      let activeCaja;
+      if (userId > 0) {
+        if (compartirApertura) {
+          activeCaja = await clientTarget.query(
+            "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY (estacion_nombre = $2) DESC, id DESC LIMIT 1",
+            [userId, myTerminal]
+          );
+        } else {
+          activeCaja = await clientTarget.query(
+            "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 AND usuario_id = $2 ORDER BY id DESC LIMIT 1",
+            [myTerminal, userId]
+          );
+        }
+      }
+
+      if (!activeCaja || activeCaja.rowCount === 0) {
+        activeCaja = await clientTarget.query(
+          "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND (estacion_nombre = $1 OR estacion_nombre = 'CAJA_PRINCIPAL' OR estacion_nombre = 'LOCAL') ORDER BY id DESC LIMIT 1",
+          [myTerminal]
+        );
+      }
+      if (!activeCaja || activeCaja.rowCount === 0) {
+        activeCaja = await clientTarget.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
       }
 
       const clientId = clientRes.rowCount > 0 ? clientRes.rows[0].id : 1;
@@ -1945,8 +1966,9 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
         FROM Ventas v
         LEFT JOIN Clientes c ON v.cliente_id = c.id
         LEFT JOIN Usuarios u ON v.usuario_id = u.id
-        WHERE v.caja_id = $1
-      `, [cajaId]);
+        WHERE v.caja_id = $1 OR (v.usuario_id = $2 AND v.fecha >= $3 AND ($4 = true OR v.estacion_nombre = $5))
+        ORDER BY v.id ASC
+      `, [cajaId, caja.usuario_id, caja.fecha_apertura, compartirApertura, myTerminal]);
       
       const shiftSalesList = [];
       let salesCashUsd = 0;
@@ -1980,7 +2002,7 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
         salesCashVes += (cashVes - vVES);
         
         const itemsRes = await pool.query(`
-          SELECT vd.cantidad as qty, vd.precio_unitario_usd, vd.total_fila_usd, p.codigo_barras_clave as barcode, p.descripcion
+          SELECT vd.cantidad as qty, vd.precio_unitario_usd, vd.total_fila_usd, p.codigo_barras_clave as barcode, p.descripcion, p.precio_costo_usd
           FROM Ventas_Detalle vd
           LEFT JOIN Productos p ON vd.producto_id = p.id
           WHERE vd.venta_id = $1
@@ -2000,7 +2022,8 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
             total_fila_usd: parseFloat(i.total_fila_usd),
             product: {
               barcode: i.barcode,
-              description: i.descripcion
+              description: i.descripcion,
+              precio_costo_usd: parseFloat(i.precio_costo_usd || '0')
             }
           })),
           subtotal: parseFloat(row.subtotal_usd),
