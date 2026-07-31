@@ -691,10 +691,14 @@ app.post('/api/users/login-check', async (req, res) => {
     const isAdmin = user.rol && user.rol.toLowerCase() === 'administrador';
     const activeTerm = terminal || 'LOCAL';
 
-    // If NOT admin, check if session is already active on another terminal
-    if (!isAdmin) {
-      for (const [id, existing] of activeSessions.entries()) {
-        const isSameUser = String(id) === String(user.id) || existing.username.toLowerCase() === user.usuario.toLowerCase();
+    // Check company configuration for multi-session policy
+    const companyConfig = await getCompanyConfig();
+    const permitirMultisesion = companyConfig.permitir_multisesion !== false;
+
+    // If multi-session is disabled by company policy and user is NOT admin, block login on 2nd terminal
+    if (!permitirMultisesion && !isAdmin) {
+      for (const [key, existing] of activeSessions.entries()) {
+        const isSameUser = String(existing.userId) === String(user.id) || (existing.username && existing.username.toLowerCase() === user.usuario.toLowerCase());
         const isDifferentTerminal = existing.terminal && existing.terminal !== activeTerm;
         const isHeartbeatFresh = (Date.now() - existing.lastHeartbeat) < 45000;
 
@@ -702,7 +706,7 @@ app.post('/api/users/login-check', async (req, res) => {
           return res.status(403).json({
             success: false,
             isBlocked: true,
-            message: 'Usuario conectado actualmente en otro equipo.'
+            message: 'Usuario conectado actualmente en otro equipo (Multisesión deshabilitada en Configuración).'
           });
         }
       }
@@ -713,8 +717,9 @@ app.post('/api/users/login-check', async (req, res) => {
     if (user.usuario) userShiftClosureEvents.delete(`name_${user.usuario.toLowerCase().trim()}`);
     if (user.nombre) userShiftClosureEvents.delete(`name_${user.nombre.toLowerCase().trim()}`);
 
-    // Register or update active session
-    activeSessions.set(user.id, {
+    // Register or update active session (keyed by userId and terminal to allow multi-device logins)
+    const sessionKey = `${user.id}_${activeTerm}`;
+    activeSessions.set(sessionKey, {
       userId: user.id,
       username: user.usuario,
       nombre: user.nombre || user.usuario,
@@ -733,11 +738,13 @@ app.post('/api/users/login-check', async (req, res) => {
 
 // Logout endpoint
 app.post('/api/users/logout', (req, res) => {
-  const { userId, username } = req.body;
+  const { userId, username, terminal } = req.body;
   cleanExpiredSessions();
-  for (const [id, sess] of activeSessions.entries()) {
-    if (String(id) === String(userId) || (username && sess.username.toLowerCase() === username.toLowerCase())) {
-      activeSessions.delete(id);
+  for (const [key, sess] of activeSessions.entries()) {
+    const matchUser = (userId && String(sess.userId) === String(userId)) || (username && sess.username.toLowerCase() === String(username).toLowerCase());
+    const matchTerminal = !terminal || sess.terminal === terminal;
+    if (matchUser && matchTerminal) {
+      activeSessions.delete(key);
     }
   }
   res.json({ success: true });
@@ -765,11 +772,13 @@ app.post('/api/users/heartbeat', async (req, res) => {
     }
   }
 
-  for (const [id, sess] of activeSessions.entries()) {
-    if (String(id) === String(userId) || (username && sess.username.toLowerCase() === String(username).toLowerCase())) {
+  for (const [key, sess] of activeSessions.entries()) {
+    const matchUser = (userId && String(sess.userId) === String(userId)) || (username && sess.username.toLowerCase() === String(username).toLowerCase());
+    const matchTerminal = !terminal || sess.terminal === terminal;
+    if (matchUser && matchTerminal) {
       sess.lastHeartbeat = Date.now();
       if (terminal) sess.terminal = terminal;
-      activeSessions.set(id, sess);
+      activeSessions.set(key, sess);
     }
   }
   res.json({ success: true });
@@ -782,12 +791,12 @@ app.get('/api/users/active-sessions', (req, res) => {
 });
 
 // Force disconnect user session (Admin action)
-app.delete('/api/users/active-sessions/:userId', (req, res) => {
-  const targetId = req.params.userId;
+app.delete('/api/users/active-sessions/:target', (req, res) => {
+  const target = req.params.target;
   cleanExpiredSessions();
-  for (const [id, sess] of activeSessions.entries()) {
-    if (String(id) === String(targetId) || sess.username.toLowerCase() === String(targetId).toLowerCase()) {
-      activeSessions.delete(id);
+  for (const [key, sess] of activeSessions.entries()) {
+    if (String(key) === String(target) || String(sess.userId) === String(target) || sess.username.toLowerCase() === String(target).toLowerCase() || sess.terminal === target) {
+      activeSessions.delete(key);
     }
   }
   res.json({ success: true });

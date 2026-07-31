@@ -71,6 +71,8 @@ try {
     ALTER TABLE Productos ADD COLUMN IF NOT EXISTS a_granel BOOLEAN DEFAULT FALSE;
     ALTER TABLE Productos ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(50);
     ALTER TABLE Productos ADD COLUMN IF NOT EXISTS porcentaje_impuesto NUMERIC DEFAULT 0;
+    ALTER TABLE Configuracion_Empresa ADD COLUMN IF NOT EXISTS permitir_multisesion BOOLEAN DEFAULT TRUE;
+    ALTER TABLE Configuracion_Empresa ADD COLUMN IF NOT EXISTS compartir_apertura_caja BOOLEAN DEFAULT TRUE;
     CREATE SEQUENCE IF NOT EXISTS seq_factura START WITH 1;
     CREATE TABLE IF NOT EXISTS Roles (
       id SERIAL PRIMARY KEY,
@@ -159,33 +161,44 @@ export async function getCompanyConfig() {
           correo: row.correo,
           moneda_base: row.moneda_base,
           mensaje_pie_ticket: row.mensaje_pie_ticket,
-          metodos_pago_activos: row.metodos_pago_activos
+          metodos_pago_activos: row.metodos_pago_activos,
+          permitir_multisesion: row.permitir_multisesion !== false,
+          compartir_apertura_caja: row.compartir_apertura_caja !== false
         };
       }
     } catch (err) {
       console.error('Error en getCompanyConfig (Postgres):', err.message);
     }
   }
-  return readJsonFile('config.json', mockConfig);
+  const c = readJsonFile('config.json', mockConfig);
+  return {
+    ...mockConfig,
+    ...c,
+    permitir_multisesion: c.permitir_multisesion !== false,
+    compartir_apertura_caja: c.compartir_apertura_caja !== false
+  };
 }
 
 export async function saveCompanyConfig(config) {
   if (usePostgres) {
     try {
       const existing = await pool.query('SELECT id FROM Configuracion_Empresa ORDER BY id DESC LIMIT 1');
+      const pMulti = config.permitir_multisesion !== false;
+      const cApertura = config.compartir_apertura_caja !== false;
       if (existing.rowCount > 0) {
         await pool.query(
           `UPDATE Configuracion_Empresa SET 
             rif = $1, nombre_comercio = $2, direccion = $3, telefono = $4, 
-            correo = $5, moneda_base = $6, mensaje_pie_ticket = $7, metodos_pago_activos = $8
-           WHERE id = $9`,
-          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), existing.rows[0].id]
+            correo = $5, moneda_base = $6, mensaje_pie_ticket = $7, metodos_pago_activos = $8,
+            permitir_multisesion = $9, compartir_apertura_caja = $10
+           WHERE id = $11`,
+          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura, existing.rows[0].id]
         );
       } else {
         await pool.query(
-          `INSERT INTO Configuracion_Empresa (rif, nombre_comercio, direccion, telefono, correo, moneda_base, mensaje_pie_ticket, metodos_pago_activos)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos)]
+          `INSERT INTO Configuracion_Empresa (rif, nombre_comercio, direccion, telefono, correo, moneda_base, mensaje_pie_ticket, metodos_pago_activos, permitir_multisesion, compartir_apertura_caja)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura]
         );
       }
       return config;
@@ -1898,12 +1911,22 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
         }
       }
 
+      const sysConfig = await getCompanyConfig();
+      const compartirApertura = sysConfig.compartir_apertura_caja !== false;
+
       let activeRes;
       if (!isNaN(userId) && userId > 0) {
-        activeRes = await pool.query(
-          "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 AND usuario_id = $2 ORDER BY id DESC LIMIT 1",
-          [myTerminal, userId]
-        );
+        if (compartirApertura) {
+          activeRes = await pool.query(
+            "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY (estacion_nombre = $2) DESC, id DESC LIMIT 1",
+            [userId, myTerminal]
+          );
+        } else {
+          activeRes = await pool.query(
+            "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 AND usuario_id = $2 ORDER BY id DESC LIMIT 1",
+            [myTerminal, userId]
+          );
+        }
       } else {
         activeRes = await pool.query(
           "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",

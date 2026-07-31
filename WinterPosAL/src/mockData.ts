@@ -105,7 +105,9 @@ export const mockConfig: CompanyConfig = {
   correo: 'inversiones.niquitao3000@gmail.com',
   moneda_base: 'USD',
   mensaje_pie_ticket: '¡Gracias por preferirnos! Conserve este ticket como comprobante de compra.',
-  metodos_pago_activos: ['efectivo_usd', 'efectivo_ves', 'tarjeta_ves', 'pago_movil', 'biopago', 'credito']
+  metodos_pago_activos: ['efectivo_usd', 'efectivo_ves', 'tarjeta_ves', 'pago_movil', 'biopago', 'credito'],
+  permitir_multisesion: true,
+  compartir_apertura_caja: true
 };
 
 export const mockMovements: InventoryMovement[] = [

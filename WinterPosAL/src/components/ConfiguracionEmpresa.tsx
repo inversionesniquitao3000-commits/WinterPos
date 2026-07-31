@@ -67,7 +67,7 @@ export default function ConfiguracionEmpresa({
   const { showAlert, showConfirm } = useDialog();
   // Navigation tabs
   const [activeTab, setActiveTab] = useState<'empresa' | 'usuarios' | 'perifericos' | 'db' | 'whatsapp'>('empresa');
-  const [subTabUsers, setSubTabUsers] = useState<'users' | 'roles' | 'sesiones'>('users');
+  const [subTabUsers, setSubTabUsers] = useState<'users' | 'roles' | 'sesiones' | 'politicas'>('users');
   const [activeSessionsList, setActiveSessionsList] = useState<any[]>([]);
 
   const fetchActiveSessions = async () => {
@@ -127,7 +127,19 @@ export default function ConfiguracionEmpresa({
   const [errorMsg, setErrorMsg] = useState('');
 
   // 1. Tab Empresa - States
-  const [formData, setFormData] = useState<CompanyConfig>({ ...config });
+  const [formData, setFormData] = useState<CompanyConfig>(() => ({
+    ...config,
+    permitir_multisesion: config.permitir_multisesion !== false,
+    compartir_apertura_caja: config.compartir_apertura_caja !== false
+  }));
+
+  useEffect(() => {
+    setFormData({
+      ...config,
+      permitir_multisesion: config.permitir_multisesion !== false,
+      compartir_apertura_caja: config.compartir_apertura_caja !== false
+    });
+  }, [config]);
 
   // 2. Tab Usuarios & Roles - States
   const [userList, setUserList] = useState<User[]>([]);
@@ -374,6 +386,25 @@ export default function ConfiguracionEmpresa({
       onSaveConfig(formData);
     }
     showToast('Configuración comercial actualizada correctamente.');
+  };
+
+  const handleSavePoliticasDirect = async (updatedConfig: CompanyConfig) => {
+    try {
+      const res = await fetch(getApiUrl('/config'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedConfig)
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        onSaveConfig(saved);
+      } else {
+        onSaveConfig(updatedConfig);
+      }
+    } catch {
+      onSaveConfig(updatedConfig);
+    }
+    showToast('Políticas de multisesión actualizadas correctamente.');
   };
 
   // User Handlers
@@ -1106,6 +1137,17 @@ export default function ConfiguracionEmpresa({
                   </span>
                 )}
               </button>
+              <button
+                onClick={() => setSubTabUsers('politicas')}
+                className={`pb-1 text-xs font-bold font-sans transition-all flex items-center gap-1.5 ${
+                  subTabUsers === 'politicas'
+                    ? 'border-b-2 border-winter-configStart text-winter-configStart font-extrabold'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                <Settings className="w-4 h-4 text-winter-configStart" />
+                Políticas de Multisesión
+              </button>
             </div>
 
             {/* SUBTAB: USERS LIST */}
@@ -1324,6 +1366,87 @@ export default function ConfiguracionEmpresa({
                       )}
                     </tbody>
                   </table>
+                </div>
+              </div>
+            )}
+            {/* SUBTAB: POLITICAS DE MULTISESION */}
+            {subTabUsers === 'politicas' && (
+              <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-6">
+                <div>
+                  <h3 className="text-xs font-bold text-slate-700 uppercase font-sans flex items-center gap-2">
+                    <Globe className="w-4 h-4 text-winter-configStart" />
+                    Políticas de Multisesión y Acceso Multi-Terminal
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1 font-sans">
+                    Configure las reglas de concurrencia y comportamiento de turnos de caja para los usuarios en la red local. Solo administradores pueden guardar estos cambios.
+                  </p>
+                </div>
+
+                {!isAdmin && (
+                  <div className="bg-amber-50 border border-amber-250 text-amber-800 p-3 rounded-lg text-xs font-sans flex items-center gap-2">
+                    <ShieldAlert className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                    <span>Solo los usuarios con rol de <strong>Administrador</strong> tienen permisos para modificar estas políticas.</span>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 font-sans">
+                  {/* 1. Permitir Multisesión */}
+                  <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex flex-col justify-between space-y-3 shadow-xs">
+                    <div>
+                      <span className="font-bold text-slate-800 text-xs block">
+                        Permitir Multisesión en Diferentes Equipos
+                      </span>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Permite que un mismo usuario (ej. vendedor o cajero) mantenga sesiones abiertas simultáneamente en diferentes computadoras de la red local.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!isAdmin}
+                      onClick={() => {
+                        const updated = { ...formData, permitir_multisesion: formData.permitir_multisesion === false };
+                        setFormData(updated);
+                        handleSavePoliticasDirect(updated);
+                      }}
+                      className={`w-full py-2.5 rounded-lg font-bold text-xs transition-all shadow-sm ${
+                        !isAdmin ? 'opacity-60 cursor-not-allowed bg-slate-300 text-slate-600' :
+                        formData.permitir_multisesion !== false
+                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          : 'bg-slate-200 hover:bg-slate-300 text-slate-700'
+                      }`}
+                    >
+                      {formData.permitir_multisesion !== false ? '✅ Multisesión Permitida (Habilitado)' : '⛔ Solo 1 Equipo por Usuario (Deshabilitado)'}
+                    </button>
+                  </div>
+
+                  {/* 2. Compartir Apertura de Caja */}
+                  <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex flex-col justify-between space-y-3 shadow-xs">
+                    <div>
+                      <span className="font-bold text-slate-800 text-xs block">
+                        Compartir Apertura de Caja entre Estaciones
+                      </span>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Permite que si el mismo usuario ingresa desde otra computadora o tablet, pueda facturar compartiendo la misma apertura de caja activa de su turno.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!isAdmin}
+                      onClick={() => {
+                        const updated = { ...formData, compartir_apertura_caja: formData.compartir_apertura_caja === false };
+                        setFormData(updated);
+                        handleSavePoliticasDirect(updated);
+                      }}
+                      className={`w-full py-2.5 rounded-lg font-bold text-xs transition-all shadow-sm ${
+                        !isAdmin ? 'opacity-60 cursor-not-allowed bg-slate-300 text-slate-600' :
+                        formData.compartir_apertura_caja !== false
+                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          : 'bg-slate-200 hover:bg-slate-300 text-slate-700'
+                      }`}
+                    >
+                      {formData.compartir_apertura_caja !== false ? '🔗 Compartir Misma Caja (Habilitado)' : '🔒 Apertura Independiente por Estación'}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

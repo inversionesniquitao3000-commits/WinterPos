@@ -137,6 +137,8 @@ export interface CompanyConfig {
   moneda_base: string;
   mensaje_pie_ticket: string;
   metodos_pago_activos: string[];
+  permitir_multisesion?: boolean;
+  compartir_apertura_caja?: boolean;
 }
 
 export interface Sale {
