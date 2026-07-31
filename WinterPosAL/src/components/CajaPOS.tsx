@@ -1329,22 +1329,54 @@ export default function CajaPOS({
     setShowAperturaModal(false);
   };
 
-  const handleSaveCierre = (e: React.FormEvent) => {
+  const handleSaveCierre = async (e: React.FormEvent) => {
     e.preventDefault();
     const realUsd = parseFloat(cierreRealUsd) || 0;
     const realVes = parseFloat(cierreRealVes) || 0;
 
+    let targetShiftSales = shiftSales;
+    let targetAperturaUsd = _montoAperturaUsd;
+    let targetAperturaVes = _montoAperturaVes;
+    let targetEntradaUsd = shiftEntradasUsd;
+    let targetEntradaVes = shiftEntradasVes;
+    let targetSalidaUsd = shiftSalidasUsd;
+    let targetSalidaVes = shiftSalidasVes;
+    let targetDevolucionUsd = shiftDevolucionesUsd;
+    let targetDevolucionVes = shiftDevolucionesVes;
+
+    // Fetch fresh unified caja estado from server before generating final cierre card
+    try {
+      const termName = localStorage.getItem('pos_terminal_name') || 'CAJA_01';
+      const res = await fetch(getApiUrl(`/cajas/estado?terminal=${encodeURIComponent(termName)}&usuarioId=${currentUser.id}&usuarioNombre=${encodeURIComponent(currentUser.nombre)}`));
+      if (res.ok) {
+        const cajaData = await res.json();
+        if (cajaData && cajaData.abierta) {
+          if (Array.isArray(cajaData.shiftSales)) targetShiftSales = cajaData.shiftSales;
+          if (typeof cajaData.aperturaUsd === 'number') targetAperturaUsd = cajaData.aperturaUsd;
+          if (typeof cajaData.aperturaVes === 'number') targetAperturaVes = cajaData.aperturaVes;
+          if (typeof cajaData.shiftEntradasUsd === 'number') targetEntradaUsd = cajaData.shiftEntradasUsd;
+          if (typeof cajaData.shiftEntradasVes === 'number') targetEntradaVes = cajaData.shiftEntradasVes;
+          if (typeof cajaData.shiftSalidasUsd === 'number') targetSalidaUsd = cajaData.shiftSalidasUsd;
+          if (typeof cajaData.shiftSalidasVes === 'number') targetSalidaVes = cajaData.shiftSalidasVes;
+          if (typeof cajaData.shiftDevolucionesUsd === 'number') targetDevolucionUsd = cajaData.shiftDevolucionesUsd;
+          if (typeof cajaData.shiftDevolucionesVes === 'number') targetDevolucionVes = cajaData.shiftDevolucionesVes;
+        }
+      }
+    } catch (err) {
+      console.warn('⚠️ No se pudo refrescar el estado de caja desde el servidor antes del cierre, utilizando cache local:', err);
+    }
+
     // Detailed metrics calculation
-    const aperturaUsd = _montoAperturaUsd;
-    const aperturaVes = _montoAperturaVes;
-    const ventasEfectivoUsd = shiftSales.reduce((acc, sale) => {
+    const aperturaUsd = targetAperturaUsd;
+    const aperturaVes = targetAperturaVes;
+    const ventasEfectivoUsd = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
-      const cashPay = sale.pagos.find(p => p.metodo === 'Efectivo$');
+      const cashPay = (sale.pagos || []).find(p => p.metodo === 'Efectivo$');
       return acc + (cashPay ? cashPay.monto : 0);
     }, 0);
-    const ventasEfectivoVes = shiftSales.reduce((acc, sale) => {
+    const ventasEfectivoVes = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
-      const cashPay = sale.pagos.find(p => p.metodo === 'EfectivoBs');
+      const cashPay = (sale.pagos || []).find(p => p.metodo === 'EfectivoBs');
       return acc + (cashPay ? cashPay.monto : 0);
     }, 0);
     // Detailed abonos metrics calculation
@@ -1368,27 +1400,35 @@ export default function CajaPOS({
       if (a.metodo_pago === 'Biopago') return acc + a.monto;
       return acc;
     }, 0);
+    const abonosPagoMovilVes = (abonos || []).reduce((acc, a) => {
+      if (a.metodo_pago === 'PagoMovil') return acc + (a.monto_ves || a.monto * tasaDia);
+      return acc;
+    }, 0);
+    const abonosPagoMovilUsd = (abonos || []).reduce((acc, a) => {
+      if (a.metodo_pago === 'PagoMovil') return acc + a.monto;
+      return acc;
+    }, 0);
     const abonosPuntoVes = (abonos || []).reduce((acc, a) => {
-      if (a.metodo_pago === 'TarjetaBs' || a.metodo_pago === 'PagoMovil') return acc + (a.monto_ves || a.monto * tasaDia);
+      if (a.metodo_pago === 'TarjetaBs' || a.metodo_pago === 'Tarjeta$') return acc + (a.monto_ves || a.monto * tasaDia);
       return acc;
     }, 0);
     const abonosPuntoUsd = (abonos || []).reduce((acc, a) => {
-      if (a.metodo_pago === 'TarjetaBs' || a.metodo_pago === 'PagoMovil') return acc + a.monto;
+      if (a.metodo_pago === 'TarjetaBs' || a.metodo_pago === 'Tarjeta$') return acc + a.monto;
       return acc;
     }, 0);
-    const abonoClientesUsd = abonosEfectivoUsd + abonosEfectivoBsUsd + abonosBiopagoUsd + abonosPuntoUsd;
+    const abonoClientesUsd = abonosEfectivoUsd + abonosEfectivoBsUsd + abonosBiopagoUsd + abonosPagoMovilUsd + abonosPuntoUsd;
 
-    const entradaEfectivoUsd = shiftEntradasUsd;
-    const entradaEfectivoVes = shiftEntradasVes;
-    const salidaEfectivoUsd = shiftSalidasUsd;
-    const salidaEfectivoVes = shiftSalidasVes;
-    const devolucionEfectivoUsd = shiftDevolucionesUsd;
-    const devolucionEfectivoVes = shiftDevolucionesVes;
-    const vueltosEntregadosUsd = shiftSales.reduce((acc, sale) => {
+    const entradaEfectivoUsd = targetEntradaUsd;
+    const entradaEfectivoVes = targetEntradaVes;
+    const salidaEfectivoUsd = targetSalidaUsd;
+    const salidaEfectivoVes = targetSalidaVes;
+    const devolucionEfectivoUsd = targetDevolucionUsd;
+    const devolucionEfectivoVes = targetDevolucionVes;
+    const vueltosEntregadosUsd = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
       return acc + (sale.vueltoUSD || 0);
     }, 0);
-    const vueltosEntregadosVes = shiftSales.reduce((acc, sale) => {
+    const vueltosEntregadosVes = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
       return acc + (sale.vueltoVES || 0);
     }, 0);
@@ -1399,13 +1439,13 @@ export default function CajaPOS({
     const rawExpectedVes = aperturaVes + ventasEfectivoVes + abonosEfectivoBsVes + entradaEfectivoVes - salidaEfectivoVes - devolucionEfectivoVes - vueltosEntregadosVes;
     const expectedVes = Math.max(0, parseFloat(rawExpectedVes.toFixed(2)));
     
-    const ventasTotalesUsd = shiftSales.reduce((acc, sale) => {
+    const ventasTotalesUsd = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
-      return acc + sale.totalUSD;
+      return acc + (sale.totalUSD || 0);
     }, 0);
-    const descuentosUsd = shiftSales.reduce((acc, sale) => {
+    const descuentosUsd = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
-      return acc + sale.descuento;
+      return acc + (sale.descuento || 0);
     }, 0);
     const ventaBrutaUsd = ventasTotalesUsd + descuentosUsd;
     
@@ -1419,63 +1459,76 @@ export default function CajaPOS({
       return isNaN(val) ? 0 : val;
     };
 
-    const pagosEfectivoUsd = shiftSales.reduce((acc, sale) => {
+    const pagosEfectivoUsd = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
       return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Efectivo$' ? a + getPayUsd(p) : a, 0);
     }, 0);
 
-    const pagosEfectivoBsUsd = shiftSales.reduce((acc, sale) => {
+    const pagosEfectivoBsUsd = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
       return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'EfectivoBs' ? a + getPayUsd(p) : a, 0);
     }, 0);
 
-    const pagosEfectivoBsVes = shiftSales.reduce((acc, sale) => {
+    const pagosEfectivoBsVes = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
       return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'EfectivoBs' ? a + getPayVes(p) : a, 0);
     }, 0) + abonosEfectivoBsVes;
 
-    const pagosBiopagoUsd = shiftSales.reduce((acc, sale) => {
+    const pagosBiopagoUsd = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
       return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Biopago' ? a + getPayUsd(p) : a, 0);
     }, 0);
 
-    const pagosBiopagoVes = shiftSales.reduce((acc, sale) => {
+    const pagosBiopagoVes = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
       return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Biopago' ? a + getPayVes(p) : a, 0);
     }, 0) + abonosBiopagoVes;
 
-    const pagosPuntoUsd = shiftSales.reduce((acc, sale) => {
+    const pagosPagoMovilUsd = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
-      return acc + (sale.pagos || []).reduce((a, p) => (p.metodo === 'Tarjeta$' || p.metodo === 'PagoMovil' || p.metodo === 'TarjetaBs') ? a + getPayUsd(p) : a, 0);
+      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'PagoMovil' ? a + getPayUsd(p) : a, 0);
     }, 0);
 
-    const pagosPuntoVes = shiftSales.reduce((acc, sale) => {
+    const pagosPagoMovilVes = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
-      return acc + (sale.pagos || []).reduce((a, p) => (p.metodo === 'Tarjeta$' || p.metodo === 'PagoMovil' || p.metodo === 'TarjetaBs') ? a + getPayVes(p) : a, 0);
+      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'PagoMovil' ? a + getPayVes(p) : a, 0);
+    }, 0) + abonosPagoMovilVes;
+
+    const pagosPuntoUsd = targetShiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      return acc + (sale.pagos || []).reduce((a, p) => (p.metodo === 'Tarjeta$' || p.metodo === 'TarjetaBs') ? a + getPayUsd(p) : a, 0);
+    }, 0);
+
+    const pagosPuntoVes = targetShiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      return acc + (sale.pagos || []).reduce((a, p) => (p.metodo === 'Tarjeta$' || p.metodo === 'TarjetaBs') ? a + getPayVes(p) : a, 0);
     }, 0) + abonosPuntoVes;
     
     const pagosTarjetaUsd = pagosEfectivoBsUsd; 
-    const pagosCreditoUsd = shiftSales.reduce((acc, sale) => {
+    const pagosCreditoUsd = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
       return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'CreditoCliente' ? a + getPayUsd(p) : a, 0);
     }, 0);
     const pagosPuntosUsd = pagosBiopagoUsd; 
     
-    const devolucionVentasUsd = shiftSales.reduce((acc, sale) => {
+    const devolucionVentasUsd = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) {
-        const cashUsdPay = sale.pagos.find(p => p.metodo === 'Efectivo$');
-        return acc + (cashUsdPay ? Math.abs(cashUsdPay.montoUSD) : 0);
+        const val = typeof sale.totalUSD === 'number' && !isNaN(sale.totalUSD) ? Math.abs(sale.totalUSD) : 0;
+        return acc + val;
       }
       return acc;
     }, 0);
-    const devolucionVentasVes = shiftSales.reduce((acc, sale) => {
+
+    const devolucionVentasVes = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) {
-        const cashVesPay = sale.pagos.find(p => p.metodo === 'EfectivoBs');
-        return acc + (cashVesPay ? Math.abs(cashVesPay.monto) : 0);
+        const val = typeof sale.totalVES === 'number' && !isNaN(sale.totalVES) ? Math.abs(sale.totalVES) : 0;
+        return acc + val;
       }
       return acc;
     }, 0);
-    const ventaTotalUsd = ventasTotalesUsd - devolucionVentasUsd;
+
+    const rawVentaTotal = ventasTotalesUsd - devolucionVentasUsd;
+    const ventaTotalUsd = isNaN(rawVentaTotal) ? 0 : parseFloat(rawVentaTotal.toFixed(2));
 
     const getItemUnitCost = (item: any) => {
       if (!item) return 0;
@@ -1500,7 +1553,7 @@ export default function CajaPOS({
       return isNaN(cost) ? 0 : cost;
     };
 
-    const costoTotalUsd = shiftSales.reduce((acc, sale) => {
+    const costoTotalUsd = targetShiftSales.reduce((acc, sale) => {
       const isDev = sale.factura_nro?.startsWith('DEV-');
       const mult = isDev ? -1 : 1;
       return acc + (sale.items || []).reduce((itemAcc, item) => {
@@ -1532,6 +1585,8 @@ export default function CajaPOS({
       abonosEfectivoBsUsd,
       abonosBiopagoVes,
       abonosBiopagoUsd,
+      abonosPagoMovilVes,
+      abonosPagoMovilUsd,
       abonosPuntoVes,
       abonosPuntoUsd,
       entradaEfectivoUsd,
@@ -1553,6 +1608,8 @@ export default function CajaPOS({
       pagosBiopagoVes,
       pagosPuntoUsd,
       pagosPuntoVes,
+      pagosPagoMovilUsd,
+      pagosPagoMovilVes,
       pagosTarjetaUsd,
       pagosCreditoUsd,
       pagosPuntosUsd,
@@ -3397,18 +3454,23 @@ export default function CajaPOS({
                       </div>
 
                       <div className="flex justify-between">
+                        <span>Pago Móvil :</span>
+                        <span className="font-bold text-slate-800">Bs {(cierreResult.pagosPagoMovilVes && !isNaN(cierreResult.pagosPagoMovilVes) ? cierreResult.pagosPagoMovilVes : 0).toFixed(2)}</span>
+                      </div>
+
+                      <div className="flex justify-between">
                         <span>A Crédito :</span>
                         <span className="font-bold text-slate-800">$ {(cierreResult.pagosCreditoUsd && !isNaN(cierreResult.pagosCreditoUsd) ? cierreResult.pagosCreditoUsd : 0).toFixed(2)}</span>
                       </div>
 
                       <div className="flex justify-between text-red-550 font-bold">
                         <span>Devolución Ventas ($) :</span>
-                        <span>- $ {cierreResult.devolucionVentasUsd.toFixed(2)}</span>
+                        <span>- $ {(cierreResult.devolucionVentasUsd && !isNaN(cierreResult.devolucionVentasUsd) ? cierreResult.devolucionVentasUsd : 0).toFixed(2)}</span>
                       </div>
 
                       <div className="flex justify-between text-red-550 font-bold">
                         <span>Devolución Ventas (Bs) :</span>
-                        <span>- Bs {(cierreResult.devolucionVentasVes ?? 0).toFixed(2)}</span>
+                        <span>- Bs {(cierreResult.devolucionVentasVes && !isNaN(cierreResult.devolucionVentasVes) ? cierreResult.devolucionVentasVes : 0).toFixed(2)}</span>
                       </div>
                     </div>
 
@@ -3417,11 +3479,11 @@ export default function CajaPOS({
                       <div className="flex justify-between text-sm font-black text-slate-900 items-baseline">
                         <span className="font-sans uppercase text-[11px] font-extrabold text-slate-600">Venta Total :</span>
                         <span className="text-xl text-winter-blueBtn font-mono font-black">
-                          $ {cierreResult.ventaTotalUsd.toFixed(2)}
+                          $ {(cierreResult.ventaTotalUsd && !isNaN(cierreResult.ventaTotalUsd) ? cierreResult.ventaTotalUsd : 0).toFixed(2)}
                         </span>
                       </div>
                       <div className="text-[8.5px] text-slate-450 italic font-mono font-medium uppercase tracking-tighter text-right">
-                        {formatNumberToWordsUSD(cierreResult.ventaTotalUsd)}
+                        {formatNumberToWordsUSD(cierreResult.ventaTotalUsd && !isNaN(cierreResult.ventaTotalUsd) ? cierreResult.ventaTotalUsd : 0)}
                       </div>
                     </div>
 
@@ -3431,8 +3493,8 @@ export default function CajaPOS({
                         <span>CÁLCULO DE UTILIDAD DEL CIERRE</span>
                       </div>
                       <div className="flex justify-between font-mono">
-                        <span>Subtotal Ventas (sin IVA):</span>
-                        <span className="font-bold text-slate-800">$ {(cierreResult.ventaBrutaUsd ?? cierreResult.ventaTotalUsd ?? 0).toFixed(2)}</span>
+                        <span>Ventas Netas (sin IVA):</span>
+                        <span className="font-bold text-slate-800">$ {(cierreResult.ventaTotalUsd ?? 0).toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between font-mono">
                         <span>Costo de Mercancía:</span>
@@ -3440,7 +3502,7 @@ export default function CajaPOS({
                       </div>
                       <div className="flex justify-between font-mono text-[12.5px] border-t border-emerald-300/80 pt-1 mt-1 font-extrabold text-emerald-700">
                         <span>UTILIDAD BRUTA (SUBTOTAL):</span>
-                        <span className="text-base font-black">$ {((cierreResult.ventaBrutaUsd ?? cierreResult.ventaTotalUsd ?? 0) - (cierreResult.costoTotalUsd ?? 0)).toFixed(2)}</span>
+                        <span className="text-base font-black">$ {(cierreResult.utilidadUsd ?? ((cierreResult.ventaTotalUsd ?? 0) - (cierreResult.costoTotalUsd ?? 0))).toFixed(2)}</span>
                       </div>
                       {(cierreResult.ventaTotalUsd ?? 0) > (cierreResult.ventaBrutaUsd ?? 0) && (
                         <div className="flex justify-between text-slate-500 font-mono text-[9.5px] mt-0.5 italic pt-1 border-t border-dashed border-emerald-200">

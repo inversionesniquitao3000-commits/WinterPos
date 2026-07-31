@@ -23,6 +23,8 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
   const [selectedCierreIds, setSelectedCierreIds] = useState<number[]>([]);
   const [capturingCierre, setCapturingCierre] = useState<CierreCaja | null>(null);
   const [sendingProgressMsg, setSendingProgressMsg] = useState<string>('');
+  const [cierreInvoicesModal, setCierreInvoicesModal] = useState<CierreCaja | null>(null);
+  const [cierreInvoiceSearch, setCierreInvoiceSearch] = useState('');
 
   const isAdmin = currentUser?.rol?.toLowerCase() === 'administrador';
 
@@ -36,6 +38,26 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
   const [editEntradaVes, setEditEntradaVes] = useState('');
   const [editSalidaUsd, setEditSalidaUsd] = useState('');
   const [editSalidaVes, setEditSalidaVes] = useState('');
+
+  // Listen for Escape key to close modals in stack order
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (selectedSale) {
+          setSelectedSale(null);
+        } else if (cierreInvoicesModal) {
+          setCierreInvoicesModal(null);
+          setCierreInvoiceSearch('');
+        } else if (selectedCierre) {
+          setSelectedCierre(null);
+        } else if (editingCierre) {
+          setEditingCierre(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedSale, cierreInvoicesModal, selectedCierre, editingCierre]);
 
   const handleStartEditCierre = (c: CierreCaja) => {
     setEditingCierre(c);
@@ -1125,7 +1147,38 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                       const aperturaUsd = c.aperturaUsd ?? 0;
                       const aperturaVes = c.aperturaVes ?? 0;
                       const ventaTotalUsd = c.ventaTotalUsd ?? 0;
-                      const utilidadUsd = c.utilidadUsd ?? (ventaTotalUsd - (c.costoTotalUsd ?? 0));
+                      let rowUtilidadUsd = typeof c.utilidadUsd === 'number' && c.utilidadUsd > 0 ? c.utilidadUsd : 0;
+                      if (rowUtilidadUsd === 0 && sales && sales.length > 0) {
+                        const cUser = c.usuario ? c.usuario.toLowerCase().trim() : '';
+                        const fAperturaMs = c.fechaApertura ? new Date(c.fechaApertura).getTime() : 0;
+                        const fCierreMs = (c.fechaCierre || c.fecha) ? new Date(c.fechaCierre || c.fecha).getTime() : Date.now();
+
+                        const shiftSales = sales.filter(s => {
+                          if (cUser && s.usuario && s.usuario.toLowerCase().trim() !== cUser) return false;
+                          const sTime = new Date(s.fecha).getTime();
+                          if (isNaN(sTime)) return true;
+                          const startBoundary = fAperturaMs > 0 ? fAperturaMs - 120000 : 0;
+                          const endBoundary = fCierreMs > 0 ? fCierreMs + 120000 : Date.now();
+                          return sTime >= startBoundary && sTime <= endBoundary;
+                        });
+
+                        rowUtilidadUsd = shiftSales.reduce((acc, s) => {
+                          const isDev = s.factura_nro?.startsWith('DEV-');
+                          const mult = isDev ? -1 : 1;
+                          const saleCost = (s.items || []).reduce((itemAcc, item) => {
+                            let unitCost = 0;
+                            if (typeof item.product?.precio_costo_usd === 'number' && item.product.precio_costo_usd > 0) unitCost = item.product.precio_costo_usd;
+                            else if (typeof (item as any).precio_costo_usd === 'number' && (item as any).precio_costo_usd > 0) unitCost = (item as any).precio_costo_usd;
+                            else if (typeof (item as any).costo_usd === 'number' && (item as any).costo_usd > 0) unitCost = (item as any).costo_usd;
+                            
+                            const qty = typeof item.qty === 'number' && !isNaN(item.qty) ? item.qty : (parseFloat(String(item.qty)) || 0);
+                            return itemAcc + (unitCost * qty);
+                          }, 0);
+                          const saleNet = (s.totalUSD || 0) * mult;
+                          return acc + (saleNet - (saleCost * mult));
+                        }, 0);
+                      }
+
                       const isSelected = selectedCierreRow?.id === c.id;
                       const isChecked = selectedCierreIds.includes(c.id);
 
@@ -1185,7 +1238,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                             ${diffUsd.toFixed(2)}
                           </td>
                           <td className="px-4 py-2.5 text-right font-mono text-emerald-600 font-extrabold">
-                            ${utilidadUsd.toFixed(2)}
+                            ${rowUtilidadUsd.toFixed(2)}
                           </td>
                           <td className="px-3 py-2.5 text-center font-sans">
                             {c.status === 'Abierta' ? (
@@ -1282,6 +1335,14 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                       REENVIAR POR WHATSAPP
                     </button>
 
+                    <button
+                      onClick={() => setCierreInvoicesModal(selectedCierreRow)}
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-3 rounded-lg text-xs transition-all shadow-sm flex items-center justify-center gap-2"
+                    >
+                      <ShoppingCart className="w-4 h-4" />
+                      VER FACTURAS DEL CIERRE
+                    </button>
+
                     {isAdmin && (
                       <>
                         <button
@@ -1346,7 +1407,8 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         const aperturaUsd = selectedCierre.aperturaUsd ?? 0;
         const aperturaVes = selectedCierre.aperturaVes ?? 0;
         const ventasEfectivoUsd = selectedCierre.ventasEfectivoUsd ?? 0;
-        const abonoClientesUsd = selectedCierre.abonoClientesUsd ?? 0;
+        const abonoClientesUsd = selectedCierre.abonoClientesUsd ?? (selectedCierre as any).abonosUsd ?? 0;
+        const abonoClientesVes = selectedCierre.abonoClientesVes ?? (selectedCierre as any).abonosVes ?? 0;
         const entradaEfectivoUsd = selectedCierre.entradaEfectivoUsd ?? 0;
         const entradaEfectivoVes = selectedCierre.entradaEfectivoVes ?? 0;
         const salidaEfectivoUsd = selectedCierre.salidaEfectivoUsd ?? 0;
@@ -1367,8 +1429,13 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         const devolucionVentasVes = selectedCierre.devolucionVentasVes ?? 0;
         const ventaTotalUsd = selectedCierre.ventaTotalUsd ?? 0;
         
-        const expectedVes = Math.max(0, selectedCierre.expectedVes ?? 0);
         const realVes = Math.max(0, selectedCierre.realVes ?? 0);
+        let expectedVes = Math.max(0, selectedCierre.expectedVes ?? 0);
+
+        if (expectedVes === 0) {
+          expectedVes = Math.max(0, aperturaVes + pagosEfectivoBsVes + abonoClientesVes + entradaEfectivoVes - salidaEfectivoVes - devolucionEfectivoVes);
+        }
+        const diffVes = realVes - expectedVes;
 
         const rawCosto = selectedCierre.costoTotalUsd;
         let costoTotalUsd = typeof rawCosto === 'number' && rawCosto > 0 ? rawCosto : 0;
@@ -1389,6 +1456,47 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
               return itemAcc + (itemCost * qty * mult);
             }, 0);
           }, 0);
+        }
+
+        let vueltosUsd = selectedCierre.vueltosEntregadosUsd ?? 0;
+        let vueltosVes = selectedCierre.vueltosEntregadosVes ?? 0;
+
+        if ((vueltosUsd === 0 || vueltosVes === 0) && sales && sales.length > 0) {
+          const cUser = selectedCierre.usuario ? selectedCierre.usuario.toLowerCase().trim() : '';
+          const fAperturaMs = selectedCierre.fechaApertura ? new Date(selectedCierre.fechaApertura).getTime() : 0;
+          const fCierreMs = (selectedCierre.fechaCierre || selectedCierre.fecha) ? new Date(selectedCierre.fechaCierre || selectedCierre.fecha).getTime() : Date.now();
+
+          const matchingShiftSales = sales.filter(s => {
+            if (cUser && s.usuario && s.usuario.toLowerCase().trim() !== cUser) return false;
+            const sTime = new Date(s.fecha).getTime();
+            if (isNaN(sTime)) return true;
+            const startBoundary = fAperturaMs > 0 ? fAperturaMs - 120000 : 0;
+            const endBoundary = fCierreMs > 0 ? fCierreMs + 120000 : Date.now();
+            return sTime >= startBoundary && sTime <= endBoundary;
+          });
+
+          if (vueltosUsd === 0) {
+            vueltosUsd = matchingShiftSales.reduce((acc, sale) => {
+              if (sale.factura_nro?.startsWith('DEV-')) return acc;
+              if (typeof sale.vueltoUSD === 'number' && sale.vueltoUSD > 0) return acc + sale.vueltoUSD;
+              const cashPayUsd = (sale.pagos || []).find(p => p.metodo === 'Efectivo$');
+              const cashMonto = cashPayUsd ? (cashPayUsd.montoUSD || cashPayUsd.monto) : 0;
+              const diff = cashMonto > sale.totalUSD ? (cashMonto - sale.totalUSD) : 0;
+              return acc + diff;
+            }, 0);
+          }
+
+          if (vueltosVes === 0) {
+            vueltosVes = matchingShiftSales.reduce((acc, sale) => {
+              if (sale.factura_nro?.startsWith('DEV-')) return acc;
+              if (typeof sale.vueltoVES === 'number' && sale.vueltoVES > 0) return acc + sale.vueltoVES;
+              if (typeof (sale as any).vuelto_ves === 'number' && (sale as any).vuelto_ves > 0) return acc + (sale as any).vuelto_ves;
+              const cashPayVes = (sale.pagos || []).find(p => p.metodo === 'EfectivoBs');
+              const cashMontoVes = cashPayVes ? (cashPayVes.montoVES || cashPayVes.montoBs || (cashPayVes.monto && cashPayVes.monto > 100 ? cashPayVes.monto : 0)) : 0;
+              const diff = cashMontoVes > sale.totalVES ? (cashMontoVes - sale.totalVES) : 0;
+              return acc + diff;
+            }, 0);
+          }
         }
 
         let subtotalNetoUsd = selectedCierre.ventaBrutaUsd ?? (selectedCierre as any).subtotalUsd ?? 0;
@@ -1447,8 +1555,13 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                     </div>
 
                     <div className="flex justify-between">
-                      <span>Abono de Clientes :</span>
+                      <span>Abono Clientes ($) :</span>
                       <span className="font-bold text-slate-800">$ {abonoClientesUsd.toFixed(2)}</span>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span>Abono Clientes (Bs) :</span>
+                      <span className="font-bold text-slate-800">Bs {abonoClientesVes.toFixed(2)}</span>
                     </div>
 
                      <div className="flex justify-between">
@@ -1483,12 +1596,12 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
 
                     <div className="flex justify-between text-amber-700 font-bold">
                       <span>Vuelto Entregado ($) :</span>
-                      <span>- $ {(selectedCierre.vueltosEntregadosUsd ?? 0).toFixed(2)}</span>
+                      <span>- $ {vueltosUsd.toFixed(2)}</span>
                     </div>
 
                     <div className="flex justify-between text-amber-700 font-bold">
                       <span>Vuelto Entregado (Bs) :</span>
-                      <span>- Bs {(selectedCierre.vueltosEntregadosVes ?? 0).toFixed(2)}</span>
+                      <span>- Bs {vueltosVes.toFixed(2)}</span>
                     </div>
                   </div>
 
@@ -1787,7 +1900,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         };
 
         return (
-          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-slate-800 animate-fade-in">
+          <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-4 z-[100] font-mono text-slate-800 animate-fade-in">
             <div className="bg-white border border-slate-355 rounded-xl overflow-hidden w-full max-w-4xl shadow-2xl flex flex-col">
               
               {/* Header Title Bar */}
@@ -2258,6 +2371,224 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
               <div className="text-center text-[10px] text-slate-400 italic pt-2 border-t border-slate-200 font-mono">
                 WinterPosAL Cloud System • Comprobante Digital de Auditoría
               </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* DETALLES DE FACTURAS DE ESTE CIERRE DE CAJA */}
+      {cierreInvoicesModal && (() => {
+        const c = cierreInvoicesModal;
+        const fAperturaMs = c.fechaApertura ? new Date(c.fechaApertura).getTime() : 0;
+        const fCierreMs = (c.fechaCierre || c.fecha) ? new Date(c.fechaCierre || c.fecha).getTime() : Date.now();
+
+        const shiftInvoices = sales.filter(s => {
+          if (c.usuario && s.usuario) {
+            const uCierre = c.usuario.toLowerCase().trim();
+            const uSale = s.usuario.toLowerCase().trim();
+            if (uCierre !== uSale && c.usuarioId && s.usuario_id && String(c.usuarioId) !== String(s.usuario_id)) {
+              return false;
+            }
+          }
+          const sTime = new Date(s.fecha).getTime();
+          if (isNaN(sTime)) return true;
+          const startBoundary = fAperturaMs > 0 ? fAperturaMs - 120000 : 0;
+          const endBoundary = fCierreMs > 0 ? fCierreMs + 120000 : Date.now();
+          return sTime >= startBoundary && sTime <= endBoundary;
+        });
+
+        const q = cierreInvoiceSearch.toLowerCase().trim();
+        const filteredInvoices = !q ? shiftInvoices : shiftInvoices.filter(s =>
+          s.factura_nro?.toLowerCase().includes(q) ||
+          s.client?.nombre?.toLowerCase().includes(q) ||
+          s.client?.cedula_rif?.toLowerCase().includes(q) ||
+          s.usuario?.toLowerCase().includes(q) ||
+          (s.pagos || []).some(p => p.metodo?.toLowerCase().includes(q))
+        );
+
+        const totalNetoUSD = shiftInvoices.reduce((acc, s) => s.factura_nro.startsWith('DEV-') ? acc - Math.abs(s.totalUSD) : acc + s.totalUSD, 0);
+        const totalNetoVES = shiftInvoices.reduce((acc, s) => s.factura_nro.startsWith('DEV-') ? acc - Math.abs(s.totalVES) : acc + s.totalVES, 0);
+
+        const calculatedUtilidad = shiftInvoices.reduce((acc, s) => {
+          const isDev = s.factura_nro?.startsWith('DEV-');
+          const mult = isDev ? -1 : 1;
+          const saleCost = (s.items || []).reduce((itemAcc, item) => {
+            let unitCost = 0;
+            if (typeof item.product?.precio_costo_usd === 'number' && item.product.precio_costo_usd > 0) unitCost = item.product.precio_costo_usd;
+            else if (typeof (item as any).precio_costo_usd === 'number' && (item as any).precio_costo_usd > 0) unitCost = (item as any).precio_costo_usd;
+            else if (typeof (item as any).costo_usd === 'number' && (item as any).costo_usd > 0) unitCost = (item as any).costo_usd;
+            
+            const qty = typeof item.qty === 'number' && !isNaN(item.qty) ? item.qty : (parseFloat(String(item.qty)) || 0);
+            return itemAcc + (unitCost * qty);
+          }, 0);
+          const saleNet = (s.totalUSD || 0) * mult;
+          return acc + (saleNet - (saleCost * mult));
+        }, 0);
+
+        const finalUtilidad = typeof c.utilidadUsd === 'number' && c.utilidadUsd !== 0 ? c.utilidadUsd : calculatedUtilidad;
+
+        return (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-3">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-[96vw] max-w-[96vw] overflow-hidden flex flex-col max-h-[92vh]">
+              
+              {/* Modal Header */}
+              <div className="bg-winter-header text-white px-6 py-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white/10 rounded-xl">
+                    <ShoppingCart className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold font-sans flex items-center gap-2">
+                      Facturas y Transacciones del Cierre - {c.usuario}
+                      {c.terminal && (
+                        <span className="text-[10px] bg-white/20 text-white font-mono px-2 py-0.5 rounded-full font-normal">
+                          {c.terminal}
+                        </span>
+                      )}
+                    </h3>
+                    <p className="text-xs opacity-80 font-mono">
+                      Apertura: {c.fechaApertura || 'N/A'} | Cierre: {c.fechaCierre || c.fecha}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => { setCierreInvoicesModal(null); setCierreInvoiceSearch(''); }}
+                  className="text-white opacity-75 hover:opacity-100 text-xs font-sans bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-all"
+                >
+                  ✕ Cerrar [ESC]
+                </button>
+              </div>
+
+              {/* Metrics & Search Bar */}
+              <div className="bg-slate-50 border-b border-slate-200 p-4 space-y-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+                  <div className="bg-white border border-slate-200 p-3 rounded-xl shadow-2xs">
+                    <span className="text-slate-400 block text-[10px] uppercase font-bold">Total Facturas</span>
+                    <strong className="text-slate-800 text-lg font-mono font-black">{shiftInvoices.length}</strong>
+                  </div>
+                  <div className="bg-white border border-slate-200 p-3 rounded-xl shadow-2xs">
+                    <span className="text-slate-400 block text-[10px] uppercase font-bold">Facturación Neta ($)</span>
+                    <strong className="text-emerald-700 text-lg font-mono font-black">
+                      ${totalNetoUSD.toFixed(2)}
+                    </strong>
+                  </div>
+                  <div className="bg-white border border-slate-200 p-3 rounded-xl shadow-2xs">
+                    <span className="text-slate-400 block text-[10px] uppercase font-bold">Facturación Neta (Bs)</span>
+                    <strong className="text-indigo-700 text-lg font-mono font-black">
+                      Bs {totalNetoVES.toFixed(2)}
+                    </strong>
+                  </div>
+                  <div className="bg-white border border-slate-200 p-3 rounded-xl shadow-2xs">
+                    <span className="text-slate-400 block text-[10px] uppercase font-bold">Utilidad del Cierre</span>
+                    <strong className="text-emerald-600 text-lg font-mono font-black">
+                      ${finalUtilidad.toFixed(2)}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Buscar por N° factura, cliente, cédula, operador o método de pago..."
+                    value={cierreInvoiceSearch}
+                    onChange={(e) => setCierreInvoiceSearch(e.target.value)}
+                    className="w-full bg-white border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-xs font-sans text-slate-800 placeholder-slate-400 focus:outline-none focus:border-winter-blueBtn shadow-2xs"
+                  />
+                </div>
+              </div>
+
+              {/* Invoices List Table */}
+              <div className="overflow-y-auto flex-1 p-4 bg-slate-100/50">
+                {filteredInvoices.length === 0 ? (
+                  <div className="p-8 text-center bg-white rounded-xl border border-dashed border-slate-200 text-slate-400 space-y-2">
+                    <ShoppingCart className="w-8 h-8 mx-auto opacity-30" />
+                    <p className="text-xs font-sans font-medium">No se encontraron facturas o transacciones registradas para este cierre.</p>
+                  </div>
+                ) : (
+                  <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                    <table className="w-full text-xs text-left">
+                      <thead className="bg-slate-100 text-slate-600 font-extrabold uppercase text-[10px] border-b border-slate-200">
+                        <tr>
+                          <th className="px-4 py-3">Fecha / Hora</th>
+                          <th className="px-4 py-3">Factura N°</th>
+                          <th className="px-4 py-3">Cliente</th>
+                          <th className="px-4 py-3">Operador</th>
+                          <th className="px-4 py-3 text-right">Total USD</th>
+                          <th className="px-4 py-3 text-right">Total VES</th>
+                          <th className="px-4 py-3">Métodos de Pago</th>
+                          <th className="px-4 py-3 text-center">Gestiones</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-150 font-mono">
+                        {filteredInvoices.map((sale) => {
+                          const isDev = sale.factura_nro?.startsWith('DEV-');
+                          return (
+                            <tr key={sale.id} className={isDev ? 'bg-rose-50/50 hover:bg-rose-50' : 'hover:bg-slate-50'}>
+                              <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap text-[11px]">
+                                {sale.fecha}
+                              </td>
+                              <td className="px-4 py-2.5 font-bold">
+                                <span className={`px-2 py-0.5 rounded text-[10.5px] font-mono font-bold ${
+                                  isDev ? 'bg-rose-100 text-rose-800 border border-rose-200' : 'bg-blue-50 text-blue-800 border border-blue-200'
+                                }`}>
+                                  {sale.factura_nro}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2.5 font-sans font-medium text-slate-800 max-w-[160px] truncate">
+                                {sale.client?.nombre || 'PÚBLICO GENERAL'}
+                                {sale.client?.cedula_rif && (
+                                  <span className="text-[10px] text-slate-400 block font-mono font-normal">
+                                    {sale.client.cedula_rif}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-2.5 font-sans uppercase text-slate-600 text-[11px]">
+                                {sale.usuario}
+                              </td>
+                              <td className={`px-4 py-2.5 text-right font-bold ${isDev ? 'text-rose-600' : 'text-slate-900'}`}>
+                                {isDev ? '-' : ''}$ {Math.abs(sale.totalUSD).toFixed(2)}
+                              </td>
+                              <td className={`px-4 py-2.5 text-right font-bold ${isDev ? 'text-rose-600' : 'text-slate-700'}`}>
+                                {isDev ? '-' : ''}Bs {Math.abs(sale.totalVES).toFixed(2)}
+                              </td>
+                              <td className="px-4 py-2.5 font-sans">
+                                <div className="flex flex-wrap gap-1">
+                                  {(sale.pagos || []).map((p, pIdx) => (
+                                    <span key={pIdx} className="text-[9.5px] bg-slate-100 border border-slate-200 text-slate-700 px-1.5 py-0.5 rounded font-mono">
+                                      {p.metodo}: ${p.monto.toFixed(2)}
+                                    </span>
+                                  ))}
+                                </div>
+                              </td>
+                              <td className="px-4 py-2.5 text-center">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <button
+                                    onClick={() => setSelectedSale(sale)}
+                                    title="Ver detalles e ítems de esta factura"
+                                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 p-1.5 rounded transition-all"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => onReprintTicket(sale)}
+                                    title="Reimprimir ticket de factura"
+                                    className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 p-1.5 rounded transition-all"
+                                  >
+                                    <Printer className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
             </div>
           </div>
         );

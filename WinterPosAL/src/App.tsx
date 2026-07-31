@@ -1605,7 +1605,15 @@ export default function App() {
       }
     }
 
-    await postApiData('/cajas/movimiento', { tipo: type, descripcion: description, usd, ves, terminal: terminalName });
+    await postApiData('/cajas/movimiento', {
+      tipo: type,
+      descripcion: description,
+      usd,
+      ves,
+      terminal: terminalName,
+      usuarioId: currentUser?.id,
+      usuarioNombre: currentUser?.nombre
+    });
   };
 
   const handleRegisterSale = async (sale: {

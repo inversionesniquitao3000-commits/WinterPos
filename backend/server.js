@@ -611,8 +611,8 @@ app.post('/api/cajas/cerrar', async (req, res) => {
 });
 
 app.post('/api/cajas/movimiento', async (req, res) => {
-  const { tipo, descripcion, usd, ves, terminal } = req.body;
-  const success = await registrarCajaMovimiento(tipo, descripcion, usd, ves, terminal);
+  const { tipo, descripcion, usd, ves, terminal, usuarioId, usuarioNombre } = req.body;
+  const success = await registrarCajaMovimiento(tipo, descripcion, usd, ves, terminal, usuarioId, usuarioNombre);
   res.json({ success });
 });
 

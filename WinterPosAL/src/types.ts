@@ -223,6 +223,8 @@ export interface CierreCaja {
   abonosEfectivoBsUsd?: number;
   abonosBiopagoVes?: number;
   abonosBiopagoUsd?: number;
+  abonosPagoMovilVes?: number;
+  abonosPagoMovilUsd?: number;
   abonosPuntoVes?: number;
   abonosPuntoUsd?: number;
   entradaEfectivoUsd: number;
@@ -247,6 +249,8 @@ export interface CierreCaja {
   pagosBiopagoVes: number;       // Biopago (monto real)
   pagosPuntoUsd: number;         // Punto (Tarjeta/PagoMovil USD equivalent)
   pagosPuntoVes: number;         // Punto (Tarjeta/PagoMovil monto real)
+  pagosPagoMovilUsd?: number;    // Pago Móvil USD
+  pagosPagoMovilVes?: number;    // Pago Móvil VES
   pagosTarjetaUsd: number;
   pagosCreditoUsd: number;
   pagosPuntosUsd: number;

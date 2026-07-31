@@ -67,6 +67,10 @@ try {
     ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS permisos TEXT;
     ALTER TABLE Usuarios ALTER COLUMN rol TYPE VARCHAR(100) USING rol::text;
     ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS estacion_nombre VARCHAR(50) DEFAULT 'CAJA_PRINCIPAL';
+    ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS vuelto_usd NUMERIC DEFAULT 0;
+    ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS vuelto_ves NUMERIC DEFAULT 0;
+    ALTER TABLE Pagos_Venta ADD COLUMN IF NOT EXISTS monto_vuelto_usd NUMERIC DEFAULT 0;
+    ALTER TABLE Pagos_Venta ADD COLUMN IF NOT EXISTS monto_vuelto_ves NUMERIC DEFAULT 0;
     ALTER TABLE Movimientos_Caja ADD COLUMN IF NOT EXISTS estacion_nombre VARCHAR(50) DEFAULT 'CAJA_PRINCIPAL';
     ALTER TABLE Productos ADD COLUMN IF NOT EXISTS a_granel BOOLEAN DEFAULT FALSE;
     ALTER TABLE Productos ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(50);
@@ -1556,9 +1560,9 @@ export async function saveSale(s) {
         factura_nro = await fetchNextSeqFactura();
       }
       const saleRes = await clientTarget.query(
-        `INSERT INTO Ventas (factura_nro, cliente_id, usuario_id, caja_id, subtotal_usd, descuento_usd, total_usd, total_ves, estacion_nombre)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, fecha`,
-        [factura_nro, clientId, userId, cajaId, s.subtotal, s.descuento, s.totalUSD, s.totalVES, s.terminal || 'CAJA_PRINCIPAL']
+        `INSERT INTO Ventas (factura_nro, cliente_id, usuario_id, caja_id, subtotal_usd, descuento_usd, total_usd, total_ves, estacion_nombre, vuelto_usd, vuelto_ves)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id, fecha`,
+        [factura_nro, clientId, userId, cajaId, s.subtotal, s.descuento, s.totalUSD, s.totalVES, s.terminal || 'CAJA_PRINCIPAL', s.vueltoUSD || 0, s.vueltoVES || 0]
       );
       
       const saleId = saleRes.rows[0].id;
@@ -1615,9 +1619,9 @@ export async function saveSale(s) {
         }
         
         await clientTarget.query(
-          `INSERT INTO Pagos_Venta (venta_id, metodo_pago, monto_entregado_usd, monto_entregado_ves, banco_emisor, numero_referencia)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [saleId, p.metodo, p.monto, p.montoVES || 0, p.banco || '', p.referencia || '']
+          `INSERT INTO Pagos_Venta (venta_id, metodo_pago, monto_entregado_usd, monto_entregado_ves, monto_vuelto_usd, monto_vuelto_ves, banco_emisor, numero_referencia)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [saleId, p.metodo, p.monto, p.montoVES || 0, s.vueltoUSD || 0, s.vueltoVES || 0, p.banco || '', p.referencia || '']
         );
       }
       
@@ -1962,6 +1966,7 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
       
       const salesRes = await pool.query(`
         SELECT v.id, v.factura_nro, v.fecha, v.subtotal_usd, v.descuento_usd, v.total_usd, v.total_ves, v.con_ticket,
+               v.vuelto_usd, v.vuelto_ves,
                v.estacion_nombre as terminal, c.cedula_rif as "clientDoc", c.nombre as "clientName", u.nombre as usuario
         FROM Ventas v
         LEFT JOIN Clientes c ON v.cliente_id = c.id
@@ -1996,8 +2001,14 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
           };
         });
         
-        const vUSD = parseFloat(paymentsRes.rows[0]?.vueltoUSD || '0');
-        const vVES = parseFloat(paymentsRes.rows[0]?.vueltoVES || '0');
+        let vUSD = parseFloat(row.vuelto_usd || '0');
+        let vVES = parseFloat(row.vuelto_ves || '0');
+        if (vUSD === 0 && paymentsRes.rows.length > 0) {
+          vUSD = parseFloat(paymentsRes.rows[0]?.vueltoUSD || '0');
+        }
+        if (vVES === 0 && paymentsRes.rows.length > 0) {
+          vVES = parseFloat(paymentsRes.rows[0]?.vueltoVES || '0');
+        }
         salesCashUsd += (cashUsd - vUSD);
         salesCashVes += (cashVes - vVES);
         
@@ -2041,15 +2052,19 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
       const movsRes = await pool.query("SELECT * FROM Movimientos_Caja WHERE caja_id = $1", [cajaId]);
       let shiftAbonosUsd = 0;
       let shiftEntradasUsd = 0;
+      let shiftEntradasVes = 0;
       let shiftSalidasUsd = 0;
+      let shiftSalidasVes = 0;
+      let shiftDevolucionesUsd = 0;
+      let shiftDevolucionesVes = 0;
       let totalMovUsd = 0;
       let totalMovVes = 0;
       
       for (const m of movsRes.rows) {
-        const mUsd = parseFloat(m.monto_usd);
-        const mVes = parseFloat(m.monto_ves);
+        const mUsd = parseFloat(m.monto_usd || '0');
+        const mVes = parseFloat(m.monto_ves || '0');
         const tipo = m.tipo;
-        const desc = m.descripcion;
+        const desc = m.descripcion || '';
         
         if (tipo === 'Entrada') {
           totalMovUsd += mUsd;
@@ -2058,11 +2073,18 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
             shiftAbonosUsd += mUsd;
           } else {
             shiftEntradasUsd += mUsd;
+            shiftEntradasVes += mVes;
           }
+        } else if (tipo === 'Devolucion') {
+          totalMovUsd -= mUsd;
+          totalMovVes -= mVes;
+          shiftDevolucionesUsd += mUsd;
+          shiftDevolucionesVes += mVes;
         } else {
           totalMovUsd -= mUsd;
           totalMovVes -= mVes;
           shiftSalidasUsd += mUsd;
+          shiftSalidasVes += mVes;
         }
       }
       
@@ -2078,7 +2100,11 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
         shiftSales: shiftSalesList,
         shiftAbonosUsd,
         shiftEntradasUsd,
-        shiftSalidasUsd
+        shiftEntradasVes,
+        shiftSalidasUsd,
+        shiftSalidasVes,
+        shiftDevolucionesUsd,
+        shiftDevolucionesVes
       };
     } catch (err) {
       console.error('Error en getCajaEstado (Postgres):', err.message);
@@ -2145,14 +2171,38 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
   };
 }
 
-export async function registrarCajaMovimiento(tipo, descripcion, usd, ves, terminal) {
+export async function registrarCajaMovimiento(tipo, descripcion, usd, ves, terminal, usuarioId, usuarioNombre) {
   if (usePostgres) {
     try {
       const termName = terminal || 'CAJA_PRINCIPAL';
-      const activeCaja = await pool.query(
-        "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",
-        [termName]
-      );
+      const sysConfig = await getCompanyConfig();
+      const compartirApertura = sysConfig.compartir_apertura_caja !== false;
+
+      let userId = parseInt(usuarioId);
+      if (isNaN(userId) || userId <= 0) {
+        if (usuarioNombre) {
+          const uRes = await pool.query('SELECT id FROM Usuarios WHERE nombre = $1 OR usuario = $2 LIMIT 1', [usuarioNombre, usuarioNombre]);
+          if (uRes.rowCount > 0) userId = uRes.rows[0].id;
+        }
+      }
+
+      let activeCaja;
+      if (!isNaN(userId) && userId > 0 && compartirApertura) {
+        activeCaja = await pool.query(
+          "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY (estacion_nombre = $2) DESC, id DESC LIMIT 1",
+          [userId, termName]
+        );
+      }
+      if (!activeCaja || activeCaja.rowCount === 0) {
+        activeCaja = await pool.query(
+          "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND (estacion_nombre = $1 OR estacion_nombre = 'CAJA_PRINCIPAL' OR estacion_nombre = 'LOCAL') ORDER BY id DESC LIMIT 1",
+          [termName]
+        );
+      }
+      if (!activeCaja || activeCaja.rowCount === 0) {
+        activeCaja = await pool.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
+      }
+
       if (activeCaja.rowCount > 0) {
         const cajaId = activeCaja.rows[0].id;
         // In Postgres we allow 'Devolucion' check constraint
