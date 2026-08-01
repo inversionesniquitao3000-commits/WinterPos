@@ -1562,10 +1562,12 @@ export async function getSales() {
       const salesRes = await pool.query(`
         SELECT v.id, v.factura_nro, v.fecha, v.subtotal_usd, v.descuento_usd, v.total_usd, v.total_ves, v.con_ticket,
                v.vuelto_usd as "vueltoUSD", v.vuelto_ves as "vueltoVES",
-               v.estacion_nombre as terminal, c.cedula_rif as "clientDoc", c.nombre as "clientName", u.nombre as usuario
+               v.estacion_nombre as terminal, c.cedula_rif as "clientDoc", c.nombre as "clientName", u.nombre as usuario,
+               cac.estatus as caja_estatus
         FROM Ventas v
         LEFT JOIN Clientes c ON v.cliente_id = c.id
         LEFT JOIN Usuarios u ON v.usuario_id = u.id
+        LEFT JOIN Cajas_Apertura_Cierre cac ON v.caja_id = cac.id
         ORDER BY v.id DESC
       `);
       
@@ -1592,6 +1594,7 @@ export async function getSales() {
           id: row.id,
           factura_nro: row.factura_nro,
           fecha: getLocalISODateString(new Date(row.fecha)),
+          caja_estatus: row.caja_estatus || 'Cerrada',
           client: {
             cedula_rif: row.clientDoc,
             nombre: row.clientName

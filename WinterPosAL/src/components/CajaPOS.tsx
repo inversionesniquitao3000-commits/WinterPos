@@ -4,7 +4,8 @@ import {
   ShoppingBag, Search, Trash2, 
   XCircle, ArrowUpRight, 
   Calculator, CheckCircle2, Ticket,
-  Clock, ListOrdered, Plus, AlertCircle, DollarSign, RotateCcw, Printer
+  Clock, ListOrdered, Plus, AlertCircle, DollarSign, RotateCcw, Printer,
+  Calendar, Lock
 } from 'lucide-react';
 import { formatNumberToWordsUSD, printTicketReceipt } from '../utils';
 import { useDialog } from '../hooks/useDialog';
@@ -206,6 +207,12 @@ export default function CajaPOS({
     return () => window.removeEventListener('keydown', handleEscKey);
   }, [showAperturaModal, onLogout]);
 
+  const [devDateFilter, setDevDateFilter] = useState<string>(() => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  });
+
   const handleOpenDevolucion = async () => {
     let salesData: Sale[] = [];
     try {
@@ -226,20 +233,40 @@ export default function CajaPOS({
       }
     }
 
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const todayStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
     setAllSalesList(salesData);
     setDevSelectedSale(null);
     setDevItems([]);
     setDevMotivo('');
     setDevSearchTerm('');
+    setDevDateFilter(todayStr);
     setDevRefundCurrency('USD');
     setShowDevolucionModal(true);
   };
 
   const filteredDevSales = useMemo(() => {
     const listToUse = allSalesList.length > 0 ? allSalesList : shiftSales;
-    const validSales = listToUse.filter(s => s && s.factura_nro && !s.factura_nro.startsWith('DEV-'));
 
-    const sortedSales = [...validSales].sort((a, b) => {
+    let sourceSales: Sale[] = [];
+    if (isAdmin) {
+      // Administrator can view all sales across dates, filtered by date selector if active
+      sourceSales = listToUse.filter(s => {
+        if (!s || !s.factura_nro || s.factura_nro.startsWith('DEV-')) return false;
+        if (devDateFilter.trim() !== '') {
+          const saleDateStr = (s.fecha || '').substring(0, 10);
+          return saleDateStr === devDateFilter.trim();
+        }
+        return true;
+      });
+    } else {
+      // Non-admin users (Cajeros, Operadores, etc.) can ONLY view and return invoices from their current active open session
+      sourceSales = shiftSales.filter(s => s && s.factura_nro && !s.factura_nro.startsWith('DEV-'));
+    }
+
+    const sortedSales = [...sourceSales].sort((a, b) => {
       const idA = typeof a.id === 'number' ? a.id : 0;
       const idB = typeof b.id === 'number' ? b.id : 0;
       if (idA !== idB) return idB - idA;
@@ -253,7 +280,7 @@ export default function CajaPOS({
       sale.client?.nombre?.toLowerCase().includes(term) ||
       sale.client?.cedula_rif?.toLowerCase().includes(term)
     );
-  }, [devSearchTerm, allSalesList, shiftSales]);
+  }, [devSearchTerm, devDateFilter, allSalesList, shiftSales, isAdmin]);
 
   // Helper para auditar las devoluciones previamente aplicadas a una factura
   const getSaleReturnInfo = useCallback((sale: Sale, salesList: Sale[]) => {
@@ -4354,17 +4381,53 @@ export default function CajaPOS({
                   />
                 </div>
 
+                {/* Date filter selector for Administrators */}
+                {isAdmin && (
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-[10px] text-slate-500 block font-sans font-bold uppercase flex items-center gap-1">
+                        <Calendar className="w-3 h-3 text-rose-600" />
+                        Filtrar por Fecha (Admin)
+                      </label>
+                      {devDateFilter && (
+                        <button
+                          type="button"
+                          onClick={() => setDevDateFilter('')}
+                          className="text-[9px] text-slate-400 hover:text-rose-600 font-bold uppercase underline font-mono"
+                        >
+                          Ver Todo
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      type="date"
+                      value={devDateFilter}
+                      onChange={(e) => setDevDateFilter(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs text-slate-800 font-mono focus:bg-white focus:ring-2 focus:ring-rose-500 focus:outline-none"
+                    />
+                  </div>
+                )}
+
                 <div className="flex-grow overflow-y-auto space-y-2 pr-1 max-h-[350px]">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block border-b pb-1">Resultados Coincidentes</span>
+                  <div className="flex justify-between items-center border-b pb-1">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block font-mono">
+                      {isAdmin ? (devDateFilter ? `Facturas del ${devDateFilter}` : 'Todas las Facturas') : 'Facturas Turno Actual'}
+                    </span>
+                    <span className="text-[9px] text-slate-400 font-mono">Total: {filteredDevSales.length}</span>
+                  </div>
+
                   {filteredDevSales.length === 0 ? (
                     <div className="text-center py-8 text-slate-400 text-[10px] font-sans">
-                      No se encontraron facturas registradas.
+                      {isAdmin ? 'No se encontraron facturas para los filtros seleccionados.' : 'No se encontraron facturas en el turno de caja abierto actual.'}
                     </div>
                   ) : (
                     filteredDevSales.map(sale => {
                       const salesList = allSalesList.length > 0 ? allSalesList : shiftSales;
                       const returnInfo = getSaleReturnInfo(sale, salesList);
                       const isSelected = devSelectedSale?.factura_nro === sale.factura_nro;
+                      const isClosedCaja = sale.caja_estatus 
+                        ? sale.caja_estatus === 'Cerrada' 
+                        : !shiftSales.some(s => s.id === sale.id || s.factura_nro === sale.factura_nro);
 
                       let bgBorderClass = 'bg-white border-slate-200 hover:bg-slate-50 text-slate-800';
                       if (isSelected) {
@@ -4373,6 +4436,8 @@ export default function CajaPOS({
                         bgBorderClass = 'bg-rose-100/90 border-rose-500 text-rose-950 font-bold shadow-xs';
                       } else if (returnInfo.isPartiallyReturned) {
                         bgBorderClass = 'bg-amber-50 border-amber-400 text-amber-950 font-bold shadow-xs';
+                      } else if (isClosedCaja) {
+                        bgBorderClass = 'bg-indigo-50/60 border-indigo-200 hover:bg-indigo-100/60 text-slate-800';
                       }
 
                       return (
@@ -4382,7 +4447,14 @@ export default function CajaPOS({
                           className={`w-full text-left p-3 rounded-lg border transition-all flex flex-col gap-1.5 ${bgBorderClass}`}
                         >
                           <div className="flex justify-between font-mono font-bold text-[10px] items-center">
-                            <span>{sale.factura_nro}</span>
+                            <div>
+                              <span className="block">{sale.factura_nro}</span>
+                              {sale.usuario && (
+                                <span className="text-[8px] text-sky-700 font-sans font-bold block uppercase mt-0.5">
+                                  Emitida por: <strong className="text-slate-800 font-extrabold">{sale.usuario}</strong>
+                                </span>
+                              )}
+                            </div>
                             <div className="flex items-center gap-1">
                               {returnInfo.isFullyReturned && (
                                 <span className="bg-red-600 text-white text-[8px] px-1.5 py-0.5 rounded font-black tracking-wider uppercase">
@@ -4394,10 +4466,16 @@ export default function CajaPOS({
                                   ⚠️ DEV. PARCIAL
                                 </span>
                               )}
-                              <span>${sale.totalUSD.toFixed(2)}</span>
+                              {isClosedCaja && !returnInfo.isFullyReturned && (
+                                <span className="bg-indigo-900 text-indigo-100 text-[8px] px-1.5 py-0.5 rounded font-black tracking-wider uppercase flex items-center gap-0.5 border border-indigo-700">
+                                  <Lock className="w-2.5 h-2.5 text-indigo-300" />
+                                  CAJA CERRADA
+                                </span>
+                              )}
+                              <span className="font-mono text-xs font-black text-slate-800 ml-1">${sale.totalUSD.toFixed(2)}</span>
                             </div>
                           </div>
-                          <div className="text-[9px] uppercase font-sans text-slate-500 flex justify-between">
+                          <div className="text-[9px] uppercase font-sans text-slate-500 flex justify-between border-t border-slate-200/60 pt-1">
                             <span className="truncate max-w-[130px]">{sale.client.nombre}</span>
                             <span>{sale.fecha}</span>
                           </div>
@@ -4413,6 +4491,9 @@ export default function CajaPOS({
                 {devSelectedSale ? (() => {
                   const salesList = allSalesList.length > 0 ? allSalesList : shiftSales;
                   const selectedReturnInfo = getSaleReturnInfo(devSelectedSale, salesList);
+                  const isSelectedSaleClosedCaja = devSelectedSale.caja_estatus 
+                    ? devSelectedSale.caja_estatus === 'Cerrada' 
+                    : !shiftSales.some(s => s.id === devSelectedSale.id || s.factura_nro === devSelectedSale.factura_nro);
                   
                   return (
                     <div className="space-y-4 flex-grow flex flex-col justify-between">
@@ -4428,7 +4509,7 @@ export default function CajaPOS({
                           </div>
                         )}
 
-                        {selectedReturnInfo.isPartiallyReturned && (
+                        {selectedReturnInfo.isPartiallyReturned && !selectedReturnInfo.isFullyReturned && (
                           <div className="bg-amber-50 border border-amber-300 text-amber-900 p-3 rounded-xl font-sans text-xs flex items-center gap-2.5 shadow-sm">
                             <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
                             <div>
@@ -4438,11 +4519,26 @@ export default function CajaPOS({
                           </div>
                         )}
 
+                        {isSelectedSaleClosedCaja && !selectedReturnInfo.isFullyReturned && (
+                          <div className="bg-indigo-900 text-white p-3 rounded-xl font-sans text-xs flex items-center gap-3 shadow-md border border-indigo-700">
+                            <Lock className="w-4 h-4 text-indigo-300 flex-shrink-0" />
+                            <div>
+                              <strong className="block text-xs uppercase text-indigo-200">🔒 Devolución de Caja Cerrada (Aprobado por Administrador)</strong>
+                              <span className="text-[11px] text-indigo-100 opacity-90 block">Esta factura pertenece a un turno de caja cerrado. El reembolso reingresará el producto al inventario actual y se registrará como un Egreso Administrativo Especial.</span>
+                            </div>
+                          </div>
+                        )}
+
                         {/* Ticket header info banner */}
                         <div className="bg-white border border-slate-200 p-3 rounded-lg flex justify-between items-center text-xs font-sans shadow-xs">
                           <div>
                             <span className="text-[9px] text-slate-400 block uppercase">Cliente</span>
                             <strong className="text-slate-800 block uppercase">{devSelectedSale.client.nombre} ({devSelectedSale.client.cedula_rif})</strong>
+                            {devSelectedSale.usuario && (
+                              <span className="text-[10px] text-sky-700 font-mono font-bold block mt-0.5">
+                                Emitida por: <strong className="text-slate-800">{devSelectedSale.usuario}</strong>
+                              </span>
+                            )}
                           </div>
                           <div className="text-right">
                             <span className="text-[9px] text-slate-400 block uppercase">Total Original</span>

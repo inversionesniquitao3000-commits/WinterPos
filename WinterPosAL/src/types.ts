@@ -158,6 +158,7 @@ export interface Sale {
   fecha: string;
   usuario: string;
   usuario_id?: number;
+  caja_estatus?: 'Abierta' | 'Cerrada' | string;
   estatus?: string;
   iva?: number;
   terminal?: string;
