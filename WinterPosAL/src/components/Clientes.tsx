@@ -327,8 +327,18 @@ export default function Clientes({
       return;
     }
 
-    onRegisterAbono(selectedRowClient.id, val, abonoMethod, abonoRef);
+    const USD_METHODS = ['Efectivo$', 'Tarjeta$', 'Binance', 'PayPal', 'Zelle'];
+    const isUsd = USD_METHODS.includes(abonoMethod);
+    const usd = isUsd ? val : 0;
+    const ves = !isUsd ? parseFloat((val * tasaDia).toFixed(2)) : 0;
+
+    const paymentsArr: import('../types').AbonoPayment[] = [
+      { metodo_pago: abonoMethod as any, monto_usd: usd, monto_ves: ves, referencia: abonoRef || '' }
+    ];
+
+    onRegisterAbono(selectedRowClient.id, val, paymentsArr, `Abono desde Catálogo de Clientes`);
     setShowAbonoModal(false);
+    setAbonoVal('');
     setAbonoMethod('Efectivo$');
     setAbonoRef('');
     showAlert('Abono registrado con éxito. El crédito disponible del cliente ha sido restablecido.', 'Abono Registrado', 'success');

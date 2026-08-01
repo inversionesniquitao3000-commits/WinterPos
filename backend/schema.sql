@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS Clientes (
     direccion TEXT,
     limite_credito NUMERIC(12, 2) DEFAULT 0.00 CHECK (limite_credito >= 0),
     credito_disponible NUMERIC(12, 2) DEFAULT 0.00 CHECK (credito_disponible >= 0),
+    saldo_pendiente NUMERIC(12, 2) GENERATED ALWAYS AS (limite_credito - credito_disponible) STORED,
     porcentaje_descuento NUMERIC(5, 2) DEFAULT 0.00 CHECK (porcentaje_descuento BETWEEN 0 AND 100),
     aplica_precio_costo BOOLEAN DEFAULT FALSE,
     estado VARCHAR(10) DEFAULT 'Activo' CHECK (estado IN ('Activo', 'Inactivo'))

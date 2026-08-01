@@ -1314,7 +1314,7 @@ export default function Inventario({
 
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
+  const [pageSize, setPageSize] = useState(100);
 
   // Reset page when filters or search change
   useEffect(() => {
@@ -2250,6 +2250,72 @@ export default function Inventario({
                       Limpiar orden
                     </button>
                   </div>
+                </div>
+              )}
+
+              {/* TOP PAGINATION CONTROLS */}
+              {sortedProducts.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 border-b border-slate-200 px-4 py-2 text-xs font-sans text-slate-600">
+                  <div className="flex items-center gap-2">
+                    <span>Mostrar:</span>
+                    <select
+                      value={pageSize}
+                      onChange={(e) => {
+                        setPageSize(Number(e.target.value));
+                        setCurrentPage(1);
+                      }}
+                      className="bg-white border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none font-sans font-bold"
+                    >
+                      <option value={25}>25 por página</option>
+                      <option value={50}>50 por página</option>
+                      <option value={100}>100 por página</option>
+                      <option value={250}>250 por página</option>
+                      <option value={sortedProducts.length}>Mostrar Todos ({sortedProducts.length})</option>
+                    </select>
+                    <span className="text-slate-400">
+                      Mostrando {Math.min((currentPage - 1) * pageSize + 1, sortedProducts.length)} - {Math.min(currentPage * pageSize, sortedProducts.length)} de {sortedProducts.length} productos
+                    </span>
+                  </div>
+
+                  {totalPages > 1 && (
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage(1)}
+                        disabled={currentPage === 1}
+                        className="px-2 py-1 bg-white border border-slate-300 rounded disabled:opacity-40 hover:bg-slate-100 transition-all"
+                      >
+                        «
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        disabled={currentPage === 1}
+                        className="px-2.5 py-1 bg-white border border-slate-300 rounded disabled:opacity-40 hover:bg-slate-100 transition-all"
+                      >
+                        Anterior
+                      </button>
+                      <span className="px-3 py-1 bg-sky-100 text-sky-800 rounded font-mono">
+                        Pág {currentPage} / {totalPages}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        disabled={currentPage === totalPages}
+                        className="px-2.5 py-1 bg-white border border-slate-300 rounded disabled:opacity-40 hover:bg-slate-100 transition-all"
+                      >
+                        Siguiente
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage(totalPages)}
+                        disabled={currentPage === totalPages}
+                        className="px-2 py-1 bg-white border border-slate-300 rounded disabled:opacity-40 hover:bg-slate-100 transition-all"
+                      >
+                        »
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 

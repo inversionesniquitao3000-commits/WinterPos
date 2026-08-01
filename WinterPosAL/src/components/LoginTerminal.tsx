@@ -239,7 +239,7 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
                     autoFocus
                     type="text"
                     value={username}
-                    onChange={(e) => setUsername(e.target.value)}
+                    onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ''))}
                     placeholder="Usuario"
                     className="w-full bg-white text-slate-800 border-none rounded px-3 py-2.5 text-xs font-sans pr-8 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-yellow-400 font-bold"
                     disabled={isLoading}
@@ -255,7 +255,7 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
                   <input
                     type={showPassword ? 'text' : 'password'}
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(e) => setPassword(e.target.value.toLowerCase())}
                     placeholder="Contraseña"
                     className="w-full bg-white text-slate-800 border-none rounded px-3 py-2.5 text-xs font-sans pr-12 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-yellow-400 font-bold"
                     disabled={isLoading}

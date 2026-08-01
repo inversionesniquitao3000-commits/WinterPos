@@ -1473,6 +1473,14 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         const ventasEfectivoUsd = selectedCierre.ventasEfectivoUsd ?? 0;
         const abonoClientesUsd = selectedCierre.abonoClientesUsd ?? (selectedCierre as any).abonosUsd ?? 0;
         const abonoClientesVes = selectedCierre.abonoClientesVes ?? (selectedCierre as any).abonosVes ?? 0;
+        const abonosEfectivoUsd = selectedCierre.abonosEfectivoUsd ?? 0;
+        const abonosEfectivoBsVes = selectedCierre.abonosEfectivoBsVes ?? 0;
+        const abonosBiopagoVes = selectedCierre.abonosBiopagoVes ?? 0;
+        const abonosPagoMovilVes = selectedCierre.abonosPagoMovilVes ?? 0;
+        const abonosPuntoVes = selectedCierre.abonosPuntoVes ?? 0;
+        const abonosZelleUsd = selectedCierre.abonosZelleUsd ?? 0;
+        const abonosBinanceUsd = selectedCierre.abonosBinanceUsd ?? 0;
+        const abonosPayPalUsd = selectedCierre.abonosPayPalUsd ?? 0;
         const entradaEfectivoUsd = selectedCierre.entradaEfectivoUsd ?? 0;
         const entradaEfectivoVes = selectedCierre.entradaEfectivoVes ?? 0;
         const salidaEfectivoUsd = selectedCierre.salidaEfectivoUsd ?? 0;
@@ -1583,15 +1591,68 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                       <span className="font-bold text-slate-800">$ {ventasEfectivoUsd.toFixed(2)}</span>
                     </div>
 
-                    <div className="flex justify-between">
-                      <span>Abono Clientes ($) :</span>
-                      <span className="font-bold text-slate-800">$ {abonoClientesUsd.toFixed(2)}</span>
-                    </div>
+                    {abonosEfectivoUsd > 0 && (
+                      <div className="flex justify-between font-bold text-emerald-700">
+                        <span>Abono Clientes (Efectivo $) :</span>
+                        <span>$ {abonosEfectivoUsd.toFixed(2)}</span>
+                      </div>
+                    )}
 
-                    <div className="flex justify-between">
-                      <span>Abono Clientes (Bs) :</span>
-                      <span className="font-bold text-slate-800">Bs {abonoClientesVes.toFixed(2)}</span>
-                    </div>
+                    {abonosEfectivoBsVes > 0 && (
+                      <div className="flex justify-between font-bold text-emerald-700">
+                        <span>Abono Clientes (Efectivo Bs) :</span>
+                        <span>Bs {abonosEfectivoBsVes.toFixed(2)}</span>
+                      </div>
+                    )}
+
+                    {abonosBiopagoVes > 0 && (
+                      <div className="flex justify-between font-bold text-sky-700">
+                        <span>Abono Clientes (Biopago) :</span>
+                        <span>Bs {abonosBiopagoVes.toFixed(2)}</span>
+                      </div>
+                    )}
+
+                    {abonosPuntoVes > 0 && (
+                      <div className="flex justify-between font-bold text-indigo-700">
+                        <span>Abono Clientes (Punto / Tarjeta) :</span>
+                        <span>Bs {abonosPuntoVes.toFixed(2)}</span>
+                      </div>
+                    )}
+
+                    {abonosPagoMovilVes > 0 && (
+                      <div className="flex justify-between font-bold text-blue-700">
+                        <span>Abono Clientes (Pago Móvil) :</span>
+                        <span>Bs {abonosPagoMovilVes.toFixed(2)}</span>
+                      </div>
+                    )}
+
+                    {abonosZelleUsd > 0 && (
+                      <div className="flex justify-between font-bold text-purple-700">
+                        <span>Abono Clientes (Zelle $) :</span>
+                        <span>$ {abonosZelleUsd.toFixed(2)}</span>
+                      </div>
+                    )}
+
+                    {abonosBinanceUsd > 0 && (
+                      <div className="flex justify-between font-bold text-amber-700">
+                        <span>Abono Clientes (Binance $) :</span>
+                        <span>$ {abonosBinanceUsd.toFixed(2)}</span>
+                      </div>
+                    )}
+
+                    {abonosPayPalUsd > 0 && (
+                      <div className="flex justify-between font-bold text-sky-600">
+                        <span>Abono Clientes (PayPal $) :</span>
+                        <span>$ {abonosPayPalUsd.toFixed(2)}</span>
+                      </div>
+                    )}
+
+                    {abonoClientesUsd === 0 && (
+                      <div className="flex justify-between">
+                        <span>Abono de Clientes :</span>
+                        <span className="font-bold text-slate-800">$ 0.00</span>
+                      </div>
+                    )}
 
                      <div className="flex justify-between">
                       <span>Entrada Efectivo ($) :</span>

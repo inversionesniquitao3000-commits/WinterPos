@@ -103,6 +103,7 @@ try {
     ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS devolucion_efectivo_usd NUMERIC DEFAULT 0;
     ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS devolucion_efectivo_ves NUMERIC DEFAULT 0;
     ALTER TABLE IF EXISTS Clientes ADD COLUMN IF NOT EXISTS aplica_precio_costo BOOLEAN DEFAULT FALSE;
+    ALTER TABLE IF EXISTS Clientes ADD COLUMN IF NOT EXISTS saldo_pendiente NUMERIC(12, 2) GENERATED ALWAYS AS (limite_credito - credito_disponible) STORED;
     ALTER TABLE IF EXISTS Ventas_Detalle DROP CONSTRAINT IF EXISTS ventas_detalle_tipo_precio_check;
     ALTER TABLE IF EXISTS Pagos_Venta DROP CONSTRAINT IF EXISTS pagos_venta_metodo_pago_check;
     ALTER TABLE IF EXISTS Abonos DROP CONSTRAINT IF EXISTS abonos_metodo_pago_check;
@@ -116,10 +117,15 @@ try {
     ALTER TABLE IF EXISTS Movimientos_Caja ADD COLUMN IF NOT EXISTS estacion_nombre VARCHAR(50) DEFAULT 'CAJA_PRINCIPAL';
     ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS a_granel BOOLEAN DEFAULT FALSE;
     ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(50);
-    ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS porcentaje_impuesto NUMERIC DEFAULT 0;
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS permitir_multisesion BOOLEAN DEFAULT TRUE;
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS compartir_apertura_caja BOOLEAN DEFAULT TRUE;
     CREATE SEQUENCE IF NOT EXISTS seq_factura START WITH 1;
+    UPDATE Cajas_Apertura_Cierre 
+    SET estatus = 'Cerrada', fecha_cierre = CURRENT_TIMESTAMP 
+    WHERE estatus = 'Abierta' 
+      AND id NOT IN (
+        SELECT MAX(id) FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' GROUP BY usuario_id
+      );
 
     DO $$ BEGIN
       IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'usuarios') THEN
@@ -136,6 +142,10 @@ try {
       END IF;
       IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'clientes') THEN
         PERFORM setval(pg_get_serial_sequence('Clientes', 'id'), COALESCE((SELECT MAX(id) FROM Clientes), 1));
+      END IF;
+      IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'abonos') THEN
+        ALTER TABLE Abonos ALTER COLUMN cliente_id TYPE BIGINT;
+        ALTER TABLE Abonos ALTER COLUMN usuario_id TYPE BIGINT;
       END IF;
       IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'ventas') THEN
         PERFORM setval(pg_get_serial_sequence('Ventas', 'id'), COALESCE((SELECT MAX(id) FROM Ventas), 1));
@@ -651,12 +661,12 @@ export async function getAbonos() {
   return readJsonFile('abonos.json', []);
 }
 
-export async function registerAbono(clientId, montoUsd, montoVes, metodoPago = 'Efectivo$', referencia = '', observacion = '') {
+export async function registerAbono(clientId, montoUsd, montoVes, metodoPago = 'Efectivo$', referencia = '', observacion = '', usuarioId = null) {
   let clientNombre = '';
   let clientDoc = '';
   const parsedId = parseInt(clientId) || 0;
-  // amountUSD used for client credit update — use whichever is non-zero, converting VES if needed
-  const amountUSD = montoUsd > 0 ? montoUsd : 0;
+  const numUsd = parseFloat(montoUsd || '0');
+  const numVes = parseFloat(montoVes || '0');
 
   if (usePostgres) {
     try {
@@ -670,6 +680,14 @@ export async function registerAbono(clientId, montoUsd, montoVes, metodoPago = '
         clientNombre = client.nombre;
         clientDoc = client.cedula_rif;
 
+        // Calculate USD equivalency for credit availability if paid in VES
+        let amountUSD = numUsd;
+        if (amountUSD <= 0 && numVes > 0) {
+          const tasaRes = await pool.query("SELECT tasa_cobro FROM Tasas_Cambio ORDER BY id DESC LIMIT 1");
+          const tasa = (tasaRes.rowCount > 0 && parseFloat(tasaRes.rows[0].tasa_cobro || '0') > 0) ? parseFloat(tasaRes.rows[0].tasa_cobro) : 36.30;
+          amountUSD = parseFloat((numVes / tasa).toFixed(2));
+        }
+
         if (amountUSD > 0) {
           const nextCredito = Math.min(parseFloat(client.limite_credito || '0'), parseFloat(client.credito_disponible || '0') + amountUSD);
           await pool.query('UPDATE Clientes SET credito_disponible = $1 WHERE id = $2', [nextCredito, realClientId]);
@@ -677,11 +695,11 @@ export async function registerAbono(clientId, montoUsd, montoVes, metodoPago = '
         
         try {
           await pool.query(
-            `INSERT INTO Abonos (cliente_id, monto_usd, monto_ves, metodo_pago, numero_referencia, observacion, fecha)
-             VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)`,
-            [realClientId, montoUsd || 0, montoVes || 0, metodoPago, referencia || null, observacion || null]
+            `INSERT INTO Abonos (cliente_id, usuario_id, monto_usd, monto_ves, metodo_pago, numero_referencia, observacion, fecha)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)`,
+            [realClientId, usuarioId || null, numUsd, numVes, metodoPago, referencia || null, observacion || null]
           );
-          console.log(`✅ [Abonos] Abono registrado en PostgreSQL — Cliente: ${clientNombre} (ID ${realClientId}) | $${montoUsd} / Bs ${montoVes} | Método: ${metodoPago}`);
+          console.log(`✅ [Abonos] Abono registrado en PostgreSQL — Cliente: ${clientNombre} (ID ${realClientId}) | $${numUsd} / Bs ${numVes} | Método: ${metodoPago}`);
         } catch (dbErr) {
           console.error('❌ Error al insertar abono en tabla Abonos:', dbErr.message);
         }
@@ -695,7 +713,7 @@ export async function registerAbono(clientId, montoUsd, montoVes, metodoPago = '
             await pool.query(
               `INSERT INTO Movimientos_Caja (caja_id, tipo, descripcion, monto_usd, monto_ves, fecha)
                VALUES ($1, 'Entrada', $2, $3, $4, CURRENT_TIMESTAMP)`,
-              [cajaId, `Abono de Crédito Cliente: ${clientNombre} (${metodoPago})`, montoUsd || 0, montoVes || 0]
+              [cajaId, `Abono de Crédito Cliente: ${clientNombre} (${metodoPago})`, numUsd, numVes]
             );
           }
         } catch (movErr) {
@@ -1142,7 +1160,12 @@ export async function wipeDatabase(options) {
       }
       if (options.wipeClients) {
         await pool.query("DELETE FROM Clientes WHERE cedula_rif <> 'V-00000000'");
-        await pool.query("UPDATE Clientes SET limite_credito = 0, credito_disponible = 0, saldo_pendiente = 0");
+        await pool.query("UPDATE Clientes SET limite_credito = 0, credito_disponible = 0");
+      }
+      if (options.wipeClientBalancesOnly) {
+        await pool.query("TRUNCATE TABLE Abonos RESTART IDENTITY CASCADE");
+        await pool.query("UPDATE Clientes SET credito_disponible = limite_credito");
+        writeJsonFile('abonos.json', []);
       }
       if (isFullWipe) {
         // Clear users except admin
@@ -1189,6 +1212,16 @@ export async function wipeDatabase(options) {
     const clients = readJsonFile('clients.json', mockClients);
     const genericClients = clients.filter(c => c.cedula_rif === 'V-00000000');
     writeJsonFile('clients.json', genericClients);
+  }
+  if (options.wipeClientBalancesOnly) {
+    writeJsonFile('abonos.json', []);
+    const clients = readJsonFile('clients.json', mockClients);
+    const updatedClients = clients.map(c => ({
+      ...c,
+      saldo_pendiente: 0,
+      credito_disponible: c.limite_credito || 0
+    }));
+    writeJsonFile('clients.json', updatedClients);
   }
   if (isFullWipe) {
     // Clear users except admin
@@ -1269,9 +1302,9 @@ export async function restoreDatabase(data) {
         await pool.query('TRUNCATE TABLE Clientes RESTART IDENTITY CASCADE');
         for (const c of data.clients) {
           await pool.query(
-            `INSERT INTO Clientes (id, cedula_rif, nombre, telefono, direccion, limite_credito, credito_disponible, porcentaje_descuento, estado, saldo_pendiente, aplica_precio_costo) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-            [c.id, c.cedula_rif, c.nombre, c.telefono || '', c.direccion || '', c.limite_credito, c.credito_disponible, c.porcentaje_descuento, c.estado || 'Activo', c.saldo_pendiente || 0, c.aplica_precio_costo || false]
+            `INSERT INTO Clientes (id, cedula_rif, nombre, telefono, direccion, limite_credito, credito_disponible, porcentaje_descuento, estado, aplica_precio_costo) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            [c.id, c.cedula_rif, c.nombre, c.telefono || '', c.direccion || '', c.limite_credito, c.credito_disponible, c.porcentaje_descuento, c.estado || 'Activo', c.aplica_precio_costo || false]
           );
         }
       }
@@ -1676,6 +1709,15 @@ export async function saveSale(s) {
         factura_nro = await fetchNextSeqFactura();
       } else if (!factura_nro.startsWith('DEV-')) {
         factura_nro = await fetchNextSeqFactura();
+      } else {
+        // Safe check for DEV- return invoices: if it already exists in database, make it unique with a suffix
+        const existsRes = await clientTarget.query('SELECT id FROM Ventas WHERE factura_nro = $1', [factura_nro]);
+        if (existsRes.rowCount > 0) {
+          const baseDev = factura_nro.split('-').slice(0, 2).join('-');
+          const countRes = await clientTarget.query('SELECT COUNT(*) FROM Ventas WHERE factura_nro LIKE $1', [`${baseDev}%`]);
+          const devSuffix = parseInt(countRes.rows[0].count, 10) + 1;
+          factura_nro = `${baseDev}-${devSuffix}`;
+        }
       }
       const saleRes = await clientTarget.query(
         `INSERT INTO Ventas (factura_nro, cliente_id, usuario_id, caja_id, subtotal_usd, descuento_usd, total_usd, total_ves, estacion_nombre, vuelto_usd, vuelto_ves)
@@ -1911,11 +1953,21 @@ export async function abrirCaja(usd, ves, usuarioId, terminal, usuarioNombre) {
       const termName = terminal || 'CAJA_PRINCIPAL';
       const nowStr = getLocalISODateString();
 
-      // Auto-close any previous stale open session for THIS user on THIS terminal
-      await pool.query(
-        "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = $3 WHERE estacion_nombre = $1 AND usuario_id = $2 AND estatus = 'Abierta'",
-        [termName, userId, nowStr]
-      );
+      const sysConfig = await getCompanyConfig();
+      const compartirApertura = sysConfig.compartir_apertura_caja !== false;
+
+      // Auto-close any previous stale open session for THIS user
+      if (compartirApertura) {
+        await pool.query(
+          "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = $2 WHERE usuario_id = $1 AND estatus = 'Abierta'",
+          [userId, nowStr]
+        );
+      } else {
+        await pool.query(
+          "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = $3 WHERE estacion_nombre = $1 AND usuario_id = $2 AND estatus = 'Abierta'",
+          [termName, userId, nowStr]
+        );
+      }
 
       const res = await pool.query(
         `INSERT INTO Cajas_Apertura_Cierre (usuario_id, estacion_nombre, monto_apertura_usd, monto_apertura_ves, estatus, fecha_apertura)
@@ -2148,8 +2200,8 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
       if (!isNaN(userId) && userId > 0) {
         if (compartirApertura) {
           activeRes = await pool.query(
-            "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY (estacion_nombre = $2) DESC, id DESC LIMIT 1",
-            [userId, myTerminal]
+            "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY id DESC LIMIT 1",
+            [userId]
           );
         } else {
           activeRes = await pool.query(
@@ -2255,11 +2307,16 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
       }
       
       const movsRes = await pool.query("SELECT * FROM Movimientos_Caja WHERE caja_id = $1", [cajaId]);
+      let totalMovUsd = 0;
+      let totalMovVes = 0;
       let shiftAbonosUsd = 0;
+      let shiftAbonosVes = 0;
       let shiftEntradasUsd = 0;
       let shiftEntradasVes = 0;
       let shiftSalidasUsd = 0;
-      let shiftAbonosVes = 0;
+      let shiftSalidasVes = 0;
+      let shiftDevolucionesUsd = 0;
+      let shiftDevolucionesVes = 0;
 
       for (const m of movsRes.rows) {
         const mUsd = parseFloat(m.monto_usd || '0');

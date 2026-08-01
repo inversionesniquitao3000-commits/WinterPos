@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Product, Client, User, CompanyConfig, SaleItem, Payment, Sale, CierreCaja, CierreDetails, Abono } from '../types';
 import { 
   ShoppingBag, Search, Trash2, 
@@ -175,7 +175,14 @@ export default function CajaPOS({
   const [devSearchTerm, setDevSearchTerm] = useState('');
   const [allSalesList, setAllSalesList] = useState<Sale[]>([]);
   const [devSelectedSale, setDevSelectedSale] = useState<Sale | null>(null);
-  const [devItems, setDevItems] = useState<Array<{ product: Product; qty: number; priceUSD: number; returnQty: number }>>([]);
+  const [devItems, setDevItems] = useState<Array<{ 
+    product: Product; 
+    qty: number; 
+    prevReturnedQty: number; 
+    remainingQty: number; 
+    priceUSD: number; 
+    returnQty: number 
+  }>>([]);
   const [devMotivo, setDevMotivo] = useState('');
   const [devRefundCurrency, setDevRefundCurrency] = useState<'USD' | 'VES'>('USD');
   const [showDevConfirmModal, setShowDevConfirmModal] = useState(false);
@@ -248,16 +255,75 @@ export default function CajaPOS({
     );
   }, [devSearchTerm, allSalesList, shiftSales]);
 
+  // Helper para auditar las devoluciones previamente aplicadas a una factura
+  const getSaleReturnInfo = useCallback((sale: Sale, salesList: Sale[]) => {
+    if (!sale || !sale.factura_nro) {
+      return { isFullyReturned: false, isPartiallyReturned: false, itemReturnedQtys: {} as Record<string, number>, totalReturnedUsd: 0, totalOriginalQty: 0, totalReturnedQty: 0 };
+    }
+
+    const rawDevCode = `DEV-${sale.factura_nro.replace('FAC-', '')}`;
+    const affectedSales = salesList.filter(s => 
+      s && s.factura_nro && s.factura_nro.startsWith('DEV-') && 
+      ((s as any).factura_afectada === sale.factura_nro || 
+       s.factura_nro === rawDevCode || 
+       s.factura_nro.startsWith(`${rawDevCode}-`))
+    );
+
+    const itemReturnedQtys: Record<string, number> = {};
+    let totalReturnedUsd = 0;
+
+    affectedSales.forEach(devSale => {
+      totalReturnedUsd += Math.abs(devSale.totalUSD || 0);
+      (devSale.items || []).forEach(devItem => {
+        const code = devItem.product?.barcode || (devItem as any).barcode || '';
+        const qty = Math.abs(typeof devItem.qty === 'number' ? devItem.qty : (parseFloat(String(devItem.qty)) || 0));
+        if (code) {
+          itemReturnedQtys[code] = (itemReturnedQtys[code] || 0) + qty;
+        }
+      });
+    });
+
+    let totalOriginalQty = 0;
+    let totalReturnedQty = 0;
+
+    (sale.items || []).forEach(item => {
+      const code = item.product?.barcode || (item as any).barcode || '';
+      const originalQty = typeof item.qty === 'number' ? item.qty : (parseFloat(String(item.qty || 0)) || 0);
+      const returnedQty = itemReturnedQtys[code] || 0;
+      
+      totalOriginalQty += originalQty;
+      totalReturnedQty += Math.min(originalQty, returnedQty);
+    });
+
+    const isFullyReturned = totalOriginalQty > 0 && totalReturnedQty >= totalOriginalQty - 0.001;
+    const isPartiallyReturned = !isFullyReturned && totalReturnedQty > 0.001;
+
+    return {
+      isFullyReturned,
+      isPartiallyReturned,
+      totalReturnedQty,
+      totalOriginalQty,
+      itemReturnedQtys,
+      totalReturnedUsd
+    };
+  }, []);
+
   const handleSelectDevSale = (sale: Sale) => {
     setDevSelectedSale(sale);
     setDevMotivo('');
     const paidInBs = (sale.pagos || []).some(p => p.metodo !== 'Efectivo$' && p.metodo !== 'CreditoCliente');
     setDevRefundCurrency(paidInBs ? 'VES' : 'USD');
+
+    const salesList = allSalesList.length > 0 ? allSalesList : shiftSales;
+    const returnInfo = getSaleReturnInfo(sale, salesList);
+
     const items = (sale.items || []).map(item => {
       const barcode = item?.product?.barcode || '';
       const description = item?.product?.description || 'Producto sin descripción';
       const price = parseFloat(String((item as any)?.precio_unitario_usd || item?.priceUSD || item?.product?.precio_detalle_usd || 0));
       const qty = typeof item?.qty === 'number' ? item.qty : (parseFloat(String(item?.qty || 0)) || 0);
+      const prevReturnedQty = returnInfo.itemReturnedQtys[barcode] || 0;
+      const remainingQty = Math.max(0, parseFloat((qty - prevReturnedQty).toFixed(3)));
 
       const fullProd = products.find(p => p.barcode === barcode) || {
         id: item?.product?.id || Date.now() + Math.random(),
@@ -269,6 +335,8 @@ export default function CajaPOS({
       return {
         product: fullProd,
         qty: qty,
+        prevReturnedQty,
+        remainingQty,
         priceUSD: price,
         returnQty: 0
       };
@@ -280,7 +348,7 @@ export default function CajaPOS({
     setDevItems(prev => prev.map((item, idx) => {
       if (idx === index) {
         const cleanVal = item.product.a_granel ? val : Math.round(val);
-        const clampedVal = Math.max(0, Math.min(item.qty, cleanVal));
+        const clampedVal = Math.max(0, Math.min(item.remainingQty, cleanVal));
         return { ...item, returnQty: clampedVal };
       }
       return item;
@@ -290,7 +358,7 @@ export default function CajaPOS({
   const handleSelectAllForDev = () => {
     setDevItems(prev => prev.map(item => ({
       ...item,
-      returnQty: item.qty
+      returnQty: item.remainingQty
     })));
   };
 
@@ -333,8 +401,21 @@ export default function CajaPOS({
       );
 
       // 3. Register the return as a Sale record in the Ventas history (negative sales)
+      const rawDevCode = `DEV-${currentSale.factura_nro.replace('FAC-', '')}`;
+      const salesList = allSalesList.length > 0 ? allSalesList : shiftSales;
+      const existingDevs = salesList.filter(s => 
+        s && s.factura_nro && s.factura_nro.startsWith('DEV-') && 
+        ((s as any).factura_afectada === currentSale.factura_nro || 
+         s.factura_nro === rawDevCode || 
+         s.factura_nro.startsWith(`${rawDevCode}-`))
+      );
+
+      const devFacturaNro = existingDevs.length === 0 
+        ? rawDevCode 
+        : `${rawDevCode}-${existingDevs.length + 1}`;
+
       const returnSaleResult = {
-        factura_nro: `DEV-${currentSale.factura_nro.replace('FAC-', '')}`,
+        factura_nro: devFacturaNro,
         factura_afectada: currentSale.factura_nro,
         client: currentSale.client,
         items: devItems.filter(i => i.returnQty > 0).map(i => ({
@@ -594,8 +675,10 @@ export default function CajaPOS({
   // Keyboard row selection and mixed change state
   const [selectedItemIndex, setSelectedItemIndex] = useState<number>(0);
   const [mixedChangeUSDVal, setMixedChangeUSDVal] = useState('');
+  const [abonoMode, setAbonoMode] = useState<'unico' | 'mixto'>('unico');
   const [abonoMethod, setAbonoMethod] = useState<import('../types').MetodoPagoAbono>('Efectivo$');
   const [abonoRef, setAbonoRef] = useState('');
+  const [abonoLineAmount, setAbonoLineAmount] = useState('');
   const [abonoObservacion, setAbonoObservacion] = useState('');
   // Multi-payment lines for a single abono
   const [abonoPayments, setAbonoPayments] = useState<import('../types').AbonoPayment[]>([]);
@@ -1443,7 +1526,22 @@ export default function CajaPOS({
       if (m === 'TarjetaBs' || m === 'Tarjeta$') return acc + (a.monto || 0);
       return acc;
     }, 0);
-    const abonoClientesUsd = abonosEfectivoUsd + abonosEfectivoBsUsd + abonosBiopagoUsd + abonosPagoMovilUsd + abonosPuntoUsd;
+    const abonosZelleUsd = targetShiftAbonos.reduce((acc, a) => {
+      const m = String(a.metodo_pago || '');
+      if (m === 'Zelle') return acc + (a.monto || 0);
+      return acc;
+    }, 0);
+    const abonosBinanceUsd = targetShiftAbonos.reduce((acc, a) => {
+      const m = String(a.metodo_pago || '');
+      if (m === 'Binance') return acc + (a.monto || 0);
+      return acc;
+    }, 0);
+    const abonosPayPalUsd = targetShiftAbonos.reduce((acc, a) => {
+      const m = String(a.metodo_pago || '');
+      if (m === 'PayPal') return acc + (a.monto || 0);
+      return acc;
+    }, 0);
+    const abonoClientesUsd = abonosEfectivoUsd + abonosEfectivoBsUsd + abonosBiopagoUsd + abonosPagoMovilUsd + abonosPuntoUsd + abonosZelleUsd + abonosBinanceUsd + abonosPayPalUsd;
 
     const entradaEfectivoUsd = targetEntradaUsd;
     const entradaEfectivoVes = targetEntradaVes;
@@ -1680,6 +1778,9 @@ export default function CajaPOS({
       abonosPagoMovilUsd,
       abonosPuntoVes,
       abonosPuntoUsd,
+      abonosZelleUsd,
+      abonosBinanceUsd,
+      abonosPayPalUsd,
       entradaEfectivoUsd,
       entradaEfectivoVes,
       salidaEfectivoUsd,
@@ -3027,30 +3128,53 @@ export default function CajaPOS({
       {showCajaAbonoModal && (() => {
         const filteredAbonoClients = clients.filter(c => {
           if (c.cedula_rif === 'V-00000000') return false;
+          if ((c.saldo_pendiente || 0) <= 0.001) return false; // Mostrar únicamente clientes con deuda activa
           return c.nombre.toLowerCase().includes(abonoSearchTerm.toLowerCase()) ||
                  c.cedula_rif.toLowerCase().includes(abonoSearchTerm.toLowerCase());
+        }).sort((a, b) => {
+          const debtA = a.saldo_pendiente || 0;
+          const debtB = b.saldo_pendiente || 0;
+          if (debtB !== debtA) {
+            return debtB - debtA; // Mayor deuda primero
+          }
+          return a.nombre.localeCompare(b.nombre);
         });
 
         const USD_METHODS: import('../types').MetodoPagoAbono[] = ['Efectivo$', 'Tarjeta$', 'Binance', 'PayPal', 'Zelle'];
         const isUsdMethod = (m: import('../types').MetodoPagoAbono) => USD_METHODS.includes(m);
 
-        const totalPagado = abonoPayments.reduce((acc, p) => acc + p.monto_usd, 0);
+        const totalPagadoUsd = abonoPayments.reduce((acc, p) => acc + (p.monto_usd > 0 ? p.monto_usd : (p.monto_ves / (tasaDia || 1))), 0);
         const totalAbono = parseFloat(abonoAmount || '0') || 0;
-        const restante = parseFloat((totalAbono - totalPagado).toFixed(2));
+        const restanteUsd = parseFloat(Math.max(0, totalAbono - totalPagadoUsd).toFixed(2));
+        const restanteVes = parseFloat((restanteUsd * tasaDia).toFixed(2));
 
         const handleAddPaymentLine = () => {
-          const montoPago = parseFloat(abonoRef.replace(',', '.')) || 0;
+          const montoPago = parseFloat(abonoLineAmount.replace(',', '.')) || 0;
           if (montoPago <= 0) {
-            showAlert('Ingrese el monto para esta forma de pago.', 'Monto Inválido', 'warning');
+            showAlert('Ingrese un monto válido para esta forma de pago.', 'Monto Inválido', 'warning');
             return;
           }
-          if (montoPago > restante + 0.01) {
-            showAlert(`El monto ($${montoPago.toFixed(2)}) excede el saldo restante por cubrir ($${restante.toFixed(2)}).`, 'Monto Excedido', 'warning');
-            return;
+          
+          let usd = 0;
+          let ves = 0;
+          if (isUsdMethod(abonoMethod)) {
+            usd = montoPago;
+            ves = parseFloat((montoPago * tasaDia).toFixed(2));
+            if (usd > restanteUsd + 0.01) {
+              showAlert(`El monto ingresado ($${usd.toFixed(2)}) excede el saldo restante por cubrir ($${restanteUsd.toFixed(2)}).`, 'Monto Excedido', 'warning');
+              return;
+            }
+          } else {
+            ves = montoPago;
+            usd = parseFloat((montoPago / (tasaDia || 1)).toFixed(2));
+            if (ves > restanteVes + 0.5) {
+              showAlert(`El monto ingresado (Bs ${ves.toFixed(2)}) excede el saldo restante por cubrir (Bs ${restanteVes.toFixed(2)}).`, 'Monto Excedido', 'warning');
+              return;
+            }
           }
-          const usd = isUsdMethod(abonoMethod) ? montoPago : 0;
-          const ves = !isUsdMethod(abonoMethod) ? parseFloat((montoPago * tasaDia).toFixed(2)) : 0;
-          setAbonoPayments(prev => [...prev, { metodo_pago: abonoMethod, monto_usd: usd, monto_ves: ves, referencia: '' }]);
+
+          setAbonoPayments(prev => [...prev, { metodo_pago: abonoMethod, monto_usd: usd, monto_ves: ves, referencia: abonoRef.trim() }]);
+          setAbonoLineAmount('');
           setAbonoRef('');
         };
 
@@ -3066,30 +3190,30 @@ export default function CajaPOS({
             return;
           }
 
-          // Build payments: if no multi-payment lines added, use single method directly
           let finalPayments: import('../types').AbonoPayment[];
-          if (abonoPayments.length === 0) {
-            // Single payment mode
+          if (abonoMode === 'unico' || abonoPayments.length === 0) {
+            // Pago único
             const usd = isUsdMethod(abonoMethod) ? val : 0;
             const ves = !isUsdMethod(abonoMethod) ? parseFloat((val * tasaDia).toFixed(2)) : 0;
-            finalPayments = [{ metodo_pago: abonoMethod, monto_usd: usd, monto_ves: ves, referencia: abonoRef }];
+            finalPayments = [{ metodo_pago: abonoMethod, monto_usd: usd, monto_ves: ves, referencia: abonoRef.trim() }];
           } else {
-            // Multi-payment mode: verify coverage
-            const sumUsd = abonoPayments.reduce((acc, p) => acc + p.monto_usd, 0);
-            if (Math.abs(sumUsd - val) > 0.02) {
-              showAlert(`Los pagos en $ deben sumar exactamente $${val.toFixed(2)}. Actualmente suman $${sumUsd.toFixed(2)}.`, 'Distribución Incompleta', 'warning');
+            // Pago mixto desglosado
+            if (Math.abs(totalPagadoUsd - val) > 0.02) {
+              showAlert(`Los pagos registrados en el desglose deben cubrir exactamente $${val.toFixed(2)}. Actualmente suman $${totalPagadoUsd.toFixed(2)}.`, 'Distribución Incompleta', 'warning');
               return;
             }
             finalPayments = abonoPayments;
           }
 
-          onRegisterAbono(abonoClient.id, val, finalPayments, abonoObservacion);
+          onRegisterAbono(abonoClient.id, val, finalPayments, abonoObservacion.trim());
           setShowCajaAbonoModal(false);
           setAbonoMethod('Efectivo$');
           setAbonoRef('');
+          setAbonoLineAmount('');
           setAbonoObservacion('');
           setAbonoPayments([]);
-          showToast('Abono registrado con éxito de forma segura.', 'success');
+          setAbonoMode('unico');
+          showToast('Abono registrado exitosamente en la base de datos.', 'success');
         };
 
         return (
@@ -3106,7 +3230,7 @@ export default function CajaPOS({
 
               <div className="p-5 space-y-4">
                 
-                {/* Search Client */}
+                {/* BÚSQUEDA DE CLIENTE DE CRÉDITO */}
                 {!abonoClient ? (
                   <div className="space-y-2">
                     <label className="text-[10px] text-slate-500 block font-sans font-bold uppercase tracking-wider">Buscar Cliente:</label>
@@ -3121,10 +3245,9 @@ export default function CajaPOS({
                       />
                     </div>
                     
-                    {/* Search Results List */}
                     <div className="border border-slate-200 rounded-lg max-h-40 overflow-y-auto divide-y divide-slate-100 text-xs font-sans">
                       {filteredAbonoClients.length === 0 ? (
-                        <div className="p-3 text-center text-slate-400 italic">No se encontraron clientes de crédito.</div>
+                        <div className="p-3 text-center text-slate-400 italic">No se encontraron clientes con deuda pendiente.</div>
                       ) : (
                         filteredAbonoClients.map(c => (
                           <div 
@@ -3133,7 +3256,7 @@ export default function CajaPOS({
                               setAbonoClient(c);
                               setAbonoAmount(c.saldo_pendiente.toFixed(2));
                             }}
-                            className="p-2.5 hover:bg-slate-50 cursor-pointer flex justify-between items-center"
+                            className="p-2.5 hover:bg-slate-50 cursor-pointer flex justify-between items-center transition-colors"
                           >
                             <div className="flex flex-col">
                               <span className="font-bold text-slate-800 uppercase">{c.nombre}</span>
@@ -3141,7 +3264,7 @@ export default function CajaPOS({
                             </div>
                             <div className="text-right flex flex-col items-end">
                               <span className={`font-mono font-bold ${c.saldo_pendiente > 0 ? 'text-red-600' : 'text-slate-500'}`}>Deuda: ${c.saldo_pendiente.toFixed(2)}</span>
-                              <span className="text-[9px] text-slate-400">Límite: ${c.limite_credito.toFixed(2)}</span>
+                              <span className="text-[9px] text-slate-400 font-mono">Bs {(c.saldo_pendiente * tasaDia).toFixed(2)}</span>
                             </div>
                           </div>
                         ))
@@ -3150,140 +3273,236 @@ export default function CajaPOS({
                   </div>
                 ) : (
                   
-                  /* Amount Form */
-                  <div className="space-y-3">
-                    <div className="bg-sky-50 border border-sky-100 p-3 rounded-lg text-xs leading-tight font-sans">
-                      <div className="font-extrabold uppercase text-sky-900 mb-0.5">{abonoClient.nombre}</div>
-                      <div className="font-mono text-slate-500 text-[10px] font-bold mb-2">{abonoClient.cedula_rif}</div>
-                      <div className="flex justify-between font-mono font-bold">
-                        <span>Deuda Pendiente:</span>
-                        <span className="text-red-700">${abonoClient.saldo_pendiente.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between font-mono text-[10px] text-slate-500 mt-0.5">
-                        <span>Crédito Disponible:</span>
-                        <span>${abonoClient.credito_disponible.toFixed(2)} / ${abonoClient.limite_credito.toFixed(2)}</span>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="text-[10px] text-slate-500 block mb-1.5 font-sans font-bold uppercase tracking-wider">Monto a Abonar ($ USD):</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={abonoAmount}
-                        onChange={(e) => setAbonoAmount(e.target.value)}
-                        placeholder="0.00"
-                        className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-emerald-600 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
-                        autoFocus
-                      />
-                    </div>
-
-                    {/* ---- PAGOS AGREGADOS ---- */}
-                    {abonoPayments.length > 0 && (
-                      <div className="space-y-1">
-                        <label className="text-[10px] text-slate-500 block font-sans font-bold uppercase tracking-wider">Pagos Registrados:</label>
-                        <div className="border border-slate-200 rounded divide-y divide-slate-100">
-                          {abonoPayments.map((p, i) => (
-                            <div key={i} className="px-2.5 py-1.5 flex justify-between items-center text-xs font-mono">
-                              <span className="text-slate-700 font-bold">{p.metodo_pago}</span>
-                              <div className="flex items-center gap-2">
-                                {p.monto_usd > 0 && <span className="text-emerald-700">${p.monto_usd.toFixed(2)}</span>}
-                                {p.monto_ves > 0 && <span className="text-blue-700">Bs {p.monto_ves.toFixed(2)}</span>}
-                                <button onClick={() => setAbonoPayments(prev => prev.filter((_, j) => j !== i))} className="text-red-400 hover:text-red-600 ml-1 text-xs">✕</button>
-                              </div>
-                            </div>
-                          ))}
+                  /* FORMULARIO DE ABONO DE CRÉDITO */
+                  <div className="space-y-3.5">
+                    
+                    {/* TARJETA DE DEUDA DEL CLIENTE */}
+                    <div className="bg-sky-50 border border-sky-150 p-3.5 rounded-xl text-xs font-sans leading-tight shadow-sm space-y-1.5">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <div className="font-black uppercase text-sky-950 text-sm">{abonoClient.nombre}</div>
+                          <div className="font-mono text-slate-500 text-[10px] font-bold">{abonoClient.cedula_rif}</div>
                         </div>
-                        {restante > 0.01 && <div className="text-[10px] text-amber-700 font-bold font-sans">Saldo restante por cubrir: ${restante.toFixed(2)}</div>}
-                        {restante <= 0.01 && <div className="text-[10px] text-emerald-700 font-bold font-sans">✓ Monto total cubierto</div>}
+                        <button
+                          type="button"
+                          onClick={() => { setAbonoClient(null); setAbonoPayments([]); setAbonoRef(''); setAbonoMode('unico'); }}
+                          className="text-[10px] text-sky-700 hover:text-sky-900 font-bold underline"
+                        >
+                          Cambiar
+                        </button>
+                      </div>
+
+                      <div className="bg-white/80 border border-sky-200 p-2 rounded-lg flex justify-between items-center font-mono">
+                        <span className="font-sans text-[11px] font-bold text-slate-600">Deuda Pendiente:</span>
+                        <div className="text-right">
+                          <span className="text-red-600 font-black text-sm block">${abonoClient.saldo_pendiente.toFixed(2)} USD</span>
+                          <span className="text-slate-500 text-[10px] font-bold block">Bs {(abonoClient.saldo_pendiente * tasaDia).toFixed(2)} VES</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* SELECTOR DE TIPO DE ABONO: PAGO ÚNICO vs PAGO MIXTO */}
+                    <div className="flex border border-slate-250 rounded-lg p-0.5 bg-slate-100 font-sans text-xs">
+                      <button
+                        type="button"
+                        onClick={() => { setAbonoMode('unico'); setAbonoPayments([]); }}
+                        className={`flex-1 py-1.5 rounded-md font-bold transition-all ${abonoMode === 'unico' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                      >
+                        💵 Pago Único
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setAbonoMode('mixto'); }}
+                        className={`flex-1 py-1.5 rounded-md font-bold transition-all ${abonoMode === 'mixto' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                      >
+                        🔀 Pago Mixto / Combinado
+                      </button>
+                    </div>
+
+                    {/* MONTO PRINCIPAL A ABONAR */}
+                    <div>
+                      <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold uppercase tracking-wider">Monto Total a Abonar ($ USD):</label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={abonoAmount}
+                          onChange={(e) => setAbonoAmount(e.target.value)}
+                          placeholder="0.00"
+                          className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-black font-mono text-emerald-700 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                          autoFocus
+                        />
+                        {totalAbono > 0 && (
+                          <span className="absolute right-3 top-2.5 text-[11px] font-mono text-slate-500 font-bold">
+                            = Bs {(totalAbono * tasaDia).toFixed(2)} VES
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* VISTA 1: PAGO ÚNICO (UN SOLO MÉTODO DE PAGO) */}
+                    {abonoMode === 'unico' && (
+                      <div className="space-y-3 bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                        <div>
+                          <label className="text-[10px] text-slate-600 block mb-1 font-sans font-bold uppercase tracking-wider">Forma de Pago:</label>
+                          <select
+                            value={abonoMethod}
+                            onChange={(e) => setAbonoMethod(e.target.value as import('../types').MetodoPagoAbono)}
+                            className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-sans text-slate-800 font-bold focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                          >
+                            <option value="Efectivo$">💵 Efectivo en Dólares ($ USD)</option>
+                            <option value="EfectivoBs">🇻🇪 Efectivo en Bolívares (Bs VES)</option>
+                            <option value="TarjetaBs">💳 Tarjeta de Débito / Crédito (Bs)</option>
+                            <option value="PagoMovil">📱 Pago Móvil (Bs)</option>
+                            <option value="Biopago">👆 Biopago (Bs)</option>
+                            <option value="Binance">₿ Binance / USDT</option>
+                            <option value="PayPal">🅿️ PayPal</option>
+                            <option value="Zelle">💸 Zelle</option>
+                          </select>
+                        </div>
+
+                        {/* Mostrar equivalencia en Bs si es un método en Bolívares */}
+                        {!isUsdMethod(abonoMethod) && (
+                          <div className="bg-emerald-50 border border-emerald-200 px-3 py-2 rounded-lg flex justify-between items-center text-xs font-mono">
+                            <span className="font-sans text-[10px] font-bold uppercase text-emerald-800">Cobrar en Bolívares:</span>
+                            <span className="font-black text-emerald-700 text-sm">Bs {(totalAbono * tasaDia).toFixed(2)} VES</span>
+                          </div>
+                        )}
+
+                        {/* Número de Referencia (si aplica) */}
+                        {abonoMethod !== 'Efectivo$' && abonoMethod !== 'EfectivoBs' && (
+                          <div>
+                            <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold uppercase tracking-wider">Nº de Referencia / Transacción:</label>
+                            <input
+                              type="text"
+                              value={abonoRef}
+                              onChange={(e) => setAbonoRef(e.target.value)}
+                              placeholder="Ej: 123456"
+                              className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                            />
+                          </div>
+                        )}
                       </div>
                     )}
 
-                    {/* ---- AGREGAR FORMA DE PAGO ---- */}
-                    <div className="border border-dashed border-slate-300 rounded-lg p-3 space-y-2 bg-slate-50">
-                      <label className="text-[10px] text-slate-600 block font-sans font-bold uppercase tracking-wider">
-                        {abonoPayments.length === 0 ? 'Forma de Pago:' : '➕ Agregar otro método de pago:'}
-                      </label>
-                      <div className="flex gap-2">
-                        <select
-                          value={abonoMethod}
-                          onChange={(e) => setAbonoMethod(e.target.value as import('../types').MetodoPagoAbono)}
-                          className="flex-1 bg-white border border-slate-300 rounded p-2 text-xs font-sans text-slate-800 focus:ring-2 focus:ring-winter-blueBtn focus:outline-none"
-                        >
-                          <option value="Efectivo$">💵 Efectivo $ USD</option>
-                          <option value="EfectivoBs">🇻🇪 Efectivo Bs VES</option>
-                          <option value="TarjetaBs">💳 Tarjeta Bs</option>
-                          <option value="PagoMovil">📱 Pago Móvil</option>
-                          <option value="Biopago">👆 Biopago</option>
-                          <option value="Binance">₿ Binance / USDT</option>
-                          <option value="PayPal">🅿️ PayPal</option>
-                          <option value="Zelle">💸 Zelle</option>
-                        </select>
-                      </div>
-                      <div className="flex gap-2 items-center">
-                        <div className="flex-1">
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={abonoRef}
-                            onChange={(e) => setAbonoRef(e.target.value)}
-                            placeholder={['Efectivo$','Tarjeta$','Binance','PayPal','Zelle'].includes(abonoMethod) ? 'Monto en USD' : 'Monto equivalente en USD'}
-                            className="w-full bg-white border border-slate-300 rounded p-2 text-xs font-bold font-mono text-emerald-700 focus:ring-2 focus:ring-winter-blueBtn focus:outline-none"
-                          />
+                    {/* VISTA 2: PAGO MIXTO / COMBINADO (MÚLTIPLES LÍNEAS DE PAGO) */}
+                    {abonoMode === 'mixto' && (
+                      <div className="space-y-3 bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                        
+                        {/* RESUMEN DE SALDO RESTANTE EN TIEMPO REAL */}
+                        <div className={`p-2.5 rounded-lg border text-xs font-sans flex justify-between items-center ${restanteUsd <= 0.01 ? 'bg-emerald-50 border-emerald-200 text-emerald-800 font-bold' : 'bg-amber-50 border-amber-200 text-amber-900 font-bold'}`}>
+                          <span>Falta por Cubrir:</span>
+                          <div className="text-right font-mono font-black">
+                            <span className="text-sm block">${restanteUsd.toFixed(2)} USD</span>
+                            <span className="text-[10px] block opacity-80">Bs {restanteVes.toFixed(2)} VES</span>
+                          </div>
                         </div>
+
+                        {/* TABLA DE LÍNEAS DE PAGO INGRESADAS */}
                         {abonoPayments.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={handleAddPaymentLine}
-                            className="px-3 py-2 bg-slate-700 hover:bg-slate-800 text-white rounded text-xs font-bold font-sans"
-                          >
-                            Agregar
-                          </button>
+                          <div className="border border-slate-200 rounded-lg divide-y divide-slate-200 bg-white">
+                            {abonoPayments.map((p, i) => (
+                              <div key={i} className="p-2 flex justify-between items-center text-xs font-mono">
+                                <div>
+                                  <span className="font-bold text-slate-800 block">{p.metodo_pago}</span>
+                                  {p.referencia && <span className="text-[9px] text-slate-400 block font-sans">Ref: {p.referencia}</span>}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {p.monto_usd > 0 && <span className="text-emerald-700 font-bold">${p.monto_usd.toFixed(2)}</span>}
+                                  {p.monto_ves > 0 && <span className="text-blue-700 font-bold">Bs {p.monto_ves.toFixed(2)}</span>}
+                                  <button onClick={() => setAbonoPayments(prev => prev.filter((_, j) => j !== i))} className="text-red-400 hover:text-red-600 text-xs p-1">✕</button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* FORMULARIO PARA AGREGAR NUEVA LÍNEA EN PAGO MIXTO */}
+                        {restanteUsd > 0.01 && (
+                          <div className="border border-dashed border-slate-300 rounded-lg p-2.5 space-y-2 bg-white">
+                            <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-slate-600 block">
+                              ➕ Agregar pago desglosado:
+                            </span>
+
+                            <div className="grid grid-cols-2 gap-2">
+                              <select
+                                value={abonoMethod}
+                                onChange={(e) => setAbonoMethod(e.target.value as import('../types').MetodoPagoAbono)}
+                                className="bg-slate-50 border border-slate-300 rounded p-1.5 text-xs font-sans text-slate-800 font-bold focus:outline-none"
+                              >
+                                <option value="Efectivo$">💵 Efectivo $ USD</option>
+                                <option value="EfectivoBs">🇻🇪 Efectivo Bs VES</option>
+                                <option value="TarjetaBs">💳 Tarjeta Bs</option>
+                                <option value="PagoMovil">📱 Pago Móvil</option>
+                                <option value="Biopago">👆 Biopago</option>
+                                <option value="Binance">₿ Binance / USDT</option>
+                                <option value="PayPal">🅿️ PayPal</option>
+                                <option value="Zelle">💸 Zelle</option>
+                              </select>
+
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={abonoLineAmount}
+                                onChange={(e) => setAbonoLineAmount(e.target.value)}
+                                placeholder={isUsdMethod(abonoMethod) ? `Monto en $ (máx $${restanteUsd.toFixed(2)})` : `Monto en Bs (máx Bs ${restanteVes.toFixed(2)})`}
+                                className="bg-slate-50 border border-slate-300 rounded p-1.5 text-xs font-bold font-mono text-emerald-700 focus:outline-none"
+                              />
+                            </div>
+
+                            <div className="flex gap-2">
+                              {abonoMethod !== 'Efectivo$' && abonoMethod !== 'EfectivoBs' && (
+                                <input
+                                  type="text"
+                                  value={abonoRef}
+                                  onChange={(e) => setAbonoRef(e.target.value)}
+                                  placeholder="Nº Referencia (Opcional)"
+                                  className="flex-1 bg-slate-50 border border-slate-300 rounded p-1.5 text-xs font-mono focus:outline-none"
+                                />
+                              )}
+                              <button
+                                type="button"
+                                onClick={handleAddPaymentLine}
+                                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded text-xs font-bold font-sans ml-auto"
+                              >
+                                + Añadir Pago
+                              </button>
+                            </div>
+                          </div>
                         )}
                       </div>
-                      {!(['Efectivo$','Tarjeta$','Binance','PayPal','Zelle'].includes(abonoMethod)) && abonoRef && (
-                        <div className="text-[10px] font-mono text-blue-700 font-bold">
-                          = Bs {((parseFloat(abonoRef || '0') || 0) * tasaDia).toFixed(2)}
-                        </div>
-                      )}
-                    </div>
+                    )}
 
-                    {/* ---- OBSERVACIÓN ---- */}
+                    {/* OBSERVACIÓN OPCIONAL */}
                     <div>
-                      <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold uppercase tracking-wider">Observación (Opcional):</label>
+                      <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold uppercase tracking-wider">Observación / Nota (Opcional):</label>
                       <input
                         type="text"
                         value={abonoObservacion}
                         onChange={(e) => setAbonoObservacion(e.target.value)}
-                        placeholder="Ej: Pago correspondiente a factura FAC-0045"
-                        className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-sans focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:outline-none"
+                        placeholder="Ej: Pago parcial correspondiente a factura FAC-0045"
+                        className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs font-sans focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                       />
                     </div>
-
-                    <button
-                       onClick={() => { setAbonoClient(null); setAbonoPayments([]); setAbonoRef(''); }}
-                       className="text-[9px] text-slate-455 hover:text-slate-650 underline font-sans"
-                     >
-                       ← Seleccionar otro cliente
-                     </button>
                   </div>
                 )}
               </div>
 
-              <div className="bg-slate-55 px-5 py-3.5 border-t border-slate-200 flex justify-end gap-2.5">
+              <div className="bg-slate-50 px-5 py-3.5 border-t border-slate-250 flex justify-end gap-2.5">
                 <button
                   onClick={() => setShowCajaAbonoModal(false)}
-                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold font-sans transition-all active:scale-95 focus:ring-2 focus:ring-slate-400 focus:outline-none"
+                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold font-sans transition-all active:scale-95 focus:outline-none"
                 >
                   Cancelar
                 </button>
-                <button
-                  onClick={handleSaveCajaAbono}
-                  disabled={!abonoClient}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 text-white rounded-lg text-xs font-bold font-sans transition-all active:scale-95 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                >
-                  Registrar Abono
-                </button>
+                {abonoClient && (
+                  <button
+                    onClick={handleSaveCajaAbono}
+                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold font-sans tracking-wider transition-all active:scale-95 shadow-md focus:outline-none"
+                  >
+                    Registrar Abono
+                  </button>
+                )}
               </div>
 
             </div>
@@ -3545,8 +3764,36 @@ export default function CajaPOS({
 
                       {(cierreResult.abonosPuntoVes ?? 0) > 0 && (
                         <div className="flex justify-between font-bold text-indigo-700">
-                          <span>Abono Clientes (Punto / P.Móvil) :</span>
+                          <span>Abono Clientes (Punto / Tarjeta) :</span>
                           <span>Bs {cierreResult.abonosPuntoVes!.toFixed(2)}</span>
+                        </div>
+                      )}
+
+                      {(cierreResult.abonosPagoMovilVes ?? 0) > 0 && (
+                        <div className="flex justify-between font-bold text-blue-700">
+                          <span>Abono Clientes (Pago Móvil) :</span>
+                          <span>Bs {cierreResult.abonosPagoMovilVes!.toFixed(2)}</span>
+                        </div>
+                      )}
+
+                      {(cierreResult.abonosZelleUsd ?? 0) > 0 && (
+                        <div className="flex justify-between font-bold text-purple-700">
+                          <span>Abono Clientes (Zelle $) :</span>
+                          <span>$ {cierreResult.abonosZelleUsd!.toFixed(2)}</span>
+                        </div>
+                      )}
+
+                      {(cierreResult.abonosBinanceUsd ?? 0) > 0 && (
+                        <div className="flex justify-between font-bold text-amber-700">
+                          <span>Abono Clientes (Binance $) :</span>
+                          <span>$ {cierreResult.abonosBinanceUsd!.toFixed(2)}</span>
+                        </div>
+                      )}
+
+                      {(cierreResult.abonosPayPalUsd ?? 0) > 0 && (
+                        <div className="flex justify-between font-bold text-sky-600">
+                          <span>Abono Clientes (PayPal $) :</span>
+                          <span>$ {cierreResult.abonosPayPalUsd!.toFixed(2)}</span>
                         </div>
                       )}
 
@@ -4114,188 +4361,266 @@ export default function CajaPOS({
                       No se encontraron facturas registradas.
                     </div>
                   ) : (
-                    filteredDevSales.map(sale => (
-                      <button
-                        key={sale.id || sale.factura_nro}
-                        onClick={() => handleSelectDevSale(sale)}
-                        className={`w-full text-left p-3 rounded-lg border transition-all flex flex-col gap-1 ${
-                          devSelectedSale?.factura_nro === sale.factura_nro
-                            ? 'bg-rose-50 border-rose-250 text-rose-900 shadow-sm'
-                            : 'bg-white border-slate-150 hover:bg-slate-50 text-slate-750'
-                        }`}
-                      >
-                        <div className="flex justify-between font-mono font-bold text-[10px]">
-                          <span>{sale.factura_nro}</span>
-                          <span>${sale.totalUSD.toFixed(2)}</span>
-                        </div>
-                        <div className="text-[9px] uppercase font-sans text-slate-500 flex justify-between">
-                          <span className="truncate max-w-[130px]">{sale.client.nombre}</span>
-                          <span>{sale.fecha}</span>
-                        </div>
-                      </button>
-                    ))
+                    filteredDevSales.map(sale => {
+                      const salesList = allSalesList.length > 0 ? allSalesList : shiftSales;
+                      const returnInfo = getSaleReturnInfo(sale, salesList);
+                      const isSelected = devSelectedSale?.factura_nro === sale.factura_nro;
+
+                      let bgBorderClass = 'bg-white border-slate-200 hover:bg-slate-50 text-slate-800';
+                      if (isSelected) {
+                        bgBorderClass = 'bg-rose-50 border-rose-400 text-rose-950 shadow-md ring-2 ring-rose-400';
+                      } else if (returnInfo.isFullyReturned) {
+                        bgBorderClass = 'bg-rose-100/90 border-rose-500 text-rose-950 font-bold shadow-xs';
+                      } else if (returnInfo.isPartiallyReturned) {
+                        bgBorderClass = 'bg-amber-50 border-amber-400 text-amber-950 font-bold shadow-xs';
+                      }
+
+                      return (
+                        <button
+                          key={sale.id || sale.factura_nro}
+                          onClick={() => handleSelectDevSale(sale)}
+                          className={`w-full text-left p-3 rounded-lg border transition-all flex flex-col gap-1.5 ${bgBorderClass}`}
+                        >
+                          <div className="flex justify-between font-mono font-bold text-[10px] items-center">
+                            <span>{sale.factura_nro}</span>
+                            <div className="flex items-center gap-1">
+                              {returnInfo.isFullyReturned && (
+                                <span className="bg-red-600 text-white text-[8px] px-1.5 py-0.5 rounded font-black tracking-wider uppercase">
+                                  🔴 DEVOLUCIÓN TOTAL
+                                </span>
+                              )}
+                              {returnInfo.isPartiallyReturned && (
+                                <span className="bg-amber-500 text-white text-[8px] px-1.5 py-0.5 rounded font-black tracking-wider uppercase">
+                                  ⚠️ DEV. PARCIAL
+                                </span>
+                              )}
+                              <span>${sale.totalUSD.toFixed(2)}</span>
+                            </div>
+                          </div>
+                          <div className="text-[9px] uppercase font-sans text-slate-500 flex justify-between">
+                            <span className="truncate max-w-[130px]">{sale.client.nombre}</span>
+                            <span>{sale.fecha}</span>
+                          </div>
+                        </button>
+                      );
+                    })
                   )}
                 </div>
               </div>
 
               {/* Right Column: Return Items and Refund Details */}
               <div className="w-full md:w-3/5 p-5 flex flex-col justify-between bg-slate-50 overflow-y-auto">
-                {devSelectedSale ? (
-                  <div className="space-y-4 flex-grow flex flex-col justify-between">
-                    <div className="space-y-4">
-                      {/* Ticket header info banner */}
-                      <div className="bg-white border border-slate-200 p-3 rounded-lg flex justify-between items-center text-xs font-sans shadow-xs">
-                        <div>
-                          <span className="text-[9px] text-slate-400 block uppercase">Cliente</span>
-                          <strong className="text-slate-800 block uppercase">{devSelectedSale.client.nombre} ({devSelectedSale.client.cedula_rif})</strong>
-                        </div>
-                        <div className="text-right">
-                          <span className="text-[9px] text-slate-400 block uppercase">Total Original</span>
-                          <strong className="text-slate-800 block font-mono">${devSelectedSale.totalUSD.toFixed(2)}</strong>
-                        </div>
-                      </div>
+                {devSelectedSale ? (() => {
+                  const salesList = allSalesList.length > 0 ? allSalesList : shiftSales;
+                  const selectedReturnInfo = getSaleReturnInfo(devSelectedSale, salesList);
+                  
+                  return (
+                    <div className="space-y-4 flex-grow flex flex-col justify-between">
+                      <div className="space-y-4">
+                        {/* BANNER DE ADVERTENCIA SEGÚN ESTADO DE DEVOLUCIÓN */}
+                        {selectedReturnInfo.isFullyReturned && (
+                          <div className="bg-red-600 text-white p-3.5 rounded-xl font-sans text-xs flex items-center gap-3 shadow-md border border-red-700">
+                            <XCircle className="w-5 h-5 flex-shrink-0" />
+                            <div>
+                              <strong className="block text-sm uppercase">⛔ Factura Totalmente Devuelta</strong>
+                              <span className="text-[11px] opacity-90 block">Esta factura ya fue devuelta en su totalidad (100% de productos reembolsados). No se permite registrar devoluciones adicionales.</span>
+                            </div>
+                          </div>
+                        )}
 
-                      {/* Método de Pago Original */}
-                      <div className="bg-slate-100 border border-slate-200 px-3 py-2 rounded-lg text-[10px] font-sans flex flex-col gap-1 shadow-xs">
-                        <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Forma de Pago Original:</span>
-                        <div className="flex flex-wrap gap-2.5 font-semibold text-slate-700">
-                          {devSelectedSale.pagos?.map((p, pIdx) => {
-                            let label: string = p.metodo;
-                            if (p.metodo === 'Efectivo$') label = 'Efectivo $';
-                            else if (p.metodo === 'EfectivoBs') label = 'Efectivo Bs';
-                            else if (p.metodo === 'TarjetaBs') label = 'Tarjeta Bs';
-                            else if (p.metodo === 'PagoMovil') label = 'Pago Móvil Bs';
-                            else if (p.metodo === 'Biopago') label = 'Biopago Bs';
-                            else if (p.metodo === 'CreditoCliente') label = 'Crédito';
+                        {selectedReturnInfo.isPartiallyReturned && (
+                          <div className="bg-amber-50 border border-amber-300 text-amber-900 p-3 rounded-xl font-sans text-xs flex items-center gap-2.5 shadow-sm">
+                            <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                            <div>
+                              <strong className="block uppercase text-amber-950">⚠️ Factura con Devolución Parcial</strong>
+                              <span className="text-[11px] text-amber-800 block">Esta factura registra productos devueltos previamente. Solo podrá devolver la cantidad faltante de cada producto.</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Ticket header info banner */}
+                        <div className="bg-white border border-slate-200 p-3 rounded-lg flex justify-between items-center text-xs font-sans shadow-xs">
+                          <div>
+                            <span className="text-[9px] text-slate-400 block uppercase">Cliente</span>
+                            <strong className="text-slate-800 block uppercase">{devSelectedSale.client.nombre} ({devSelectedSale.client.cedula_rif})</strong>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[9px] text-slate-400 block uppercase">Total Original</span>
+                            <strong className="text-slate-800 block font-mono">${devSelectedSale.totalUSD.toFixed(2)}</strong>
+                          </div>
+                        </div>
+
+                        {/* Método de Pago Original */}
+                        <div className="bg-slate-100 border border-slate-200 px-3 py-2 rounded-lg text-[10px] font-sans flex flex-col gap-1 shadow-xs">
+                          <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Forma de Pago Original:</span>
+                          <div className="flex flex-wrap gap-2.5 font-semibold text-slate-700">
+                            {devSelectedSale.pagos?.map((p, pIdx) => {
+                              let label: string = p.metodo;
+                              if (p.metodo === 'Efectivo$') label = 'Efectivo $';
+                              else if (p.metodo === 'EfectivoBs') label = 'Efectivo Bs';
+                              else if (p.metodo === 'TarjetaBs') label = 'Tarjeta Bs';
+                              else if (p.metodo === 'PagoMovil') label = 'Pago Móvil Bs';
+                              else if (p.metodo === 'Biopago') label = 'Biopago Bs';
+                              else if (p.metodo === 'CreditoCliente') label = 'Crédito';
+                              
+                              const currency = p.metodo.includes('$') || p.metodo === 'CreditoCliente' ? '$' : 'Bs';
+                              const formattedMonto = currency === '$' ? `$${p.monto.toFixed(2)}` : `Bs ${p.monto.toFixed(2)}`;
+                              
+                              return (
+                                <div key={pIdx} className="bg-white border border-slate-200 px-2 py-0.5 rounded shadow-xs text-[9px] flex items-center gap-1">
+                                  <span className="text-[8px] text-sky-700 font-bold uppercase">{label}:</span>
+                                  <span className="font-mono font-bold text-slate-800">{formattedMonto}</span>
+                                  {p.reference && <span className="text-[8px] text-slate-400 font-mono">Ref: {p.reference}</span>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {/* Display vuelto (change) if any */}
+                          {((devSelectedSale.vueltoUSD || 0) > 0 || (devSelectedSale.vueltoVES || 0) > 0) && (
+                            <div className="text-[8px] text-slate-500 italic mt-0.5 flex gap-2 font-mono border-t border-slate-200/60 pt-1">
+                              <span>Vuelto entregado:</span>
+                              {(devSelectedSale.vueltoUSD || 0) > 0 && <span>${(devSelectedSale.vueltoUSD || 0).toFixed(2)} USD</span>}
+                              {(devSelectedSale.vueltoVES || 0) > 0 && <span>Bs {(devSelectedSale.vueltoVES || 0).toFixed(2)} VES</span>}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex justify-between items-center border-b border-slate-200 pb-1">
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block font-mono">Modificar Cantidades a Devolver</span>
+                          <button
+                            type="button"
+                            onClick={handleSelectAllForDev}
+                            disabled={selectedReturnInfo.isFullyReturned}
+                            className="text-[9px] text-rose-700 hover:text-white font-bold font-sans bg-rose-50 hover:bg-rose-600 border border-rose-200 hover:border-transparent disabled:opacity-40 disabled:hover:bg-rose-50 disabled:hover:text-rose-700 px-2.5 py-0.5 rounded transition-all flex items-center gap-1 shadow-xs"
+                          >
+                            <RotateCcw className="w-2.5 h-2.5" />
+                            {selectedReturnInfo.isPartiallyReturned ? 'Devolver Faltantes' : 'Devolver Factura Completa'}
+                          </button>
+                        </div>
+
+                        {/* Items list to return */}
+                        <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                          {devItems.map((item, idx) => {
+                            const isItemFullyReturned = item.remainingQty <= 0;
                             
-                            const currency = p.metodo.includes('$') || p.metodo === 'CreditoCliente' ? '$' : 'Bs';
-                            const formattedMonto = currency === '$' ? `$${p.monto.toFixed(2)}` : `Bs ${p.monto.toFixed(2)}`;
-                            
+                            if (isItemFullyReturned) {
+                              return (
+                                <div key={idx} className="bg-slate-100 border border-slate-200 p-3 rounded-lg flex items-center justify-between text-xs gap-4 opacity-75">
+                                  <div className="flex-grow min-w-0">
+                                    <span className="font-bold text-slate-500 uppercase block truncate line-through">{item.product.description}</span>
+                                    <span className="text-[10px] text-rose-700 font-mono font-bold">✓ Totalmente Devuelto ({item.prevReturnedQty} de {item.qty})</span>
+                                  </div>
+                                  <span className="bg-rose-100 text-rose-800 border border-rose-200 px-2 py-0.5 rounded text-[9px] font-bold font-mono uppercase">
+                                    DEVUELTO
+                                  </span>
+                                </div>
+                              );
+                            }
+
                             return (
-                              <div key={pIdx} className="bg-white border border-slate-200 px-2 py-0.5 rounded shadow-xs text-[9px] flex items-center gap-1">
-                                <span className="text-[8px] text-sky-700 font-bold uppercase">{label}:</span>
-                                <span className="font-mono font-bold text-slate-800">{formattedMonto}</span>
-                                {p.reference && <span className="text-[8px] text-slate-400 font-mono">Ref: {p.reference}</span>}
+                              <div key={idx} className="bg-white border border-slate-200 p-3 rounded-lg flex items-center justify-between text-xs gap-4 shadow-sm">
+                                <div className="flex-grow min-w-0">
+                                  <span className="font-bold text-slate-800 uppercase block truncate">{item.product.description}</span>
+                                  <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 font-mono mt-0.5">
+                                    <span>Precio: ${item.priceUSD.toFixed(2)}</span>
+                                    <span>| Original: {item.qty}</span>
+                                    {item.prevReturnedQty > 0 && <span className="text-amber-800 font-bold bg-amber-100/70 px-1 rounded">Ya devueltos: {item.prevReturnedQty}</span>}
+                                    <span className="text-emerald-800 font-bold bg-emerald-100/70 px-1 rounded">Disponibles: {item.remainingQty}</span>
+                                  </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-2 flex-shrink-0">
+                                  <label className="text-[9px] text-slate-400 uppercase block font-sans">Devolver:</label>
+                                  <div className="flex items-center border border-slate-300 rounded overflow-hidden">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateDevQty(idx, item.returnQty - (item.product.a_granel ? 0.1 : 1))}
+                                      disabled={selectedReturnInfo.isFullyReturned}
+                                      className="bg-slate-100 hover:bg-slate-200 px-2.5 py-1 text-slate-600 font-bold disabled:opacity-40"
+                                    >
+                                      -
+                                    </button>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      max={item.remainingQty}
+                                      step={item.product.a_granel ? "0.001" : "1"}
+                                      value={item.returnQty === 0 ? '' : item.returnQty}
+                                      placeholder="0"
+                                      disabled={selectedReturnInfo.isFullyReturned}
+                                      onChange={(e) => handleUpdateDevQty(idx, item.product.a_granel ? parseFloat(e.target.value) || 0 : parseInt(e.target.value) || 0)}
+                                      className="w-12 text-center font-bold font-mono text-xs focus:outline-none disabled:bg-slate-100 disabled:text-slate-400"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateDevQty(idx, item.returnQty + (item.product.a_granel ? 0.1 : 1))}
+                                      disabled={selectedReturnInfo.isFullyReturned}
+                                      className="bg-slate-100 hover:bg-slate-200 px-2.5 py-1 text-slate-600 font-bold disabled:opacity-40"
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+                                </div>
                               </div>
                             );
                           })}
                         </div>
-                        {/* Display vuelto (change) if any */}
-                        {((devSelectedSale.vueltoUSD || 0) > 0 || (devSelectedSale.vueltoVES || 0) > 0) && (
-                          <div className="text-[8px] text-slate-500 italic mt-0.5 flex gap-2 font-mono border-t border-slate-200/60 pt-1">
-                            <span>Vuelto entregado:</span>
-                            {(devSelectedSale.vueltoUSD || 0) > 0 && <span>${(devSelectedSale.vueltoUSD || 0).toFixed(2)} USD</span>}
-                            {(devSelectedSale.vueltoVES || 0) > 0 && <span>Bs {(devSelectedSale.vueltoVES || 0).toFixed(2)} VES</span>}
-                          </div>
-                        )}
                       </div>
 
-                      <div className="flex justify-between items-center border-b border-slate-200 pb-1">
-                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block font-mono">Modificar Cantidades a Devolver</span>
+                      {/* Refund Summary and Action Form */}
+                      <div className="border-t border-slate-200 pt-4 mt-4 space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-3">
+                            <div>
+                              <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold">Concepto / Motivo de Devolución</label>
+                              <input
+                                type="text"
+                                required
+                                disabled={selectedReturnInfo.isFullyReturned}
+                                placeholder={selectedReturnInfo.isFullyReturned ? 'Factura devuelta en su totalidad' : 'ej. Producto defectuoso, cambio de talla...'}
+                                value={devMotivo}
+                                onChange={(e) => setDevMotivo(e.target.value)}
+                                className="w-full bg-white border border-slate-355 rounded p-2 text-xs text-slate-800 focus:outline-none disabled:bg-slate-100 disabled:text-slate-400"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold">Moneda de Reembolso</label>
+                              <select
+                                value={devRefundCurrency}
+                                disabled={selectedReturnInfo.isFullyReturned}
+                                onChange={(e) => setDevRefundCurrency(e.target.value as 'USD' | 'VES')}
+                                className="w-full bg-white border border-slate-355 rounded p-2 text-xs text-slate-800 focus:outline-none font-sans disabled:bg-slate-100 disabled:text-slate-400"
+                              >
+                                <option value="USD">Dólares ($ USD)</option>
+                                <option value="VES">Bolívares (Bs VES)</option>
+                              </select>
+                            </div>
+                          </div>
+                          <div className="bg-rose-50 border border-rose-100 p-3 rounded-lg flex flex-col justify-center items-end font-mono">
+                            <span className="text-[9px] text-rose-800 font-bold uppercase font-sans">Total Reembolso</span>
+                            {devRefundCurrency === 'USD' ? (
+                              <span className="text-xl font-black text-rose-700">${devRefundTotal.toFixed(2)} USD</span>
+                            ) : (
+                              <span className="text-xl font-black text-rose-700">Bs {(devRefundTotal * tasaDia).toFixed(2)} VES</span>
+                            )}
+                            <span className="text-[9px] text-slate-500 mt-1">
+                              Equivale a: {devRefundCurrency === 'USD' ? `Bs ${(devRefundTotal * tasaDia).toFixed(2)} VES` : `$${devRefundTotal.toFixed(2)} USD`}
+                            </span>
+                          </div>
+                        </div>
+
                         <button
-                          type="button"
-                          onClick={handleSelectAllForDev}
-                          className="text-[9px] text-rose-700 hover:text-white font-bold font-sans bg-rose-50 hover:bg-rose-600 border border-rose-200 hover:border-transparent px-2.5 py-0.5 rounded transition-all flex items-center gap-1 shadow-xs"
+                          onClick={handleProcessDevolucion}
+                          disabled={selectedReturnInfo.isFullyReturned || devRefundTotal === 0 || !devMotivo.trim()}
+                          className="w-full bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 disabled:text-slate-500 text-white py-3.5 rounded-lg font-bold font-sans text-xs tracking-wider transition-all shadow-md flex items-center justify-center gap-1.5"
                         >
-                          <RotateCcw className="w-2.5 h-2.5" />
-                          Devolver Factura Completa
+                          <CheckCircle2 className="w-4 h-4" />
+                          {selectedReturnInfo.isFullyReturned ? 'FACTURA TOTALMENTE DEVUELTA' : 'PROCESAR DEVOLUCIÓN Y REEMBOLSAR EFECTIVO'}
                         </button>
                       </div>
-
-                      {/* Items list to return */}
-                      <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
-                        {devItems.map((item, idx) => (
-                          <div key={idx} className="bg-white border border-slate-200 p-3 rounded-lg flex items-center justify-between text-xs gap-4 shadow-sm">
-                            <div className="flex-grow min-w-0">
-                              <span className="font-bold text-slate-800 uppercase block truncate">{item.product.description}</span>
-                              <span className="text-[10px] text-slate-500 font-mono">Precio Unit: ${item.priceUSD.toFixed(2)} | Comprado: {item.qty}</span>
-                            </div>
-                            
-                            <div className="flex items-center gap-2 flex-shrink-0">
-                              <label className="text-[9px] text-slate-400 uppercase block font-sans">Devolver:</label>
-                              <div className="flex items-center border border-slate-300 rounded overflow-hidden">
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdateDevQty(idx, item.returnQty - (item.product.a_granel ? 0.1 : 1))}
-                                  className="bg-slate-100 hover:bg-slate-200 px-2.5 py-1 text-slate-600 font-bold"
-                                >
-                                  -
-                                </button>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  max={item.qty}
-                                  step={item.product.a_granel ? "0.001" : "1"}
-                                  value={item.returnQty === 0 ? '' : item.returnQty}
-                                  placeholder="0"
-                                  onChange={(e) => handleUpdateDevQty(idx, item.product.a_granel ? parseFloat(e.target.value) || 0 : parseInt(e.target.value) || 0)}
-                                  className="w-12 text-center font-bold font-mono text-xs focus:outline-none"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdateDevQty(idx, item.returnQty + (item.product.a_granel ? 0.1 : 1))}
-                                  className="bg-slate-100 hover:bg-slate-200 px-2.5 py-1 text-slate-600 font-bold"
-                                >
-                                  +
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
                     </div>
-
-                    {/* Refund Summary and Action Form */}
-                    <div className="border-t border-slate-200 pt-4 mt-4 space-y-4">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-3">
-                          <div>
-                            <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold">Concepto / Motivo de Devolución</label>
-                            <input
-                              type="text"
-                              required
-                              placeholder="ej. Producto defectuoso, cambio de talla..."
-                              value={devMotivo}
-                              onChange={(e) => setDevMotivo(e.target.value)}
-                              className="w-full bg-white border border-slate-355 rounded p-2 text-xs text-slate-800 focus:outline-none"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold">Moneda de Reembolso</label>
-                            <select
-                              value={devRefundCurrency}
-                              onChange={(e) => setDevRefundCurrency(e.target.value as 'USD' | 'VES')}
-                              className="w-full bg-white border border-slate-355 rounded p-2 text-xs text-slate-800 focus:outline-none font-sans"
-                            >
-                              <option value="USD">Dólares ($ USD)</option>
-                              <option value="VES">Bolívares (Bs VES)</option>
-                            </select>
-                          </div>
-                        </div>
-                        <div className="bg-rose-50 border border-rose-100 p-3 rounded-lg flex flex-col justify-center items-end font-mono">
-                          <span className="text-[9px] text-rose-800 font-bold uppercase font-sans">Total Reembolso</span>
-                          {devRefundCurrency === 'USD' ? (
-                            <span className="text-xl font-black text-rose-700">${devRefundTotal.toFixed(2)} USD</span>
-                          ) : (
-                            <span className="text-xl font-black text-rose-700">Bs {(devRefundTotal * tasaDia).toFixed(2)} VES</span>
-                          )}
-                          <span className="text-[9px] text-slate-500 mt-1">
-                            Equivale a: {devRefundCurrency === 'USD' ? `Bs ${(devRefundTotal * tasaDia).toFixed(2)} VES` : `$${devRefundTotal.toFixed(2)} USD`}
-                          </span>
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={handleProcessDevolucion}
-                        disabled={devRefundTotal === 0 || !devMotivo.trim()}
-                        className="w-full bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 disabled:text-slate-500 text-white py-3.5 rounded-lg font-bold font-sans text-xs tracking-wider transition-all shadow-md flex items-center justify-center gap-1.5"
-                      >
-                        <CheckCircle2 className="w-4 h-4" />
-                        PROCESAR DEVOLUCIÓN Y REEMBOLSAR EFECTIVO
-                      </button>
-                    </div>
-                  </div>
-                ) : (
+                  );
+                })() : (
                   <div className="flex-grow flex flex-col items-center justify-center text-slate-400 text-[11px] font-sans gap-2">
                     <RotateCcw className="w-8 h-8 text-slate-300" />
                     <span>Seleccione un ticket vendido a la izquierda para iniciar la devolución.</span>

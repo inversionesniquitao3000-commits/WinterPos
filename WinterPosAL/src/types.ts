@@ -178,8 +178,13 @@ export interface CierreDetails {
   abonosEfectivoBsUsd?: number;
   abonosBiopagoVes?: number;
   abonosBiopagoUsd?: number;
+  abonosPagoMovilVes?: number;
+  abonosPagoMovilUsd?: number;
   abonosPuntoVes?: number;
   abonosPuntoUsd?: number;
+  abonosZelleUsd?: number;
+  abonosBinanceUsd?: number;
+  abonosPayPalUsd?: number;
   entradaEfectivoUsd?: number;
   entradaEfectivoVes?: number;
   salidaEfectivoUsd?: number;
@@ -241,6 +246,9 @@ export interface CierreCaja {
   abonosPagoMovilUsd?: number;
   abonosPuntoVes?: number;
   abonosPuntoUsd?: number;
+  abonosZelleUsd?: number;
+  abonosBinanceUsd?: number;
+  abonosPayPalUsd?: number;
   entradaEfectivoUsd: number;
   entradaEfectivoVes?: number;
   salidaEfectivoUsd: number;

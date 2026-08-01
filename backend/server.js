@@ -145,8 +145,8 @@ app.post('/api/clientes', async (req, res) => {
 });
 
 app.post('/api/clientes/abono', async (req, res) => {
-  const { id, monto_usd, monto_ves, metodo_pago, referencia, observacion } = req.body;
-  const success = await registerAbono(id, monto_usd || 0, monto_ves || 0, metodo_pago, referencia || '', observacion || '');
+  const { id, monto_usd, monto_ves, metodo_pago, referencia, observacion, usuario_id } = req.body;
+  const success = await registerAbono(id, monto_usd || 0, monto_ves || 0, metodo_pago, referencia || '', observacion || '', usuario_id || null);
   res.json({ success });
 });
 

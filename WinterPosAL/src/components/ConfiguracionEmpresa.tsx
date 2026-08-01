@@ -15,7 +15,7 @@ interface ConfiguracionEmpresaProps {
   currentUser: User;
   getApiUrl: (path: string) => string;
   onReloadUsers?: () => void;
-  onWipeData?: (mode: 'inventory' | 'sales' | 'clients' | 'all' | 'stock') => void;
+  onWipeData?: (mode: 'inventory' | 'sales' | 'clients' | 'all' | 'stock' | 'client_balances') => void;
 }
 
 const MODULOS_PERMISOS = [
@@ -116,6 +116,7 @@ export default function ConfiguracionEmpresa({
   const [subTabUsers, setSubTabUsers] = useState<'users' | 'roles' | 'sesiones' | 'politicas'>('users');
   const [activeSessionsList, setActiveSessionsList] = useState<any[]>([]);
   const [activeGuideModule, setActiveGuideModule] = useState<string>('inventario');
+  const [onlyClientBalances, setOnlyClientBalances] = useState(false);
 
   const fetchActiveSessions = async () => {
     try {
@@ -700,7 +701,7 @@ export default function ConfiguracionEmpresa({
   };
 
   // DB Admin Handlers
-  const handleWipeDb = async (mode: 'inventory' | 'sales' | 'clients' | 'all' | 'stock') => {
+  const handleWipeDb = async (mode: 'inventory' | 'sales' | 'clients' | 'all' | 'stock' | 'client_balances') => {
     if (!dbConfirmWord.trim().toUpperCase().includes('CONFIRMAR')) {
       showAlert('Debe escribir la palabra de seguridad "CONFIRMAR" para poder procesar la limpieza.', 'Palabra de Seguridad Incorrecta', 'error');
       return;
@@ -711,6 +712,7 @@ export default function ConfiguracionEmpresa({
     else if (mode === 'stock') confirmMsg = '¿ESTÁ TOTALMENTE SEGURO de poner a cero las existencias (stock) de todos los productos? El catálogo de productos y precios se conservará.';
     else if (mode === 'sales') confirmMsg = '¿ESTÁ TOTALMENTE SEGURO de vaciar el historial de ventas, correlativos de facturas y cierres de caja?';
     else if (mode === 'clients') confirmMsg = '¿ESTÁ TOTALMENTE SEGURO de vaciar la lista de clientes registrados?';
+    else if (mode === 'client_balances') confirmMsg = '¿ESTÁ TOTALMENTE SEGURO de reiniciar a cero los saldos pendientes de los clientes y vaciar el historial de abonos? Se conservará la lista de clientes.';
     else if (mode === 'all') confirmMsg = '⚠️ ADVERTENCIA CRÍTICA: Se formateará e inicializará el sistema por completo. Todo quedará en blanco. ¿Continuar?';
 
     const ok = await showConfirm(confirmMsg, 'Confirmar Limpieza del Sistema', { confirmLabel: 'Sí, Limpiar', isDanger: true });
@@ -745,8 +747,10 @@ export default function ConfiguracionEmpresa({
         localStorage.removeItem('pos_price_history');
         localStorage.removeItem('pos_cierres_log');
       }
-      if (mode === 'clients' || mode === 'all') {
+      if (mode === 'clients' || mode === 'all' || mode === 'client_balances') {
         localStorage.removeItem('pos_clients');
+        localStorage.removeItem('pos_abonos');
+        localStorage.removeItem('pos_shift_abonos');
       }
 
       showToast('Limpieza de base de datos ejecutada exitosamente.');
@@ -762,6 +766,7 @@ export default function ConfiguracionEmpresa({
           wipeInventory: mode === 'inventory' || mode === 'all',
           wipeSales: mode === 'sales' || mode === 'all',
           wipeClients: mode === 'clients' || mode === 'all',
+          wipeClientBalancesOnly: mode === 'client_balances',
           wipeStock: mode === 'stock'
         })
       });
@@ -2038,14 +2043,27 @@ export default function ConfiguracionEmpresa({
 
                 <div className="border border-slate-200 rounded-lg p-4 space-y-3 flex flex-col justify-between">
                   <div>
-                    <span className="font-bold text-slate-700 block">Vaciar Directorio de Clientes</span>
-                    <p className="text-[10px] text-slate-500 font-sans">Elimina todos los clientes registrados, a excepción del cliente genérico (Consumidor Final).</p>
+                    <span className="font-bold text-slate-700 block">Vaciar Directorio o Saldos de Clientes</span>
+                    <p className="text-[10px] text-slate-500 font-sans mt-0.5">
+                      {onlyClientBalances 
+                        ? 'Reinicia a cero el saldo pendiente de todos los clientes y vacía el historial de abonos en la BD, manteniendo los clientes.'
+                        : 'Elimina todos los clientes registrados, a excepción del cliente genérico (Consumidor Final).'}
+                    </p>
                   </div>
+                  <label className="flex items-center gap-2 text-xs font-sans text-slate-700 font-bold bg-slate-50 p-2 rounded border border-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={onlyClientBalances}
+                      onChange={(e) => setOnlyClientBalances(e.target.checked)}
+                      className="w-4 h-4 text-sky-600 rounded focus:ring-sky-500 cursor-pointer"
+                    />
+                    <span>Eliminar solo saldos pendientes y abonos (Mantener clientes)</span>
+                  </label>
                   <button
-                    onClick={() => handleWipeDb('clients')}
+                    onClick={() => handleWipeDb(onlyClientBalances ? 'client_balances' : 'clients')}
                     className="w-full bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 py-2 rounded font-bold font-sans text-xs transition-all"
                   >
-                    Borrar Directorio de Clientes
+                    {onlyClientBalances ? 'Reiniciar Saldos y Abonos de Clientes' : 'Borrar Directorio de Clientes'}
                   </button>
                 </div>
 
@@ -2546,7 +2564,10 @@ export default function ConfiguracionEmpresa({
                   placeholder=""
                   autoComplete="off"
                   value={userForm.usuario}
-                  onChange={(e) => setUserForm(prev => ({ ...prev, usuario: e.target.value }))}
+                  onChange={(e) => {
+                    const cleanVal = e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '');
+                    setUserForm(prev => ({ ...prev, usuario: cleanVal }));
+                  }}
                   className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs focus:bg-white focus:border-winter-configStart focus:outline-none font-mono"
                 />
               </div>
@@ -2573,7 +2594,7 @@ export default function ConfiguracionEmpresa({
                   placeholder=""
                   autoComplete="new-password"
                   value={userForm.clave}
-                  onChange={(e) => setUserForm(prev => ({ ...prev, clave: e.target.value }))}
+                  onChange={(e) => setUserForm(prev => ({ ...prev, clave: e.target.value.toLowerCase() }))}
                   className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs focus:bg-white focus:border-winter-configStart focus:outline-none font-mono"
                 />
               </div>

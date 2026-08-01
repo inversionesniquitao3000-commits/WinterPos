@@ -573,17 +573,23 @@ export default function App() {
             const trulyNew = data.sales.filter((s: any) => !existingIds.has(s.id) && !existingFacs.has(s.factura_nro));
             return trulyNew.length > 0 ? [...prev, ...trulyNew] : prev;
           });
-          // Also refresh invoice reference and active shift state for unified closure
-          if (currentUserRef.current) {
-            fetchLastInvoice();
-            const u = currentUserRef.current;
-            fetch(getApiUrl(`/cajas/estado?terminal=${encodeURIComponent(myTerminal)}&usuarioId=${u.id}&usuarioNombre=${encodeURIComponent(u.nombre)}`))
-              .then(r => r.ok ? r.json() : null)
-              .then(cajaData => {
-                if (cajaData && cajaData.abierta) {
+          fetchLastInvoice();
+        }
+
+        // Always sync active caja state for the current logged in user across all terminals
+        if (currentUserRef.current) {
+          const u = currentUserRef.current;
+          fetch(getApiUrl(`/cajas/estado?terminal=${encodeURIComponent(myTerminal)}&usuarioId=${u.id}&usuarioNombre=${encodeURIComponent(u.nombre)}`))
+            .then(r => r.ok ? r.json() : null)
+            .then(cajaData => {
+              if (cajaData) {
+                const uKey = `u_${u.id}`;
+                if (cajaData.abierta) {
                   setCajaAbierta(true);
-                  setMontoAperturaUsd(cajaData.aperturaUsd || 0);
-                  setMontoAperturaVes(cajaData.aperturaVes || 0);
+                  const openUsd = cajaData.aperturaUsd || 0;
+                  const openVes = cajaData.aperturaVes || 0;
+                  setMontoAperturaUsd(openUsd);
+                  setMontoAperturaVes(openVes);
                   setCajaVentasUsd(cajaData.ventasUsd || 0);
                   setCajaVentasVes(cajaData.ventasVes || 0);
                   setCajaMovimientosUsd(cajaData.movimientosUsd || 0);
@@ -592,10 +598,21 @@ export default function App() {
                   setShiftAbonosUsd(cajaData.shiftAbonosUsd || 0);
                   setShiftEntradasUsd(cajaData.shiftEntradasUsd || 0);
                   setShiftSalidasUsd(cajaData.shiftSalidasUsd || 0);
+
+                  localStorage.setItem(`pos_caja_abierta_${uKey}`, 'true');
+                  localStorage.setItem(`pos_apertura_usd_${uKey}`, openUsd.toString());
+                  localStorage.setItem(`pos_apertura_ves_${uKey}`, openVes.toString());
+                } else {
+                  setCajaAbierta(false);
+                  setMontoAperturaUsd(0);
+                  setMontoAperturaVes(0);
+                  localStorage.removeItem(`pos_caja_abierta_${uKey}`);
+                  localStorage.removeItem(`pos_apertura_usd_${uKey}`);
+                  localStorage.removeItem(`pos_apertura_ves_${uKey}`);
                 }
-              })
-              .catch(() => {});
-          }
+              }
+            })
+            .catch(() => {});
         }
 
         // 3. Tasa updated from another terminal
@@ -697,15 +714,36 @@ export default function App() {
         const statusRes = await fetch(getApiUrl('/status'));
         if (!statusRes.ok) throw new Error('Servidor no disponible');
 
-        // Fetch config
-        const configRes = await fetch(getApiUrl('/config'));
+        // Fetch all endpoints in parallel for maximum network performance (1 single round trip over LAN)
+        const [
+          configRes,
+          productsRes,
+          clientsRes,
+          tasasRes,
+          movementsRes,
+          priceRes,
+          salesRes,
+          abonosRes,
+          cajaRes,
+          cierresRes
+        ] = await Promise.all([
+          fetch(getApiUrl('/config')),
+          fetch(getApiUrl('/productos')),
+          fetch(getApiUrl('/clientes')),
+          fetch(getApiUrl('/tasas')),
+          fetch(getApiUrl('/movements')),
+          fetch(getApiUrl('/price-history')),
+          fetch(getApiUrl('/sales')),
+          fetch(getApiUrl('/abonos')),
+          fetch(getApiUrl(`/cajas/estado?terminal=${encodeURIComponent(terminalName)}&usuarioId=${currentUser.id}&usuarioNombre=${encodeURIComponent(currentUser.nombre)}`)),
+          fetch(getApiUrl('/cajas/cierres'))
+        ]);
+
         if (configRes.ok) {
           const configData = await configRes.json();
           setCompanyConfig(configData);
         }
 
-        // Fetch products
-        const productsRes = await fetch(getApiUrl('/productos'));
         if (productsRes.ok) {
           const productsData = await productsRes.json();
           setProducts(productsData.map((p: any) => ({
@@ -715,29 +753,21 @@ export default function App() {
           })));
         }
 
-        // Fetch clients
-        const clientsRes = await fetch(getApiUrl('/clientes'));
         if (clientsRes.ok) {
           const clientsData = await clientsRes.json();
           setClients(clientsData);
         }
 
-        // Fetch tasas
-        const tasasRes = await fetch(getApiUrl('/tasas'));
         if (tasasRes.ok) {
           const tasasData = await tasasRes.json();
           setTasaHistory(tasasData);
         }
 
-        // Fetch movements
-        const movementsRes = await fetch(getApiUrl('/movements'));
         if (movementsRes.ok) {
           const movementsData = await movementsRes.json();
           setMovements(movementsData);
         }
 
-        // Fetch price history
-        const priceRes = await fetch(getApiUrl('/price-history'));
         if (priceRes.ok) {
           const priceData = await priceRes.json();
           const normalized = priceData.map((h: any) => ({
@@ -754,28 +784,25 @@ export default function App() {
           setPriceHistory(normalized);
         }
 
-        // Fetch sales
-        const salesRes = await fetch(getApiUrl('/sales'));
         if (salesRes.ok) {
           const salesData = await salesRes.json();
           setSales(salesData);
         }
 
-        // Fetch abonos
-        const abonosRes = await fetch(getApiUrl('/abonos'));
         if (abonosRes.ok) {
           const abonosData = await abonosRes.json();
           setAbonos(abonosData);
         }
 
-        // Fetch active caja state for this specific user & terminal
-        const cajaRes = await fetch(getApiUrl(`/cajas/estado?terminal=${encodeURIComponent(terminalName)}&usuarioId=${currentUser.id}&usuarioNombre=${encodeURIComponent(currentUser.nombre)}`));
         if (cajaRes.ok) {
           const cajaData = await cajaRes.json();
+          const uKey = `u_${currentUser.id}`;
           if (cajaData.abierta) {
             setCajaAbierta(true);
-            setMontoAperturaUsd(cajaData.aperturaUsd || 0);
-            setMontoAperturaVes(cajaData.aperturaVes || 0);
+            const openUsd = cajaData.aperturaUsd || 0;
+            const openVes = cajaData.aperturaVes || 0;
+            setMontoAperturaUsd(openUsd);
+            setMontoAperturaVes(openVes);
             setCajaVentasUsd(cajaData.ventasUsd || 0);
             setCajaVentasVes(cajaData.ventasVes || 0);
             setCajaMovimientosUsd(cajaData.movimientosUsd || 0);
@@ -784,6 +811,15 @@ export default function App() {
             setShiftAbonosUsd(cajaData.shiftAbonosUsd || 0);
             setShiftEntradasUsd(cajaData.shiftEntradasUsd || 0);
             setShiftSalidasUsd(cajaData.shiftSalidasUsd || 0);
+
+            // Sync with local storage so remote machines don't retain stale local storage values
+            localStorage.setItem(`pos_caja_abierta_${uKey}`, 'true');
+            localStorage.setItem(`pos_apertura_usd_${uKey}`, openUsd.toString());
+            localStorage.setItem(`pos_apertura_ves_${uKey}`, openVes.toString());
+            localStorage.setItem(`pos_ventas_usd_${uKey}`, (cajaData.ventasUsd || 0).toString());
+            localStorage.setItem(`pos_ventas_ves_${uKey}`, (cajaData.ventasVes || 0).toString());
+            localStorage.setItem(`pos_movimientos_usd_${uKey}`, (cajaData.movimientosUsd || 0).toString());
+            localStorage.setItem(`pos_movimientos_ves_${uKey}`, (cajaData.movimientosVes || 0).toString());
           } else {
             // Explicitly reset caja state for fresh session so user is prompted for Apertura
             setCajaAbierta(false);
@@ -797,7 +833,6 @@ export default function App() {
             setShiftAbonosUsd(0);
             setShiftEntradasUsd(0);
             setShiftSalidasUsd(0);
-            const uKey = `u_${currentUser.id}`;
             localStorage.removeItem(`pos_caja_abierta_${uKey}`);
             localStorage.removeItem(`pos_apertura_usd_${uKey}`);
             localStorage.removeItem(`pos_apertura_ves_${uKey}`);
@@ -807,8 +842,6 @@ export default function App() {
           }
         }
 
-        // Fetch cierres history
-        const cierresRes = await fetch(getApiUrl('/cajas/cierres'));
         if (cierresRes.ok) {
           const cierresData = await cierresRes.json();
           setCierres(cierresData);
@@ -1426,7 +1459,8 @@ export default function App() {
         monto_ves,
         metodo_pago,
         referencia: referencia || '',
-        observacion: observacion || ''
+        observacion: observacion || '',
+        usuario_id: currentUser?.id || null
       });
     }
   };
@@ -2259,6 +2293,14 @@ export default function App() {
                 }
                 if (mode === 'clients' || mode === 'all') {
                   setClients(prev => prev.filter(c => c.cedula_rif === 'V-00000000'));
+                }
+                if (mode === 'client_balances') {
+                  setAbonos([]);
+                  setClients(prev => prev.map(c => ({
+                    ...c,
+                    saldo_pendiente: 0,
+                    credito_disponible: c.limite_credito
+                  })));
                 }
               }}
             />
