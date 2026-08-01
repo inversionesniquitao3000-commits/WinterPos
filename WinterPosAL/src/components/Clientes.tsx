@@ -772,40 +772,63 @@ export default function Clientes({
 
   return (
     <div className="space-y-4 text-slate-800 font-mono text-xs animate-fade-in">
-      
-      {/* SUBMODULE BANNER TABS (STYLISH DARK BLUE / SLATE DESIGN FOR VISIBILITY ON WHITE BACKGROUNDS) */}
-      <div className="flex bg-slate-800 text-white rounded-t-lg overflow-hidden border border-slate-700 shadow-sm">
-        <button 
-          className={`px-4 py-2.5 text-xs font-bold transition-all flex items-center gap-1.5 ${activeSubTab === 'catalogo' ? 'bg-slate-900 border-b-2 border-sky-400 text-white font-black' : 'text-slate-350 hover:bg-slate-700 hover:text-white'}`}
+      {/* HEADER SECTION */}
+      <div>
+        <h1 className="text-xl font-extrabold text-winter-header tracking-wider flex items-center gap-2">
+          <Users className="w-5 h-5 text-winter-header" />
+          GESTIÓN Y CARTERA DE CLIENTES
+        </h1>
+        <p className="text-xs text-slate-500 mt-1 font-sans">
+          Administre el catálogo maestro de clientes, límite de crédito, historial transaccional y registro de abonos.
+        </p>
+      </div>
+
+      {/* TOP TABS NAVIGATION - Aligned Left (Config Module Style) */}
+      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-1">
+        <button
           onClick={() => setActiveSubTab('catalogo')}
+          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all flex items-center gap-1.5 ${
+            activeSubTab === 'catalogo'
+              ? 'bg-white border-slate-200 text-slate-900 shadow-2xs font-extrabold'
+              : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
+          }`}
         >
           <Users className="w-3.5 h-3.5" />
           Catálogo
         </button>
-        <button 
-          className={`px-4 py-2.5 text-xs font-bold transition-all flex items-center gap-1.5 ${activeSubTab === 'historial' ? 'bg-slate-900 border-b-2 border-sky-400 text-white font-black' : 'text-slate-350 hover:bg-slate-700 hover:text-white'}`}
+        <button
           onClick={() => setActiveSubTab('historial')}
+          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all flex items-center gap-1.5 ${
+            activeSubTab === 'historial'
+              ? 'bg-white border-slate-200 text-slate-900 shadow-2xs font-extrabold'
+              : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
+          }`}
         >
           <FileText className="w-3.5 h-3.5" />
           Historial Detalle
         </button>
-        <button 
-          className={`px-4 py-2.5 text-xs font-bold transition-all flex items-center gap-1.5 ${activeSubTab === 'ranking' ? 'bg-slate-900 border-b-2 border-sky-400 text-white font-black' : 'text-slate-350 hover:bg-slate-700 hover:text-white'}`}
+        <button
           onClick={() => setActiveSubTab('ranking')}
+          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all flex items-center gap-1.5 ${
+            activeSubTab === 'ranking'
+              ? 'bg-white border-slate-200 text-slate-900 shadow-2xs font-extrabold'
+              : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
+          }`}
         >
           <TrendingUp className="w-3.5 h-3.5" />
           Movimientos por Ranking
         </button>
-        <button 
-          className={`px-4 py-2.5 text-xs font-bold transition-all flex items-center gap-1.5 ${activeSubTab === 'creditos' ? 'bg-slate-900 border-b-2 border-sky-400 text-white font-black' : 'text-slate-350 hover:bg-slate-700 hover:text-white'}`}
+        <button
           onClick={() => setActiveSubTab('creditos')}
+          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all flex items-center gap-1.5 ${
+            activeSubTab === 'creditos'
+              ? 'bg-white border-slate-200 text-slate-900 shadow-2xs font-extrabold'
+              : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
+          }`}
         >
           <DollarSign className="w-3.5 h-3.5" />
           Créditos / Abonos
         </button>
-        <div className="ml-auto flex items-center pr-4 text-[10px] uppercase font-sans tracking-widest text-slate-400 font-bold hidden sm:flex">
-          Administra tus Clientes
-        </div>
       </div>
 
       {/* FILTER SEARCH BAR + PDF EXPORT BAR */}

@@ -1898,50 +1898,48 @@ export default function Inventario({
       )}
 
       {/* HEADER SECTION */}
-      <div className="border-b border-slate-200 pb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-extrabold text-winter-inventarioStart tracking-wider flex items-center gap-2">
-            <Package className="w-5 h-5 text-winter-inventarioStart" />
-            CONTROL DE INVENTARIO Y AUDITORÍA
-          </h1>
-          <p className="text-xs text-slate-500 mt-1 font-sans">
-            Gestión centralizada del stock, mermas de almacén, auditorías de Kardex y registro histórico de precios.
-          </p>
-        </div>
+      <div>
+        <h1 className="text-xl font-extrabold text-winter-inventarioStart tracking-wider flex items-center gap-2">
+          <Package className="w-5 h-5 text-winter-inventarioStart" />
+          CONTROL DE INVENTARIO Y AUDITORÍA
+        </h1>
+        <p className="text-xs text-slate-500 mt-1 font-sans">
+          Gestión centralizada del stock, mermas de almacén, auditorías de Kardex y registro histórico de precios.
+        </p>
+      </div>
 
-        {/* SUB-TABS NAVIGATION - Light styled */}
-        <div className="flex bg-slate-200 border border-slate-350 rounded-lg p-0.5 self-start">
-          <button
-            onClick={() => setActiveSubTab('catalogo')}
-            className={`px-4 py-2 text-xs font-bold rounded-md font-sans transition-all ${
-              activeSubTab === 'catalogo'
-                ? 'bg-white text-winter-inventarioStart shadow-sm border border-slate-300/40'
-                : 'text-slate-550 hover:text-slate-800'
-            }`}
-          >
-            Catálogo
-          </button>
-          <button
-            onClick={() => setActiveSubTab('movimientos')}
-            className={`px-4 py-2 text-xs font-bold rounded-md font-sans transition-all ${
-              activeSubTab === 'movimientos'
-                ? 'bg-white text-winter-inventarioStart shadow-sm border border-slate-300/40'
-                : 'text-slate-550 hover:text-slate-800'
-            }`}
-          >
-            Kardex
-          </button>
-          <button
-            onClick={() => setActiveSubTab('precios')}
-            className={`px-4 py-2 text-xs font-bold rounded-md font-sans transition-all ${
-              activeSubTab === 'precios'
-                ? 'bg-white text-winter-inventarioStart shadow-sm border border-slate-300/40'
-                : 'text-slate-550 hover:text-slate-800'
-            }`}
-          >
-            Historial Precios
-          </button>
-        </div>
+      {/* TOP TABS NAVIGATION - Aligned Left (Config Module Style) */}
+      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-1">
+        <button
+          onClick={() => setActiveSubTab('catalogo')}
+          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all ${
+            activeSubTab === 'catalogo'
+              ? 'bg-white border-slate-200 text-slate-900 shadow-2xs font-extrabold'
+              : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
+          }`}
+        >
+          Catálogo
+        </button>
+        <button
+          onClick={() => setActiveSubTab('movimientos')}
+          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all ${
+            activeSubTab === 'movimientos'
+              ? 'bg-white border-slate-200 text-slate-900 shadow-2xs font-extrabold'
+              : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
+          }`}
+        >
+          Kardex
+        </button>
+        <button
+          onClick={() => setActiveSubTab('precios')}
+          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all ${
+            activeSubTab === 'precios'
+              ? 'bg-white border-slate-200 text-slate-900 shadow-2xs font-extrabold'
+              : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
+          }`}
+        >
+          Historial Precios
+        </button>
       </div>
 
       {/* RENDER ACTIVE PANEL */}

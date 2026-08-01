@@ -20,6 +20,8 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
   const [selectedCierre, setSelectedCierre] = useState<CierreCaja | null>(null);
   const [selectedCierreRow, setSelectedCierreRow] = useState<CierreCaja | null>(null);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+  const [selectedSaleIds, setSelectedSaleIds] = useState<string[]>([]);
+  const [selectedSaleRow, setSelectedSaleRow] = useState<Sale | null>(null);
   const [selectedCierreIds, setSelectedCierreIds] = useState<number[]>([]);
   const [capturingCierre, setCapturingCierre] = useState<CierreCaja | null>(null);
   const [sendingProgressMsg, setSendingProgressMsg] = useState<string>('');
@@ -351,6 +353,101 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
     };
   }, [finalFilteredSales]);
 
+  const toggleSelectAllSales = () => {
+    if (selectedSaleIds.length === finalFilteredSales.length && finalFilteredSales.length > 0) {
+      setSelectedSaleIds([]);
+    } else {
+      setSelectedSaleIds(finalFilteredSales.map(s => s.factura_nro));
+    }
+  };
+
+  const toggleSelectSale = (sale: Sale) => {
+    if (selectedSaleIds.includes(sale.factura_nro)) {
+      setSelectedSaleIds(prev => prev.filter(id => id !== sale.factura_nro));
+    } else {
+      setSelectedSaleIds(prev => [...prev, sale.factura_nro]);
+      setSelectedSaleRow(sale);
+    }
+  };
+
+  const selectedSalesSummary = useMemo(() => {
+    const selectedSalesList = finalFilteredSales.filter(s => selectedSaleIds.includes(s.factura_nro));
+    const totalUSD = selectedSalesList.reduce((acc, s) => s.factura_nro.startsWith('DEV-') ? acc - Math.abs(s.totalUSD) : acc + (s.totalUSD || 0), 0);
+    const totalVES = selectedSalesList.reduce((acc, s) => s.factura_nro.startsWith('DEV-') ? acc - Math.abs(s.totalVES) : acc + (s.totalVES || 0), 0);
+    return { totalUSD, totalVES, count: selectedSalesList.length };
+  }, [finalFilteredSales, selectedSaleIds]);
+
+  const activeSelectedSale = useMemo(() => {
+    if (selectedSaleRow && finalFilteredSales.some(s => s.factura_nro === selectedSaleRow.factura_nro)) {
+      return selectedSaleRow;
+    }
+    if (selectedSaleIds.length === 1) {
+      return finalFilteredSales.find(s => s.factura_nro === selectedSaleIds[0]) || null;
+    }
+    return null;
+  }, [selectedSaleRow, selectedSaleIds, finalFilteredSales]);
+
+  const handleResendWhatsAppSale = async (sale: Sale) => {
+    setSendingProgressMsg(`Enviando comprobante de factura ${sale.factura_nro}...`);
+    try {
+      const isDev = sale.factura_nro.startsWith('DEV-');
+      let textSummary = isDev ? `🔄 *COMPROBANTE DE DEVOLUCIÓN (${sale.factura_nro})*\n\n` : `🧾 *COMPROBANTE DE VENTA (${sale.factura_nro})*\n\n`;
+      textSummary += `📅 *Fecha:* ${sale.fecha}\n`;
+      textSummary += `👤 *Cliente:* ${sale.client.nombre} (${sale.client.cedula_rif || 'V-00000000'})\n`;
+      textSummary += `💼 *Atendido por:* ${sale.usuario || 'SISTEMA'}\n\n`;
+      textSummary += `📦 *PRODUCTOS / ARTÍCULOS:*\n`;
+      
+      (sale.items || []).forEach(item => {
+        const desc = item.product?.description || (item as any).descripcion || 'Producto';
+        const qty = item.qty;
+        const priceUSD = item.priceUSD || (item as any).precio_unitario_usd || 0;
+        const total = (qty * priceUSD).toFixed(2);
+        textSummary += `• ${desc} (x${qty}) - $${total}\n`;
+      });
+
+      textSummary += `\n💵 *TOTAL: $${Math.abs(sale.totalUSD || 0).toFixed(2)} USD* (Bs ${Math.abs(sale.totalVES || 0).toFixed(2)})\n`;
+      textSummary += `💳 *Pago:* ${(sale.pagos || []).map(p => `${p.metodo} ($${p.monto.toFixed(2)})`).join(', ')}\n\n`;
+      textSummary += `*WinterPosAL Cloud System*`;
+
+      let waSentSuccess = false;
+      try {
+        const res = await fetch(getApiUrl('/whatsapp/send-cierre'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ textSummary })
+        });
+        if (res.ok) waSentSuccess = true;
+      } catch (err) {
+        console.warn('Error al enviar por API de WhatsApp:', err);
+      }
+
+      if (waSentSuccess) {
+        showAlert(`El comprobante de la factura ${sale.factura_nro} fue enviado con éxito por WhatsApp.`, 'Envío Exitoso', 'success');
+      } else {
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(textSummary);
+          }
+          const encodedText = encodeURIComponent(textSummary);
+          window.open(`https://web.whatsapp.com/send?text=${encodedText}`, '_blank');
+          showAlert(`El resumen de la factura ${sale.factura_nro} fue copiado al portapapeles. Presione Ctrl+V en WhatsApp Web para adjuntarla.`, 'Copiado al Portapapeles', 'info');
+        } catch (e: any) {
+          showAlert('Error al preparar el reenvío por WhatsApp.', 'Error', 'error');
+        }
+      }
+    } finally {
+      setSendingProgressMsg('');
+    }
+  };
+
+  const handleResendBatchWhatsAppSales = async () => {
+    const selectedSalesList = finalFilteredSales.filter(s => selectedSaleIds.includes(s.factura_nro));
+    if (selectedSalesList.length === 0) return;
+    for (let i = 0; i < selectedSalesList.length; i++) {
+      await handleResendWhatsAppSale(selectedSalesList[i]);
+    }
+  };
+
   // Filter cierres list by date range if enabled
   const filteredCierres = useMemo(() => {
     if (!filterEnabled) return cierres;
@@ -427,6 +524,276 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
   }, []);
+
+  const handlePrintSingleCierrePDF = (
+    c: CierreCaja, 
+    invoices: Sale[], 
+    netoUSD: number, 
+    netoVES: number, 
+    utilidad: number
+  ) => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      showAlert('No se pudo abrir la ventana de impresión. Habilite las ventanas emergentes (popups) en su navegador.', 'Popups Bloqueados', 'warning');
+      return;
+    }
+
+    const dineroExpected = c.dineroEnCajaExpected ?? (c as any).expectedUsd ?? 0;
+    const realUsd = c.realUsd ?? 0;
+    const diffUsd = realUsd - dineroExpected;
+    const fechaAperturaStr = c.fechaApertura || 'N/A';
+    const fechaCierreStr = c.fechaCierre || c.fecha || new Date().toLocaleString('es-VE');
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Reporte de Cierre de Caja - ${c.usuario} (${c.terminal || 'LOCAL'})</title>
+          <style>
+            @page {
+              size: A4 portrait;
+              margin: 12mm 15mm 15mm 15mm;
+            }
+            body {
+              font-family: 'Segoe UI', Arial, sans-serif;
+              color: #1e293b;
+              margin: 0;
+              padding: 0;
+              font-size: 11px;
+              line-height: 1.4;
+            }
+            .header-banner {
+              border-bottom: 2.5px solid #0f172a;
+              padding-bottom: 10px;
+              margin-bottom: 15px;
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-end;
+            }
+            .title-main {
+              font-size: 18px;
+              font-weight: 800;
+              color: #0f172a;
+              margin: 0 0 4px 0;
+              letter-spacing: 0.5px;
+              text-transform: uppercase;
+            }
+            .subtitle {
+              color: #64748b;
+              font-size: 11px;
+              margin: 0;
+            }
+            .meta-box {
+              text-align: right;
+              font-size: 10px;
+              color: #475569;
+            }
+            
+            .kpi-grid {
+              display: grid;
+              grid-template-columns: repeat(4, 1fr);
+              gap: 10px;
+              margin-bottom: 15px;
+            }
+            .kpi-card {
+              background-color: #f8fafc;
+              border: 1px solid #cbd5e1;
+              border-radius: 6px;
+              padding: 8px 12px;
+            }
+            .kpi-label {
+              font-size: 9px;
+              font-weight: bold;
+              color: #64748b;
+              text-transform: uppercase;
+              margin-bottom: 3px;
+              display: block;
+            }
+            .kpi-val {
+              font-size: 14px;
+              font-weight: 800;
+              font-family: monospace;
+              color: #0f172a;
+            }
+
+            .cierre-details {
+              background-color: #f1f5f9;
+              border: 1px solid #cbd5e1;
+              border-radius: 6px;
+              padding: 10px 14px;
+              margin-bottom: 16px;
+              display: grid;
+              grid-template-columns: repeat(3, 1fr);
+              gap: 8px 16px;
+            }
+            .detail-item {
+              font-size: 10.5px;
+            }
+            .detail-item label {
+              color: #64748b;
+              font-weight: 600;
+            }
+            .detail-item span {
+              color: #0f172a;
+              font-weight: 700;
+            }
+
+            .section-title {
+              font-size: 12px;
+              font-weight: 800;
+              text-transform: uppercase;
+              color: #0f172a;
+              border-bottom: 1.5px solid #0f172a;
+              padding-bottom: 4px;
+              margin-bottom: 10px;
+              letter-spacing: 0.5px;
+            }
+            .report-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 15px;
+            }
+            .report-table th {
+              background-color: #0f172a;
+              color: #ffffff;
+              border: 1px solid #0f172a;
+              padding: 6px 8px;
+              font-weight: bold;
+              text-transform: uppercase;
+              font-size: 9.5px;
+            }
+            .report-table td {
+              border: 1px solid #cbd5e1;
+              padding: 5px 8px;
+              font-size: 10px;
+            }
+            .text-center { text-align: center !important; }
+            .text-right { text-align: right !important; }
+            .font-bold { font-weight: bold; }
+            .text-green { color: #16a34a !important; }
+            .text-red { color: #dc2626 !important; }
+            .text-emerald { color: #059669 !important; }
+            .text-dev { color: #e11d48 !important; font-weight: bold; }
+            
+            .signatures {
+              margin-top: 35px;
+              display: flex;
+              justify-content: space-between;
+              padding: 0 40px;
+            }
+            .sig-line {
+              width: 200px;
+              border-top: 1px solid #64748b;
+              text-align: center;
+              padding-top: 5px;
+              font-size: 10px;
+              color: #475569;
+              font-weight: 600;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header-banner">
+            <div>
+              <h1 class="title-main">Reporte Detallado de Cierre de Caja</h1>
+              <p class="subtitle">Desglose oficial de auditoría de turno y facturas emitidas</p>
+            </div>
+            <div class="meta-box">
+              <div><strong>Terminal:</strong> ${c.terminal || 'CAJA_01'}</div>
+              <div><strong>Impreso el:</strong> ${new Date().toLocaleString('es-VE')}</div>
+            </div>
+          </div>
+
+          <div class="cierre-details">
+            <div class="detail-item"><label>Cajero / Operador: </label><span>${c.usuario?.toUpperCase()}</span></div>
+            <div class="detail-item"><label>Estado de Caja: </label><span>${c.status || 'Conciliada'}</span></div>
+            <div class="detail-item"><label>Apertura USD / VES: </label><span>$${(c.aperturaUsd || 0).toFixed(2)} / Bs ${(c.aperturaVes || 0).toFixed(2)}</span></div>
+            <div class="detail-item"><label>Fecha Apertura: </label><span>${fechaAperturaStr}</span></div>
+            <div class="detail-item"><label>Fecha Cierre: </label><span>${fechaCierreStr}</span></div>
+            <div class="detail-item"><label>Físico Reportado: </label><span>$${(c.realUsd || 0).toFixed(2)} USD / Bs ${(c.realVes || 0).toFixed(2)}</span></div>
+            <div class="detail-item"><label>Efectivo Esperado: </label><span>$${dineroExpected.toFixed(2)} USD</span></div>
+            <div class="detail-item"><label>Diferencia Cuadre: </label><span class="${diffUsd >= 0 ? 'text-green' : 'text-red'}">$${diffUsd.toFixed(2)} USD</span></div>
+            <div class="detail-item"><label>Utilidad Neta del Cierre: </label><span class="text-emerald">$${utilidad.toFixed(2)} USD</span></div>
+          </div>
+
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <span class="kpi-label">Facturas Emitidas</span>
+              <div class="kpi-val">${invoices.length}</div>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-label">Ventas Netas ($)</span>
+              <div class="kpi-val" style="color: #047857;">$${netoUSD.toFixed(2)}</div>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-label">Ventas Netas (Bs)</span>
+              <div class="kpi-val" style="color: #4338ca;">Bs ${netoVES.toFixed(2)}</div>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-label">Utilidad Turno</span>
+              <div class="kpi-val" style="color: #059669;">$${utilidad.toFixed(2)}</div>
+            </div>
+          </div>
+
+          <div class="section-title">Facturas y Transacciones del Turno (${invoices.length})</div>
+
+          <table class="report-table">
+            <thead>
+              <tr>
+                <th style="width: 14%;">Fecha / Hora</th>
+                <th style="width: 14%;">Factura Nº</th>
+                <th style="width: 22%;">Cliente</th>
+                <th style="width: 14%;">Operador</th>
+                <th class="text-center" style="width: 12%;">Total USD</th>
+                <th class="text-center" style="width: 12%;">Total VES</th>
+                <th style="width: 12%;">Forma Pago</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${invoices.length === 0 ? `
+                <tr><td colspan="7" class="text-center" style="color: #94a3b8; padding: 15px;">No se registraron ventas en este turno de caja.</td></tr>
+              ` : invoices.map(s => {
+                const isDev = s.factura_nro?.startsWith('DEV-');
+                const sign = isDev ? '-' : '';
+                const pagosStr = (s.pagos || []).map(p => `${p.metodo}: $${p.monto.toFixed(2)}`).join(', ') || 'N/A';
+
+                return `
+                  <tr style="${isDev ? 'background-color: #fff1f2;' : ''}">
+                    <td>${s.fecha}</td>
+                    <td class="font-bold ${isDev ? 'text-dev' : ''}">${s.factura_nro}</td>
+                    <td>${s.client?.nombre || 'Público General'}<br/><span style="font-size: 8.5px; color: #64748b;">${s.client?.cedula_rif || ''}</span></td>
+                    <td style="text-transform: uppercase;">${s.usuario || c.usuario}</td>
+                    <td class="text-center font-bold ${isDev ? 'text-dev' : ''}">${sign}$${Math.abs(s.totalUSD || 0).toFixed(2)}</td>
+                    <td class="text-center font-bold ${isDev ? 'text-dev' : ''}">${sign}Bs ${Math.abs(s.totalVES || 0).toFixed(2)}</td>
+                    <td style="font-size: 8.5px;">${pagosStr}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+
+          <div class="signatures">
+            <div class="sig-line">
+              Firma Cajero / Operador<br/>
+              ${c.usuario?.toUpperCase()}
+            </div>
+            <div class="sig-line">
+              Firma Supervisión / Administración
+            </div>
+          </div>
+
+          <script>
+            window.onload = function() {
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  };
 
   const handleDownloadCierresReport = () => {
     const title = "Historial de Cierres de Caja Conciliados";
@@ -617,45 +984,59 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
   };
 
   const handleDownloadTransactionsReport = () => {
-    const title = "Historial de Facturas y Ventas Registradas";
+    const targetSales = selectedSaleIds.length > 0
+      ? finalFilteredSales.filter(s => selectedSaleIds.includes(s.factura_nro))
+      : finalFilteredSales;
+
+    const title = selectedSaleIds.length > 0 
+      ? `Reporte de Ventas Seleccionadas (${selectedSaleIds.length} facturas)`
+      : "Historial de Facturas y Ventas Registradas";
+      
     const dateStr = new Date().toLocaleString();
     const periodText = filterEnabled ? `Período: Desde ${startDate} Hasta ${endDate}` : "Todas las facturas registradas";
+
+    const totalUSD = targetSales.reduce((acc, s) => s.factura_nro.startsWith('DEV-') ? acc - Math.abs(s.totalUSD) : acc + (s.totalUSD || 0), 0);
+    const totalVES = targetSales.reduce((acc, s) => s.factura_nro.startsWith('DEV-') ? acc - Math.abs(s.totalVES) : acc + (s.totalVES || 0), 0);
 
     const tableHtml = `
       <table class="report-table">
         <thead>
           <tr>
-            <th>Fecha</th>
-            <th>Factura</th>
-            <th>Cliente</th>
-            <th>Cajero</th>
-            <th class="text-right">Total USD</th>
-            <th class="text-right">Total VES</th>
-            <th>Método Pago</th>
+            <th style="text-align: center;">FECHA</th>
+            <th style="text-align: center;">FACTURA</th>
+            <th>CLIENTE</th>
+            <th>CAJERO</th>
+            <th class="text-center">TOTAL USD</th>
+            <th class="text-center">TOTAL VES</th>
+            <th>MÉTODO PAGO</th>
           </tr>
         </thead>
         <tbody>
-          ${filteredSales.length === 0 ? `
-            <tr><td colspan="7" style="text-align: center; color: #777;">Sin ventas registradas en este rango de fechas.</td></tr>
-          ` : filteredSales.map(sale => `
-            <tr>
-              <td>${sale.fecha}</td>
-              <td class="font-bold">${sale.factura_nro}</td>
+          ${targetSales.length === 0 ? `
+            <tr><td colspan="7" style="text-align: center; color: #777;">Sin ventas seleccionadas en este rango.</td></tr>
+          ` : targetSales.map(sale => {
+            const isDev = sale.factura_nro.startsWith('DEV-');
+            return `
+            <tr style="${isDev ? 'background-color: #fff1f2;' : ''}">
+              <td style="text-align: center; font-family: monospace;">${sale.fecha}</td>
+              <td style="text-align: center; font-family: monospace; font-weight: bold; ${isDev ? 'color: #be123c;' : 'color: #334155;'}">${sale.factura_nro}</td>
               <td style="text-transform: uppercase;">${sale.client.nombre}</td>
               <td>${sale.usuario}</td>
-              <td class="text-right font-bold text-emerald">$${(sale.totalUSD ?? 0).toFixed(2)}</td>
-              <td class="text-right font-bold">Bs ${(sale.totalVES ?? 0).toFixed(2)}</td>
-              <td style="font-size: 8px;">${(sale.pagos ?? []).map(p => {
+              <td class="text-center font-bold ${isDev ? 'text-red' : 'text-emerald'}">${isDev ? '-' : ''}$${Math.abs(sale.totalUSD ?? 0).toFixed(2)}</td>
+              <td class="text-center font-bold ${isDev ? 'text-red' : ''}">${isDev ? '-' : ''}Bs ${Math.abs(sale.totalVES ?? 0).toFixed(2)}</td>
+              <td style="font-size: 8.5px;">${(sale.pagos ?? []).map(p => {
                 const amt = p.montoVES ? `Bs ${p.montoVES}` : `$${p.monto}`;
                 return `<strong>${p.metodo}</strong>: ${amt}`;
               }).join(', ')}</td>
             </tr>
-          `).join('')}
+          `;
+          }).join('')}
         </tbody>
       </table>
       <div class="report-summary">
-        <p><strong>Total Facturas:</strong> ${filteredSales.length}</p>
-        <p><strong>Total Ventas Netas:</strong> $${filteredSales.reduce((acc, s) => acc + (s.totalUSD ?? 0), 0).toFixed(2)} USD</p>
+        <p><strong>Total Facturas Registradas:</strong> ${targetSales.length}</p>
+        <p><strong>Total Ventas Netas (USD):</strong> $${totalUSD.toFixed(2)} USD</p>
+        <p><strong>Total Ventas Netas (VES):</strong> Bs ${totalVES.toFixed(2)} VES</p>
       </div>
     `;
 
@@ -671,13 +1052,13 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
           <title>Reporte PDF - ${title}</title>
           <style>
             body {
-              font-family: Arial, sans-serif;
-              color: #333;
-              margin: 30px;
+              font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+              color: #1e293b;
+              margin: 20px;
               font-size: 11px;
             }
             .header {
-              border-bottom: 2px solid #333;
+              border-bottom: 2px solid #0f172a;
               padding-bottom: 8px;
               margin-bottom: 15px;
               display: flex;
@@ -716,17 +1097,22 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
               border-collapse: collapse;
               margin-bottom: 15px;
             }
-            .report-table th, .report-table td {
-              border: 1px solid #94a3b8;
-              padding: 6px 8px;
-              text-align: left;
-            }
             .report-table th {
-              background-color: #f1f5f9;
+              background-color: #0f172a;
+              color: #ffffff;
+              border: 1px solid #0f172a;
+              padding: 7px 8px;
               font-weight: bold;
               text-transform: uppercase;
               font-size: 9px;
-              color: #334155;
+            }
+            .report-table td {
+              border: 1px solid #cbd5e1;
+              padding: 6px 8px;
+              font-size: 10.5px;
+            }
+            .text-center {
+              text-align: center !important;
             }
             .text-right {
               text-align: right !important;
@@ -734,24 +1120,33 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
             .font-bold {
               font-weight: bold;
             }
+            .text-green {
+              color: #16a34a !important;
+            }
+            .text-red {
+              color: #dc2626 !important;
+            }
             .text-emerald {
               color: #059669 !important;
             }
             .report-summary {
               margin-top: 20px;
-              padding: 12px;
+              padding: 12px 16px;
               background-color: #f8fafc;
-              border: 1px solid #e2e8f0;
-              border-radius: 4px;
+              border: 1px solid #cbd5e1;
+              border-radius: 8px;
               width: fit-content;
-              min-width: 250px;
+              min-width: 280px;
             }
             .report-summary p {
               margin: 0 0 5px 0;
               font-size: 11px;
             }
+            .report-summary p:last-child {
+              margin-bottom: 0;
+            }
             @media print {
-              body { margin: 15px; }
+              body { margin: 10px; }
               .no-print { display: none; }
             }
           </style>
@@ -787,41 +1182,40 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
   };
 
   return (
-    <div className="space-y-6 font-mono text-xs text-slate-800">
-      <div className="border-b border-slate-200 pb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-extrabold text-winter-header tracking-wider flex items-center gap-2">
-            <History className="w-5 h-5 text-winter-header" />
-            HISTORIAL TRANSACCIONAL Y CIERRES
-          </h1>
-          <p className="text-xs text-slate-500 mt-1 font-sans">
-            Consulte las facturas emitidas y el histórico de cierres de caja conciliados.
-          </p>
-        </div>
+    <div className="space-y-4 font-mono text-xs text-slate-800">
+      {/* HEADER SECTION */}
+      <div>
+        <h1 className="text-xl font-extrabold text-winter-header tracking-wider flex items-center gap-2">
+          <History className="w-5 h-5 text-winter-header" />
+          HISTORIAL TRANSACCIONAL Y CIERRES
+        </h1>
+        <p className="text-xs text-slate-500 mt-1 font-sans">
+          Consulte las facturas emitidas y el histórico de cierres de caja conciliados.
+        </p>
+      </div>
 
-        {/* SUB-TABS */}
-        <div className="flex bg-slate-200 rounded-lg p-0.5 self-start border border-slate-300">
-          <button
-            onClick={() => setActiveSubTab('ventas')}
-            className={`px-4 py-2 text-xs font-bold rounded-md font-sans transition-all ${
-              activeSubTab === 'ventas'
-                ? 'bg-white text-slate-800 shadow-sm'
-                : 'text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            Transacciones
-          </button>
-          <button
-            onClick={() => setActiveSubTab('cierres')}
-            className={`px-4 py-2 text-xs font-bold rounded-md font-sans transition-all ${
-              activeSubTab === 'cierres'
-                ? 'bg-white text-slate-800 shadow-sm'
-                : 'text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            Cierres de Caja
-          </button>
-        </div>
+      {/* TOP TABS NAVIGATION - Aligned Left (Config Module Style) */}
+      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-1">
+        <button
+          onClick={() => setActiveSubTab('ventas')}
+          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all ${
+            activeSubTab === 'ventas'
+              ? 'bg-white border-slate-200 text-slate-900 shadow-2xs font-extrabold'
+              : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
+          }`}
+        >
+          Transacciones
+        </button>
+        <button
+          onClick={() => setActiveSubTab('cierres')}
+          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all ${
+            activeSubTab === 'cierres'
+              ? 'bg-white border-slate-200 text-slate-900 shadow-2xs font-extrabold'
+              : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
+          }`}
+        >
+          Cierres de Caja
+        </button>
       </div>
 
       {/* SHARED DATE RANGE FILTER & PDF EXPORT BAR */}
@@ -860,228 +1254,327 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
             />
           </div>
         </div>
-
-        <button
-          onClick={activeSubTab === 'cierres' ? handleDownloadCierresReport : handleDownloadTransactionsReport}
-          className="bg-red-600 hover:bg-red-700 text-white font-bold px-3 py-1.5 rounded text-[11px] transition-all shadow-sm flex items-center gap-1 font-sans"
-          title="Generar y abrir reporte PDF de lo que ve en la tabla"
-        >
-          <Printer className="w-3.5 h-3.5" />
-          <span>Reporte PDF</span>
-        </button>
       </div>
 
       {activeSubTab === 'ventas' && (
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col h-[500px]">
-          <div className="bg-slate-50 border-b border-slate-200 px-4 py-2 flex flex-wrap justify-between items-center gap-3">
-            <div className="flex items-center gap-4 flex-grow">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5 font-sans whitespace-nowrap">
-                <ShoppingCart className="w-4 h-4 text-slate-450" />
-                Facturas y Ventas Registradas
-              </span>
-              <div className="relative w-full max-w-xs">
-                <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
-                  <Search className="w-3.5 h-3.5" />
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-[520px]">
+          {/* LEFT COLUMN: Clean Sales Table */}
+          <div className="lg:col-span-9 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col h-[520px]">
+            <div className="bg-slate-50 border-b border-slate-200 px-4 py-2 flex flex-wrap justify-between items-center gap-3 flex-shrink-0">
+              <div className="flex items-center gap-4 flex-grow">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5 font-sans whitespace-nowrap">
+                  <ShoppingCart className="w-4 h-4 text-slate-450" />
+                  Facturas y Ventas Registradas
                 </span>
-                <input
-                  type="text"
-                  placeholder="Buscar factura, cliente, operador..."
-                  value={salesSearchTerm}
-                  onChange={(e) => setSalesSearchTerm(e.target.value)}
-                  className="w-full bg-white border border-slate-300 rounded pl-8 pr-2.5 py-1 text-[11px] text-slate-800 focus:outline-none focus:border-slate-500 font-sans shadow-sm"
-                />
+                <div className="relative w-full max-w-xs">
+                  <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                    <Search className="w-3.5 h-3.5" />
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="Buscar factura, cliente, operador..."
+                    value={salesSearchTerm}
+                    onChange={(e) => setSalesSearchTerm(e.target.value)}
+                    className="w-full bg-white border border-slate-300 rounded pl-8 pr-2.5 py-1 text-[11px] text-slate-800 focus:outline-none focus:border-slate-500 font-sans shadow-sm"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 font-sans text-[10px]">
+                <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-250">
+                  Facturas: <strong className="font-mono">{finalFilteredSales.length}</strong>
+                </span>
+                <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-250">
+                  Ventas Filtro: <strong className="font-mono text-winter-blueBtn">${filteredSalesTotals.totalVentas.toFixed(2)}</strong>
+                </span>
+                <span className="bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded border border-emerald-200">
+                  Utilidad Filtro: <strong className="font-mono font-bold text-emerald-600">${filteredSalesTotals.totalUtilidad.toFixed(2)}</strong>
+                </span>
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2 font-sans text-[10px]">
-              <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-250">
-                Facturas: <strong className="font-mono">{finalFilteredSales.length}</strong>
-              </span>
-              <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-250">
-                Ventas Filtro: <strong className="font-mono text-winter-blueBtn">${filteredSalesTotals.totalVentas.toFixed(2)}</strong>
-              </span>
-              <span className="bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded border border-emerald-200">
-                Utilidad Filtro: <strong className="font-mono font-bold text-emerald-600">${filteredSalesTotals.totalUtilidad.toFixed(2)}</strong>
-              </span>
+
+            <div className="flex-grow overflow-y-auto">
+              <table className="w-full border-collapse text-left">
+                <thead className="sticky top-0 z-10 border-b border-slate-200">
+                  <tr className="text-slate-500">
+                    <th className="sticky top-0 z-10 bg-slate-100 w-8 px-2 py-1.5 text-center">
+                      <input
+                        type="checkbox"
+                        checked={finalFilteredSales.length > 0 && selectedSaleIds.length === finalFilteredSales.length}
+                        onChange={toggleSelectAllSales}
+                        className="w-3.5 h-3.5 rounded border-slate-300 text-winter-blueBtn focus:ring-winter-blueBtn cursor-pointer"
+                        title="Seleccionar todas las facturas filtradas"
+                      />
+                    </th>
+                    <th className="sticky top-0 z-10 bg-slate-100 px-3 py-1.5 font-bold font-sans cursor-pointer select-none" onClick={() => handleSalesSort('fecha')}>
+                      <div className="flex items-center gap-1">
+                        <span>FECHA</span>
+                        <SalesSortIcon field="fecha" />
+                      </div>
+                    </th>
+                    <th className="sticky top-0 z-10 bg-slate-100 px-3 py-1.5 font-bold font-sans cursor-pointer select-none" onClick={() => handleSalesSort('factura_nro')}>
+                      <div className="flex items-center gap-1">
+                        <span>FACTURA</span>
+                        <SalesSortIcon field="factura_nro" />
+                      </div>
+                    </th>
+                    <th className="sticky top-0 z-10 bg-slate-100 px-3 py-1.5 font-bold font-sans cursor-pointer select-none" onClick={() => handleSalesSort('cliente')}>
+                      <div className="flex items-center gap-1">
+                        <span>CLIENTE</span>
+                        <SalesSortIcon field="cliente" />
+                      </div>
+                    </th>
+                    <th className="sticky top-0 z-10 bg-slate-100 px-3 py-1.5 font-bold font-sans cursor-pointer select-none" onClick={() => handleSalesSort('usuario')}>
+                      <div className="flex items-center gap-1">
+                        <span>OPERADOR</span>
+                        <SalesSortIcon field="usuario" />
+                      </div>
+                    </th>
+                    <th className="sticky top-0 z-10 bg-slate-100 px-3 py-1.5 text-center font-bold font-sans cursor-pointer select-none" onClick={() => handleSalesSort('totalUSD')}>
+                      <div className="flex items-center justify-center gap-1">
+                        <span>TOTAL USD</span>
+                        <SalesSortIcon field="totalUSD" />
+                      </div>
+                    </th>
+                    <th className="sticky top-0 z-10 bg-slate-100 px-3 py-1.5 text-center font-bold font-sans cursor-pointer select-none" onClick={() => handleSalesSort('totalVES')}>
+                      <div className="flex items-center justify-center gap-1">
+                        <span>TOTAL VES</span>
+                        <SalesSortIcon field="totalVES" />
+                      </div>
+                    </th>
+                    <th className="sticky top-0 z-10 bg-slate-100 px-3 py-1.5 font-bold font-sans">MÉTODO PAGO</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-[11px] text-slate-700 select-text">
+                  {finalFilteredSales.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="text-center py-12 text-slate-400 font-sans">
+                        No se han procesado ventas que coincidan con la búsqueda.
+                      </td>
+                    </tr>
+                  ) : (
+                    finalFilteredSales.map(sale => {
+                      const isDev = sale.factura_nro.startsWith('DEV-');
+                      const isChecked = selectedSaleIds.includes(sale.factura_nro);
+                      const isRowActive = activeSelectedSale?.factura_nro === sale.factura_nro;
+
+                      let rowBg = 'hover:bg-slate-50/50';
+                      if (isRowActive) {
+                        rowBg = 'bg-emerald-50/80 font-semibold';
+                      } else if (isChecked) {
+                        rowBg = 'bg-blue-50/50';
+                      } else if (isDev) {
+                        rowBg = 'bg-rose-50/20';
+                      }
+
+                      return (
+                        <tr 
+                          key={sale.factura_nro} 
+                          onClick={() => setSelectedSaleRow(sale)}
+                          className={`transition-all cursor-pointer ${rowBg}`}
+                        >
+                          <td className="px-2 py-1 text-center" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleSelectSale(sale)}
+                              className="w-3.5 h-3.5 rounded border-slate-300 text-winter-blueBtn focus:ring-winter-blueBtn cursor-pointer"
+                            />
+                          </td>
+                          <td className="px-3 py-1 font-mono">{sale.fecha}</td>
+                          <td className={`px-3 py-1 font-bold font-mono ${isDev ? 'text-rose-700' : 'text-slate-600'}`}>
+                            {sale.factura_nro}
+                          </td>
+                          <td className="px-3 py-1 font-sans font-medium">{sale.client.nombre}</td>
+                          <td className="px-3 py-1 font-sans">
+                            {sale.usuario}
+                            {sale.terminal && (
+                              <span className="ml-1.5 text-[8px] bg-slate-100 text-slate-500 border border-slate-200 px-1 py-0.2 rounded font-mono uppercase">
+                                {sale.terminal.replace('CAJA_', 'C')}
+                              </span>
+                            )}
+                          </td>
+                          <td className={`px-3 py-1 text-center font-mono font-bold ${isDev ? 'text-rose-600' : 'text-emerald-600'}`}>
+                            {isDev ? '-' : ''}${Math.abs(sale.totalUSD ?? 0).toFixed(2)}
+                          </td>
+                          <td className={`px-3 py-1 text-center font-mono font-bold ${isDev ? 'text-rose-500' : 'text-slate-500'}`}>
+                            {isDev ? '-' : ''}Bs {Math.abs(sale.totalVES ?? 0).toFixed(2)}
+                          </td>
+                          <td className="px-3 py-1.5 font-sans">
+                            <div className="flex flex-wrap gap-1 max-w-[220px]">
+                              {(sale.pagos ?? []).map((p, idx) => {
+                                let icon = '💵';
+                                let style = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+                                let textStr: string = String(p.metodo);
+                                let fullTextStr: string = `${p.metodo}: `;
+                                
+                                if (p.metodo === 'Efectivo$') {
+                                  icon = '💵';
+                                  style = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+                                  textStr = `$${p.monto.toFixed(2)}`;
+                                  fullTextStr += `$${p.monto.toFixed(2)} USD`;
+                                } else if (p.metodo === 'EfectivoBs') {
+                                  icon = '💵';
+                                  style = 'bg-sky-50 text-sky-800 border-sky-200';
+                                  textStr = `Bs ${(p.montoVES || p.monto).toFixed(0)}`;
+                                  fullTextStr += `Bs ${(p.montoVES || p.monto).toFixed(2)}`;
+                                } else if (p.metodo === 'TarjetaBs') {
+                                  icon = '💳';
+                                  style = 'bg-blue-50 text-blue-800 border-blue-200';
+                                  textStr = `Débito`;
+                                  fullTextStr += `Bs ${(p.montoVES || p.monto).toFixed(2)}`;
+                                } else if (p.metodo === 'PagoMovil') {
+                                  icon = '📱';
+                                  style = 'bg-purple-50 text-purple-800 border-purple-200';
+                                  textStr = `P.Móvil`;
+                                  fullTextStr += `Bs ${(p.montoVES || p.monto).toFixed(2)}`;
+                                } else if (p.metodo === 'Biopago') {
+                                  icon = '📲';
+                                  style = 'bg-teal-50 text-teal-800 border-teal-200';
+                                  textStr = `Biopago`;
+                                  fullTextStr += `Bs ${(p.montoVES || p.monto).toFixed(2)}`;
+                                } else if (p.metodo === 'Tarjeta$') {
+                                  icon = '💳';
+                                  style = 'bg-indigo-50 text-indigo-800 border-indigo-200';
+                                  textStr = `Tarj. $`;
+                                  fullTextStr += `$${p.monto.toFixed(2)}`;
+                                } else if (p.metodo === 'Binance') {
+                                  icon = '🟡';
+                                  style = 'bg-amber-50 text-amber-900 border-amber-200';
+                                  textStr = `Binance`;
+                                  fullTextStr += `$${p.monto.toFixed(2)} USDT`;
+                                } else if (p.metodo === 'PayPal') {
+                                  icon = '🅿️';
+                                  style = 'bg-blue-50 text-blue-900 border-blue-200';
+                                  textStr = `PayPal`;
+                                  fullTextStr += `$${p.monto.toFixed(2)}`;
+                                } else if (p.metodo === 'CreditoCliente') {
+                                  icon = '🤝';
+                                  style = 'bg-orange-50 text-orange-800 border-orange-200';
+                                  textStr = `Crédito`;
+                                  fullTextStr += `$${p.monto.toFixed(2)}`;
+                                }
+
+                                if (isDev) {
+                                  style = 'bg-rose-50 border-rose-200 text-rose-700';
+                                }
+
+                                return (
+                                  <span
+                                    key={idx}
+                                    className={`border px-1.5 py-0.5 rounded text-[9px] font-bold font-mono inline-flex items-center gap-1 shadow-2xs ${style}`}
+                                    title={fullTextStr}
+                                  >
+                                    <span className="text-[10px]">{icon}</span>
+                                    <span>{isDev && p.metodo === 'Efectivo$' ? 'Reembolso $' : textStr}</span>
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
 
-          <div className="flex-grow overflow-y-auto">
-            <table className="w-full border-collapse text-left">
-              <thead className="sticky top-0 z-10 border-b border-slate-200">
-                <tr className="text-slate-500">
-                  <th className="sticky top-0 z-10 bg-slate-100 px-4 py-1.5 font-bold font-sans cursor-pointer select-none" onClick={() => handleSalesSort('fecha')}>
-                    <div className="flex items-center gap-1">
-                      <span>FECHA</span>
-                      <SalesSortIcon field="fecha" />
-                    </div>
-                  </th>
-                  <th className="sticky top-0 z-10 bg-slate-100 px-4 py-1.5 font-bold font-sans cursor-pointer select-none" onClick={() => handleSalesSort('factura_nro')}>
-                    <div className="flex items-center gap-1">
-                      <span>FACTURA</span>
-                      <SalesSortIcon field="factura_nro" />
-                    </div>
-                  </th>
-                  <th className="sticky top-0 z-10 bg-slate-100 px-4 py-1.5 font-bold font-sans cursor-pointer select-none" onClick={() => handleSalesSort('cliente')}>
-                    <div className="flex items-center gap-1">
-                      <span>CLIENTE</span>
-                      <SalesSortIcon field="cliente" />
-                    </div>
-                  </th>
-                  <th className="sticky top-0 z-10 bg-slate-100 px-4 py-1.5 font-bold font-sans cursor-pointer select-none" onClick={() => handleSalesSort('usuario')}>
-                    <div className="flex items-center gap-1">
-                      <span>OPERADOR</span>
-                      <SalesSortIcon field="usuario" />
-                    </div>
-                  </th>
-                  <th className="sticky top-0 z-10 bg-slate-100 px-4 py-1.5 text-right font-bold font-sans cursor-pointer select-none" onClick={() => handleSalesSort('totalUSD')}>
-                    <div className="flex items-center justify-end gap-1">
-                      <span>TOTAL USD</span>
-                      <SalesSortIcon field="totalUSD" />
-                    </div>
-                  </th>
-                  <th className="sticky top-0 z-10 bg-slate-100 px-4 py-1.5 text-right font-bold font-sans cursor-pointer select-none" onClick={() => handleSalesSort('totalVES')}>
-                    <div className="flex items-center justify-end gap-1">
-                      <span>TOTAL VES</span>
-                      <SalesSortIcon field="totalVES" />
-                    </div>
-                  </th>
-                  <th className="sticky top-0 z-10 bg-slate-100 px-4 py-1.5 font-bold font-sans">MÉTODO PAGO</th>
-                  <th className="sticky top-0 z-10 bg-slate-100 px-4 py-1.5 text-center"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-[11px] text-slate-700 select-text">
-                {finalFilteredSales.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="text-center py-12 text-slate-400 font-sans">
-                      No se han procesado ventas que coincidan con la búsqueda.
-                    </td>
-                  </tr>
-                ) : (
-                  finalFilteredSales.map(sale => {
-                    const isDev = sale.factura_nro.startsWith('DEV-');
-                    return (
-                      <tr key={sale.factura_nro} className={`hover:bg-slate-50/50 ${isDev ? 'bg-rose-50/20' : ''}`}>
-                        <td className="px-4 py-1 font-mono">{sale.fecha}</td>
-                        <td className={`px-4 py-1 font-bold font-mono ${isDev ? 'text-rose-700' : 'text-slate-600'}`}>
-                          {sale.factura_nro}
-                        </td>
-                        <td className="px-4 py-1 font-sans font-medium">{sale.client.nombre}</td>
-                        <td className="px-4 py-1 font-sans">
-                          {sale.usuario}
-                          {sale.terminal && (
-                            <span className="ml-1.5 text-[8px] bg-slate-100 text-slate-500 border border-slate-200 px-1 py-0.2 rounded font-mono uppercase">
-                              {sale.terminal.replace('CAJA_', 'C')}
-                            </span>
-                          )}
-                        </td>
-                        <td className={`px-4 py-1 text-right font-mono font-bold ${isDev ? 'text-rose-600' : 'text-emerald-600'}`}>
-                          {isDev ? '-' : ''}${Math.abs(sale.totalUSD ?? 0).toFixed(2)}
-                        </td>
-                        <td className={`px-4 py-1 text-right font-mono font-bold ${isDev ? 'text-rose-500' : 'text-slate-500'}`}>
-                          {isDev ? '-' : ''}Bs {Math.abs(sale.totalVES ?? 0).toFixed(2)}
-                        </td>
-                        <td className="px-4 py-1.5 font-sans">
-                          <div className="flex flex-wrap gap-1 max-w-[220px]">
-                            {(sale.pagos ?? []).map((p, idx) => {
-                              let icon = '💵';
-                              let style = 'bg-emerald-50 text-emerald-800 border-emerald-200';
-                              let textStr: string = String(p.metodo);
-                              let fullTextStr: string = `${p.metodo}: `;
-                              
-                              if (p.metodo === 'Efectivo$') {
-                                icon = '💵';
-                                style = 'bg-emerald-50 text-emerald-800 border-emerald-200';
-                                textStr = `$${p.monto.toFixed(2)}`;
-                                fullTextStr += `$${p.monto.toFixed(2)} USD`;
-                              } else if (p.metodo === 'EfectivoBs') {
-                                icon = '💵';
-                                style = 'bg-sky-50 text-sky-800 border-sky-200';
-                                textStr = `Bs ${(p.montoVES || p.monto).toFixed(0)}`;
-                                fullTextStr += `Bs ${(p.montoVES || p.monto).toFixed(2)}`;
-                              } else if (p.metodo === 'TarjetaBs') {
-                                icon = '💳';
-                                style = 'bg-blue-50 text-blue-800 border-blue-200';
-                                textStr = `Débito`;
-                                fullTextStr += `Bs ${(p.montoVES || p.monto).toFixed(2)}`;
-                              } else if (p.metodo === 'PagoMovil') {
-                                icon = '📱';
-                                style = 'bg-purple-50 text-purple-800 border-purple-200';
-                                textStr = `P.Móvil`;
-                                fullTextStr += `Bs ${(p.montoVES || p.monto).toFixed(2)}`;
-                              } else if (p.metodo === 'Biopago') {
-                                icon = '📲';
-                                style = 'bg-teal-50 text-teal-800 border-teal-200';
-                                textStr = `Biopago`;
-                                fullTextStr += `Bs ${(p.montoVES || p.monto).toFixed(2)}`;
-                              } else if (p.metodo === 'Tarjeta$') {
-                                icon = '💳';
-                                style = 'bg-indigo-50 text-indigo-800 border-indigo-200';
-                                textStr = `Tarj. $`;
-                                fullTextStr += `$${p.monto.toFixed(2)}`;
-                              } else if (p.metodo === 'Binance') {
-                                icon = '🟡';
-                                style = 'bg-amber-50 text-amber-900 border-amber-200';
-                                textStr = `Binance`;
-                                fullTextStr += `$${p.monto.toFixed(2)} USDT`;
-                              } else if (p.metodo === 'PayPal') {
-                                icon = '🅿️';
-                                style = 'bg-blue-50 text-blue-900 border-blue-200';
-                                textStr = `PayPal`;
-                                fullTextStr += `$${p.monto.toFixed(2)}`;
-                              } else if (p.metodo === 'CreditoCliente') {
-                                icon = '🤝';
-                                style = 'bg-orange-50 text-orange-800 border-orange-200';
-                                textStr = `Crédito`;
-                                fullTextStr += `$${p.monto.toFixed(2)}`;
-                              }
+          {/* RIGHT COLUMN: OPERACIONES DE VENTA Panel */}
+          <div className="lg:col-span-3 bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between h-[520px]">
+            <div className="space-y-4">
+              <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700 uppercase tracking-wider font-sans border-b border-slate-100 pb-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span>OPERACIONES DE VENTA</span>
+              </div>
 
-                              if (isDev) {
-                                style = 'bg-rose-50 border-rose-200 text-rose-700';
-                              }
+              {activeSelectedSale ? (
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-sans space-y-2">
+                  <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Venta Seleccionada</div>
+                  <div className="flex justify-between items-center font-mono">
+                    <strong className="text-sm text-slate-800">{activeSelectedSale.factura_nro}</strong>
+                    <span className="text-[10px] text-slate-500">{activeSelectedSale.fecha}</span>
+                  </div>
+                  <div className="text-[11px] text-slate-600">
+                    <span className="block font-medium">Cliente: <strong className="text-slate-800 uppercase">{activeSelectedSale.client.nombre}</strong></span>
+                    <span className="block text-[10px] text-slate-500 mt-0.5">Atendido por: <strong className="text-slate-700">{activeSelectedSale.usuario}</strong></span>
+                  </div>
+                  <div className="border-t border-slate-200 pt-2 flex justify-between font-mono font-bold text-xs">
+                    <span>Total USD:</span>
+                    <span className="text-emerald-600">${Math.abs(activeSelectedSale.totalUSD || 0).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between font-mono text-[11px] text-slate-500">
+                    <span>Total VES:</span>
+                    <span>Bs {Math.abs(activeSelectedSale.totalVES || 0).toFixed(2)}</span>
+                  </div>
+                </div>
+              ) : selectedSaleIds.length > 1 ? (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs font-sans space-y-2">
+                  <div className="text-[10px] text-emerald-800 font-bold uppercase tracking-wider">Lote Seleccionado</div>
+                  <div className="font-mono text-sm text-emerald-950 font-bold">
+                    {selectedSaleIds.length} Facturas Seleccionadas
+                  </div>
+                  <div className="border-t border-emerald-200 pt-2 flex justify-between font-mono font-bold text-xs text-emerald-900">
+                    <span>Total USD:</span>
+                    <span>${selectedSalesSummary.totalUSD.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between font-mono text-[11px] text-emerald-800">
+                    <span>Total VES:</span>
+                    <span>Bs {selectedSalesSummary.totalVES.toFixed(2)}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 text-center text-slate-400 text-xs font-sans">
+                  <ShoppingCart className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                  Seleccione una o varias ventas en la tabla para ejecutar operaciones.
+                </div>
+              )}
 
-                              return (
-                                <span
-                                  key={idx}
-                                  className={`border px-1.5 py-0.5 rounded text-[9px] font-bold font-mono inline-flex items-center gap-1 shadow-2xs ${style}`}
-                                  title={fullTextStr}
-                                >
-                                  <span className="text-[10px]">{icon}</span>
-                                  <span>{isDev && p.metodo === 'Efectivo$' ? 'Reembolso $' : textStr}</span>
-                                </span>
-                              );
-                            })}
-                          </div>
-                        </td>
-                        <td className="px-4 py-1 text-center">
-                          <div className="flex items-center justify-center gap-1.5">
-                            <button
-                              onClick={() => setSelectedSale(sale)}
-                              className={`border p-1.5 rounded transition-all shadow-sm flex items-center gap-1 text-[10px] ${
-                                isDev 
-                                  ? 'bg-rose-50 border-rose-200 text-rose-750 hover:bg-rose-100 hover:text-rose-800' 
-                                  : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
-                              }`}
-                              title={isDev ? 'Ver Detalle de Devolución' : 'Ver Detalle de Venta y Utilidad'}
-                            >
-                              <Eye className={`w-3.5 h-3.5 ${isDev ? 'text-rose-600' : 'text-winter-blueBtn'}`} />
-                            </button>
-                            {!isDev && (
-                              <button
-                                onClick={() => onReprintTicket(sale)}
-                                className="bg-slate-100 border border-slate-200 text-slate-600 p-1.5 rounded hover:bg-slate-100 hover:text-slate-800 transition-all shadow-sm"
-                                title="Reimprimir ticket fiscal"
-                              >
-                                <Printer className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+              <div className="space-y-2 pt-1">
+                <button
+                  onClick={() => activeSelectedSale && setSelectedSale(activeSelectedSale)}
+                  disabled={!activeSelectedSale}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold py-2.5 px-3 rounded-lg text-xs transition-all shadow-sm flex items-center justify-center gap-2 font-sans"
+                >
+                  <Eye className="w-4 h-4" />
+                  <span>VER DETALLES / COMPROBANTE</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (activeSelectedSale) {
+                      handleResendWhatsAppSale(activeSelectedSale);
+                    } else if (selectedSaleIds.length > 0) {
+                      handleResendBatchWhatsAppSales();
+                    }
+                  }}
+                  disabled={!activeSelectedSale && selectedSaleIds.length === 0}
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold py-2.5 px-3 rounded-lg text-xs transition-all shadow-sm flex items-center justify-center gap-2 font-sans"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  <span>{selectedSaleIds.length > 1 ? `REENVIAR ${selectedSaleIds.length} POR WHATSAPP` : 'REENVIAR POR WHATSAPP'}</span>
+                </button>
+
+                <button
+                  onClick={() => activeSelectedSale && onReprintTicket(activeSelectedSale)}
+                  disabled={!activeSelectedSale || activeSelectedSale.factura_nro.startsWith('DEV-')}
+                  className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold py-2.5 px-3 rounded-lg text-xs transition-all shadow-sm flex items-center justify-center gap-2 font-sans"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>REIMPRIMIR TICKET</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-200">
+              <button
+                onClick={handleDownloadTransactionsReport}
+                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 px-3 rounded-lg text-xs transition-all shadow-md flex items-center justify-center gap-2 font-sans"
+              >
+                <FileDown className="w-4 h-4" />
+                <span>{selectedSaleIds.length > 0 ? `REPORTE PDF SELECCIONADAS (${selectedSaleIds.length})` : 'REPORTE GENERAL EN PDF'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2712,12 +3205,22 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                   </div>
                 </div>
 
-                <button
-                  onClick={() => { setCierreInvoicesModal(null); setCierreInvoiceSearch(''); }}
-                  className="text-white opacity-75 hover:opacity-100 text-xs font-sans bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-all"
-                >
-                  ✕ Cerrar [ESC]
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handlePrintSingleCierrePDF(c, shiftInvoices, totalNetoUSD, totalNetoVES, finalUtilidad)}
+                    className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all shadow-sm flex items-center gap-1.5 font-sans cursor-pointer"
+                    title="Generar y abrir reporte PDF oficial de este Cierre con todas sus facturas"
+                  >
+                    <Printer className="w-3.5 h-3.5 text-white" />
+                    <span>Reporte PDF Cierre</span>
+                  </button>
+                  <button
+                    onClick={() => { setCierreInvoicesModal(null); setCierreInvoiceSearch(''); }}
+                    className="text-white opacity-75 hover:opacity-100 text-xs font-sans bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-all"
+                  >
+                    ✕ Cerrar [ESC]
+                  </button>
+                </div>
               </div>
 
               {/* Metrics & Search Bar */}
@@ -2747,15 +3250,25 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                   </div>
                 </div>
 
-                <div className="relative">
-                  <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="Buscar por N° factura, cliente, cédula, operador o método de pago..."
-                    value={cierreInvoiceSearch}
-                    onChange={(e) => setCierreInvoiceSearch(e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-xs font-sans text-slate-800 placeholder-slate-400 focus:outline-none focus:border-winter-blueBtn shadow-2xs"
-                  />
+                <div className="flex items-center gap-3">
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Buscar por N° factura, cliente, cédula, operador o método de pago..."
+                      value={cierreInvoiceSearch}
+                      onChange={(e) => setCierreInvoiceSearch(e.target.value)}
+                      className="w-full bg-white border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-xs font-sans text-slate-800 placeholder-slate-400 focus:outline-none focus:border-winter-blueBtn shadow-2xs"
+                    />
+                  </div>
+                  <button
+                    onClick={() => handlePrintSingleCierrePDF(c, shiftInvoices, totalNetoUSD, totalNetoVES, finalUtilidad)}
+                    className="bg-slate-800 hover:bg-slate-900 text-white font-bold px-4 py-2 rounded-lg text-xs transition-all shadow-sm flex items-center gap-1.5 font-sans whitespace-nowrap cursor-pointer"
+                    title="Imprimir reporte PDF oficial de este Cierre con todas sus facturas"
+                  >
+                    <Printer className="w-3.5 h-3.5 text-white" />
+                    <span>Reporte PDF</span>
+                  </button>
                 </div>
               </div>
 
