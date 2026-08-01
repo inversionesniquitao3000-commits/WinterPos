@@ -1374,55 +1374,61 @@ export default function App() {
 
   const handleRegisterAbono = async (
     clientId: number, 
-    amountUSD: number,
-    metodoPago: 'Efectivo$' | 'EfectivoBs' | 'Tarjeta$' | 'TarjetaBs' | 'PagoMovil' | 'Biopago' | 'Binance' | 'PayPal' = 'Efectivo$',
-    referencia: string = ''
+    amountUSD: number,   // total abono in USD (for client credit update)
+    payments: import('./types').AbonoPayment[],  // one entry per payment method used
+    observacion: string = ''
   ) => {
-    const montoVES = parseFloat((amountUSD * tasaDia).toFixed(2));
-
+    // 1. Update local client state (credit/balance)
     setClients(prev =>
       prev.map(c => {
         if (c.id === clientId) {
           const nextPending = Math.max(0, c.saldo_pendiente - amountUSD);
           const nextCreditAvailable = Math.min(c.limite_credito, c.credito_disponible + amountUSD);
-
-          const mStr = String(metodoPago || '');
-          const isUsdMethod = mStr === 'Efectivo$' || mStr === 'Tarjeta$' || mStr === 'Binance' || mStr === 'PayPal' || mStr === 'Zelle';
-          const movUsd = isUsdMethod ? amountUSD : 0;
-          const movVes = isUsdMethod ? 0 : montoVES;
-          handleRegisterCajaMovement('Entrada', `Abono de Crédito Cliente: ${c.nombre} (${metodoPago})`, movUsd, movVes);
-          
-          // Append to abonos state
-          const newAbonoLog: Abono = {
-            id: Date.now(),
-            cliente_id: clientId,
-            nombre: c.nombre,
-            cedula_rif: c.cedula_rif,
-            monto: amountUSD,
-            metodo_pago: metodoPago,
-            monto_ves: montoVES,
-            referencia: referencia || undefined,
-            usuario: currentUser?.nombre || 'SISTEMA',
-            fecha: getLocalISODateString()
-          };
-          setAbonos(prev => [...prev, newAbonoLog]);
-
-          return {
-            ...c,
-            saldo_pendiente: nextPending,
-            credito_disponible: nextCreditAvailable
-          };
+          return { ...c, saldo_pendiente: nextPending, credito_disponible: nextCreditAvailable };
         }
         return c;
       })
     );
 
-    await postApiData('/clientes/abono', { 
-      id: clientId, 
-      monto: amountUSD,
-      metodo_pago: metodoPago,
-      referencia 
-    });
+    // 2. Register one caja movement and one Abono record per payment method
+    for (const pago of payments) {
+      const { metodo_pago, monto_usd, monto_ves, referencia } = pago;
+
+      // Update local caja movement tracker
+      handleRegisterCajaMovement(
+        'Entrada',
+        `Abono de Crédito Cliente (${metodo_pago})`,
+        monto_usd,
+        monto_ves
+      );
+
+      // Append to local abonos state
+      const clientData = clients.find(c => c.id === clientId);
+      const newAbonoLog: Abono = {
+        id: Date.now() + Math.random(),
+        cliente_id: clientId,
+        nombre: clientData?.nombre || '',
+        cedula_rif: clientData?.cedula_rif || '',
+        monto: monto_usd,
+        metodo_pago: metodo_pago as import('./types').MetodoPagoAbono,
+        monto_ves: monto_ves,
+        referencia: referencia || undefined,
+        observacion: observacion || undefined,
+        usuario: currentUser?.nombre || 'SISTEMA',
+        fecha: getLocalISODateString()
+      };
+      setAbonos(prev => [...prev, newAbonoLog]);
+
+      // 3. Persist each payment line separately in the DB
+      await postApiData('/clientes/abono', {
+        id: clientId,
+        monto_usd,
+        monto_ves,
+        metodo_pago,
+        referencia: referencia || '',
+        observacion: observacion || ''
+      });
+    }
   };
 
   const handleUpdateClient = async (updatedCli: Client) => {

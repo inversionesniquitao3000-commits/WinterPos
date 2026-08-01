@@ -53,10 +53,10 @@ interface CajaPOSProps {
     reason: string
   ) => Promise<void>;
   onRegisterAbono: (
-    clientId: number, 
+    clientId: number,
     amountUSD: number,
-    metodoPago?: 'Efectivo$' | 'EfectivoBs' | 'Tarjeta$' | 'TarjetaBs' | 'PagoMovil' | 'Biopago' | 'Binance' | 'PayPal',
-    referencia?: string
+    payments: import('../types').AbonoPayment[],
+    observacion?: string
   ) => void;
   abonos?: Abono[];
   getApiUrl: (path: string) => string;
@@ -594,8 +594,11 @@ export default function CajaPOS({
   // Keyboard row selection and mixed change state
   const [selectedItemIndex, setSelectedItemIndex] = useState<number>(0);
   const [mixedChangeUSDVal, setMixedChangeUSDVal] = useState('');
-  const [abonoMethod, setAbonoMethod] = useState<'Efectivo$' | 'EfectivoBs' | 'Tarjeta$' | 'TarjetaBs' | 'PagoMovil' | 'Biopago' | 'Binance' | 'PayPal'>('Efectivo$');
+  const [abonoMethod, setAbonoMethod] = useState<import('../types').MetodoPagoAbono>('Efectivo$');
   const [abonoRef, setAbonoRef] = useState('');
+  const [abonoObservacion, setAbonoObservacion] = useState('');
+  // Multi-payment lines for a single abono
+  const [abonoPayments, setAbonoPayments] = useState<import('../types').AbonoPayment[]>([]);
 
   // Reset mixed change on open/close
   useEffect(() => {
@@ -3028,11 +3031,34 @@ export default function CajaPOS({
                  c.cedula_rif.toLowerCase().includes(abonoSearchTerm.toLowerCase());
         });
 
+        const USD_METHODS: import('../types').MetodoPagoAbono[] = ['Efectivo$', 'Tarjeta$', 'Binance', 'PayPal', 'Zelle'];
+        const isUsdMethod = (m: import('../types').MetodoPagoAbono) => USD_METHODS.includes(m);
+
+        const totalPagado = abonoPayments.reduce((acc, p) => acc + p.monto_usd, 0);
+        const totalAbono = parseFloat(abonoAmount || '0') || 0;
+        const restante = parseFloat((totalAbono - totalPagado).toFixed(2));
+
+        const handleAddPaymentLine = () => {
+          const montoPago = parseFloat(abonoRef.replace(',', '.')) || 0;
+          if (montoPago <= 0) {
+            showAlert('Ingrese el monto para esta forma de pago.', 'Monto Inválido', 'warning');
+            return;
+          }
+          if (montoPago > restante + 0.01) {
+            showAlert(`El monto ($${montoPago.toFixed(2)}) excede el saldo restante por cubrir ($${restante.toFixed(2)}).`, 'Monto Excedido', 'warning');
+            return;
+          }
+          const usd = isUsdMethod(abonoMethod) ? montoPago : 0;
+          const ves = !isUsdMethod(abonoMethod) ? parseFloat((montoPago * tasaDia).toFixed(2)) : 0;
+          setAbonoPayments(prev => [...prev, { metodo_pago: abonoMethod, monto_usd: usd, monto_ves: ves, referencia: '' }]);
+          setAbonoRef('');
+        };
+
         const handleSaveCajaAbono = () => {
           if (!abonoClient) return;
           const val = parseFloat(abonoAmount);
           if (isNaN(val) || val <= 0) {
-            showAlert('Por favor ingrese un monto válido para el abono.', 'Monto Inválido', 'warning');
+            showAlert('Por favor ingrese un monto total válido para el abono.', 'Monto Inválido', 'warning');
             return;
           }
           if (val > abonoClient.saldo_pendiente + 0.01) {
@@ -3040,10 +3066,29 @@ export default function CajaPOS({
             return;
           }
 
-          onRegisterAbono(abonoClient.id, val, abonoMethod, abonoRef);
+          // Build payments: if no multi-payment lines added, use single method directly
+          let finalPayments: import('../types').AbonoPayment[];
+          if (abonoPayments.length === 0) {
+            // Single payment mode
+            const usd = isUsdMethod(abonoMethod) ? val : 0;
+            const ves = !isUsdMethod(abonoMethod) ? parseFloat((val * tasaDia).toFixed(2)) : 0;
+            finalPayments = [{ metodo_pago: abonoMethod, monto_usd: usd, monto_ves: ves, referencia: abonoRef }];
+          } else {
+            // Multi-payment mode: verify coverage
+            const sumUsd = abonoPayments.reduce((acc, p) => acc + p.monto_usd, 0);
+            if (Math.abs(sumUsd - val) > 0.02) {
+              showAlert(`Los pagos en $ deben sumar exactamente $${val.toFixed(2)}. Actualmente suman $${sumUsd.toFixed(2)}.`, 'Distribución Incompleta', 'warning');
+              return;
+            }
+            finalPayments = abonoPayments;
+          }
+
+          onRegisterAbono(abonoClient.id, val, finalPayments, abonoObservacion);
           setShowCajaAbonoModal(false);
           setAbonoMethod('Efectivo$');
           setAbonoRef('');
+          setAbonoObservacion('');
+          setAbonoPayments([]);
           showToast('Abono registrado con éxito de forma segura.', 'success');
         };
 
@@ -3133,47 +3178,94 @@ export default function CajaPOS({
                       />
                     </div>
 
-                    <div>
-                      <label className="text-[10px] text-slate-500 block mb-1.5 font-sans font-bold uppercase tracking-wider">Forma de Pago del Abono:</label>
-                      <select
-                        value={abonoMethod}
-                        onChange={(e) => setAbonoMethod(e.target.value as any)}
-                        className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-sans text-slate-800 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:outline-none"
-                      >
-                        <option value="Efectivo$">💵 Efectivo en Dólares ($ USD)</option>
-                        <option value="EfectivoBs">🇻🇪 Efectivo en Bolívares (Bs VES)</option>
-                        <option value="TarjetaBs">💳 Tarjeta de Débito / Crédito (Bs)</option>
-                        <option value="PagoMovil">📱 Pago Móvil (Bs)</option>
-                        <option value="Biopago">👆 Biopago (Bs)</option>
-                      </select>
+                    {/* ---- PAGOS AGREGADOS ---- */}
+                    {abonoPayments.length > 0 && (
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-500 block font-sans font-bold uppercase tracking-wider">Pagos Registrados:</label>
+                        <div className="border border-slate-200 rounded divide-y divide-slate-100">
+                          {abonoPayments.map((p, i) => (
+                            <div key={i} className="px-2.5 py-1.5 flex justify-between items-center text-xs font-mono">
+                              <span className="text-slate-700 font-bold">{p.metodo_pago}</span>
+                              <div className="flex items-center gap-2">
+                                {p.monto_usd > 0 && <span className="text-emerald-700">${p.monto_usd.toFixed(2)}</span>}
+                                {p.monto_ves > 0 && <span className="text-blue-700">Bs {p.monto_ves.toFixed(2)}</span>}
+                                <button onClick={() => setAbonoPayments(prev => prev.filter((_, j) => j !== i))} className="text-red-400 hover:text-red-600 ml-1 text-xs">✕</button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        {restante > 0.01 && <div className="text-[10px] text-amber-700 font-bold font-sans">Saldo restante por cubrir: ${restante.toFixed(2)}</div>}
+                        {restante <= 0.01 && <div className="text-[10px] text-emerald-700 font-bold font-sans">✓ Monto total cubierto</div>}
+                      </div>
+                    )}
+
+                    {/* ---- AGREGAR FORMA DE PAGO ---- */}
+                    <div className="border border-dashed border-slate-300 rounded-lg p-3 space-y-2 bg-slate-50">
+                      <label className="text-[10px] text-slate-600 block font-sans font-bold uppercase tracking-wider">
+                        {abonoPayments.length === 0 ? 'Forma de Pago:' : '➕ Agregar otro método de pago:'}
+                      </label>
+                      <div className="flex gap-2">
+                        <select
+                          value={abonoMethod}
+                          onChange={(e) => setAbonoMethod(e.target.value as import('../types').MetodoPagoAbono)}
+                          className="flex-1 bg-white border border-slate-300 rounded p-2 text-xs font-sans text-slate-800 focus:ring-2 focus:ring-winter-blueBtn focus:outline-none"
+                        >
+                          <option value="Efectivo$">💵 Efectivo $ USD</option>
+                          <option value="EfectivoBs">🇻🇪 Efectivo Bs VES</option>
+                          <option value="TarjetaBs">💳 Tarjeta Bs</option>
+                          <option value="PagoMovil">📱 Pago Móvil</option>
+                          <option value="Biopago">👆 Biopago</option>
+                          <option value="Binance">₿ Binance / USDT</option>
+                          <option value="PayPal">🅿️ PayPal</option>
+                          <option value="Zelle">💸 Zelle</option>
+                        </select>
+                      </div>
+                      <div className="flex gap-2 items-center">
+                        <div className="flex-1">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={abonoRef}
+                            onChange={(e) => setAbonoRef(e.target.value)}
+                            placeholder={['Efectivo$','Tarjeta$','Binance','PayPal','Zelle'].includes(abonoMethod) ? 'Monto en USD' : 'Monto equivalente en USD'}
+                            className="w-full bg-white border border-slate-300 rounded p-2 text-xs font-bold font-mono text-emerald-700 focus:ring-2 focus:ring-winter-blueBtn focus:outline-none"
+                          />
+                        </div>
+                        {abonoPayments.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleAddPaymentLine}
+                            className="px-3 py-2 bg-slate-700 hover:bg-slate-800 text-white rounded text-xs font-bold font-sans"
+                          >
+                            Agregar
+                          </button>
+                        )}
+                      </div>
+                      {!(['Efectivo$','Tarjeta$','Binance','PayPal','Zelle'].includes(abonoMethod)) && abonoRef && (
+                        <div className="text-[10px] font-mono text-blue-700 font-bold">
+                          = Bs {((parseFloat(abonoRef || '0') || 0) * tasaDia).toFixed(2)}
+                        </div>
+                      )}
                     </div>
 
-                    {abonoMethod !== 'Efectivo$' && (
-                      <div className="bg-emerald-50 border border-emerald-200 p-2.5 rounded-lg text-xs font-mono text-emerald-900 flex justify-between items-center">
-                        <span className="font-sans text-[10px] font-bold uppercase text-emerald-700">Monto a Recibir en Bs:</span>
-                        <strong className="text-sm">Bs {((parseFloat(abonoAmount || '0') || 0) * tasaDia).toFixed(2)}</strong>
-                      </div>
-                    )}
+                    {/* ---- OBSERVACIÓN ---- */}
+                    <div>
+                      <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold uppercase tracking-wider">Observación (Opcional):</label>
+                      <input
+                        type="text"
+                        value={abonoObservacion}
+                        onChange={(e) => setAbonoObservacion(e.target.value)}
+                        placeholder="Ej: Pago correspondiente a factura FAC-0045"
+                        className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-sans focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:outline-none"
+                      />
+                    </div>
 
-                    {(abonoMethod === 'TarjetaBs' || abonoMethod === 'PagoMovil' || abonoMethod === 'Biopago') && (
-                      <div>
-                        <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold uppercase tracking-wider">Nro. de Referencia (Opcional):</label>
-                        <input
-                          type="text"
-                          value={abonoRef}
-                          onChange={(e) => setAbonoRef(e.target.value)}
-                          placeholder="Ej: 123456"
-                          className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-mono focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:outline-none"
-                        />
-                      </div>
-                    )}
-                    
                     <button
-                      onClick={() => setAbonoClient(null)}
-                      className="text-[9px] text-slate-455 hover:text-slate-650 underline font-sans"
-                    >
-                      ← Seleccionar otro cliente
-                    </button>
+                       onClick={() => { setAbonoClient(null); setAbonoPayments([]); setAbonoRef(''); }}
+                       className="text-[9px] text-slate-455 hover:text-slate-650 underline font-sans"
+                     >
+                       ← Seleccionar otro cliente
+                     </button>
                   </div>
                 )}
               </div>

@@ -277,15 +277,26 @@ export interface CierreCaja {
   expectedVes: number;
 }
 
+export type MetodoPagoAbono = 'Efectivo$' | 'EfectivoBs' | 'Tarjeta$' | 'TarjetaBs' | 'PagoMovil' | 'Biopago' | 'Binance' | 'PayPal' | 'Zelle';
+
+/** A single payment line within a multi-payment abono */
+export interface AbonoPayment {
+  metodo_pago: MetodoPagoAbono;
+  monto_usd: number;   // amount in USD (0 if Bs-based method)
+  monto_ves: number;   // amount in VES (0 if USD-based method)
+  referencia?: string;
+}
+
 export interface Abono {
   id: number;
   cliente_id: number;
   nombre: string;
   cedula_rif: string;
-  monto: number;
-  metodo_pago?: 'Efectivo$' | 'EfectivoBs' | 'Tarjeta$' | 'TarjetaBs' | 'PagoMovil' | 'Biopago' | 'Binance' | 'PayPal';
+  monto: number;        // total abono in USD (used for local state display)
+  metodo_pago?: MetodoPagoAbono;
   monto_ves?: number;
   referencia?: string;
+  observacion?: string;
   usuario?: string;
   fecha: string;
 }

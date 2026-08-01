@@ -651,20 +651,12 @@ export async function getAbonos() {
   return readJsonFile('abonos.json', []);
 }
 
-export async function registerAbono(clientId, amountUSD, metodoPago = 'Efectivo$', referencia = '') {
+export async function registerAbono(clientId, montoUsd, montoVes, metodoPago = 'Efectivo$', referencia = '', observacion = '') {
   let clientNombre = '';
   let clientDoc = '';
-
-  let tasaDia = 1;
-  try {
-    const tasas = await getTasaHistory();
-    if (tasas && tasas.length > 0) {
-      tasaDia = parseFloat(tasas[tasas.length - 1].tasa_cobro || '1');
-    }
-  } catch (_) {}
-
-  const montoVES = parseFloat((amountUSD * tasaDia).toFixed(2));
   const parsedId = parseInt(clientId) || 0;
+  // amountUSD used for client credit update — use whichever is non-zero, converting VES if needed
+  const amountUSD = montoUsd > 0 ? montoUsd : 0;
 
   if (usePostgres) {
     try {
@@ -677,16 +669,19 @@ export async function registerAbono(clientId, amountUSD, metodoPago = 'Efectivo$
         const realClientId = client.id;
         clientNombre = client.nombre;
         clientDoc = client.cedula_rif;
-        const nextCredito = Math.min(parseFloat(client.limite_credito || '0'), parseFloat(client.credito_disponible || '0') + amountUSD);
-        await pool.query('UPDATE Clientes SET credito_disponible = $1 WHERE id = $2', [nextCredito, realClientId]);
+
+        if (amountUSD > 0) {
+          const nextCredito = Math.min(parseFloat(client.limite_credito || '0'), parseFloat(client.credito_disponible || '0') + amountUSD);
+          await pool.query('UPDATE Clientes SET credito_disponible = $1 WHERE id = $2', [nextCredito, realClientId]);
+        }
         
         try {
           await pool.query(
-            `INSERT INTO Abonos (cliente_id, monto_usd, monto_ves, metodo_pago, numero_referencia, fecha)
-             VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
-            [realClientId, amountUSD, montoVES, metodoPago, referencia]
+            `INSERT INTO Abonos (cliente_id, monto_usd, monto_ves, metodo_pago, numero_referencia, observacion, fecha)
+             VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)`,
+            [realClientId, montoUsd || 0, montoVes || 0, metodoPago, referencia || null, observacion || null]
           );
-          console.log(`✅ [Abonos] Abono registrado exitosamente en PostgreSQL para cliente ${clientNombre} (ID ${realClientId}): $${amountUSD} / Bs ${montoVES}`);
+          console.log(`✅ [Abonos] Abono registrado en PostgreSQL — Cliente: ${clientNombre} (ID ${realClientId}) | $${montoUsd} / Bs ${montoVes} | Método: ${metodoPago}`);
         } catch (dbErr) {
           console.error('❌ Error al insertar abono en tabla Abonos:', dbErr.message);
         }
@@ -697,30 +692,28 @@ export async function registerAbono(clientId, amountUSD, metodoPago = 'Efectivo$
           );
           if (activeCajaRes.rowCount > 0) {
             const cajaId = activeCajaRes.rows[0].id;
-            const isUsd = metodoPago === 'Efectivo$' || metodoPago === 'Tarjeta$' || metodoPago === 'Zelle' || metodoPago === 'Binance' || metodoPago === 'PayPal';
-            const mUsd = isUsd ? amountUSD : 0;
-            const mVes = isUsd ? 0 : montoVES;
             await pool.query(
               `INSERT INTO Movimientos_Caja (caja_id, tipo, descripcion, monto_usd, monto_ves, fecha)
                VALUES ($1, 'Entrada', $2, $3, $4, CURRENT_TIMESTAMP)`,
-              [cajaId, `Abono de Crédito Cliente: ${clientNombre} (${metodoPago})`, mUsd, mVes]
+              [cajaId, `Abono de Crédito Cliente: ${clientNombre} (${metodoPago})`, montoUsd || 0, montoVes || 0]
             );
           }
         } catch (movErr) {
           console.error('⚠️ Error al registrar movimiento de abono:', movErr.message);
         }
 
-        // Log abono in JSON store as well for sync consistency
+        // Sync to JSON store
         const abonos = readJsonFile('abonos.json', []);
         abonos.push({
           id: Date.now(),
           cliente_id: realClientId,
           nombre: clientNombre,
           cedula_rif: clientDoc,
-          monto: amountUSD,
-          monto_ves: montoVES,
+          monto: montoUsd || 0,
+          monto_ves: montoVes || 0,
           metodo_pago: metodoPago,
           referencia: referencia || undefined,
+          observacion: observacion || undefined,
           fecha: getLocalISODateString()
         });
         writeJsonFile('abonos.json', abonos);
@@ -737,21 +730,23 @@ export async function registerAbono(clientId, amountUSD, metodoPago = 'Efectivo$
     if (idx !== -1) {
       clientNombre = clients[idx].nombre;
       clientDoc = clients[idx].cedula_rif;
-      clients[idx].saldo_pendiente = Math.max(0, clients[idx].saldo_pendiente - amountUSD);
-      clients[idx].credito_disponible = Math.min(clients[idx].limite_credito, clients[idx].credito_disponible + amountUSD);
+      if (amountUSD > 0) {
+        clients[idx].saldo_pendiente = Math.max(0, clients[idx].saldo_pendiente - amountUSD);
+        clients[idx].credito_disponible = Math.min(clients[idx].limite_credito, clients[idx].credito_disponible + amountUSD);
+      }
       writeJsonFile('clients.json', clients);
       
-      // Log abono
       const abonos = readJsonFile('abonos.json', []);
       abonos.push({
         id: Date.now(),
         cliente_id: clients[idx].id,
         nombre: clientNombre,
         cedula_rif: clientDoc,
-        monto: amountUSD,
-        monto_ves: montoVES,
+        monto: montoUsd || 0,
+        monto_ves: montoVes || 0,
         metodo_pago: metodoPago,
         referencia: referencia || undefined,
+        observacion: observacion || undefined,
         fecha: getLocalISODateString()
       });
       writeJsonFile('abonos.json', abonos);
