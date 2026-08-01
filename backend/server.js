@@ -655,12 +655,12 @@ app.get('/api/users', async (req, res) => {
 // Active Network Sessions Store (Map: userId -> sessionObj)
 const activeSessions = new Map();
 
-// Helper to clean up expired sessions (older than 45 seconds)
+// Helper to clean up expired sessions (older than 5 minutes of total heartbeat silence)
 const cleanExpiredSessions = () => {
   const now = Date.now();
-  for (const [userId, session] of activeSessions.entries()) {
-    if (now - session.lastHeartbeat > 45000) {
-      activeSessions.delete(userId);
+  for (const [key, session] of activeSessions.entries()) {
+    if (now - session.lastHeartbeat > 300000) {
+      activeSessions.delete(key);
     }
   }
 };
@@ -755,23 +755,27 @@ app.post('/api/users/heartbeat', async (req, res) => {
   const { userId, username, terminal } = req.body;
   cleanExpiredSessions();
 
+  let userObj = null;
   if (userId || username) {
-    const allUsers = await getUsers();
-    const userObj = allUsers.find(u => 
-      (userId && String(u.id) === String(userId)) ||
-      (username && u.usuario && u.usuario.toLowerCase().trim() === String(username).toLowerCase().trim())
-    );
+    try {
+      const allUsers = await getUsers();
+      userObj = allUsers.find(u => 
+        (userId && String(u.id) === String(userId)) ||
+        (username && u.usuario && u.usuario.toLowerCase().trim() === String(username).toLowerCase().trim())
+      );
 
-    const isAdmin = userObj && userObj.rol && userObj.rol.toLowerCase() === 'administrador';
-    if (!isAdmin) {
-      const cById = userId ? userShiftClosureEvents.get(`id_${userId}`) : null;
-      const cByName = username ? userShiftClosureEvents.get(`name_${String(username).toLowerCase().trim()}`) : null;
-      if (cById || cByName) {
-        return res.json({ success: false, sessionClosed: true, message: 'Shift closed' });
+      const isAdmin = userObj && userObj.rol && userObj.rol.toLowerCase() === 'administrador';
+      if (!isAdmin) {
+        const cById = userId ? userShiftClosureEvents.get(`id_${userId}`) : null;
+        const cByName = username ? userShiftClosureEvents.get(`name_${String(username).toLowerCase().trim()}`) : null;
+        if (cById || cByName) {
+          return res.json({ success: false, sessionClosed: true, message: 'Shift closed' });
+        }
       }
-    }
+    } catch (_) {}
   }
 
+  let found = false;
   for (const [key, sess] of activeSessions.entries()) {
     const matchUser = (userId && String(sess.userId) === String(userId)) || (username && sess.username.toLowerCase() === String(username).toLowerCase());
     const matchTerminal = !terminal || sess.terminal === terminal;
@@ -779,8 +783,30 @@ app.post('/api/users/heartbeat', async (req, res) => {
       sess.lastHeartbeat = Date.now();
       if (terminal) sess.terminal = terminal;
       activeSessions.set(key, sess);
+      found = true;
     }
   }
+
+  // Si la sesión no estaba en memoria (por reinicio del servidor backend o reconexión), la restaura dinámicamente
+  if (!found && (userObj || userId || username)) {
+    const activeTerm = terminal || 'LOCAL';
+    const finalUserId = userObj ? userObj.id : (userId || '1');
+    const finalUsername = userObj ? userObj.usuario : (username || 'usuario');
+    const finalNombre = userObj ? (userObj.nombre || userObj.usuario) : finalUsername;
+    const finalRol = userObj ? userObj.rol : 'Usuario';
+    const sessionKey = `${finalUserId}_${activeTerm}`;
+
+    activeSessions.set(sessionKey, {
+      userId: finalUserId,
+      username: finalUsername,
+      nombre: finalNombre,
+      rol: finalRol,
+      terminal: activeTerm,
+      loginTime: new Date().toISOString(),
+      lastHeartbeat: Date.now()
+    });
+  }
+
   res.json({ success: true });
 });
 

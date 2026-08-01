@@ -33,6 +33,51 @@ const ACCIONES_PERMISOS = [
   { id: 'eliminar', label: 'Eliminar' }
 ];
 
+const MODULE_GUIDES_MAP: Record<string, { title: string; ver: string; crear: string; editar: string; eliminar: string }> = {
+  caja: {
+    title: 'F1 CAJA / POS',
+    ver: 'Consulta de precios y búsqueda de productos',
+    crear: 'Procesar ventas, aperturar turno y cobros (Efectivo, PM, Zelle, Tarjeta)',
+    editar: 'Descuentos especiales, Entradas/Salidas de dinero y Pausar compras',
+    eliminar: 'Devolución de productos, anulación de ítems y Cierre de Caja'
+  },
+  inventario: {
+    title: 'F2 INVENTARIO',
+    ver: 'Ver catálogo de productos y existencias',
+    crear: 'Agregar producto, Carga por Factura y Carga Masiva (PDF/CSV)',
+    editar: 'Editar Precios, Modificar Producto, Ajuste General, Ajuste Masivo Stock',
+    eliminar: 'Eliminar productos del catálogo (requiere existencia 0)'
+  },
+  ventas: {
+    title: 'F3 HISTORIAL VENTAS',
+    ver: 'Ver histórico de facturas, ventas pasadas y cierres',
+    crear: 'Exportar reportes de ventas a PDF / Excel',
+    editar: 'Reimprimir comprobantes y ver detalle de costos/utilidades',
+    eliminar: 'Anular facturas o ventas procesadas'
+  },
+  clientes: {
+    title: 'F4 CLIENTES',
+    ver: 'Ver catálogo y directorio de clientes',
+    crear: 'Registrar nuevo cliente',
+    editar: 'Modificar datos del cliente, límite de crédito y registrar Abonos',
+    eliminar: 'Eliminar cliente de la base de datos (requiere saldo 0)'
+  },
+  tasa: {
+    title: 'F9 TASA DE CAMBIO',
+    ver: 'Ver tasa activa y tabla de historial',
+    crear: 'Registrar actualización de tasa',
+    editar: 'Cambiar tasa activa o alternar modo (Manual / Auto BCV)',
+    eliminar: 'Eliminar registros del historial de tasas'
+  },
+  config: {
+    title: 'F10 CONFIGURACIÓN',
+    ver: 'Consultar información de la empresa',
+    crear: 'Crear nuevos Usuarios y Perfiles de Rol',
+    editar: 'Modificar RIF, Nombre, Impresoras, Básculas e Integración WhatsApp',
+    eliminar: 'Desconectar sesiones activas en red y borrar perfiles/usuarios'
+  }
+};
+
 const DEFAULT_WA_TEMPLATE = `📊 *REPORTE DE ARQUEO Y CIERRE DE CAJA*
 
 📅 *Fecha:* {fecha}
@@ -69,6 +114,7 @@ export default function ConfiguracionEmpresa({
   const [activeTab, setActiveTab] = useState<'empresa' | 'usuarios' | 'perifericos' | 'db' | 'whatsapp'>('empresa');
   const [subTabUsers, setSubTabUsers] = useState<'users' | 'roles' | 'sesiones' | 'politicas'>('users');
   const [activeSessionsList, setActiveSessionsList] = useState<any[]>([]);
+  const [activeGuideModule, setActiveGuideModule] = useState<string>('inventario');
 
   const fetchActiveSessions = async () => {
     try {
@@ -2684,6 +2730,48 @@ export default function ConfiguracionEmpresa({
                     ))}
                   </tbody>
                 </table>
+              </div>
+
+              {/* Guía interactiva de permisos por Módulo */}
+              <div className="mt-2 bg-[#08284c]/5 border border-indigo-200 rounded p-2.5 text-[9.5px] leading-relaxed text-slate-700 space-y-2">
+                <div className="flex items-center justify-between border-b border-indigo-100 pb-1.5 gap-2">
+                  <span className="font-extrabold text-indigo-950 uppercase font-sans text-[10px] flex items-center gap-1">
+                    💡 Guía de Operaciones por Módulo:
+                  </span>
+                  <div className="flex gap-1 overflow-x-auto">
+                    {MODULOS_PERMISOS.map(m => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setActiveGuideModule(m.id)}
+                        className={`px-1.5 py-0.5 rounded font-mono font-bold text-[8.5px] transition-all cursor-pointer ${
+                          activeGuideModule === m.id
+                            ? 'bg-indigo-600 text-white shadow-xs'
+                            : 'bg-white text-slate-600 hover:bg-indigo-50 border border-slate-200'
+                        }`}
+                      >
+                        {m.id.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {(() => {
+                  const guide = MODULE_GUIDES_MAP[activeGuideModule] || MODULE_GUIDES_MAP.inventario;
+                  return (
+                    <div className="space-y-1 font-sans">
+                      <span className="font-extrabold text-indigo-900 block text-[9.5px] uppercase font-mono">
+                        📌 {guide.title}
+                      </span>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 bg-white p-2 rounded border border-slate-200 text-slate-700">
+                        <div><strong className="text-sky-700">Ver:</strong> {guide.ver}</div>
+                        <div><strong className="text-emerald-700">Crear:</strong> {guide.crear}</div>
+                        <div><strong className="text-amber-700">Editar:</strong> {guide.editar}</div>
+                        <div><strong className="text-rose-700">Eliminar:</strong> {guide.eliminar}</div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 

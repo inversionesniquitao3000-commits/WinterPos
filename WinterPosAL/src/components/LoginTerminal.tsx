@@ -25,7 +25,11 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
   });
   const [dbMode, setDbMode] = useState(() => {
     const saved = localStorage.getItem('pos_db_mode');
-    return saved || 'local'; 
+    return saved || 'local';
+  });
+  const [terminalNameState, setTerminalNameState] = useState(() => {
+    const saved = localStorage.getItem('pos_terminal_name');
+    return saved || 'CAJA_01';
   });
   
   const [username, setUsername] = useState('');
@@ -74,14 +78,17 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
 
   const handleSaveConfig = (e: React.FormEvent) => {
     e.preventDefault();
+    const finalTerminal = terminalNameState.trim().toUpperCase() || 'CAJA_01';
     localStorage.setItem('pos_lan_ip', serverIP);
     localStorage.setItem('pos_lan_port', serverPort);
     localStorage.setItem('pos_db_mode', dbMode);
+    localStorage.setItem('pos_terminal_name', finalTerminal);
+    setTerminalNameState(finalTerminal);
     setShowConfig(false);
     
-    console.log('Saved network config to config.json', { dbMode, serverIP, serverPort });
+    console.log('Saved network and terminal config', { dbMode, serverIP, serverPort, finalTerminal });
     showAlert(
-      `Conexión de base de datos configurada correctamente hacia: ${dbMode === 'local' ? 'localhost (modo local)' : `${serverIP}:${serverPort}`}`,
+      `Configuración de estación "${finalTerminal}" guardada correctamente (${dbMode === 'local' ? 'Modo Local' : `${serverIP}:${serverPort}`}).`,
       'Configuración Guardada',
       'success'
     );
@@ -155,7 +162,9 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
         
         {/* Top Spacer or Network Settings Button */}
         <div className="flex justify-between items-center text-[10px] text-slate-300 font-sans">
-          <span>ESTACIÓN: TERMINAL_01</span>
+          <span className="font-mono uppercase font-bold tracking-wider text-slate-300">
+            ESTACIÓN: {localStorage.getItem('pos_terminal_name') || 'CAJA_01'}
+          </span>
           <button 
             type="button"
             onClick={() => setShowConfig(prev => !prev)}
@@ -295,6 +304,17 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
               </div>
               
               <div className="space-y-2 text-[10px]">
+                <div>
+                  <label className="text-slate-300 block mb-1 font-sans font-bold">Identificador de Estación / Caja</label>
+                  <input
+                    type="text"
+                    value={terminalNameState}
+                    onChange={(e) => setTerminalNameState(e.target.value.toUpperCase())}
+                    placeholder="Ej: CAJA_01, CAJA_02, MOSTRADOR"
+                    className="w-full bg-[#08284c] border border-slate-700 rounded p-1.5 text-yellow-400 font-bold uppercase outline-none"
+                  />
+                </div>
+
                 <div>
                   <label className="text-slate-300 block mb-1 font-sans">Origen de Datos</label>
                   <select
