@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Shield, Network, Eye, EyeOff } from 'lucide-react';
+import { Shield, Network, Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import { User, CompanyConfig } from '../types';
 import { useDialog } from '../hooks/useDialog';
 
@@ -8,9 +8,10 @@ interface LoginTerminalProps {
   systemUsers: User[];
   companyConfig: CompanyConfig;
   sessionNotice?: string;
+  onOpenLicenseModal?: () => void;
 }
 
-export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConfig, sessionNotice }: LoginTerminalProps) {
+export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConfig, sessionNotice, onOpenLicenseModal }: LoginTerminalProps) {
   const { showAlert } = useDialog();
   const usernameInputRef = useRef<HTMLInputElement>(null);
   const [showConfig, setShowConfig] = useState(false);
@@ -55,17 +56,20 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
     };
   }, [showConfig]);
 
-  // Monitor key press Ctrl + Alt + P
+  // Monitor key press Ctrl + Alt + P for LAN settings and F9 for License
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
         setShowConfig(prev => !prev);
+      } else if (e.key === 'F9') {
+        e.preventDefault();
+        if (onOpenLicenseModal) onOpenLicenseModal();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [onOpenLicenseModal]);
 
   const handleLogoClick = () => {
     const newCount = clickCount + 1;
@@ -165,14 +169,27 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
           <span className="font-mono uppercase font-bold tracking-wider text-slate-300">
             ESTACIÓN: {localStorage.getItem('pos_terminal_name') || 'CAJA_01'}
           </span>
-          <button 
-            type="button"
-            onClick={() => setShowConfig(prev => !prev)}
-            className="text-slate-300 hover:text-white p-1 rounded hover:bg-white/10"
-            title="Ajustes de Red LAN"
-          >
-            <Network className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            {onOpenLicenseModal && (
+              <button 
+                type="button"
+                onClick={onOpenLicenseModal}
+                className="text-emerald-300 hover:text-white px-2 py-0.5 rounded bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-500/30 transition-all font-mono text-[9px] flex items-center gap-1 cursor-pointer"
+                title="Consultar o renovar información de licencia (F9)"
+              >
+                <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                <span>Licencia (F9)</span>
+              </button>
+            )}
+            <button 
+              type="button"
+              onClick={() => setShowConfig(prev => !prev)}
+              className="text-slate-300 hover:text-white p-1 rounded hover:bg-white/10"
+              title="Ajustes de Red LAN"
+            >
+              <Network className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Center Contents: Logo, Title, Inputs */}

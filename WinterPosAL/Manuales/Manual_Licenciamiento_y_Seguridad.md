@@ -65,6 +65,12 @@ El comando creará un archivo llamado **`license.lic`** en la raíz del proyecto
 5. **Activar:** Haz clic en **"🔓 ACTIVAR SISTEMA WINTERPOS"**.
 6. **¡Listo!** El sistema verificará la firma digital en menos de 1 segundo, desbloqueará el punto de venta y dejará operativas todas las cajas de tu red local.
 
+### 2.2. Consulta Anticipada de Licencia e Información de Equipo (Teclas F9)
+
+- **Consulta en Pantalla de Login:** El usuario puede presionar la tecla **`F9`** o hacer clic en el botón **`🛡️ Licencia (F9)`** en la esquina superior de la pantalla de inicio de sesión en cualquier momento (incluso con la licencia activa).
+- **Consulta dentro del Punto de Venta:** Presionando **`F9`** o haciendo clic en el badge verde **`🛡️ 365d (F9)`** de la barra superior.
+- **Detalles Mostrados:** Muestra el nombre de la empresa registrada, RIF, vigencia, días restantes, número de cajas autorizadas, botón para copiar HWID, contacto directo de soporte y la opción de renovar o extender la licencia con anticipación sin esperar a que expire.
+
 ---
 
 ## 🔒 PARTE 3: MEDIDAS DE SEGURIDAD Y PREGUNTAS FRECUENTES

@@ -1958,12 +1958,28 @@ export default function App() {
     setReprintSale(sale);
   };
 
-  if (licenseStatus && !licenseStatus.isValid) {
+  const [showLicenseModalManually, setShowLicenseModalManually] = useState(false);
+
+  useEffect(() => {
+    const handleGlobalF9 = (e: KeyboardEvent) => {
+      if (e.key === 'F9') {
+        e.preventDefault();
+        setShowLicenseModalManually(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalF9);
+    return () => window.removeEventListener('keydown', handleGlobalF9);
+  }, []);
+
+  const isLicenseBlocking = licenseStatus && !licenseStatus.isValid;
+
+  if (isLicenseBlocking || showLicenseModalManually) {
     return (
       <LicenciaModal 
         licenseStatus={licenseStatus} 
         onLicenseActivated={fetchLicenseStatus} 
         getApiUrl={getApiUrl} 
+        onClose={isLicenseBlocking ? undefined : () => setShowLicenseModalManually(false)}
       />
     );
   }
@@ -1979,6 +1995,7 @@ export default function App() {
         systemUsers={users} 
         companyConfig={companyConfig} 
         sessionNotice={sessionNotice}
+        onOpenLicenseModal={() => setShowLicenseModalManually(true)}
       />
     );
   }
@@ -1998,10 +2015,14 @@ export default function App() {
             <span className="text-slate-100 font-bold block flex items-center gap-1.5">
               {currentUser.nombre.toUpperCase()}
               {licenseStatus?.isValid && (
-                <span className="text-[9px] bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 px-2 py-0.5 rounded-full font-mono font-bold inline-flex items-center gap-1" title={`Licencia asignada a: ${licenseStatus.payload?.cliente || 'Cliente'}`}>
+                <button
+                  onClick={() => setShowLicenseModalManually(true)}
+                  className="text-[9px] bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 px-2 py-0.5 rounded-full font-mono font-bold inline-flex items-center gap-1 hover:bg-emerald-900 transition-all cursor-pointer"
+                  title="Haga clic para ver detalles de licencia o actualizar (F9)"
+                >
                   <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                  <span>{licenseStatus.payload?.fechaExpiracion === 'VITALICIA' ? 'Vitalicia' : `${licenseStatus.daysRemaining ?? '---'}d`}</span>
-                </span>
+                  <span>{licenseStatus.payload?.fechaExpiracion === 'VITALICIA' ? 'Vitalicia' : `${licenseStatus.daysRemaining ?? '---'}d (F9)`}</span>
+                </button>
               )}
             </span>
             <span className="text-[10px] text-slate-400 block uppercase font-sans tracking-wide">
