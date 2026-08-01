@@ -10,8 +10,8 @@ Este documento constituye la guía oficial para el **Desarrollador / Vendedor** 
 - **Backend Executable & Obfuscation:** El servidor backend Express se compila a binario ejecutable de máquina (`.exe`). Ningún cliente o tercero puede abrir, copiar ni modificar los scripts `.js` o controladores de base de datos.
 - **Algoritmo de Licenciamiento:** Criptografía Asimétrica **RSA-2048** con firma digest **SHA-256**.
 - **Resguardo de Claves:**
-  - **Clave Privada (`tools/keys/private_key.pem`):** Reside **ÚNICAMENTE** en la computadora del desarrollador. Está protegida en el `.gitignore` y **NUNCA** debe entregarse al cliente ni subirse a Git. Sirve para firmar los archivos `license.lic`.
-  - **Clave Pública (`backend/keys/public_key.pem`):** Viene empaquetada dentro del backend de WinterPos para verificar que la firma RSA sea auténtica.
+  - **Clave Privada (`tools/keys/private_key.pem`):** Reside en tu repositorio Git privado y en tu máquina de desarrollo. Se utiliza exclusivamente para firmar los archivos `license.lic` y no se incluye en el instalador final del cliente.
+  - **Clave Pública (`backend/keys/public_key.pem`):** Viene empaquetada dentro del backend compilado de WinterPos para verificar que la firma RSA sea auténtica.
 
 ---
 
