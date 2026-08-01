@@ -1348,6 +1348,7 @@ export default function CajaPOS({
     const realVes = parseFloat(cierreRealVes) || 0;
 
     let targetShiftSales = shiftSales;
+    let targetShiftAbonos = abonos || [];
     let targetAperturaUsd = _montoAperturaUsd;
     let targetAperturaVes = _montoAperturaVes;
     let targetEntradaUsd = shiftEntradasUsd;
@@ -1365,6 +1366,7 @@ export default function CajaPOS({
         const cajaData = await res.json();
         if (cajaData && cajaData.abierta) {
           if (Array.isArray(cajaData.shiftSales)) targetShiftSales = cajaData.shiftSales;
+          if (Array.isArray(cajaData.shiftAbonosList)) targetShiftAbonos = cajaData.shiftAbonosList;
           if (typeof cajaData.aperturaUsd === 'number') targetAperturaUsd = cajaData.aperturaUsd;
           if (typeof cajaData.aperturaVes === 'number') targetAperturaVes = cajaData.aperturaVes;
           if (typeof cajaData.shiftEntradasUsd === 'number') targetEntradaUsd = cajaData.shiftEntradasUsd;
@@ -1392,41 +1394,50 @@ export default function CajaPOS({
       const cashPay = (sale.pagos || []).find(p => p.metodo === 'EfectivoBs');
       return acc + (cashPay ? cashPay.monto : 0);
     }, 0);
-    // Detailed abonos metrics calculation
-    const abonosEfectivoUsd = (abonos || []).reduce((acc, a) => {
-      if (a.metodo_pago === 'Efectivo$' || !a.metodo_pago) return acc + a.monto;
+    // Detailed abonos metrics calculation for active shift
+    const abonosEfectivoUsd = targetShiftAbonos.reduce((acc, a) => {
+      const m = String(a.metodo_pago || '');
+      if (m === 'Efectivo$' || m === 'USD') return acc + (a.monto || 0);
       return acc;
     }, 0);
-    const abonosEfectivoBsVes = (abonos || []).reduce((acc, a) => {
-      if (a.metodo_pago === 'EfectivoBs') return acc + (a.monto_ves || a.monto * tasaDia);
+    const abonosEfectivoBsVes = targetShiftAbonos.reduce((acc, a) => {
+      const m = String(a.metodo_pago || '');
+      if (m === 'EfectivoBs' || m === 'VES' || m === 'Bolivares') return acc + (a.monto_ves || (a.monto || 0) * tasaDia);
       return acc;
     }, 0);
-    const abonosEfectivoBsUsd = (abonos || []).reduce((acc, a) => {
-      if (a.metodo_pago === 'EfectivoBs') return acc + a.monto;
+    const abonosEfectivoBsUsd = targetShiftAbonos.reduce((acc, a) => {
+      const m = String(a.metodo_pago || '');
+      if (m === 'EfectivoBs' || m === 'VES' || m === 'Bolivares') return acc + (a.monto || 0);
       return acc;
     }, 0);
-    const abonosBiopagoVes = (abonos || []).reduce((acc, a) => {
-      if (a.metodo_pago === 'Biopago') return acc + (a.monto_ves || a.monto * tasaDia);
+    const abonosBiopagoVes = targetShiftAbonos.reduce((acc, a) => {
+      const m = String(a.metodo_pago || '');
+      if (m === 'Biopago') return acc + (a.monto_ves || (a.monto || 0) * tasaDia);
       return acc;
     }, 0);
-    const abonosBiopagoUsd = (abonos || []).reduce((acc, a) => {
-      if (a.metodo_pago === 'Biopago') return acc + a.monto;
+    const abonosBiopagoUsd = targetShiftAbonos.reduce((acc, a) => {
+      const m = String(a.metodo_pago || '');
+      if (m === 'Biopago') return acc + (a.monto || 0);
       return acc;
     }, 0);
-    const abonosPagoMovilVes = (abonos || []).reduce((acc, a) => {
-      if (a.metodo_pago === 'PagoMovil') return acc + (a.monto_ves || a.monto * tasaDia);
+    const abonosPagoMovilVes = targetShiftAbonos.reduce((acc, a) => {
+      const m = String(a.metodo_pago || '');
+      if (m === 'PagoMovil') return acc + (a.monto_ves || (a.monto || 0) * tasaDia);
       return acc;
     }, 0);
-    const abonosPagoMovilUsd = (abonos || []).reduce((acc, a) => {
-      if (a.metodo_pago === 'PagoMovil') return acc + a.monto;
+    const abonosPagoMovilUsd = targetShiftAbonos.reduce((acc, a) => {
+      const m = String(a.metodo_pago || '');
+      if (m === 'PagoMovil') return acc + (a.monto || 0);
       return acc;
     }, 0);
-    const abonosPuntoVes = (abonos || []).reduce((acc, a) => {
-      if (a.metodo_pago === 'TarjetaBs' || a.metodo_pago === 'Tarjeta$') return acc + (a.monto_ves || a.monto * tasaDia);
+    const abonosPuntoVes = targetShiftAbonos.reduce((acc, a) => {
+      const m = String(a.metodo_pago || '');
+      if (m === 'TarjetaBs' || m === 'Tarjeta$') return acc + (a.monto_ves || (a.monto || 0) * tasaDia);
       return acc;
     }, 0);
-    const abonosPuntoUsd = (abonos || []).reduce((acc, a) => {
-      if (a.metodo_pago === 'TarjetaBs' || a.metodo_pago === 'Tarjeta$') return acc + a.monto;
+    const abonosPuntoUsd = targetShiftAbonos.reduce((acc, a) => {
+      const m = String(a.metodo_pago || '');
+      if (m === 'TarjetaBs' || m === 'Tarjeta$') return acc + (a.monto || 0);
       return acc;
     }, 0);
     const abonoClientesUsd = abonosEfectivoUsd + abonosEfectivoBsUsd + abonosBiopagoUsd + abonosPagoMovilUsd + abonosPuntoUsd;
@@ -1542,7 +1553,7 @@ export default function CajaPOS({
     }, 0);
     const pagosPuntosUsd = pagosBiopagoUsd; 
     
-    const devolucionVentasUsd = targetShiftSales.reduce((acc, sale) => {
+    const totalDevolucionesUsd = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) {
         const val = typeof sale.totalUSD === 'number' && !isNaN(sale.totalUSD) ? Math.abs(sale.totalUSD) : 0;
         return acc + val;
@@ -1550,15 +1561,51 @@ export default function CajaPOS({
       return acc;
     }, 0);
 
-    const devolucionVentasVes = targetShiftSales.reduce((acc, sale) => {
+    const devolucionVentasUsd = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) {
-        const val = typeof sale.totalVES === 'number' && !isNaN(sale.totalVES) ? Math.abs(sale.totalVES) : 0;
-        return acc + val;
+        const isUsdDev = (sale.pagos || []).some(p => {
+          const m = String(p.metodo || '');
+          return m === 'Efectivo$' || m.endsWith('$') || m === 'Binance' || m === 'PayPal' || m === 'Zelle';
+        });
+        const isVesDev = (sale.pagos || []).some(p => {
+          const m = String(p.metodo || '');
+          return m === 'EfectivoBs' || m.endsWith('Bs') || m === 'PagoMovil' || m === 'Biopago';
+        });
+
+        if (isUsdDev) {
+          const val = typeof sale.totalUSD === 'number' && !isNaN(sale.totalUSD) ? Math.abs(sale.totalUSD) : 0;
+          return acc + val;
+        } else if (!isVesDev) {
+          const val = (sale.totalUSD && (!sale.totalVES || sale.totalVES === 0)) ? Math.abs(sale.totalUSD) : 0;
+          return acc + val;
+        }
       }
       return acc;
     }, 0);
 
-    const rawVentaTotal = ventasTotalesUsd - devolucionVentasUsd;
+    const devolucionVentasVes = targetShiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro.startsWith('DEV-')) {
+        const isVesDev = (sale.pagos || []).some(p => {
+          const m = String(p.metodo || '');
+          return m === 'EfectivoBs' || m.endsWith('Bs') || m === 'PagoMovil' || m === 'Biopago';
+        });
+        const isUsdDev = (sale.pagos || []).some(p => {
+          const m = String(p.metodo || '');
+          return m === 'Efectivo$' || m.endsWith('$') || m === 'Binance' || m === 'PayPal' || m === 'Zelle';
+        });
+
+        if (isVesDev) {
+          const val = typeof sale.totalVES === 'number' && !isNaN(sale.totalVES) ? Math.abs(sale.totalVES) : 0;
+          return acc + val;
+        } else if (!isUsdDev && typeof sale.totalVES === 'number' && sale.totalVES > 0) {
+          const val = Math.abs(sale.totalVES);
+          return acc + val;
+        }
+      }
+      return acc;
+    }, 0);
+
+    const rawVentaTotal = ventasTotalesUsd - totalDevolucionesUsd;
     const ventaTotalUsd = isNaN(rawVentaTotal) ? 0 : parseFloat(rawVentaTotal.toFixed(2));
 
     const getItemUnitCost = (item: any) => {

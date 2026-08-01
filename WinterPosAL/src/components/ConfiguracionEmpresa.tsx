@@ -3,7 +3,8 @@ import { CompanyConfig, User, Role, PrinterConfig, ScaleConfig } from '../types'
 import { 
   Save, CheckCircle2, Users, HardDrive, Cpu, 
   Trash2, Edit, Plus, Download, Upload, ShieldAlert,
-  Settings, CheckSquare, Square, Globe, ShieldCheck, Printer, FileText
+  Settings, CheckSquare, Square, Globe, ShieldCheck, Printer, FileText,
+  LogOut, Unplug
 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr } from '../utils';
@@ -136,18 +137,37 @@ export default function ConfiguracionEmpresa({
 
   const handleForceDisconnectSession = async (userId: number | string, username: string) => {
     const ok = await showConfirm(
-      `¿Desea desconectar la sesión activa de "${username}"? El usuario podrá volver a ingresar desde cualquier equipo.`,
-      'Desconectar Usuario',
-      { confirmLabel: 'Desconectar', isDanger: true }
+      `¿Desea desconectar la reserva de sesión en red de "${username}"? (Se liberará el registro de la terminal para permitir reconexión sin cerrar la aplicación del usuario).`,
+      'Desconectar Terminal de Red',
+      { confirmLabel: 'Desconectar Terminal', isDanger: false }
     );
     if (ok) {
       try {
         await fetch(getApiUrl(`/users/active-sessions/${userId}`), { method: 'DELETE' });
-        setSuccessMsg(`Sesión de ${username} liberada correctamente.`);
+        setSuccessMsg(`Registro de red de ${username} liberado correctamente.`);
         setTimeout(() => setSuccessMsg(''), 4000);
         fetchActiveSessions();
       } catch (_) {
         setErrorMsg('Error al intentar liberar la sesión.');
+        setTimeout(() => setErrorMsg(''), 4000);
+      }
+    }
+  };
+
+  const handleForceLogoutSession = async (userId: number | string, username: string) => {
+    const ok = await showConfirm(
+      `¿Desea expulsar a "${username}" del sistema? Su sesión será cerrada de inmediato y será enviado a la pantalla de login.`,
+      'Expulsar y Cerrar Sesión',
+      { confirmLabel: 'Expulsar Usuario (Logout)', isDanger: true }
+    );
+    if (ok) {
+      try {
+        await fetch(getApiUrl(`/users/force-logout/${userId}`), { method: 'POST' });
+        setSuccessMsg(`Usuario ${username} expulsado del sistema correctamente.`);
+        setTimeout(() => setSuccessMsg(''), 4000);
+        fetchActiveSessions();
+      } catch (_) {
+        setErrorMsg('Error al intentar expulsar al usuario.');
         setTimeout(() => setErrorMsg(''), 4000);
       }
     }
@@ -1398,14 +1418,26 @@ export default function ConfiguracionEmpresa({
                             <td className="py-3 px-3 font-mono text-emerald-800 font-bold">{s.terminal}</td>
                             <td className="py-3 px-3 font-mono text-slate-500">{new Date(s.loginTime).toLocaleTimeString()}</td>
                             <td className="py-3 px-3 text-right">
-                              <button
-                                type="button"
-                                onClick={() => handleForceDisconnectSession(s.userId, s.username)}
-                                className="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 px-2.5 py-1 rounded text-[11px] font-bold transition-all"
-                                title="Desconectar usuario de esta terminal"
-                              >
-                                Desconectar
-                              </button>
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleForceDisconnectSession(s.userId, s.username)}
+                                  className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-2.5 py-1 rounded text-[11px] font-bold transition-all flex items-center gap-1"
+                                  title="Liberar registro de terminal en red (permite reconexión sin cerrar aplicación)"
+                                >
+                                  <Unplug className="w-3 h-3" />
+                                  Desconectar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleForceLogoutSession(s.userId, s.username)}
+                                  className="bg-red-600 hover:bg-red-700 text-white px-2.5 py-1 rounded text-[11px] font-bold transition-all shadow-sm flex items-center gap-1"
+                                  title="Expulsar usuario del sistema de inmediato (Cerrar Sesión / Logout)"
+                                >
+                                  <LogOut className="w-3 h-3" />
+                                  Logout
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))

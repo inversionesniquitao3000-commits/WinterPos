@@ -145,8 +145,8 @@ app.post('/api/clientes', async (req, res) => {
 });
 
 app.post('/api/clientes/abono', async (req, res) => {
-  const { id, monto } = req.body;
-  const success = await registerAbono(id, monto);
+  const { id, monto, metodo_pago, referencia } = req.body;
+  const success = await registerAbono(id, monto, metodo_pago, referencia);
   res.json({ success });
 });
 
@@ -469,10 +469,22 @@ app.get('/api/sync/poll', async (req, res) => {
       result.products = products;
     }
 
+    // 8. Abonos sync: check count & signature
+    const clientAbonosCount = parseInt(req.query.abonos_count) || 0;
+    const clientAbonosSig = parseFloat(req.query.abonos_sig) || 0;
+    const abonosList = await getAbonos();
+    const serverAbonosSig = abonosList.reduce((acc, a) => acc + (a.id || 0) + (a.monto || 0) + (a.monto_ves || 0), 0);
+    const roundedServerAbonosSig = Math.round(serverAbonosSig * 100) / 100;
+    const roundedClientAbonosSig = Math.round(clientAbonosSig * 100) / 100;
+
+    if (abonosList.length !== clientAbonosCount || roundedServerAbonosSig !== roundedClientAbonosSig) {
+      result.abonos = abonosList;
+    }
+
     res.json(result);
   } catch (err) {
     console.error('Error en /api/sync/poll:', err.message);
-    res.json({ sales: [], tasas: null, cierres: null, sessionClosed: false, serverTime: new Date().toISOString() });
+    res.json({ sales: [], tasas: null, cierres: null, abonos: null, sessionClosed: false, serverTime: new Date().toISOString() });
   }
 });
 
@@ -654,6 +666,7 @@ app.get('/api/users', async (req, res) => {
 
 // Active Network Sessions Store (Map: userId -> sessionObj)
 const activeSessions = new Map();
+const forcedLogoutUsers = new Map();
 
 // Helper to clean up expired sessions (older than 5 minutes of total heartbeat silence)
 const cleanExpiredSessions = () => {
@@ -712,10 +725,18 @@ app.post('/api/users/login-check', async (req, res) => {
       }
     }
 
-    // Clear previous shift closure eviction events for this user so new session can run cleanly
-    if (user.id) userShiftClosureEvents.delete(`id_${user.id}`);
-    if (user.usuario) userShiftClosureEvents.delete(`name_${user.usuario.toLowerCase().trim()}`);
-    if (user.nombre) userShiftClosureEvents.delete(`name_${user.nombre.toLowerCase().trim()}`);
+    // Clear previous shift closure eviction & forced logout events for this user so new session can run cleanly
+    if (user.id) {
+      userShiftClosureEvents.delete(`id_${user.id}`);
+      forcedLogoutUsers.delete(String(user.id));
+    }
+    if (user.usuario) {
+      userShiftClosureEvents.delete(`name_${user.usuario.toLowerCase().trim()}`);
+      forcedLogoutUsers.delete(String(user.usuario).toLowerCase().trim());
+    }
+    if (user.nombre) {
+      userShiftClosureEvents.delete(`name_${user.nombre.toLowerCase().trim()}`);
+    }
 
     // Register or update active session (keyed by userId and terminal to allow multi-device logins)
     const sessionKey = `${user.id}_${activeTerm}`;
@@ -757,6 +778,25 @@ app.post('/api/users/heartbeat', async (req, res) => {
 
   let userObj = null;
   if (userId || username) {
+    const idKey = userId ? String(userId) : '';
+    const nameKey = username ? String(username).toLowerCase().trim() : '';
+
+    // Check if admin performed a forced logout (kill session) on this user
+    if ((idKey && forcedLogoutUsers.has(idKey)) || (nameKey && forcedLogoutUsers.has(nameKey))) {
+      if (idKey) forcedLogoutUsers.delete(idKey);
+      if (nameKey) forcedLogoutUsers.delete(nameKey);
+      for (const [key, sess] of activeSessions.entries()) {
+        if ((idKey && String(sess.userId) === idKey) || (nameKey && sess.username.toLowerCase() === nameKey)) {
+          activeSessions.delete(key);
+        }
+      }
+      return res.json({
+        success: false,
+        sessionClosed: true,
+        message: '⚠️ Su sesión ha sido cerrada remotamente por un Administrador.'
+      });
+    }
+
     try {
       const allUsers = await getUsers();
       userObj = allUsers.find(u => 
@@ -816,7 +856,7 @@ app.get('/api/users/active-sessions', (req, res) => {
   res.json(Array.from(activeSessions.values()));
 });
 
-// Force disconnect user session (Admin action)
+// Force disconnect user session (release network lock - Admin action)
 app.delete('/api/users/active-sessions/:target', (req, res) => {
   const target = req.params.target;
   cleanExpiredSessions();
@@ -825,6 +865,29 @@ app.delete('/api/users/active-sessions/:target', (req, res) => {
       activeSessions.delete(key);
     }
   }
+  res.json({ success: true });
+});
+
+// Force logout user (kill session remotely - Admin action)
+app.post('/api/users/force-logout/:target', (req, res) => {
+  const target = String(req.params.target).toLowerCase().trim();
+  cleanExpiredSessions();
+  
+  for (const [key, sess] of activeSessions.entries()) {
+    const matchId = String(sess.userId).toLowerCase() === target;
+    const matchName = String(sess.username).toLowerCase() === target;
+    const matchKey = String(key).toLowerCase() === target;
+    const matchTerm = String(sess.terminal).toLowerCase() === target;
+
+    if (matchId || matchName || matchKey || matchTerm) {
+      activeSessions.delete(key);
+      if (sess.userId) forcedLogoutUsers.set(String(sess.userId), Date.now());
+      if (sess.username) forcedLogoutUsers.set(String(sess.username).toLowerCase().trim(), Date.now());
+    }
+  }
+  // Register target identifier in forcedLogoutUsers map
+  forcedLogoutUsers.set(target, Date.now());
+
   res.json({ success: true });
 });
 

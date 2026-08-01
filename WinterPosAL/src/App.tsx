@@ -526,6 +526,11 @@ export default function App() {
         const productsCount = safeProducts.length;
         const productsSig = safeProducts.reduce((acc, p) => acc + (p?.id || 0) + (p?.stock_actual || 0) + (p?.precio_detalle_usd || 0), 0);
 
+        // Calculate abonos parameters
+        const safeAbonos = Array.isArray(abonos) ? abonos : [];
+        const abonosCount = safeAbonos.length;
+        const abonosSig = safeAbonos.reduce((acc, a) => acc + (a?.id || 0) + (a?.monto || 0) + (a?.monto_ves || 0), 0);
+
         const params = new URLSearchParams({
           since_id: String(maxSaleId),
           last_tasa_cobro: String(lastTasaCobro),
@@ -538,6 +543,8 @@ export default function App() {
           clients_sig: String(clientsSig),
           products_count: String(productsCount),
           products_sig: String(productsSig),
+          abonos_count: String(abonosCount),
+          abonos_sig: String(abonosSig),
           config_name: companyConfigRef.current?.nombre_comercio || '',
           config_rif: companyConfigRef.current?.rif || '',
           terminal: myTerminal,
@@ -613,6 +620,12 @@ export default function App() {
         if (data.products) {
           console.log('[Sync] Catálogo de productos actualizado desde otra terminal.');
           setProducts(data.products);
+        }
+
+        // 7. Abonos history updated from another terminal
+        if (data.abonos) {
+          console.log('[Sync] Historial de abonos de clientes actualizado desde otra terminal.');
+          setAbonos(data.abonos);
         }
 
         // 7. Session closure detection for non-administrators
@@ -1373,11 +1386,11 @@ export default function App() {
           const nextPending = Math.max(0, c.saldo_pendiente - amountUSD);
           const nextCreditAvailable = Math.min(c.limite_credito, c.credito_disponible + amountUSD);
 
-          if (metodoPago === 'EfectivoBs') {
-            handleRegisterCajaMovement('Entrada', `Abono de Crédito Cliente: ${c.nombre} (Efectivo Bs)`, 0, montoVES);
-          } else if (metodoPago === 'Efectivo$') {
-            handleRegisterCajaMovement('Entrada', `Abono de Crédito Cliente: ${c.nombre} (Efectivo $)`, amountUSD, 0);
-          }
+          const mStr = String(metodoPago || '');
+          const isUsdMethod = mStr === 'Efectivo$' || mStr === 'Tarjeta$' || mStr === 'Binance' || mStr === 'PayPal' || mStr === 'Zelle';
+          const movUsd = isUsdMethod ? amountUSD : 0;
+          const movVes = isUsdMethod ? 0 : montoVES;
+          handleRegisterCajaMovement('Entrada', `Abono de Crédito Cliente: ${c.nombre} (${metodoPago})`, movUsd, movVes);
           
           // Append to abonos state
           const newAbonoLog: Abono = {
@@ -1644,7 +1657,7 @@ export default function App() {
     // Track shift statistics
     if (type === 'Entrada') {
       if (description.startsWith('Abono')) {
-        setShiftAbonosUsd(prev => prev + usd);
+        if (usd > 0) setShiftAbonosUsd(prev => prev + usd);
       } else {
         setShiftEntradasUsd(prev => prev + usd);
         setShiftEntradasVes(prev => prev + ves);
@@ -1845,8 +1858,8 @@ export default function App() {
         });
         if (res.ok) {
           const data = await res.json();
-          if (data.sessionClosed && currentUser && currentUser.rol.toLowerCase() !== 'administrador') {
-            console.warn('[Heartbeat] Cierre de caja detectado. Expulsando sesión remota.');
+          if (data.sessionClosed && currentUser) {
+            console.warn('[Heartbeat] Cierre de sesión remoto detectado. Expulsando usuario.');
             const uKey = `u_${currentUser.id}`;
             localStorage.removeItem(`pos_caja_abierta_${uKey}`);
             localStorage.removeItem(`pos_apertura_usd_${uKey}`);
@@ -1857,7 +1870,7 @@ export default function App() {
             localStorage.removeItem(`pos_movimientos_ves_${uKey}`);
             localStorage.removeItem(`pos_apertura_fecha_${uKey}`);
             setCajaAbierta(false);
-            setSessionNotice('⚠️ Su turno de caja ha sido cerrado desde la red local. Su sesión fue finalizada. Inicie sesión nuevamente para realizar una nueva apertura.');
+            setSessionNotice(data.message || '⚠️ Su sesión ha sido finalizada remotamente. Inicie sesión nuevamente.');
             setCurrentUser(null);
           }
         }

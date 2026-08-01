@@ -627,41 +627,113 @@ export async function saveClient(c) {
 
 
 export async function getAbonos() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query(`
+        SELECT a.id, a.cliente_id, a.monto_usd as monto, a.monto_ves, a.metodo_pago, a.banco_emisor, a.numero_referencia as referencia, a.observacion, a.fecha, c.nombre, c.cedula_rif
+        FROM Abonos a
+        LEFT JOIN Clientes c ON a.cliente_id = c.id
+        ORDER BY a.id DESC
+      `);
+      if (res.rows.length > 0) {
+        return res.rows.map(r => ({
+          ...r,
+          monto: parseFloat(r.monto || '0'),
+          monto_ves: parseFloat(r.monto_ves || '0'),
+          metodo_pago: r.metodo_pago || 'Efectivo$',
+          fecha: r.fecha ? getLocalISODateString(r.fecha) : getLocalISODateString()
+        }));
+      }
+    } catch (err) {
+      console.error('Error en getAbonos (Postgres):', err.message);
+    }
+  }
   return readJsonFile('abonos.json', []);
 }
 
-export async function registerAbono(clientId, amountUSD) {
+export async function registerAbono(clientId, amountUSD, metodoPago = 'Efectivo$', referencia = '') {
   let clientNombre = '';
   let clientDoc = '';
+
+  let tasaDia = 1;
+  try {
+    const tasas = await getTasaHistory();
+    if (tasas && tasas.length > 0) {
+      tasaDia = parseFloat(tasas[tasas.length - 1].tasa_cobro || '1');
+    }
+  } catch (_) {}
+
+  const montoVES = parseFloat((amountUSD * tasaDia).toFixed(2));
+  const parsedId = parseInt(clientId) || 0;
+
   if (usePostgres) {
     try {
-      const res = await pool.query('SELECT nombre, cedula_rif, limite_credito, credito_disponible FROM Clientes WHERE id = $1', [clientId]);
+      const res = await pool.query(
+        'SELECT id, nombre, cedula_rif, limite_credito, credito_disponible FROM Clientes WHERE id = $1 OR CAST(id AS TEXT) = $2 OR cedula_rif = $2 LIMIT 1',
+        [parsedId, String(clientId)]
+      );
       if (res.rowCount > 0) {
         const client = res.rows[0];
+        const realClientId = client.id;
         clientNombre = client.nombre;
         clientDoc = client.cedula_rif;
-        const nextCredito = Math.min(parseFloat(client.limite_credito), parseFloat(client.credito_disponible) + amountUSD);
-        await pool.query('UPDATE Clientes SET credito_disponible = $1 WHERE id = $2', [nextCredito, clientId]);
+        const nextCredito = Math.min(parseFloat(client.limite_credito || '0'), parseFloat(client.credito_disponible || '0') + amountUSD);
+        await pool.query('UPDATE Clientes SET credito_disponible = $1 WHERE id = $2', [nextCredito, realClientId]);
         
-        // Log abono
+        try {
+          await pool.query(
+            `INSERT INTO Abonos (cliente_id, monto_usd, monto_ves, metodo_pago, numero_referencia, fecha)
+             VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
+            [realClientId, amountUSD, montoVES, metodoPago, referencia]
+          );
+          console.log(`✅ [Abonos] Abono registrado exitosamente en PostgreSQL para cliente ${clientNombre} (ID ${realClientId}): $${amountUSD} / Bs ${montoVES}`);
+        } catch (dbErr) {
+          console.error('❌ Error al insertar abono en tabla Abonos:', dbErr.message);
+        }
+
+        try {
+          const activeCajaRes = await pool.query(
+            "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1"
+          );
+          if (activeCajaRes.rowCount > 0) {
+            const cajaId = activeCajaRes.rows[0].id;
+            const isUsd = metodoPago === 'Efectivo$' || metodoPago === 'Tarjeta$' || metodoPago === 'Zelle' || metodoPago === 'Binance' || metodoPago === 'PayPal';
+            const mUsd = isUsd ? amountUSD : 0;
+            const mVes = isUsd ? 0 : montoVES;
+            await pool.query(
+              `INSERT INTO Movimientos_Caja (caja_id, tipo, descripcion, monto_usd, monto_ves, fecha)
+               VALUES ($1, 'Entrada', $2, $3, $4, CURRENT_TIMESTAMP)`,
+              [cajaId, `Abono de Crédito Cliente: ${clientNombre} (${metodoPago})`, mUsd, mVes]
+            );
+          }
+        } catch (movErr) {
+          console.error('⚠️ Error al registrar movimiento de abono:', movErr.message);
+        }
+
+        // Log abono in JSON store as well for sync consistency
         const abonos = readJsonFile('abonos.json', []);
         abonos.push({
           id: Date.now(),
-          cliente_id: clientId,
+          cliente_id: realClientId,
           nombre: clientNombre,
           cedula_rif: clientDoc,
           monto: amountUSD,
+          monto_ves: montoVES,
+          metodo_pago: metodoPago,
+          referencia: referencia || undefined,
           fecha: getLocalISODateString()
         });
         writeJsonFile('abonos.json', abonos);
         return true;
+      } else {
+        console.warn(`⚠️ [Abonos] Cliente no encontrado en PostgreSQL con ID/Cédula: ${clientId}`);
       }
     } catch (err) {
       console.error('Error en registerAbono (Postgres):', err.message);
     }
   } else {
     const clients = readJsonFile('clients.json', mockClients);
-    const idx = clients.findIndex(c => c.id === clientId || c.id === parseInt(clientId));
+    const idx = clients.findIndex(c => c.id === clientId || c.id === parseInt(clientId) || c.cedula_rif === String(clientId));
     if (idx !== -1) {
       clientNombre = clients[idx].nombre;
       clientDoc = clients[idx].cedula_rif;
@@ -673,10 +745,13 @@ export async function registerAbono(clientId, amountUSD) {
       const abonos = readJsonFile('abonos.json', []);
       abonos.push({
         id: Date.now(),
-        cliente_id: clientId,
+        cliente_id: clients[idx].id,
         nombre: clientNombre,
         cedula_rif: clientDoc,
         monto: amountUSD,
+        monto_ves: montoVES,
+        metodo_pago: metodoPago,
+        referencia: referencia || undefined,
         fecha: getLocalISODateString()
       });
       writeJsonFile('abonos.json', abonos);
@@ -2189,12 +2264,8 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
       let shiftEntradasUsd = 0;
       let shiftEntradasVes = 0;
       let shiftSalidasUsd = 0;
-      let shiftSalidasVes = 0;
-      let shiftDevolucionesUsd = 0;
-      let shiftDevolucionesVes = 0;
-      let totalMovUsd = 0;
-      let totalMovVes = 0;
-      
+      let shiftAbonosVes = 0;
+
       for (const m of movsRes.rows) {
         const mUsd = parseFloat(m.monto_usd || '0');
         const mVes = parseFloat(m.monto_ves || '0');
@@ -2206,6 +2277,7 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
           totalMovVes += mVes;
           if (desc.startsWith('Abono')) {
             shiftAbonosUsd += mUsd;
+            shiftAbonosVes += mVes;
           } else {
             shiftEntradasUsd += mUsd;
             shiftEntradasVes += mVes;
@@ -2222,6 +2294,35 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
           shiftSalidasVes += mVes;
         }
       }
+
+      // Also query Abonos directly since opening time for complete accuracy
+      const abonosRes = await pool.query(`
+        SELECT a.id, a.cliente_id, a.monto_usd as monto, a.monto_ves, a.metodo_pago, a.banco_emisor, a.numero_referencia as referencia, a.observacion, a.fecha, c.nombre, c.cedula_rif
+        FROM Abonos a
+        LEFT JOIN Clientes c ON a.cliente_id = c.id
+        WHERE a.fecha >= $1
+        ORDER BY a.id ASC
+      `, [caja.fecha_apertura]);
+
+      const shiftAbonosList = abonosRes.rows.map(r => ({
+        ...r,
+        monto: parseFloat(r.monto_usd || r.monto || '0'),
+        monto_ves: parseFloat(r.monto_ves || '0'),
+        metodo_pago: r.metodo_pago || 'Efectivo$',
+        fecha: r.fecha ? getLocalISODateString(r.fecha) : getLocalISODateString()
+      }));
+
+      if (shiftAbonosList.length > 0) {
+        let sqlAbonosUsd = 0;
+        let sqlAbonosVes = 0;
+        shiftAbonosList.forEach(a => {
+          const m = String(a.metodo_pago || '');
+          if (m === 'Efectivo$' || m === 'USD') sqlAbonosUsd += a.monto;
+          if (m === 'EfectivoBs' || m === 'Biopago' || m === 'PagoMovil' || m === 'TarjetaBs') sqlAbonosVes += (a.monto_ves || 0);
+        });
+        if (sqlAbonosUsd > shiftAbonosUsd) shiftAbonosUsd = sqlAbonosUsd;
+        if (sqlAbonosVes > shiftAbonosVes) shiftAbonosVes = sqlAbonosVes;
+      }
       
       return {
         abierta: true,
@@ -2233,7 +2334,9 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
         movimientosUsd: totalMovUsd,
         movimientosVes: totalMovVes,
         shiftSales: shiftSalesList,
+        shiftAbonosList,
         shiftAbonosUsd,
+        shiftAbonosVes,
         shiftEntradasUsd,
         shiftEntradasVes,
         shiftSalidasUsd,
