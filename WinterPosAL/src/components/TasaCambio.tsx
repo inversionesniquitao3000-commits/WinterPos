@@ -16,11 +16,53 @@ interface TasaCambioProps {
 
 export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUser, isServer = true, getApiUrl, onUpdateTasa, onClearHistory }: TasaCambioProps) {
   const { showAlert, showConfirm } = useDialog();
-
   const [inputDia, setInputDia] = useState(tasaDia > 0 ? tasaDia.toString() : '');
   const [inputVuelto, setInputVuelto] = useState(tasaVuelto > 0 ? tasaVuelto.toString() : '');
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+
+  // Auto BCV Mode State ('off' | 'usd' | 'eur')
+  const [autoMode, setAutoMode] = useState<'off' | 'usd' | 'eur'>(() => {
+    return (localStorage.getItem('pos_auto_tasa_mode') as 'off' | 'usd' | 'eur') || 'off';
+  });
+
+  const handleSelectAutoMode = (mode: 'off' | 'usd' | 'eur') => {
+    setAutoMode(mode);
+    localStorage.setItem('pos_auto_tasa_mode', mode);
+
+    if (mode === 'off') {
+      showAlert('Modo Manual Activado. Ahora puede registrar las tasas de cobro y vuelto manualmente.', 'Modo Manual', 'info');
+      return;
+    }
+
+    const targetVal = mode === 'eur' ? eurRateNum : usdRateNum;
+    const modeName = mode === 'eur' ? '€ Euro BCV' : '$ Dólar BCV';
+
+    if (targetVal > 0) {
+      const targetStr = targetVal.toFixed(2);
+      setInputDia(targetStr);
+      setInputVuelto(targetStr);
+
+      // Duplicate Prevention Check
+      const todayStr = new Date().toISOString().substring(0, 10);
+      const latestHistory = tasaHistory.length > 0 ? tasaHistory[tasaHistory.length - 1] : null;
+      const latestDateStr = latestHistory?.fecha_actualizacion ? latestHistory.fecha_actualizacion.substring(0, 10) : '';
+
+      const isDuplicate = latestHistory &&
+        latestDateStr === todayStr &&
+        Math.abs(latestHistory.tasa_cobro - targetVal) < 0.001 &&
+        Math.abs(latestHistory.tasa_vuelto - targetVal) < 0.001;
+
+      if (!isDuplicate) {
+        onUpdateTasa(targetVal, targetVal);
+        showAlert(`Tasa automática (${modeName}) activada y registrada a ${targetStr} Bs (Cobro y Vuelto).`, 'Tasa BCV Aplicada', 'success');
+      } else {
+        showAlert(`Tasa automática (${modeName}) activada. La tasa ya se encuentra al día con el BCV (${targetStr} Bs).`, 'Tasa Al Día', 'success');
+      }
+    } else {
+      showAlert(`Modo Auto (${modeName}) activado. Al estar sin conexión a Internet o sin refrescar la tasa BCV, el sistema continuará operando normalmente con la última tasa registrada en la tabla (${tasaDia > 0 ? tasaDia.toFixed(2) : '—'} Bs) sin interrupciones.`, 'Modo Automático (Resguardo Offline)', 'info');
+    }
+  };
 
   // BCV State
   const [bcvRates, setBcvRates] = useState<{ usd: string; eur: string; fechaValor: string }>({ usd: '', eur: '', fechaValor: '' });
@@ -325,15 +367,66 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
   return (
     <div className="space-y-6 text-slate-800 font-mono text-xs">
       
-      {/* HEADER */}
-      <div className="border-b border-slate-200 pb-4">
-        <h1 className="text-xl font-extrabold text-winter-clientesStart tracking-wider flex items-center gap-2">
-          <TrendingUp className="w-5 h-5 text-winter-clientesStart" />
-          TASAS DE CAMBIO (AUDITORÍA DIARIA)
-        </h1>
-        <p className="text-xs text-slate-500 mt-1 font-sans">
-          Establezca las tasas cambiarias de cobro y de vuelto del día en bolívares para las conversiones automáticas del POS.
-        </p>
+      {/* HEADER WITH AUTO BCV MODE TOGGLE */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+        <div>
+          <h1 className="text-xl font-extrabold text-winter-clientesStart tracking-wider flex items-center gap-2">
+            <TrendingUp className="w-5 h-5 text-winter-clientesStart" />
+            TASAS DE CAMBIO (AUDITORÍA DIARIA)
+          </h1>
+          <p className="text-xs text-slate-500 mt-1 font-sans">
+            Establezca las tasas cambiarias de cobro y de vuelto del día en bolívares para las conversiones automáticas del POS.
+          </p>
+        </div>
+
+        {/* AUTO BCV SELECTOR BUTTONS */}
+        <div className="bg-slate-100 p-1.5 rounded-xl border border-slate-250 flex items-center gap-1 shrink-0 self-start sm:self-auto shadow-2xs font-sans">
+          <span className="text-[10.5px] font-extrabold text-slate-500 uppercase px-2 hidden md:inline tracking-wider">
+            Auto BCV:
+          </span>
+
+          {/* MANUAL BUTTON */}
+          <button
+            type="button"
+            onClick={() => handleSelectAutoMode('off')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              autoMode === 'off'
+                ? 'bg-white text-slate-800 shadow-sm border border-slate-300'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'
+            }`}
+          >
+            <span className="text-sm">⚙️</span>
+            <span>Manual</span>
+          </button>
+
+          {/* AUTO USD BUTTON */}
+          <button
+            type="button"
+            onClick={() => handleSelectAutoMode('usd')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              autoMode === 'usd'
+                ? 'bg-emerald-600 text-white shadow-sm font-extrabold ring-2 ring-emerald-300'
+                : 'text-emerald-700 hover:bg-emerald-50'
+            }`}
+          >
+            <span className="text-sm">💵</span>
+            <span>Auto $ BCV</span>
+          </button>
+
+          {/* AUTO EUR BUTTON */}
+          <button
+            type="button"
+            onClick={() => handleSelectAutoMode('eur')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              autoMode === 'eur'
+                ? 'bg-indigo-600 text-white shadow-sm font-extrabold ring-2 ring-indigo-300'
+                : 'text-indigo-700 hover:bg-indigo-50'
+            }`}
+          >
+            <span className="text-sm">💶</span>
+            <span>Auto € BCV</span>
+          </button>
+        </div>
       </div>
 
       {errorMsg && (

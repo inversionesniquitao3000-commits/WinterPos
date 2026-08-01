@@ -4,9 +4,9 @@ import {
   ShoppingBag, Search, Trash2, 
   XCircle, ArrowUpRight, 
   Calculator, CheckCircle2, Ticket,
-  Clock, ListOrdered, Plus, AlertCircle, DollarSign, RotateCcw
+  Clock, ListOrdered, Plus, AlertCircle, DollarSign, RotateCcw, Printer
 } from 'lucide-react';
-import { formatNumberToWordsUSD } from '../utils';
+import { formatNumberToWordsUSD, printTicketReceipt } from '../utils';
 import { useDialog } from '../hooks/useDialog';
 
 interface CajaPOSProps {
@@ -119,7 +119,12 @@ export default function CajaPOS({
     }
   }, [cajaAbierta, isClosingCaja, userDismissedApertura]);
 
-  
+  const isAdmin = useMemo(() => {
+    if (!currentUser) return false;
+    const r = (currentUser.rol || '').toLowerCase();
+    return r.includes('admin') || r === 'administrador';
+  }, [currentUser]);
+
   const [showCierreModal, setShowCierreModal] = useState(false);
   const [cierreRealUsd, setCierreRealUsd] = useState('0');
   const [cierreRealVes, setCierreRealVes] = useState('0');
@@ -899,18 +904,23 @@ export default function CajaPOS({
   // Compute Totals
   const subtotalUSD = Math.round(saleItems.reduce((acc, item) => acc + item.totalUSD, 0) * 100) / 100;
   const discountAmountUSD = Math.round((subtotalUSD * (discountPct / 100)) * 100) / 100;
-
-  // Tax calculations: Standard IVA (16%) is applied only to non-exempt (taxable) items
-  const taxableSubtotal = Math.round(saleItems.reduce((acc, item) => {
-    return acc + (item.product.exento_impuesto ? 0 : item.totalUSD);
-  }, 0) * 100) / 100;
-  const exemptSubtotal = Math.round((subtotalUSD - taxableSubtotal) * 100) / 100;
-
   const discountFactor = (1 - discountPct / 100);
-  const discountedTaxableSubtotal = taxableSubtotal * discountFactor;
-  const ivaAmount = Math.round((discountedTaxableSubtotal * 0.16) * 100) / 100;
 
-  const totalUSD = Math.round((Math.max(0, (taxableSubtotal + exemptSubtotal) * discountFactor + ivaAmount)) * 100) / 100;
+  // Tax calculations (Venezuelan standard: shelf prices are tax-inclusive for taxable items)
+  const grossTaxableUSD = Math.round(saleItems.reduce((acc, item) => {
+    const isExempt = item.product.exento_impuesto === true || (item.product.porcentaje_impuesto !== undefined && item.product.porcentaje_impuesto === 0);
+    return acc + (isExempt ? 0 : item.totalUSD);
+  }, 0) * 100) / 100;
+
+  const grossExemptUSD = Math.round((subtotalUSD - grossTaxableUSD) * 100) / 100;
+
+  const netTaxableUSD = Math.round((grossTaxableUSD * discountFactor) * 100) / 100;
+  const netExemptUSD = Math.round((grossExemptUSD * discountFactor) * 100) / 100;
+
+  const baseImponibleUSD = Math.round((netTaxableUSD / 1.16) * 100) / 100;
+  const ivaAmount = Math.round((netTaxableUSD - baseImponibleUSD) * 100) / 100;
+
+  const totalUSD = Math.round((netTaxableUSD + netExemptUSD) * 100) / 100;
   const totalVES = Math.round((totalUSD * tasaDia) * 100) / 100;
 
   const executeAddProduct = (prod: Product, finalQty: number) => {
@@ -1244,6 +1254,9 @@ export default function CajaPOS({
     if (shouldPrint) {
       setPrintedTicketData(finalSaleForTicket as any);
       setShowTicketModal(true);
+      setTimeout(() => {
+        printTicketReceipt(finalSaleForTicket, companyConfig, currentUser, selectedSeller);
+      }, 300);
     }
 
     // Clear sale state
@@ -1582,6 +1595,16 @@ export default function CajaPOS({
 
     const utilidadUsd = ventaTotalUsd - costoTotalUsd;
 
+    const pagosBinanceUsd = targetShiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Binance' ? a + getPayUsd(p) : a, 0);
+    }, 0);
+
+    const pagosPayPalUsd = targetShiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'PayPal' ? a + getPayUsd(p) : a, 0);
+    }, 0);
+
     const localCierreResult: CierreCaja = {
       id: Date.now(),
       fecha: new Date().toLocaleString(),
@@ -1628,6 +1651,8 @@ export default function CajaPOS({
       pagosPuntoVes,
       pagosPagoMovilUsd,
       pagosPagoMovilVes,
+      pagosBinanceUsd,
+      pagosPayPalUsd,
       pagosTarjetaUsd,
       pagosCreditoUsd,
       pagosPuntosUsd,
@@ -2112,10 +2137,10 @@ export default function CajaPOS({
               <span className="font-mono">${subtotalUSD.toFixed(2)}</span>
             </div>
 
-            {taxableSubtotal > 0 && (
+            {grossTaxableUSD > 0 && (
               <div className="flex justify-between text-slate-500 text-[10.5px]">
-                <span className="font-sans">Base Imponible (Gravable)</span>
-                <span className="font-mono">${taxableSubtotal.toFixed(2)}</span>
+                <span className="font-sans">Base Imponible (G 16%)</span>
+                <span className="font-mono">${baseImponibleUSD.toFixed(2)}</span>
               </div>
             )}
 
@@ -2123,6 +2148,13 @@ export default function CajaPOS({
               <div className="flex justify-between text-slate-600 text-[11px]">
                 <span className="font-sans text-slate-700 font-bold">IVA (16%)</span>
                 <span className="font-mono text-slate-750 font-bold">${ivaAmount.toFixed(2)}</span>
+              </div>
+            )}
+
+            {netExemptUSD > 0 && (
+              <div className="flex justify-between text-emerald-700 text-[10.5px]">
+                <span className="font-sans font-medium">Monto Exento (E)</span>
+                <span className="font-mono font-bold">${netExemptUSD.toFixed(2)}</span>
               </div>
             )}
             
@@ -2134,14 +2166,23 @@ export default function CajaPOS({
                   min="0"
                   max="100"
                   value={discountPct}
-                  onChange={(e) => setDiscountPct(Math.min(100, Math.max(0, parseInt(e.target.value) || 0)))}
-                  disabled={selectedClient && selectedClient.porcentaje_descuento > 0}
+                  onChange={(e) => {
+                    if (!isAdmin) return;
+                    setDiscountPct(Math.min(100, Math.max(0, parseInt(e.target.value) || 0)));
+                  }}
+                  disabled={!isAdmin || (selectedClient && selectedClient.porcentaje_descuento > 0)}
                   className={`w-12 text-center rounded p-0.5 font-bold font-mono text-[10px] transition-all ${
-                    selectedClient && selectedClient.porcentaje_descuento > 0
-                      ? 'bg-slate-150 border-slate-300 text-slate-400 cursor-not-allowed opacity-80'
-                      : 'bg-slate-50 border-slate-300 text-emerald-700'
+                    !isAdmin || (selectedClient && selectedClient.porcentaje_descuento > 0)
+                      ? 'bg-slate-200/80 border-slate-300 text-slate-500 cursor-not-allowed opacity-90 select-none'
+                      : 'bg-slate-50 border-slate-300 text-emerald-700 hover:border-emerald-500 focus:border-emerald-600'
                   }`}
-                  title={selectedClient && selectedClient.porcentaje_descuento > 0 ? "Descuento preestablecido en ficha de cliente (bloqueado)" : "Descuento manual"}
+                  title={
+                    !isAdmin 
+                      ? "🔒 Solo los usuarios administradores pueden modificar el % de descuento" 
+                      : (selectedClient && selectedClient.porcentaje_descuento > 0)
+                        ? "Descuento fijado automáticamente desde la ficha del cliente"
+                        : "Porcentaje de descuento manual"
+                  }
                 />
                 %
               </span>
@@ -2591,22 +2632,28 @@ export default function CajaPOS({
                       <span className="text-slate-550 font-sans">Subtotal USD:</span>
                       <span className="font-bold text-slate-600 font-mono">${subtotalUSD.toFixed(2)}</span>
                     </div>
-                    {taxableSubtotal > 0 && (
-                      <div className="flex justify-between text-[11px] text-slate-500">
-                        <span className="font-sans">Base Imponible:</span>
-                        <span className="font-mono">${taxableSubtotal.toFixed(2)}</span>
-                      </div>
-                    )}
-                    {ivaAmount > 0 && (
-                      <div className="flex justify-between text-xs text-slate-700">
-                        <span className="font-sans">IVA (16%) USD:</span>
-                        <span className="font-bold font-mono">${ivaAmount.toFixed(2)}</span>
-                      </div>
-                    )}
                     {discountAmountUSD > 0 && (
                       <div className="flex justify-between text-xs text-red-500">
                         <span className="font-sans">Descuento USD:</span>
                         <span className="font-bold font-mono">-${discountAmountUSD.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {grossTaxableUSD > 0 && (
+                      <>
+                        <div className="flex justify-between text-[11px] text-slate-500">
+                          <span className="font-sans">Base Imponible (G 16%):</span>
+                          <span className="font-mono">${baseImponibleUSD.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs text-slate-700">
+                          <span className="font-sans">IVA (16%) USD:</span>
+                          <span className="font-bold font-mono">${ivaAmount.toFixed(2)}</span>
+                        </div>
+                      </>
+                    )}
+                    {netExemptUSD > 0 && (
+                      <div className="flex justify-between text-xs text-emerald-700 font-medium">
+                        <span className="font-sans">Monto Exento (E):</span>
+                        <span className="font-bold font-mono">${netExemptUSD.toFixed(2)}</span>
                       </div>
                     )}
 
@@ -3143,14 +3190,21 @@ export default function CajaPOS({
                   <span className="w-1/4 text-right">P.UN</span>
                   <span className="w-1/6 text-right">TOTAL</span>
                 </div>
-                {printedTicketData.items.map((item: any) => (
-                  <div key={item.product.id} className="flex justify-between">
-                    <span className="w-1/2 overflow-hidden truncate">{item.product.description}</span>
-                    <span className="w-1/12 text-center">{item.qty}</span>
-                    <span className="w-1/4 text-right">${item.priceUSD.toFixed(2)}</span>
-                    <span className="w-1/6 text-right">${item.totalUSD.toFixed(2)}</span>
-                  </div>
-                ))}
+                {printedTicketData.items.map((item: any) => {
+                  const isBulk = item.product?.a_granel || item.a_granel;
+                  const rawQty = parseFloat(item.qty || '0');
+                  const qtyDisplay = (isBulk || (rawQty % 1 !== 0))
+                    ? (rawQty % 1 === 0 ? rawQty.toString() : rawQty.toFixed(3))
+                    : Math.round(rawQty).toString();
+                  return (
+                    <div key={item.product?.id || item.productCode || item.code} className="flex justify-between">
+                      <span className="w-1/2 overflow-hidden truncate">{item.product?.description || item.description}</span>
+                      <span className="w-1/12 text-center">{qtyDisplay}</span>
+                      <span className="w-1/4 text-right">${item.priceUSD.toFixed(2)}</span>
+                      <span className="w-1/6 text-right">${item.totalUSD.toFixed(2)}</span>
+                    </div>
+                  );
+                })}
               </div>
 
               <p className="text-center select-none text-slate-400">----------------------------------------</p>
@@ -3178,7 +3232,7 @@ export default function CajaPOS({
                   <span>${printedTicketData.totalUSD.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-slate-600 font-bold border-t border-dashed border-slate-350 pt-1">
-                  <span>TOTAL VES (Tasa {tasaDia.toFixed(2)}):</span>
+                  <span>TOTAL VES:</span>
                   <span>Bs {printedTicketData.totalVES.toFixed(2)}</span>
                 </div>
               </div>
@@ -3197,7 +3251,7 @@ export default function CajaPOS({
                 
                 {printedTicketData.vueltoVES > 0 && (
                   <div className="flex justify-between font-bold border-t border-slate-300 pt-1 text-[11px]">
-                    <span>CAMBIO ENTREGADO VES (Tasa {tasaVuelto.toFixed(2)}):</span>
+                    <span>CAMBIO ENTREGADO VES:</span>
                     <span>Bs {printedTicketData.vueltoVES.toFixed(2)}</span>
                   </div>
                 )}
@@ -3214,13 +3268,23 @@ export default function CajaPOS({
               </div>
             </div>
 
-            <button
-              onClick={() => { setShowTicketModal(false); setPrintedTicketData(null); }}
-              className="w-full bg-emerald-600 hover:bg-emerald-500 text-slate-955 py-3 rounded-lg font-bold font-sans text-xs tracking-wider transition-all flex items-center justify-center gap-1.5"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              ACEPTAR Y CONTINUAR (TICKET REGISTRADO)
-            </button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+              <button
+                onClick={() => printTicketReceipt(printedTicketData, companyConfig, currentUser, selectedSeller)}
+                className="w-full bg-sky-600 hover:bg-sky-500 text-white py-3 rounded-lg font-bold font-sans text-xs tracking-wider transition-all flex items-center justify-center gap-1.5 shadow active:scale-95"
+                title="Abrir diálogo de impresión para enviar a la impresora de ticket o elegir otra"
+              >
+                <Printer className="w-4 h-4" />
+                IMPRIMIR TICKET
+              </button>
+              <button
+                onClick={() => { setShowTicketModal(false); setPrintedTicketData(null); }}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-lg font-bold font-sans text-xs tracking-wider transition-all flex items-center justify-center gap-1.5 shadow active:scale-95"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                ACEPTAR Y CONTINUAR
+              </button>
+            </div>
           </div>
         </div>
       )}

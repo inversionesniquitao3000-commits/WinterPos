@@ -75,6 +75,8 @@ try {
     ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS devolucion_efectivo_ves NUMERIC DEFAULT 0;
     ALTER TABLE Clientes ADD COLUMN IF NOT EXISTS aplica_precio_costo BOOLEAN DEFAULT FALSE;
     ALTER TABLE Ventas_Detalle DROP CONSTRAINT IF EXISTS ventas_detalle_tipo_precio_check;
+    ALTER TABLE Pagos_Venta DROP CONSTRAINT IF EXISTS pagos_venta_metodo_pago_check;
+    ALTER TABLE Abonos DROP CONSTRAINT IF EXISTS abonos_metodo_pago_check;
     ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS clave VARCHAR(100) DEFAULT 'admin';
     ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS permisos TEXT;
     ALTER TABLE Usuarios ALTER COLUMN rol TYPE VARCHAR(100) USING rol::text;
@@ -87,6 +89,8 @@ try {
     ALTER TABLE Productos ADD COLUMN IF NOT EXISTS a_granel BOOLEAN DEFAULT FALSE;
     ALTER TABLE Productos ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(50);
     ALTER TABLE Productos ADD COLUMN IF NOT EXISTS porcentaje_impuesto NUMERIC DEFAULT 0;
+    UPDATE Productos SET porcentaje_impuesto = 16 WHERE exento_impuesto = FALSE AND (porcentaje_impuesto IS NULL OR porcentaje_impuesto = 0);
+    UPDATE Productos SET porcentaje_impuesto = 0 WHERE exento_impuesto = TRUE;
     ALTER TABLE Configuracion_Empresa ADD COLUMN IF NOT EXISTS permitir_multisesion BOOLEAN DEFAULT TRUE;
     ALTER TABLE Configuracion_Empresa ADD COLUMN IF NOT EXISTS compartir_apertura_caja BOOLEAN DEFAULT TRUE;
     CREATE SEQUENCE IF NOT EXISTS seq_factura START WITH 1;
@@ -1631,11 +1635,25 @@ export async function saveSale(s) {
           );
         }
         
-        await clientTarget.query(
-          `INSERT INTO Pagos_Venta (venta_id, metodo_pago, monto_entregado_usd, monto_entregado_ves, monto_vuelto_usd, monto_vuelto_ves, banco_emisor, numero_referencia)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [saleId, p.metodo, p.monto, p.montoVES || 0, s.vueltoUSD || 0, s.vueltoVES || 0, p.banco || '', p.referencia || '']
-        );
+        try {
+          await clientTarget.query(
+            `INSERT INTO Pagos_Venta (venta_id, metodo_pago, monto_entregado_usd, monto_entregado_ves, monto_vuelto_usd, monto_vuelto_ves, banco_emisor, numero_referencia)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [saleId, p.metodo, p.monto, p.montoVES || 0, s.vueltoUSD || 0, s.vueltoVES || 0, p.banco || '', p.referencia || '']
+          );
+        } catch (payErr) {
+          if (payErr.message && payErr.message.includes('pagos_venta_metodo_pago_check')) {
+            console.log('⚠️ Eliminando restricción legacy CHECK pagos_venta_metodo_pago_check en caliente...');
+            await pool.query('ALTER TABLE Pagos_Venta DROP CONSTRAINT IF EXISTS pagos_venta_metodo_pago_check');
+            await clientTarget.query(
+              `INSERT INTO Pagos_Venta (venta_id, metodo_pago, monto_entregado_usd, monto_entregado_ves, monto_vuelto_usd, monto_vuelto_ves, banco_emisor, numero_referencia)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+              [saleId, p.metodo, p.monto, p.montoVES || 0, s.vueltoUSD || 0, s.vueltoVES || 0, p.banco || '', p.referencia || '']
+            );
+          } else {
+            throw payErr;
+          }
+        }
       }
       
       await clientTarget.query('COMMIT');

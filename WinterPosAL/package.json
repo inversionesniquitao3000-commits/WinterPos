@@ -12,8 +12,10 @@
   "dependencies": {
     "html-to-image": "^1.11.13",
     "lucide-react": "^1.24.0",
+    "pdfjs-dist": "^6.2.108",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",

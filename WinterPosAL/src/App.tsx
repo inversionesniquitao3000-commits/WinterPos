@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { 
-  mockUsers, mockProducts, mockClients, mockTasaHistory, 
-  mockConfig, mockMovements 
+  mockUsers, 
+  mockConfig 
 } from './mockData';
 import { 
   User, Product, Client, TasaHistoryItem, CompanyConfig, 
@@ -24,8 +24,9 @@ import ConfiguracionEmpresa from './components/ConfiguracionEmpresa';
 import VentasHistorico from './components/VentasHistorico';
 import { 
   ShoppingBag, Package, Users, 
-  TrendingUp, Settings, LogOut, Globe, Cpu, History
+  TrendingUp, Settings, LogOut, Globe, Cpu, History, Printer, CheckCircle2
 } from 'lucide-react';
+import { printTicketReceipt } from './utils';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -852,18 +853,74 @@ export default function App() {
   const tasaDia = currentTasa ? currentTasa.tasa_cobro : 40.00;
   const tasaVuelto = currentTasa ? currentTasa.tasa_vuelto : 40.00;
 
-  const handleUpdateTasa = async (newDia: number, newVuelto: number) => {
+  const handleUpdateTasa = async (newDia: number, newVuelto: number, userOverrideLabel?: string) => {
     const newItem = {
       tasa_cobro: newDia,
       tasa_vuelto: newVuelto,
       usuarioId: currentUser?.id,
-      usuario: currentUser?.nombre || 'SISTEMA'
+      usuario: userOverrideLabel || currentUser?.nombre || 'SISTEMA'
     };
     const saved = await postApiData('/tasas', newItem);
     if (saved) {
       setTasaHistory(prev => [...prev, saved]);
     }
   };
+
+  // Auto BCV Rate Sync on User Login (Executes once per login session with duplicate prevention)
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const autoMode = (localStorage.getItem('pos_auto_tasa_mode') as 'off' | 'usd' | 'eur') || 'off';
+    if (autoMode === 'off') return;
+
+    const sessionKey = `pos_auto_rate_synced_${currentUser.id}_${new Date().toISOString().substring(0, 10)}`;
+    if (sessionStorage.getItem(sessionKey)) {
+      return; // Already ran for this login session
+    }
+
+    const syncAutoBcvRateOnLogin = async () => {
+      try {
+        const res = await fetch(getApiUrl('/bcv'));
+        if (!res.ok) throw new Error('Respuesta HTTP no exitosa');
+        const bcvData = await res.json();
+        if (!bcvData) throw new Error('Respuesta vacía');
+
+        const rawValStr = autoMode === 'eur' ? bcvData.eur : bcvData.usd;
+        if (!rawValStr) throw new Error('Tasa no encontrada en respuesta BCV');
+
+        const cleanedVal = parseFloat(rawValStr.toString().replace(',', '.'));
+        if (isNaN(cleanedVal) || cleanedVal <= 0) throw new Error('Valor numérico de tasa inválido');
+
+        const targetRate = Math.round(cleanedVal * 100) / 100;
+        const todayStr = new Date().toISOString().substring(0, 10);
+
+        // Strict Duplicate Prevention Filter
+        const latestHistory = tasaHistory.length > 0 ? tasaHistory[tasaHistory.length - 1] : null;
+        const latestDateStr = latestHistory?.fecha_actualizacion ? latestHistory.fecha_actualizacion.substring(0, 10) : '';
+
+        const isDuplicate = latestHistory &&
+          latestDateStr === todayStr &&
+          Math.abs(latestHistory.tasa_cobro - targetRate) < 0.001 &&
+          Math.abs(latestHistory.tasa_vuelto - targetRate) < 0.001;
+
+        sessionStorage.setItem(sessionKey, 'done');
+
+        if (isDuplicate) {
+          console.log(`[Auto BCV] La tasa del día ya está actualizada a ${targetRate} Bs (${autoMode.toUpperCase()}). Se omite registro duplicado.`);
+          return;
+        }
+
+        console.log(`[Auto BCV] Sincronizando automáticamente al inicio de sesión: ${targetRate} Bs (${autoMode.toUpperCase()} BCV)...`);
+        const userLabel = autoMode === 'eur' ? 'SISTEMA (Auto BCV €)' : 'SISTEMA (Auto BCV $)';
+        await handleUpdateTasa(targetRate, targetRate, userLabel);
+      } catch (err: any) {
+        console.warn(`[Auto BCV Fallback] Sin conexión a internet o API BCV no disponible (${err?.message || err}). La operativa del sistema continúa normalmente con la última tasa activa registrada.`);
+        sessionStorage.setItem(sessionKey, 'done');
+      }
+    };
+
+    syncAutoBcvRateOnLogin();
+  }, [currentUser?.id, tasaHistory.length]);
 
   const handleClearTasaHistory = async () => {
     try {
@@ -1110,7 +1167,7 @@ export default function App() {
             date: adjDate,
             productCode: product.barcode,
             productDescription: product.description,
-            type: 'Mayorista',
+            type: 'Mayor',
             precio_anterior: oldMayor,
             precio_nuevo: update.precio_mayor_usd,
             motivo: `Carga por Factura: ${reason}`,
@@ -1891,9 +1948,21 @@ export default function App() {
             </div>
           )}
 
-          <div className="bg-slate-900 border border-slate-750 px-3 py-1.5 rounded flex items-center gap-2">
-            <TrendingUp className="w-3.5 h-3.5 text-emerald-450" />
-            <span className="text-slate-300 font-mono">Tasa BCV: <strong className="text-emerald-455">{tasaDia.toFixed(2)}</strong> Bs</span>
+          <div 
+            onClick={() => setActiveTab('tasa')}
+            className="bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 border border-emerald-500/60 px-3.5 py-1 rounded-lg flex items-center gap-2 shadow-md hover:border-emerald-400 transition-all cursor-pointer group"
+            title="Haga clic para consultar o actualizar la Tasa de Cambio BCV"
+          >
+            <div className="bg-emerald-500/20 p-1 rounded-md border border-emerald-500/30 group-hover:bg-emerald-500/30 transition-all">
+              <TrendingUp className="w-4 h-4 text-emerald-400 animate-pulse" />
+            </div>
+            <div className="flex items-center gap-1.5 font-sans">
+              <span className="text-emerald-300 font-extrabold text-[11px] uppercase tracking-wider">TASA BCV:</span>
+              <span className="bg-slate-950 text-white font-mono font-black text-xs px-2.5 py-0.5 rounded border border-emerald-400/60 shadow-inner flex items-center gap-1">
+                <span className="text-emerald-300 text-sm font-extrabold">{tasaDia.toFixed(2)}</span>
+                <span className="text-[10px] text-emerald-200/90 font-bold">Bs</span>
+              </span>
+            </div>
           </div>
 
           <div className="bg-slate-900 border border-slate-750 px-3 py-1.5 rounded flex items-center gap-1.5 text-slate-300">
@@ -2221,14 +2290,21 @@ export default function App() {
                   <span className="w-1/4 text-right">P.UN</span>
                   <span className="w-1/6 text-right">TOTAL</span>
                 </div>
-                {reprintSale.items.map((item, idx) => (
-                  <div key={idx} className="flex justify-between">
-                    <span className="w-1/2 overflow-hidden truncate">{item.product.description}</span>
-                    <span className="w-1/12 text-center">{item.qty}</span>
-                    <span className="w-1/4 text-right">${item.priceUSD.toFixed(2)}</span>
-                    <span className="w-1/6 text-right">${item.totalUSD.toFixed(2)}</span>
-                  </div>
-                ))}
+                {reprintSale.items.map((item: any, idx: number) => {
+                  const isBulk = item.product?.a_granel || item.a_granel;
+                  const rawQty = parseFloat(item.qty || '0');
+                  const qtyDisplay = (isBulk || (rawQty % 1 !== 0))
+                    ? (rawQty % 1 === 0 ? rawQty.toString() : rawQty.toFixed(3))
+                    : Math.round(rawQty).toString();
+                  return (
+                    <div key={idx} className="flex justify-between">
+                      <span className="w-1/2 overflow-hidden truncate">{item.product?.description || item.description}</span>
+                      <span className="w-1/12 text-center">{qtyDisplay}</span>
+                      <span className="w-1/4 text-right">${item.priceUSD.toFixed(2)}</span>
+                      <span className="w-1/6 text-right">${item.totalUSD.toFixed(2)}</span>
+                    </div>
+                  );
+                })}
               </div>
 
               <p className="text-center select-none text-slate-400">----------------------------------------</p>
@@ -2250,7 +2326,7 @@ export default function App() {
                   <span>${reprintSale.totalUSD.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-slate-600 font-bold border-t border-dashed border-slate-350 pt-1">
-                  <span>TOTAL VES (Tasa {tasaDia.toFixed(2)}):</span>
+                  <span>TOTAL VES:</span>
                   <span>Bs {reprintSale.totalVES.toFixed(2)}</span>
                 </div>
               </div>
@@ -2282,12 +2358,23 @@ export default function App() {
 
             </div>
 
-            <button
-              onClick={() => setReprintSale(null)}
-              className="w-full bg-emerald-600 hover:bg-emerald-500 text-slate-950 py-3 rounded-lg font-bold font-sans text-xs tracking-wider transition-all"
-            >
-              ACEPTAR Y REGRESAR
-            </button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+              <button
+                onClick={() => printTicketReceipt(reprintSale, companyConfig, currentUser, (reprintSale as any)?.vendedor || reprintSale.usuario)}
+                className="w-full bg-sky-600 hover:bg-sky-500 text-white py-3 rounded-lg font-bold font-sans text-xs tracking-wider transition-all flex items-center justify-center gap-1.5 shadow active:scale-95"
+                title="Imprimir copia de ticket en la impresora"
+              >
+                <Printer className="w-4 h-4" />
+                IMPRIMIR TICKET
+              </button>
+              <button
+                onClick={() => setReprintSale(null)}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-lg font-bold font-sans text-xs tracking-wider transition-all flex items-center justify-center gap-1.5 shadow active:scale-95"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                ACEPTAR Y REGRESAR
+              </button>
+            </div>
 
           </div>
         </div>

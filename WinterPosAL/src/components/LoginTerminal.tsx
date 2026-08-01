@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Shield, Network, Eye, EyeOff } from 'lucide-react';
 import { User, CompanyConfig } from '../types';
 import { useDialog } from '../hooks/useDialog';
@@ -12,6 +12,7 @@ interface LoginTerminalProps {
 
 export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConfig, sessionNotice }: LoginTerminalProps) {
   const { showAlert } = useDialog();
+  const usernameInputRef = useRef<HTMLInputElement>(null);
   const [showConfig, setShowConfig] = useState(false);
   const [clickCount, setClickCount] = useState(0);
   const [serverIP, setServerIP] = useState(() => {
@@ -32,6 +33,23 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  // Auto-focus username input on load, refresh, or window focus
+  useEffect(() => {
+    const focusInput = () => {
+      if (!showConfig) {
+        usernameInputRef.current?.focus();
+      }
+    };
+
+    const timer = setTimeout(focusInput, 100);
+    window.addEventListener('focus', focusInput);
+
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('focus', focusInput);
+    };
+  }, [showConfig]);
 
   // Monitor key press Ctrl + Alt + P
   useEffect(() => {
@@ -208,6 +226,8 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
               <div className="space-y-1">
                 <div className="relative">
                   <input
+                    ref={usernameInputRef}
+                    autoFocus
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
@@ -327,8 +347,8 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
         {/* Footer brand info */}
         <div className="text-center space-y-1 border-t border-white/10 pt-4 text-[9px] text-slate-300 leading-relaxed font-sans relative">
           <div>Módulo Punto de Venta</div>
-          <div>Pos Venta Version : 3.7</div>
-          <div>Derechos Reservados : 2021</div>
+          <div>Pos Venta Version : 1.0</div>
+          <div>Derechos Reservados : 2027</div>
           
           {/* Circle X icon bottom right style */}
           <div className="absolute bottom-1 right-1 text-white opacity-70 hover:opacity-100 cursor-pointer" onClick={() => window.close()}>

@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Product, InventoryMovement, PriceAdjustmentHistory, User, CompanyConfig } from '../types';
-import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator, PauseCircle, Play, Trash2, Wand2, Sparkles, ShieldAlert, RotateCcw, AlertTriangle } from 'lucide-react';
+import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator, PauseCircle, Play, Trash2, Wand2, Sparkles, ShieldAlert, RotateCcw } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr } from '../utils';
 import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
+import AsistenteImportacionPDF from './AsistenteImportacionPDF';
 
 interface InventarioProps {
   products: Product[];
@@ -249,7 +250,7 @@ export default function Inventario({
     });
   };
 
-  const renderSortHeader = (label: string, field: SortRule['field'], align: 'left' | 'right' = 'left') => {
+  const renderSortHeader = (label: string, field: SortRule['field'], align: 'left' | 'right' | 'center' = 'left') => {
     const ruleIdx = sortRules.findIndex(r => r.field === field);
     const isSorted = ruleIdx !== -1;
     const rule = isSorted ? sortRules[ruleIdx] : null;
@@ -532,11 +533,42 @@ export default function Inventario({
     return Object.values(groups).reverse();
   }, [movements]);
 
+  const existingCategories = useMemo(() => {
+    const cats = new Set<string>();
+    products.forEach(p => {
+      if (p.category && p.category.trim() && p.category.trim().toUpperCase() !== 'SIN CATEGORIA') {
+        cats.add(p.category.trim().toUpperCase());
+      }
+    });
+    return Array.from(cats);
+  }, [products]);
+
   // Bulk Upload state
+  const [bulkImportTab, setBulkImportTab] = useState<'pdf' | 'csv'>('pdf');
   const [bulkFile, setBulkFile] = useState<File | null>(null);
   const [bulkPreview, setBulkPreview] = useState<any[]>([]);
   const [bulkErrors, setBulkErrors] = useState<string[]>([]);
   const [importStatus, setImportStatus] = useState<'idle' | 'parsing' | 'validating' | 'importing' | 'success'>('idle');
+
+  const handleProcessPdfImport = async (productsToImport: any[]) => {
+    try {
+      setImportStatus('importing');
+      const count = await onAddProductsBulk(productsToImport);
+      if (count !== null) {
+        showToast(`✨ ¡Se importaron ${count} productos exitosamente desde el reporte PDF!`);
+        setShowBulkModal(false);
+        setBulkFile(null);
+        setBulkPreview([]);
+        setBulkErrors([]);
+        setImportStatus('idle');
+      } else {
+        setImportStatus('idle');
+      }
+    } catch (err) {
+      console.error('Error importando desde PDF:', err);
+      setImportStatus('idle');
+    }
+  };
 
   const downloadTemplate = () => {
     const headers = [
@@ -1179,7 +1211,7 @@ export default function Inventario({
     setEditWholesaleQty(p.cantidad_mayorista.toString());
     setEditTaxActive(!p.exento_impuesto);
     setEditTaxName('IVA');
-    setEditTaxPct('16');
+    setEditTaxPct((p.porcentaje_impuesto && p.porcentaje_impuesto > 0 ? p.porcentaje_impuesto : 16).toString());
     setEditAGranel(p.a_granel || false);
     setEditVencimiento(p.fecha_vencimiento || '');
     setShowEditProdModal(true);
@@ -1215,6 +1247,7 @@ export default function Inventario({
       stock_minimo: editAGranel ? (parseFloat(editMinStock) || 0) : (parseInt(editMinStock) || 0),
       cantidad_mayorista: parseInt(editWholesaleQty) || 12,
       exento_impuesto: !editTaxActive,
+      porcentaje_impuesto: editTaxActive ? (parseFloat(editTaxPct) || 0) : 0,
       a_granel: editAGranel,
       fecha_vencimiento: editVencimiento || undefined,
       precio_costo_usd: cost,
@@ -3836,165 +3869,218 @@ export default function Inventario({
 
       {/* MODAL: CARGA MASIVA DE PRODUCTOS */}
       {showBulkModal && (
-        <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 text-slate-800">
-          <div className="bg-white border border-indigo-200 rounded-xl overflow-hidden w-full max-w-4xl shadow-2xl flex flex-col max-h-[85vh]">
-            
-            {/* Header */}
-            <div className="bg-indigo-650 text-white px-6 py-4 flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <Upload className="w-5 h-5" />
-                <h3 className="text-sm font-black font-sans uppercase tracking-wider">Carga Masiva de Productos</h3>
-              </div>
-              <button 
-                onClick={() => {
-                  setShowBulkModal(false);
-                  setBulkFile(null);
-                  setBulkPreview([]);
-                  setBulkErrors([]);
-                  setImportStatus('idle');
-                }} 
-                className="text-white hover:text-indigo-200 text-lg font-bold font-sans"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Content Area */}
-            <div className="p-6 overflow-y-auto space-y-5 flex-grow">
-              
-              {/* Instructions and Template download */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                <div className="md:col-span-2 space-y-2 bg-indigo-50 border border-indigo-150 p-4 rounded-lg text-xs leading-relaxed text-indigo-900">
-                  <h4 className="font-bold text-[13px] text-indigo-900 font-sans uppercase mb-1">📋 Instrucciones de Importación</h4>
-                  <p>1. Descarga la plantilla oficial en formato CSV haciendo clic en el botón de la derecha.</p>
-                  <p>2. Abre el archivo en Microsoft Excel o cualquier editor y rellena las columnas con tus productos.</p>
-                  <p>3. Los campos <strong className="text-red-700">Obligatorios</strong> son: <strong>Código/Clave</strong>, <strong>Descripción</strong>, <strong>Costo</strong> y <strong>Precio Venta</strong>.</p>
-                  <p>4. Valores válidos para <strong>Exento Impuesto</strong> y <strong>A Granel</strong>: escribe <code className="bg-white px-1.5 py-0.5 rounded border border-indigo-200 font-bold font-mono">SI</code> o <code className="bg-white px-1.5 py-0.5 rounded border border-indigo-200 font-bold font-mono">NO</code>.</p>
-                  <p>5. Sube el archivo completado en el selector inferior y presiona <strong>Procesar Importación</strong>.</p>
-                </div>
-                
-                <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg flex flex-col justify-center items-center text-center space-y-3">
-                  <span className="text-[11px] font-sans font-bold text-slate-500 uppercase tracking-tight">Formato Oficial</span>
-                  <button
-                    type="button"
-                    onClick={downloadTemplate}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-sans font-bold text-xs py-3 px-4 rounded-lg shadow transition-all active:scale-95 flex items-center gap-2 uppercase tracking-wide"
-                  >
-                    Descargar Plantilla
-                  </button>
-                  <span className="text-[9px] text-slate-400 font-sans">Compatible con Excel (CSV UTF-8)</span>
-                </div>
+        <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 text-slate-800 animate-in fade-in duration-200">
+          {bulkImportTab === 'pdf' ? (
+            <div className="w-full max-w-5xl space-y-2">
+              {/* Tab Selector Bar above Assistant */}
+              <div className="flex items-center gap-2 bg-slate-900/90 p-1.5 rounded-xl border border-slate-700/60 shadow-lg w-fit">
+                <button
+                  type="button"
+                  onClick={() => setBulkImportTab('pdf')}
+                  className="bg-indigo-600 text-white font-black px-4 py-2 rounded-lg text-xs font-sans uppercase tracking-wider flex items-center gap-2 shadow"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+                  🤖 Asistente Inteligente (PDF / POS)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBulkImportTab('csv')}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold px-4 py-2 rounded-lg text-xs font-sans uppercase tracking-wider flex items-center gap-2 transition-all"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                  📄 Plantilla CSV Oficial
+                </button>
               </div>
 
-              {/* Upload Input */}
-              <div className="border-2 border-dashed border-slate-300 rounded-lg p-5 flex flex-col justify-center items-center text-center bg-slate-50 hover:bg-slate-100/50 transition-all relative">
-                <input
-                  type="file"
-                  accept=".csv"
-                  onChange={handleCsvUpload}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  disabled={importStatus === 'importing'}
-                />
-                <Upload className="w-8 h-8 text-slate-400 mb-2" />
-                <span className="text-xs font-sans font-bold text-slate-700">
-                  {bulkFile ? `Archivo seleccionado: ${bulkFile.name}` : 'Seleccione o arrastre el archivo CSV con la lista de productos aquí'}
-                </span>
-                <span className="text-[10px] text-slate-450 font-sans mt-1">Límite máximo recomendado: 1000 productos por carga</span>
-              </div>
-
-              {/* Errors Display */}
-              {bulkErrors.length > 0 && (
-                <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-lg text-[11px] space-y-1 font-sans">
-                  <h5 className="font-extrabold uppercase text-red-900">⚠️ Errores de Validación Encontrados:</h5>
-                  <div className="max-h-24 overflow-y-auto space-y-0.5">
-                    {bulkErrors.map((err, idx) => (
-                      <div key={idx} className="font-mono">{err}</div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Preview Table */}
-              {bulkPreview.length > 0 && bulkErrors.length === 0 && (
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="font-sans font-bold text-slate-655 uppercase">Vista Previa de Productos a Importar ({bulkPreview.length}):</span>
-                    <span className="text-emerald-700 font-bold bg-emerald-50 border border-emerald-255 px-2 py-0.5 rounded text-[10px] uppercase font-sans">Listo para procesar</span>
-                  </div>
-                  <div className="border border-slate-200 rounded-lg overflow-hidden max-h-56 overflow-y-auto">
-                    <table className="w-full text-left border-collapse text-[10.5px]">
-                      <thead>
-                        <tr className="bg-slate-100 border-b border-slate-200 text-slate-700 uppercase font-sans font-bold">
-                          <th className="p-2 font-mono">Código</th>
-                          <th className="p-2">Descripción</th>
-                          <th className="p-2">Categoría</th>
-                          <th className="p-2 text-right">Existencia</th>
-                          <th className="p-2 text-right">Min. Stock</th>
-                          <th className="p-2 text-right">Costo</th>
-                          <th className="p-2 text-right">Venta Detalle</th>
-                          <th className="p-2 text-right">Venta Mayor</th>
-                          <th className="p-2 text-center">Mayorista</th>
-                          <th className="p-2 text-center">A Granel</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {bulkPreview.map((p, idx) => (
-                          <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50/50">
-                            <td className="p-2 font-mono font-bold text-slate-600">{p.barcode}</td>
-                            <td className="p-2 font-bold text-slate-800 uppercase">{p.description}</td>
-                            <td className="p-2 text-slate-500">{p.category}</td>
-                            <td className="p-2 text-right font-mono font-bold text-slate-700">{p.stock_actual}</td>
-                            <td className="p-2 text-right font-mono text-slate-500">{p.stock_minimo}</td>
-                            <td className="p-2 text-right font-mono text-slate-600">${p.precio_costo_usd.toFixed(2)}</td>
-                            <td className="p-2 text-right font-mono font-bold text-emerald-600">${p.precio_detalle_usd.toFixed(2)}</td>
-                            <td className="p-2 text-right font-mono text-slate-600">${p.precio_mayor_usd.toFixed(2)}</td>
-                            <td className="p-2 text-center font-sans text-slate-500 font-bold">{p.cantidad_mayorista} un.</td>
-                            <td className="p-2 text-center">
-                              {p.a_granel ? (
-                                <span className="bg-amber-50 text-amber-700 border border-amber-200 rounded px-1.5 py-0.2 text-[9px] font-bold uppercase">SI</span>
-                              ) : (
-                                <span className="text-slate-400">NO</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-            </div>
-
-            {/* Footer */}
-            <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex justify-between items-center">
-              <button
-                type="button"
-                onClick={() => {
+              <AsistenteImportacionPDF
+                existingCategories={existingCategories}
+                existingProducts={products}
+                onProcessImport={handleProcessPdfImport}
+                onCancel={() => {
                   setShowBulkModal(false);
                   setBulkFile(null);
                   setBulkPreview([]);
                   setBulkErrors([]);
                   setImportStatus('idle');
                 }}
-                className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-5 py-2.5 rounded-lg text-xs font-sans font-bold transition-all"
-                disabled={importStatus === 'importing'}
-              >
-                Cerrar
-              </button>
-
-              <button
-                type="button"
-                onClick={handleExecuteBulkImport}
-                disabled={bulkPreview.length === 0 || bulkErrors.length > 0 || importStatus === 'importing' || importStatus === 'success'}
-                className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-sans font-bold text-xs py-2.5 px-6 rounded-lg shadow-sm uppercase tracking-wide transition-all active:scale-95"
-              >
-                {importStatus === 'importing' ? 'Procesando Carga...' :
-                 importStatus === 'success' ? '✓ ¡Importado con Éxito!' : 'Procesar Importación'}
-              </button>
+              />
             </div>
+          ) : (
+            <div className="bg-white border border-indigo-200 rounded-xl overflow-hidden w-full max-w-4xl shadow-2xl flex flex-col max-h-[85vh]">
+              
+              {/* Header with tabs */}
+              <div className="bg-indigo-650 text-white px-6 py-3.5 flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1 bg-indigo-900/60 p-1 rounded-lg border border-indigo-400/30">
+                    <button
+                      type="button"
+                      onClick={() => setBulkImportTab('pdf')}
+                      className="bg-indigo-800 hover:bg-indigo-700 text-indigo-100 px-3 py-1 rounded text-xs font-bold font-sans flex items-center gap-1.5 transition-all"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                      🤖 Asistente PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBulkImportTab('csv')}
+                      className="bg-white text-indigo-950 px-3 py-1 rounded text-xs font-black font-sans flex items-center gap-1.5 shadow-sm"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                      📄 Plantilla CSV Oficial
+                    </button>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => {
+                    setShowBulkModal(false);
+                    setBulkFile(null);
+                    setBulkPreview([]);
+                    setBulkErrors([]);
+                    setImportStatus('idle');
+                  }} 
+                  className="text-white hover:text-indigo-200 text-lg font-bold font-sans"
+                >
+                  ✕
+                </button>
+              </div>
 
-          </div>
+              {/* Content Area */}
+              <div className="p-6 overflow-y-auto space-y-5 flex-grow">
+                
+                {/* Instructions and Template download */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  <div className="md:col-span-2 space-y-2 bg-indigo-50 border border-indigo-150 p-4 rounded-lg text-xs leading-relaxed text-indigo-900">
+                    <h4 className="font-bold text-[13px] text-indigo-900 font-sans uppercase mb-1">📋 Instrucciones de Importación CSV</h4>
+                    <p>1. Descarga la plantilla oficial en formato CSV haciendo clic en el botón de la derecha.</p>
+                    <p>2. Abre el archivo en Microsoft Excel o cualquier editor y rellena las columnas con tus productos.</p>
+                    <p>3. Los campos <strong className="text-red-700">Obligatorios</strong> son: <strong>Código/Clave</strong>, <strong>Descripción</strong>, <strong>Costo</strong> y <strong>Precio Venta</strong>.</p>
+                    <p>4. Valores válidos para <strong>Exento Impuesto</strong> y <strong>A Granel</strong>: escribe <code className="bg-white px-1.5 py-0.5 rounded border border-indigo-200 font-bold font-mono">SI</code> o <code className="bg-white px-1.5 py-0.5 rounded border border-indigo-200 font-bold font-mono">NO</code>.</p>
+                    <p>5. Sube el archivo completado en el selector inferior y presiona <strong>Procesar Importación</strong>.</p>
+                  </div>
+                  
+                  <div className="bg-slate-50 border border-slate-200 p-4 rounded-lg flex flex-col justify-center items-center text-center space-y-3">
+                    <span className="text-[11px] font-sans font-bold text-slate-500 uppercase tracking-tight">Formato Oficial</span>
+                    <button
+                      type="button"
+                      onClick={downloadTemplate}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-sans font-bold text-xs py-3 px-4 rounded-lg shadow transition-all active:scale-95 flex items-center gap-2 uppercase tracking-wide"
+                    >
+                      Descargar Plantilla
+                    </button>
+                    <span className="text-[9px] text-slate-400 font-sans">Compatible con Excel (CSV UTF-8)</span>
+                  </div>
+                </div>
+
+                {/* Upload Input */}
+                <div className="border-2 border-dashed border-slate-300 rounded-lg p-5 flex flex-col justify-center items-center text-center bg-slate-50 hover:bg-slate-100/50 transition-all relative">
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={handleCsvUpload}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    disabled={importStatus === 'importing'}
+                  />
+                  <Upload className="w-8 h-8 text-slate-400 mb-2" />
+                  <span className="text-xs font-sans font-bold text-slate-700">
+                    {bulkFile ? `Archivo seleccionado: ${bulkFile.name}` : 'Seleccione o arrastre el archivo CSV con la lista de productos aquí'}
+                  </span>
+                  <span className="text-[10px] text-slate-450 font-sans mt-1">Límite máximo recomendado: 1000 productos por carga</span>
+                </div>
+
+                {/* Errors Display */}
+                {bulkErrors.length > 0 && (
+                  <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-lg text-[11px] space-y-1 font-sans">
+                    <h5 className="font-extrabold uppercase text-red-900">⚠️ Errores de Validación Encontrados:</h5>
+                    <div className="max-h-24 overflow-y-auto space-y-0.5">
+                      {bulkErrors.map((err, idx) => (
+                        <div key={idx} className="font-mono">{err}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Preview Table */}
+                {bulkPreview.length > 0 && bulkErrors.length === 0 && (
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="font-sans font-bold text-slate-655 uppercase">Vista Previa de Productos a Importar ({bulkPreview.length}):</span>
+                      <span className="text-emerald-700 font-bold bg-emerald-50 border border-emerald-255 px-2 py-0.5 rounded text-[10px] uppercase font-sans">Listo para procesar</span>
+                    </div>
+                    <div className="border border-slate-200 rounded-lg overflow-hidden max-h-56 overflow-y-auto">
+                      <table className="w-full text-left border-collapse text-[10.5px]">
+                        <thead>
+                          <tr className="bg-slate-100 border-b border-slate-200 text-slate-700 uppercase font-sans font-bold">
+                            <th className="p-2 font-mono">Código</th>
+                            <th className="p-2">Descripción</th>
+                            <th className="p-2">Categoría</th>
+                            <th className="p-2 text-right">Existencia</th>
+                            <th className="p-2 text-right">Min. Stock</th>
+                            <th className="p-2 text-right">Costo</th>
+                            <th className="p-2 text-right">Venta Detalle</th>
+                            <th className="p-2 text-right">Venta Mayor</th>
+                            <th className="p-2 text-center">Mayorista</th>
+                            <th className="p-2 text-center">A Granel</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {bulkPreview.map((p, idx) => (
+                            <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50/50">
+                              <td className="p-2 font-mono font-bold text-slate-600">{p.barcode}</td>
+                              <td className="p-2 font-bold text-slate-800 uppercase">{p.description}</td>
+                              <td className="p-2 text-slate-500">{p.category}</td>
+                              <td className="p-2 text-right font-mono font-bold text-slate-700">{p.stock_actual}</td>
+                              <td className="p-2 text-right font-mono text-slate-500">{p.stock_minimo}</td>
+                              <td className="p-2 text-right font-mono text-slate-600">${p.precio_costo_usd.toFixed(2)}</td>
+                              <td className="p-2 text-right font-mono font-bold text-emerald-600">${p.precio_detalle_usd.toFixed(2)}</td>
+                              <td className="p-2 text-right font-mono text-slate-600">${p.precio_mayor_usd.toFixed(2)}</td>
+                              <td className="p-2 text-center font-sans text-slate-500 font-bold">{p.cantidad_mayorista} un.</td>
+                              <td className="p-2 text-center">
+                                {p.a_granel ? (
+                                  <span className="bg-amber-50 text-amber-700 border border-amber-200 rounded px-1.5 py-0.2 text-[9px] font-bold uppercase">SI</span>
+                                ) : (
+                                  <span className="text-slate-400">NO</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+              </div>
+
+              {/* Footer */}
+              <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex justify-between items-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowBulkModal(false);
+                    setBulkFile(null);
+                    setBulkPreview([]);
+                    setBulkErrors([]);
+                    setImportStatus('idle');
+                  }}
+                  className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-5 py-2.5 rounded-lg text-xs font-sans font-bold transition-all"
+                  disabled={importStatus === 'importing'}
+                >
+                  Cerrar
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleExecuteBulkImport}
+                  disabled={bulkPreview.length === 0 || bulkErrors.length > 0 || importStatus === 'importing' || importStatus === 'success'}
+                  className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-sans font-bold text-xs py-2.5 px-6 rounded-lg shadow-sm uppercase tracking-wide transition-all active:scale-95"
+                >
+                  {importStatus === 'importing' ? 'Procesando Carga...' :
+                   importStatus === 'success' ? '✓ ¡Importado con Éxito!' : 'Procesar Importación'}
+                </button>
+              </div>
+
+            </div>
+          )}
         </div>
       )}
 
@@ -4551,19 +4637,19 @@ export default function Inventario({
               tasaFallback={tasaDia}
               initialCost={
                 (customPriceOverrides[assistantAuxProduct.id]?.cost !== undefined
-                  ? customPriceOverrides[assistantAuxProduct.id].cost
+                  ? customPriceOverrides[assistantAuxProduct.id]?.cost ?? 0
                   : assistantAuxProduct.precio_costo_usd
                 ).toString()
               }
               initialDetail={
                 (customPriceOverrides[assistantAuxProduct.id]?.detail !== undefined
-                  ? customPriceOverrides[assistantAuxProduct.id].detail
+                  ? customPriceOverrides[assistantAuxProduct.id]?.detail ?? 0
                   : assistantAuxProduct.precio_detalle_usd
                 ).toString()
               }
               initialMayor={
                 (customPriceOverrides[assistantAuxProduct.id]?.mayor !== undefined
-                  ? customPriceOverrides[assistantAuxProduct.id].mayor
+                  ? customPriceOverrides[assistantAuxProduct.id]?.mayor ?? 0
                   : assistantAuxProduct.precio_mayor_usd
                 ).toString()
               }

@@ -631,11 +631,12 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
             <th>Cajero</th>
             <th class="text-right">Total USD</th>
             <th class="text-right">Total VES</th>
+            <th>Método Pago</th>
           </tr>
         </thead>
         <tbody>
           ${filteredSales.length === 0 ? `
-            <tr><td colspan="6" style="text-align: center; color: #777;">Sin ventas registradas en este rango de fechas.</td></tr>
+            <tr><td colspan="7" style="text-align: center; color: #777;">Sin ventas registradas en este rango de fechas.</td></tr>
           ` : filteredSales.map(sale => `
             <tr>
               <td>${sale.fecha}</td>
@@ -644,6 +645,10 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
               <td>${sale.usuario}</td>
               <td class="text-right font-bold text-emerald">$${(sale.totalUSD ?? 0).toFixed(2)}</td>
               <td class="text-right font-bold">Bs ${(sale.totalVES ?? 0).toFixed(2)}</td>
+              <td style="font-size: 8px;">${(sale.pagos ?? []).map(p => {
+                const amt = p.montoVES ? `Bs ${p.montoVES}` : `$${p.monto}`;
+                return `<strong>${p.metodo}</strong>: ${amt}`;
+              }).join(', ')}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -975,17 +980,76 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                         <td className={`px-4 py-1 text-right font-mono font-bold ${isDev ? 'text-rose-500' : 'text-slate-500'}`}>
                           {isDev ? '-' : ''}Bs {Math.abs(sale.totalVES ?? 0).toFixed(2)}
                         </td>
-                        <td className="px-4 py-1 font-sans">
-                          <div className="flex flex-wrap gap-1">
-                            {(sale.pagos ?? []).map((p, idx) => (
-                              <span key={idx} className={`border px-1.5 py-0.5 rounded text-[9px] ${
-                                isDev 
-                                  ? 'bg-rose-50 border-rose-200 text-rose-700' 
-                                  : 'bg-slate-100 border-slate-200 text-slate-600'
-                              }`}>
-                                {p.metodo === 'Efectivo$' && isDev ? 'Reembolso $' : p.metodo}
-                              </span>
-                            ))}
+                        <td className="px-4 py-1.5 font-sans">
+                          <div className="flex flex-wrap gap-1 max-w-[220px]">
+                            {(sale.pagos ?? []).map((p, idx) => {
+                              let icon = '💵';
+                              let style = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+                              let textStr: string = String(p.metodo);
+                              let fullTextStr: string = `${p.metodo}: `;
+                              
+                              if (p.metodo === 'Efectivo$') {
+                                icon = '💵';
+                                style = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+                                textStr = `$${p.monto.toFixed(2)}`;
+                                fullTextStr += `$${p.monto.toFixed(2)} USD`;
+                              } else if (p.metodo === 'EfectivoBs') {
+                                icon = '💵';
+                                style = 'bg-sky-50 text-sky-800 border-sky-200';
+                                textStr = `Bs ${(p.montoVES || p.monto).toFixed(0)}`;
+                                fullTextStr += `Bs ${(p.montoVES || p.monto).toFixed(2)}`;
+                              } else if (p.metodo === 'TarjetaBs') {
+                                icon = '💳';
+                                style = 'bg-blue-50 text-blue-800 border-blue-200';
+                                textStr = `Débito`;
+                                fullTextStr += `Bs ${(p.montoVES || p.monto).toFixed(2)}`;
+                              } else if (p.metodo === 'PagoMovil') {
+                                icon = '📱';
+                                style = 'bg-purple-50 text-purple-800 border-purple-200';
+                                textStr = `P.Móvil`;
+                                fullTextStr += `Bs ${(p.montoVES || p.monto).toFixed(2)}`;
+                              } else if (p.metodo === 'Biopago') {
+                                icon = '📲';
+                                style = 'bg-teal-50 text-teal-800 border-teal-200';
+                                textStr = `Biopago`;
+                                fullTextStr += `Bs ${(p.montoVES || p.monto).toFixed(2)}`;
+                              } else if (p.metodo === 'Tarjeta$') {
+                                icon = '💳';
+                                style = 'bg-indigo-50 text-indigo-800 border-indigo-200';
+                                textStr = `Tarj. $`;
+                                fullTextStr += `$${p.monto.toFixed(2)}`;
+                              } else if (p.metodo === 'Binance') {
+                                icon = '🟡';
+                                style = 'bg-amber-50 text-amber-900 border-amber-200';
+                                textStr = `Binance`;
+                                fullTextStr += `$${p.monto.toFixed(2)} USDT`;
+                              } else if (p.metodo === 'PayPal') {
+                                icon = '🅿️';
+                                style = 'bg-blue-50 text-blue-900 border-blue-200';
+                                textStr = `PayPal`;
+                                fullTextStr += `$${p.monto.toFixed(2)}`;
+                              } else if (p.metodo === 'CreditoCliente') {
+                                icon = '🤝';
+                                style = 'bg-orange-50 text-orange-800 border-orange-200';
+                                textStr = `Crédito`;
+                                fullTextStr += `$${p.monto.toFixed(2)}`;
+                              }
+
+                              if (isDev) {
+                                style = 'bg-rose-50 border-rose-200 text-rose-700';
+                              }
+
+                              return (
+                                <span
+                                  key={idx}
+                                  className={`border px-1.5 py-0.5 rounded text-[9px] font-bold font-mono inline-flex items-center gap-1 shadow-2xs ${style}`}
+                                  title={fullTextStr}
+                                >
+                                  <span className="text-[10px]">{icon}</span>
+                                  <span>{isDev && p.metodo === 'Efectivo$' ? 'Reembolso $' : textStr}</span>
+                                </span>
+                              );
+                            })}
                           </div>
                         </td>
                         <td className="px-4 py-1 text-center">
@@ -1422,8 +1486,12 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         
         const pagosEfectivoUsd = selectedCierre.pagosEfectivoUsd ?? 0;
         const pagosEfectivoBsVes = (selectedCierre as any).pagosEfectivoBsVes ?? 0;
+        const pagosPagoMovilVes = (selectedCierre as any).pagosPagoMovilVes ?? 0;
         const pagosBiopagoVes = (selectedCierre as any).pagosBiopagoVes ?? 0;
         const pagosPuntoVes = (selectedCierre as any).pagosPuntoVes ?? 0;
+        const pagosTarjetaUsd = selectedCierre.pagosTarjetaUsd ?? 0;
+        const pagosBinanceUsd = selectedCierre.pagosBinanceUsd ?? 0;
+        const pagosPayPalUsd = selectedCierre.pagosPayPalUsd ?? 0;
         const pagosCreditoUsd = selectedCierre.pagosCreditoUsd ?? 0;
         const devolucionVentasUsd = selectedCierre.devolucionVentasUsd ?? 0;
         const devolucionVentasVes = selectedCierre.devolucionVentasVes ?? 0;
@@ -1435,7 +1503,6 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         if (expectedVes === 0) {
           expectedVes = Math.max(0, aperturaVes + pagosEfectivoBsVes + abonoClientesVes + entradaEfectivoVes - salidaEfectivoVes - devolucionEfectivoVes);
         }
-        const diffVes = realVes - expectedVes;
 
         const rawCosto = selectedCierre.costoTotalUsd;
         let costoTotalUsd = typeof rawCosto === 'number' && rawCosto > 0 ? rawCosto : 0;
@@ -1598,29 +1665,55 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                       </div>
                     </div>
 
-                    <div className="space-y-2 pt-1 font-mono text-[13px]">
+                    <div className="space-y-1.5 pt-1 font-mono text-[12px]">
                       <div className="flex justify-between">
-                        <span>Efectivo $ :</span>
+                        <span>Efectivo ($) :</span>
                         <span className="font-bold text-slate-800">$ {pagosEfectivoUsd.toFixed(2)}</span>
                       </div>
                       
                       <div className="flex justify-between">
-                        <span>Efectivo Bs :</span>
+                        <span>Efectivo (Bs) :</span>
                         <span className="font-bold text-slate-800">Bs {pagosEfectivoBsVes.toFixed(2)}</span>
                       </div>
 
                       <div className="flex justify-between">
-                        <span>Biopago :</span>
-                        <span className="font-bold text-slate-800">Bs {pagosBiopagoVes.toFixed(2)}</span>
+                        <span>Pago Móvil (Bs) :</span>
+                        <span className="font-bold text-slate-800">Bs {pagosPagoMovilVes.toFixed(2)}</span>
                       </div>
 
                       <div className="flex justify-between">
-                        <span>Punto / Tarjeta :</span>
+                        <span>Punto / Tarjetas (Bs) :</span>
                         <span className="font-bold text-slate-800">Bs {pagosPuntoVes.toFixed(2)}</span>
                       </div>
 
                       <div className="flex justify-between">
-                        <span>A Crédito :</span>
+                        <span>Biopago (Bs) :</span>
+                        <span className="font-bold text-slate-800">Bs {pagosBiopagoVes.toFixed(2)}</span>
+                      </div>
+
+                      {pagosTarjetaUsd > 0 && (
+                        <div className="flex justify-between">
+                          <span>Tarjeta ($ USD) :</span>
+                          <span className="font-bold text-slate-800">$ {pagosTarjetaUsd.toFixed(2)}</span>
+                        </div>
+                      )}
+
+                      {pagosBinanceUsd > 0 && (
+                        <div className="flex justify-between text-amber-700">
+                          <span>Binance ($) :</span>
+                          <span className="font-bold">$ {pagosBinanceUsd.toFixed(2)}</span>
+                        </div>
+                      )}
+
+                      {pagosPayPalUsd > 0 && (
+                        <div className="flex justify-between text-indigo-700">
+                          <span>PayPal ($) :</span>
+                          <span className="font-bold">$ {pagosPayPalUsd.toFixed(2)}</span>
+                        </div>
+                      )}
+
+                      <div className="flex justify-between text-slate-700">
+                        <span>A Crédito ($) :</span>
                         <span className="font-bold text-slate-800">$ {pagosCreditoUsd.toFixed(2)}</span>
                       </div>
 
@@ -1846,12 +1939,29 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
           };
         });
 
+        const totalSaleItems = itemsWithProfit.filter(i => !i.isFullyReturned);
+        const grossTaxable = totalSaleItems.reduce((acc, i) => {
+          const isExempt = i.product?.exento_impuesto === true || (i.product?.porcentaje_impuesto !== undefined && i.product?.porcentaje_impuesto === 0);
+          return acc + (isExempt ? 0 : i.activeItemSale);
+        }, 0);
+        const grossExempt = totalSaleItems.reduce((acc, i) => {
+          const isExempt = i.product?.exento_impuesto === true || (i.product?.porcentaje_impuesto !== undefined && i.product?.porcentaje_impuesto === 0);
+          return acc + (isExempt ? i.activeItemSale : 0);
+        }, 0);
+
         const subtotal = safeNum(isDev ? (selectedSale.subtotal ?? 0) : (hasReturnsOnThisSale ? totalNetSale : (selectedSale.subtotal ?? selectedSale.totalUSD ?? 0)));
         const descuento = safeNum(selectedSale.descuento);
-        const iva = safeNum(selectedSale.iva);
         const totalUSD = safeNum(isDev ? (selectedSale.totalUSD ?? 0) : (hasReturnsOnThisSale ? totalNetSale : (selectedSale.totalUSD ?? 0)));
-        const totalProfit = isDev ? 0 : (totalUSD - totalNetCost);
-        const subtotalProfit = subtotal - totalNetCost;
+
+        const discountFactor = totalNetSale > 0 ? (1 - (descuento / totalNetSale)) : 1;
+        const netTaxable = grossTaxable * discountFactor;
+        const netExempt = grossExempt * discountFactor;
+
+        const baseImponible = netTaxable > 0 ? netTaxable / 1.16 : 0;
+        const ivaCalculado = netTaxable > 0 ? (netTaxable - baseImponible) : 0;
+        const iva = safeNum(selectedSale.iva) > 0 ? safeNum(selectedSale.iva) : ivaCalculado;
+
+        const netProfitReal = (baseImponible + netExempt) - totalNetCost;
 
         const formatItemQty = (qty: number, isBulk?: boolean) => {
           const safe = safeNum(qty);
@@ -1986,25 +2096,26 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   
                   {/* Totals & Payments */}
-                  <div className={`bg-white border border-slate-200 p-4 rounded-lg space-y-2 shadow-sm ${isDev ? 'md:col-span-2' : ''}`}>
-                    <div className="font-bold text-[9px] text-slate-500 uppercase border-b border-slate-100 pb-1 font-sans flex justify-between">
-                      <span>{isDev ? 'Montos y Reembolso' : 'Montos y Pagos'}</span>
+                  <div className={`bg-white border border-slate-200 p-4 rounded-lg space-y-3 shadow-sm ${isDev ? 'md:col-span-2' : ''}`}>
+                    <div className="font-bold text-[9.5px] text-slate-600 uppercase border-b border-slate-100 pb-1.5 font-sans flex justify-between items-center">
+                      <span>{isDev ? 'Montos y Reembolso' : 'Resumen Financiero y Métodos de Cobro'}</span>
                       {hasReturnsOnThisSale && <span className="text-rose-600 font-extrabold">(Recalculado por Devolución)</span>}
                     </div>
-                    <div className="space-y-1.5 text-[11px] text-slate-700">
+
+                    <div className="space-y-1.5 text-[11px] text-slate-700 font-mono">
                       <div className="flex justify-between">
-                        <span>{isDev ? 'Subtotal Devuelto:' : 'Subtotal USD Neto:'}</span>
+                        <span className="font-sans font-medium">{isDev ? 'Subtotal Devuelto:' : 'Subtotal USD Neto:'}</span>
                         <span className="font-bold">{isDev ? '-' : ''}$ {Math.abs(subtotal).toFixed(2)}</span>
                       </div>
                       {iva > 0 && (
                         <div className="flex justify-between text-slate-700">
-                          <span>IVA (16%) USD:</span>
+                          <span className="font-sans font-medium">IVA (16%) USD:</span>
                           <span>$ {iva.toFixed(2)}</span>
                         </div>
                       )}
                       {descuento > 0 && (
                         <div className="flex justify-between text-red-550">
-                          <span>Descuentos USD:</span>
+                          <span className="font-sans font-medium">Descuentos USD:</span>
                           <span>- $ {descuento.toFixed(2)}</span>
                         </div>
                       )}
@@ -2015,6 +2126,117 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                         </span>
                       </div>
                     </div>
+
+                    {/* DETALLE DE MÉTODOS DE PAGO UTILIZADOS */}
+                    {selectedSale.pagos && selectedSale.pagos.length > 0 && (
+                      <div className="border-t border-slate-200 pt-2.5 space-y-2">
+                        <div className="text-[10px] font-extrabold text-slate-600 uppercase font-sans tracking-wide flex justify-between items-center">
+                          <span>Forma de Pago Recibida:</span>
+                          <span className="text-[9px] text-slate-400 font-normal font-mono">({selectedSale.pagos.length} método(s))</span>
+                        </div>
+
+                        <div className="space-y-1.5 font-mono text-[11px] bg-slate-50/80 p-2.5 rounded-lg border border-slate-200/80">
+                          {selectedSale.pagos.map((p, pIdx) => {
+                            let icon = '💵';
+                            let badgeColor = 'bg-emerald-100 text-emerald-800 border-emerald-300';
+                            let labelStr: string = String(p.metodo);
+                            let amountText = `$${p.monto.toFixed(2)}`;
+
+                            const bankName = (p as any).banco || (p as any).bancoEmisor || '';
+                            const refNum = (p as any).referencia || (p as any).reference || '';
+
+                            if (p.metodo === 'Efectivo$') {
+                              icon = '💵';
+                              badgeColor = 'bg-emerald-50 text-emerald-800 border-emerald-300';
+                              labelStr = 'Efectivo ($ USD)';
+                              amountText = `$ ${p.monto.toFixed(2)}`;
+                            } else if (p.metodo === 'EfectivoBs') {
+                              icon = '💵';
+                              badgeColor = 'bg-sky-50 text-sky-800 border-sky-300';
+                              labelStr = 'Efectivo (Bs VES)';
+                              amountText = `Bs ${(p.montoVES || p.monto).toFixed(2)}`;
+                            } else if (p.metodo === 'TarjetaBs') {
+                              icon = '💳';
+                              badgeColor = 'bg-blue-50 text-blue-800 border-blue-300';
+                              labelStr = 'Tarjeta Débito (Bs)';
+                              amountText = `Bs ${(p.montoVES || p.monto).toFixed(2)}`;
+                            } else if (p.metodo === 'PagoMovil') {
+                              icon = '📱';
+                              badgeColor = 'bg-purple-50 text-purple-800 border-purple-300';
+                              labelStr = 'Pago Móvil (Bs)';
+                              amountText = `Bs ${(p.montoVES || p.monto).toFixed(2)}`;
+                            } else if (p.metodo === 'Biopago') {
+                              icon = '📲';
+                              badgeColor = 'bg-teal-50 text-teal-800 border-teal-300';
+                              labelStr = 'Biopago (Bs)';
+                              amountText = `Bs ${(p.montoVES || p.monto).toFixed(2)}`;
+                            } else if (p.metodo === 'Tarjeta$') {
+                              icon = '💳';
+                              badgeColor = 'bg-indigo-50 text-indigo-800 border-indigo-300';
+                              labelStr = 'Tarjeta ($ USD)';
+                              amountText = `$ ${p.monto.toFixed(2)}`;
+                            } else if (p.metodo === 'Binance') {
+                              icon = '🟡';
+                              badgeColor = 'bg-amber-50 text-amber-900 border-amber-300';
+                              labelStr = 'Binance ($ USDT)';
+                              amountText = `$ ${p.monto.toFixed(2)}`;
+                            } else if (p.metodo === 'PayPal') {
+                              icon = '🅿️';
+                              badgeColor = 'bg-blue-50 text-blue-900 border-blue-300';
+                              labelStr = 'PayPal ($ USD)';
+                              amountText = `$ ${p.monto.toFixed(2)}`;
+                            } else if (p.metodo === 'CreditoCliente') {
+                              icon = '🤝';
+                              badgeColor = 'bg-orange-50 text-orange-800 border-orange-300';
+                              labelStr = 'Crédito Cliente ($)';
+                              amountText = `$ ${p.monto.toFixed(2)}`;
+                            }
+
+                            return (
+                              <div key={pIdx} className="flex justify-between items-center py-0.5">
+                                <div className="flex items-center gap-1.5 font-sans">
+                                  <span className="text-xs">{icon}</span>
+                                  <span className="font-bold text-slate-700 text-[11px]">{labelStr}</span>
+                                  {bankName && <span className="text-[9px] text-slate-500 bg-slate-200/80 px-1 py-0.2 rounded font-mono uppercase">{bankName}</span>}
+                                  {refNum && <span className="text-[9px] text-slate-500 font-mono">Ref: #{refNum}</span>}
+                                </div>
+                                <span className={`px-2 py-0.5 rounded border text-[11px] font-bold font-mono ${badgeColor}`}>
+                                  {amountText}
+                                </span>
+                              </div>
+                            );
+                          })}
+
+                          {/* DETALLE DE VUELTO ENTREGADO */}
+                          {(() => {
+                            const vUSD = selectedSale.vueltoUSD ?? (selectedSale as any).vuelto_usd ?? 0;
+                            const vVES = selectedSale.vueltoVES ?? (selectedSale as any).vuelto_ves ?? 0;
+                            const hasVuelto = vUSD > 0 || vVES > 0;
+
+                            if (hasVuelto) {
+                              return (
+                                <div className="border-t border-dashed border-purple-200 pt-2 mt-2 bg-purple-50/50 p-2 rounded text-purple-900 space-y-0.5 font-sans">
+                                  <div className="flex justify-between items-center text-[10px] font-extrabold text-purple-800">
+                                    <span>💸 Vuelto Entregado al Cliente:</span>
+                                    <span className="bg-purple-200 text-purple-900 px-1.5 py-0.2 rounded text-[9px] font-mono font-bold">
+                                      {vUSD > 0 ? `$${vUSD.toFixed(2)} USD ` : ''}
+                                      {vVES > 0 ? `Bs ${vVES.toFixed(2)} VES` : ''}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            } else {
+                              return (
+                                <div className="border-t border-dashed border-slate-200 pt-1.5 mt-1.5 flex justify-between items-center text-[9.5px] text-slate-400 font-sans">
+                                  <span>Vuelto Entregado:</span>
+                                  <span className="font-mono font-medium text-slate-500">Sin vuelto (Pago Exacto)</span>
+                                </div>
+                              );
+                            }
+                          })()}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Profitability Panel */}
@@ -2025,13 +2247,31 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                           <span>Rentabilidad de la Venta</span>
                           {hasReturnsOnThisSale && <span className="text-emerald-700 font-extrabold">(Restantes)</span>}
                         </div>
-                        <div className="space-y-2 pt-2 text-[11px] text-slate-700">
+                        <div className="space-y-1.5 pt-2 text-[11px] text-slate-700">
                           <div className="flex justify-between">
-                            <span>Subtotal Venta (sin IVA):</span>
+                            <span>Venta Total Facturada:</span>
                             <span className="font-bold text-slate-800">$ {subtotal.toFixed(2)}</span>
                           </div>
-                          <div className="flex justify-between">
-                            <span>Costo Mercancía:</span>
+                          {grossTaxable > 0 && (
+                            <>
+                              <div className="flex justify-between text-slate-600 text-[10.5px]">
+                                <span>Base Imponible (Venta Neta Gravable):</span>
+                                <span className="font-mono font-bold">$ {baseImponible.toFixed(2)}</span>
+                              </div>
+                              <div className="flex justify-between text-slate-600 text-[10.5px]">
+                                <span>Impuesto Retenido (IVA 16% SENIAT):</span>
+                                <span className="font-mono font-bold text-amber-700">$ {iva.toFixed(2)}</span>
+                              </div>
+                            </>
+                          )}
+                          {netExempt > 0 && (
+                            <div className="flex justify-between text-emerald-700 text-[10.5px]">
+                              <span>Venta Exenta (0% IVA):</span>
+                              <span className="font-mono font-bold">$ {netExempt.toFixed(2)}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between border-t border-slate-200 pt-1">
+                            <span>Costo Mercancía Vendida:</span>
                             <span className="font-bold text-red-600">- $ {totalNetCost.toFixed(2)}</span>
                           </div>
                         </div>
@@ -2039,15 +2279,12 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
 
                       <div className="border-t border-emerald-300 pt-2 font-bold font-sans">
                         <div className="flex justify-between text-emerald-800 font-extrabold items-baseline">
-                          <span className="uppercase text-[10px] font-black">UTILIDAD BRUTA (SUBTOTAL):</span>
-                          <span className="text-xl text-emerald-700 font-mono font-black">$ {subtotalProfit.toFixed(2)}</span>
+                          <span className="uppercase text-[10px] font-black">UTILIDAD NETA REAL (SIN IVA):</span>
+                          <span className="text-xl text-emerald-700 font-mono font-black">$ {netProfitReal.toFixed(2)}</span>
                         </div>
-                        {iva > 0 && (
-                          <div className="flex justify-between text-slate-500 font-mono text-[9.5px] mt-1 italic pt-1 border-t border-dashed border-emerald-200">
-                            <span>Total Facturado (con IVA $ {iva.toFixed(2)}):</span>
-                            <span>$ {totalUSD.toFixed(2)} (Utilidad Neta: ${totalProfit.toFixed(2)})</span>
-                          </div>
-                        )}
+                        <p className="text-[8.5px] text-slate-500 font-sans mt-1 leading-tight">
+                          * Calculada restando el Costo de Mercancía a la Venta Neta sin IVA (Base Imponible). El IVA ($ {iva.toFixed(2)}) es retención fiscal del SENIAT y no forma parte de la ganancia.
+                        </p>
                       </div>
                     </div>
                   )}

@@ -98,6 +98,8 @@ export interface Payment {
   metodo: 'Efectivo$' | 'EfectivoBs' | 'Tarjeta$' | 'TarjetaBs' | 'PagoMovil' | 'Biopago' | 'Binance' | 'PayPal' | 'CreditoCliente';
   monto: number; // in the currency of the payment (VES for Bs, USD for $)
   montoUSD: number; // calculated in USD
+  montoVES?: number;
+  montoBs?: number;
   reference?: string;
   bancoEmisor?: string;
   telefonoPagoMovil?: string;
@@ -155,15 +157,22 @@ export interface Sale {
   vueltoVES: number;
   fecha: string;
   usuario: string;
+  usuario_id?: number;
   estatus?: string;
   iva?: number;
   terminal?: string;
 }
 
 export interface CierreDetails {
+  aperturaUsd?: number;
+  aperturaVes?: number;
+  expectedVes?: number;
+  costoTotalUsd?: number;
+  utilidadUsd?: number;
   ventasEfectivoUsd?: number;
   ventasEfectivoVes?: number;
   abonoClientesUsd?: number;
+  abonoClientesVes?: number;
   abonosEfectivoUsd?: number;
   abonosEfectivoBsVes?: number;
   abonosEfectivoBsUsd?: number;
@@ -190,6 +199,10 @@ export interface CierreDetails {
   pagosBiopagoVes?: number;
   pagosPuntoUsd?: number;
   pagosPuntoVes?: number;
+  pagosPagoMovilUsd?: number;
+  pagosPagoMovilVes?: number;
+  pagosBinanceUsd?: number;
+  pagosPayPalUsd?: number;
   pagosTarjetaUsd?: number;
   pagosCreditoUsd?: number;
   pagosPuntosUsd?: number;
@@ -218,6 +231,7 @@ export interface CierreCaja {
   ventasEfectivoUsd: number;
   ventasEfectivoVes?: number;
   abonoClientesUsd: number;
+  abonoClientesVes?: number;
   abonosEfectivoUsd?: number;
   abonosEfectivoBsVes?: number;
   abonosEfectivoBsUsd?: number;
@@ -251,6 +265,8 @@ export interface CierreCaja {
   pagosPuntoVes: number;         // Punto (Tarjeta/PagoMovil monto real)
   pagosPagoMovilUsd?: number;    // Pago Móvil USD
   pagosPagoMovilVes?: number;    // Pago Móvil VES
+  pagosBinanceUsd?: number;      // Binance $
+  pagosPayPalUsd?: number;       // PayPal $
   pagosTarjetaUsd: number;
   pagosCreditoUsd: number;
   pagosPuntosUsd: number;
