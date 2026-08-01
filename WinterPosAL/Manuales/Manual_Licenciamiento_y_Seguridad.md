@@ -1,4 +1,4 @@
-# 📖 MANUAL TÉCNICO Y OPERATIVO DE LICENCIAMIENTO - WINTERPOS
+# 📖 MANUAL TÉCNICO Y OPERATIVO DE LICENCIAMIENTO Y SEGURIDAD - WINTERPOS
 
 Este documento constituye la guía oficial para el **Desarrollador / Vendedor** y para el **Usuario Final** sobre cómo generar, instalar y administrar licencias criptográficas vinculadas a Hardware (HWID) en **WinterPos**.
 
@@ -6,8 +6,9 @@ Este documento constituye la guía oficial para el **Desarrollador / Vendedor** 
 
 ## 🛠️ PARTE 1: MANUAL TÉCNICO (Para el Desarrollador / Vendedor)
 
-### 1.1. Arquitectura de Seguridad
-- **Algoritmo:** Criptografía Asimétrica **RSA-2048** con firma digest **SHA-256**.
+### 1.1. Arquitectura de Seguridad y Protección de Código
+- **Backend Executable & Obfuscation:** El servidor backend Express se compila a binario ejecutable de máquina (`.exe`). Ningún cliente o tercero puede abrir, copiar ni modificar los scripts `.js` o controladores de base de datos.
+- **Algoritmo de Licenciamiento:** Criptografía Asimétrica **RSA-2048** con firma digest **SHA-256**.
 - **Resguardo de Claves:**
   - **Clave Privada (`tools/keys/private_key.pem`):** Reside **ÚNICAMENTE** en la computadora del desarrollador. Está protegida en el `.gitignore` y **NUNCA** debe entregarse al cliente ni subirse a Git. Sirve para firmar los archivos `license.lic`.
   - **Clave Pública (`backend/keys/public_key.pem`):** Viene empaquetada dentro del backend de WinterPos para verificar que la firma RSA sea auténtica.
