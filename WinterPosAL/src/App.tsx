@@ -22,9 +22,10 @@ import Clientes from './components/Clientes';
 import TasaCambio from './components/TasaCambio';
 import ConfiguracionEmpresa from './components/ConfiguracionEmpresa';
 import VentasHistorico from './components/VentasHistorico';
+import LicenciaModal from './components/LicenciaModal';
 import { 
   ShoppingBag, Package, Users, 
-  TrendingUp, Settings, LogOut, Globe, Cpu, History, Printer, CheckCircle2
+  TrendingUp, Settings, LogOut, Globe, Cpu, History, Printer, CheckCircle2, ShieldCheck
 } from 'lucide-react';
 import { printTicketReceipt } from './utils';
 
@@ -262,10 +263,34 @@ export default function App() {
     return null;
   };
 
-  const [bcvRateUSD, setBcvRateUSD] = useState<number>(() => {
-    const saved = localStorage.getItem('pos_bcv_usd');
-    return saved ? parseFloat(saved) || 0 : 0;
-  });
+  const [licenseStatus, setLicenseStatus] = useState<{
+    status: string;
+    isValid: boolean;
+    hwid: string;
+    payload?: any;
+    daysRemaining?: number | null;
+    message?: string;
+  } | null>(null);
+
+  const fetchLicenseStatus = async () => {
+    try {
+      const res = await fetch(getApiUrl(`/license/status?terminal=${encodeURIComponent(terminalName)}`), {
+        headers: { 'X-Terminal-ID': terminalName }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setLicenseStatus(data);
+      }
+    } catch (err) {
+      console.warn('⚠️ No se pudo consultar el estado de la licencia al servidor.');
+    }
+  };
+
+  useEffect(() => {
+    fetchLicenseStatus();
+    const interval = setInterval(fetchLicenseStatus, 60000);
+    return () => clearInterval(interval);
+  }, [terminalName, lanIP, dbMode]);
 
   // Load business config, users, and official BCV rate immediately when app starts
   useEffect(() => {
@@ -1933,6 +1958,16 @@ export default function App() {
     setReprintSale(sale);
   };
 
+  if (licenseStatus && !licenseStatus.isValid) {
+    return (
+      <LicenciaModal 
+        licenseStatus={licenseStatus} 
+        onLicenseActivated={fetchLicenseStatus} 
+        getApiUrl={getApiUrl} 
+      />
+    );
+  }
+
   if (!currentUser) {
     return (
       <LoginTerminal 
@@ -1960,7 +1995,15 @@ export default function App() {
             <Cpu className="w-5 h-5 text-emerald-455" />
           </div>
           <div>
-            <span className="text-slate-100 font-bold block">{currentUser.nombre.toUpperCase()}</span>
+            <span className="text-slate-100 font-bold block flex items-center gap-1.5">
+              {currentUser.nombre.toUpperCase()}
+              {licenseStatus?.isValid && (
+                <span className="text-[9px] bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 px-2 py-0.5 rounded-full font-mono font-bold inline-flex items-center gap-1" title={`Licencia asignada a: ${licenseStatus.payload?.cliente || 'Cliente'}`}>
+                  <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                  <span>{licenseStatus.payload?.fechaExpiracion === 'VITALICIA' ? 'Vitalicia' : `${licenseStatus.daysRemaining ?? '---'}d`}</span>
+                </span>
+              )}
+            </span>
             <span className="text-[10px] text-slate-400 block uppercase font-sans tracking-wide">
               Rol: {currentUser.rol} | Estación: {terminalName}
             </span>

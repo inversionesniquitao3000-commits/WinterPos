@@ -1,0 +1,12 @@
+{
+  "payload": {
+    "cliente": "INVERSIONES NIQUITAO 3000 C.A.",
+    "rif": "J-41132631",
+    "hwid": "WPOS-8F18-BE43-09BF",
+    "terminales": 5,
+    "fechaEmision": "2026-08-01",
+    "fechaExpiracion": "2027-08-01",
+    "tipo": "365 DÍAS"
+  },
+  "signature": "7432b78379ac05a3d94d46055310dcf94b595f46bd4b61eb467e921e928743e3b27a9bd78121244849eaf27a1a3ab4e7043576645d9ac3ae2bc55a097ff5b85fa5f85045754bdaeb18fa48a5d86afccf845c8f403ce5faf43b60e1dc39c3afabad497ede1de881cf36ada1c88c7577015fd39243cbbc1030a03ba1951f1adf8a4433f00f50489d339bab9ac245bcabf7a583c59fbe23333f21b682930592f83eb2ddfc3c95261f1d9b0427c04381748ecf87eae1fbcd7921b809d6a4dd4cef73300e7dfb38285076e59b6c3ac399c53159325c9698e5637734f7250df560dc5ad6c926eeab6f6ea57d1f0b10893197e5f54575fcb0f83084d84e4ac09c6d69ca"
+}

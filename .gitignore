@@ -10,3 +10,8 @@ backend/node_modules/.cache/
 
 # Variables de entorno locales
 backend/.env
+
+# Clave Privada RSA de Generación de Licencias (NUNCA SUBIR A GIT)
+tools/keys/private_key.pem
+*.pem.private
+

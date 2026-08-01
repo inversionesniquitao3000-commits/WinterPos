@@ -15,6 +15,8 @@ import {
   initWhatsAppClient, getWhatsAppStatus, saveWhatsAppConfig, sendCierreReport 
 } from './whatsapp-service.js';
 
+import { verifyLicense, activateLicense, registerTerminalActivity } from './license-manager.js';
+
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -37,6 +39,51 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // Log incoming requests
 app.use((req, res, next) => {
   console.log(`[${new Date().toLocaleTimeString()}] ${req.method} ${req.url}`);
+  next();
+});
+
+// -------------------------------------------------------------
+// LICENSE MANAGEMENT ENDPOINTS & MIDDLEWARE
+// -------------------------------------------------------------
+app.get('/api/license/status', (req, res) => {
+  const terminalName = req.headers['x-terminal-id'] || req.query.terminal || 'LOCAL';
+  registerTerminalActivity(terminalName);
+  const statusInfo = verifyLicense();
+  res.json(statusInfo);
+});
+
+app.post('/api/license/activate', (req, res) => {
+  const { licenseContent, licenseText } = req.body || {};
+  const input = licenseContent || licenseText;
+  const result = activateLicense(input);
+  res.json(result);
+});
+
+// Enforce License Validation on all business APIs
+app.use((req, res, next) => {
+  if (
+    req.path.startsWith('/api/license') ||
+    req.path === '/api/status' ||
+    req.path === '/api/health' ||
+    !req.path.startsWith('/api/')
+  ) {
+    return next();
+  }
+
+  const terminalName = req.headers['x-terminal-id'] || req.query.terminal || 'LOCAL';
+  registerTerminalActivity(terminalName);
+
+  const license = verifyLicense();
+  if (!license.isValid) {
+    return res.status(403).json({
+      error: 'LICENSE_INVALID',
+      licenseStatus: license.status,
+      hwid: license.hwid,
+      message: license.message,
+      payload: license.payload
+    });
+  }
+
   next();
 });
 
