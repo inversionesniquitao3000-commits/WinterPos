@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import pg from 'pg';
 import dotenv from 'dotenv';
+import { initDatabase } from './init-db.js';
 import { 
   mockUsers, mockProducts, mockClients, mockTasaHistory, mockConfig 
 } from './mockData.js';
@@ -42,6 +43,9 @@ let pool = null;
 
 // Initialize PostgreSQL connection pool
 try {
+  // First ensure DB service is running and schema tables exist
+  await initDatabase();
+
   pool = new Pool({
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
@@ -58,42 +62,6 @@ try {
   
   // Run schema migration to add new closure fields if they do not exist
   await client.query(`
-    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS venta_total_usd NUMERIC DEFAULT 0;
-    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS utilidad_usd NUMERIC DEFAULT 0;
-    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS detalles_json TEXT;
-    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS vuelto_entregado_usd NUMERIC DEFAULT 0;
-    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS vuelto_entregado_ves NUMERIC DEFAULT 0;
-    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS ventas_efectivo_usd NUMERIC DEFAULT 0;
-    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS ventas_efectivo_ves NUMERIC DEFAULT 0;
-    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS abono_clientes_usd NUMERIC DEFAULT 0;
-    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS abono_clientes_ves NUMERIC DEFAULT 0;
-    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS entrada_efectivo_usd NUMERIC DEFAULT 0;
-    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS entrada_efectivo_ves NUMERIC DEFAULT 0;
-    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS salida_efectivo_usd NUMERIC DEFAULT 0;
-    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS salida_efectivo_ves NUMERIC DEFAULT 0;
-    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS devolucion_efectivo_usd NUMERIC DEFAULT 0;
-    ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS devolucion_efectivo_ves NUMERIC DEFAULT 0;
-    ALTER TABLE Clientes ADD COLUMN IF NOT EXISTS aplica_precio_costo BOOLEAN DEFAULT FALSE;
-    ALTER TABLE Ventas_Detalle DROP CONSTRAINT IF EXISTS ventas_detalle_tipo_precio_check;
-    ALTER TABLE Pagos_Venta DROP CONSTRAINT IF EXISTS pagos_venta_metodo_pago_check;
-    ALTER TABLE Abonos DROP CONSTRAINT IF EXISTS abonos_metodo_pago_check;
-    ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS clave VARCHAR(100) DEFAULT 'admin';
-    ALTER TABLE Usuarios ADD COLUMN IF NOT EXISTS permisos TEXT;
-    ALTER TABLE Usuarios ALTER COLUMN rol TYPE VARCHAR(100) USING rol::text;
-    ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS estacion_nombre VARCHAR(50) DEFAULT 'CAJA_PRINCIPAL';
-    ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS vuelto_usd NUMERIC DEFAULT 0;
-    ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS vuelto_ves NUMERIC DEFAULT 0;
-    ALTER TABLE Pagos_Venta ADD COLUMN IF NOT EXISTS monto_vuelto_usd NUMERIC DEFAULT 0;
-    ALTER TABLE Pagos_Venta ADD COLUMN IF NOT EXISTS monto_vuelto_ves NUMERIC DEFAULT 0;
-    ALTER TABLE Movimientos_Caja ADD COLUMN IF NOT EXISTS estacion_nombre VARCHAR(50) DEFAULT 'CAJA_PRINCIPAL';
-    ALTER TABLE Productos ADD COLUMN IF NOT EXISTS a_granel BOOLEAN DEFAULT FALSE;
-    ALTER TABLE Productos ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(50);
-    ALTER TABLE Productos ADD COLUMN IF NOT EXISTS porcentaje_impuesto NUMERIC DEFAULT 0;
-    UPDATE Productos SET porcentaje_impuesto = 16 WHERE exento_impuesto = FALSE AND (porcentaje_impuesto IS NULL OR porcentaje_impuesto = 0);
-    UPDATE Productos SET porcentaje_impuesto = 0 WHERE exento_impuesto = TRUE;
-    ALTER TABLE Configuracion_Empresa ADD COLUMN IF NOT EXISTS permitir_multisesion BOOLEAN DEFAULT TRUE;
-    ALTER TABLE Configuracion_Empresa ADD COLUMN IF NOT EXISTS compartir_apertura_caja BOOLEAN DEFAULT TRUE;
-    CREATE SEQUENCE IF NOT EXISTS seq_factura START WITH 1;
     CREATE TABLE IF NOT EXISTS Roles (
       id SERIAL PRIMARY KEY,
       nombre VARCHAR(100) UNIQUE,
@@ -106,19 +74,82 @@ try {
       fecha_actualizacion VARCHAR(50) NOT NULL,
       usuario_id INT REFERENCES Usuarios(id) ON DELETE SET NULL
     );
-    -- Resincronizar secuencias de claves primarias para evitar colisiones de llaves duplicadas (usuarios_pkey, etc.)
-    SELECT setval(pg_get_serial_sequence('Usuarios', 'id'), COALESCE((SELECT MAX(id) FROM Usuarios), 1));
-    SELECT setval(pg_get_serial_sequence('Roles', 'id'), COALESCE((SELECT MAX(id) FROM Roles), 1));
-    SELECT setval(pg_get_serial_sequence('Productos', 'id'), COALESCE((SELECT MAX(id) FROM Productos), 1));
-    SELECT setval(pg_get_serial_sequence('Clientes', 'id'), COALESCE((SELECT MAX(id) FROM Clientes), 1));
-    SELECT setval(pg_get_serial_sequence('Ventas', 'id'), COALESCE((SELECT MAX(id) FROM Ventas), 1));
-    SELECT setval(pg_get_serial_sequence('Tasas_Cambio', 'id'), COALESCE((SELECT MAX(id) FROM Tasas_Cambio), 1));
-    SELECT setval('seq_factura', COALESCE((SELECT MAX(CAST(NULLIF(regexp_replace(factura_nro, '[^0-9]', '', 'g'), '') AS INTEGER)) FROM Ventas WHERE factura_nro LIKE 'FAC-%'), 1));
-    -- Asegurar que todos los cierres tengan fecha_cierre asignada y estatus 'Cerrada' si ya tienen detalles de conciliación
-    UPDATE Cajas_Apertura_Cierre SET fecha_cierre = COALESCE(fecha_cierre, fecha_apertura, CURRENT_TIMESTAMP) WHERE fecha_cierre IS NULL;
-    UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada' WHERE (monto_cierre_real_usd IS NOT NULL OR detalles_json IS NOT NULL) AND (estatus IS NULL OR estatus = 'Abierta');
-    -- Eliminar cualquier registro de muestra de tasas si existía previamente
-    DELETE FROM Tasas_Cambio WHERE fecha_actualizacion IN ('2026-07-10 08:15', '2026-07-10 14:00', '2026-07-15 08:05');
+    CREATE TABLE IF NOT EXISTS Abonos (
+      id SERIAL PRIMARY KEY,
+      cliente_id INT REFERENCES Clientes(id) ON DELETE CASCADE,
+      usuario_id INT REFERENCES Usuarios(id) ON DELETE SET NULL,
+      monto_usd NUMERIC(12,2) NOT NULL DEFAULT 0,
+      monto_ves NUMERIC(12,2) NOT NULL DEFAULT 0,
+      metodo_pago VARCHAR(50),
+      banco_emisor VARCHAR(100),
+      numero_referencia VARCHAR(50),
+      observacion TEXT,
+      fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS venta_total_usd NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS utilidad_usd NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS detalles_json TEXT;
+    ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS vuelto_entregado_usd NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS vuelto_entregado_ves NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS ventas_efectivo_usd NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS ventas_efectivo_ves NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS abono_clientes_usd NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS abono_clientes_ves NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS entrada_efectivo_usd NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS entrada_efectivo_ves NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS salida_efectivo_usd NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS salida_efectivo_ves NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS devolucion_efectivo_usd NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS devolucion_efectivo_ves NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Clientes ADD COLUMN IF NOT EXISTS aplica_precio_costo BOOLEAN DEFAULT FALSE;
+    ALTER TABLE IF EXISTS Ventas_Detalle DROP CONSTRAINT IF EXISTS ventas_detalle_tipo_precio_check;
+    ALTER TABLE IF EXISTS Pagos_Venta DROP CONSTRAINT IF EXISTS pagos_venta_metodo_pago_check;
+    ALTER TABLE IF EXISTS Abonos DROP CONSTRAINT IF EXISTS abonos_metodo_pago_check;
+    ALTER TABLE IF EXISTS Usuarios ADD COLUMN IF NOT EXISTS clave VARCHAR(100) DEFAULT 'admin';
+    ALTER TABLE IF EXISTS Usuarios ADD COLUMN IF NOT EXISTS permisos TEXT;
+    ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS estacion_nombre VARCHAR(50) DEFAULT 'CAJA_PRINCIPAL';
+    ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS vuelto_usd NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS vuelto_ves NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Pagos_Venta ADD COLUMN IF NOT EXISTS monto_vuelto_usd NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Pagos_Venta ADD COLUMN IF NOT EXISTS monto_vuelto_ves NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Movimientos_Caja ADD COLUMN IF NOT EXISTS estacion_nombre VARCHAR(50) DEFAULT 'CAJA_PRINCIPAL';
+    ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS a_granel BOOLEAN DEFAULT FALSE;
+    ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(50);
+    ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS porcentaje_impuesto NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS permitir_multisesion BOOLEAN DEFAULT TRUE;
+    ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS compartir_apertura_caja BOOLEAN DEFAULT TRUE;
+    CREATE SEQUENCE IF NOT EXISTS seq_factura START WITH 1;
+
+    DO $$ BEGIN
+      IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'usuarios') THEN
+        ALTER TABLE Usuarios ALTER COLUMN rol TYPE VARCHAR(100) USING rol::text;
+        PERFORM setval(pg_get_serial_sequence('Usuarios', 'id'), COALESCE((SELECT MAX(id) FROM Usuarios), 1));
+      END IF;
+      IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'roles') THEN
+        PERFORM setval(pg_get_serial_sequence('Roles', 'id'), COALESCE((SELECT MAX(id) FROM Roles), 1));
+      END IF;
+      IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'productos') THEN
+        UPDATE Productos SET porcentaje_impuesto = 16 WHERE exento_impuesto = FALSE AND (porcentaje_impuesto IS NULL OR porcentaje_impuesto = 0);
+        UPDATE Productos SET porcentaje_impuesto = 0 WHERE exento_impuesto = TRUE;
+        PERFORM setval(pg_get_serial_sequence('Productos', 'id'), COALESCE((SELECT MAX(id) FROM Productos), 1));
+      END IF;
+      IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'clientes') THEN
+        PERFORM setval(pg_get_serial_sequence('Clientes', 'id'), COALESCE((SELECT MAX(id) FROM Clientes), 1));
+      END IF;
+      IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'ventas') THEN
+        PERFORM setval(pg_get_serial_sequence('Ventas', 'id'), COALESCE((SELECT MAX(id) FROM Ventas), 1));
+        PERFORM setval('seq_factura', COALESCE((SELECT MAX(CAST(NULLIF(regexp_replace(factura_nro, '[^0-9]', '', 'g'), '') AS INTEGER)) FROM Ventas WHERE factura_nro LIKE 'FAC-%'), 1));
+      END IF;
+      IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'tasas_cambio') THEN
+        PERFORM setval(pg_get_serial_sequence('Tasas_Cambio', 'id'), COALESCE((SELECT MAX(id) FROM Tasas_Cambio), 1));
+        DELETE FROM Tasas_Cambio WHERE fecha_actualizacion IN ('2026-07-10 08:15', '2026-07-10 14:00', '2026-07-15 08:05');
+      END IF;
+      IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'cajas_apertura_cierre') THEN
+        UPDATE Cajas_Apertura_Cierre SET fecha_cierre = COALESCE(fecha_cierre, fecha_apertura, CURRENT_TIMESTAMP) WHERE fecha_cierre IS NULL;
+        UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada' WHERE (monto_cierre_real_usd IS NOT NULL OR detalles_json IS NOT NULL) AND (estatus IS NULL OR estatus = 'Abierta');
+      END IF;
+    END $$;
   `);
 
   // Alter enum type outside of main multi-statement query to prevent implicit transaction block errors in Postgres

@@ -167,6 +167,22 @@ CREATE TABLE Pagos_Venta (
 );
 
 -- ==========================================
+-- 10.1 ABONOS DE CLIENTES
+-- ==========================================
+CREATE TABLE IF NOT EXISTS Abonos (
+    id BIGSERIAL PRIMARY KEY,
+    cliente_id BIGINT REFERENCES Clientes(id) ON DELETE CASCADE,
+    usuario_id BIGINT REFERENCES Usuarios(id) ON DELETE SET NULL,
+    monto_usd NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    monto_ves NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    metodo_pago VARCHAR(50),
+    banco_emisor VARCHAR(100),
+    numero_referencia VARCHAR(50),
+    observacion TEXT,
+    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ==========================================
 -- 11. TRAZABILIDAD DE INVENTARIO (KARDEX / MERMAS)
 -- ==========================================
 CREATE TYPE tipo_movimiento_inv AS ENUM ('Entrada', 'Salida', 'Merma', 'Venta', 'Devolucion', 'Entrada Rápida');
