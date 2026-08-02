@@ -1,12 +1,12 @@
 {
   "payload": {
-    "cliente": "INVERSIONES NIQUITAO 3000 C.A.",
-    "rif": "J-41132631",
+    "cliente": "Inversiones Niquitao JB AL 3000",
+    "rif": "J-411332631",
     "hwid": "WPOS-8F18-BE43-09BF",
-    "terminales": 5,
-    "fechaEmision": "2026-08-01",
-    "fechaExpiracion": "2027-08-01",
-    "tipo": "365 DÍAS"
+    "terminales": "ILIMITADO",
+    "fechaEmision": "2026-08-02",
+    "fechaExpiracion": "VITALICIA",
+    "tipo": "VITALICIA"
   },
-  "signature": "7432b78379ac05a3d94d46055310dcf94b595f46bd4b61eb467e921e928743e3b27a9bd78121244849eaf27a1a3ab4e7043576645d9ac3ae2bc55a097ff5b85fa5f85045754bdaeb18fa48a5d86afccf845c8f403ce5faf43b60e1dc39c3afabad497ede1de881cf36ada1c88c7577015fd39243cbbc1030a03ba1951f1adf8a4433f00f50489d339bab9ac245bcabf7a583c59fbe23333f21b682930592f83eb2ddfc3c95261f1d9b0427c04381748ecf87eae1fbcd7921b809d6a4dd4cef73300e7dfb38285076e59b6c3ac399c53159325c9698e5637734f7250df560dc5ad6c926eeab6f6ea57d1f0b10893197e5f54575fcb0f83084d84e4ac09c6d69ca"
+  "signature": "86fb9701af582e4eaf6e93d8b926cf9ff61a9c9c5e3a3210242a928f87cab4e68de1bc8a9a0a00df3ca1da6c37ac54a0d862346c7267d7b60149a8c6f5a868dbe7a8ec5b3ee5d09eaeabe2a707e00fa36850649b92b33354eef326a5e52f8b7a1bc232e93f333fb36292b66cb2d50971f4c349f1ee3fb7ae65e5e75472029decaec9241a64739b2ca3ce3b7095011705e97523788b82abc03bafb6150fd63abf72378f9606095f6a3cf5eb14107038b075f6315c6ed42b61e5cd4a23838d10ad0b237aa475bc1021814e6244618d1eeaefb7ca2927e763bbe24f76cf6e59627c58e3c3c0317a80e7743b03cb04ea93fd822c9c6bb91e8b6ac7a01d09219c43b2"
 }
