@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Product, InventoryMovement, PriceAdjustmentHistory, User, CompanyConfig } from '../types';
-import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator, PauseCircle, Play, Trash2, Wand2, Sparkles, ShieldAlert, RotateCcw } from 'lucide-react';
+import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator, PauseCircle, Play, Trash2, Wand2, Sparkles, ShieldAlert, RotateCcw, BarChart3, TrendingUp, Award, DollarSign } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr } from '../utils';
 import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
@@ -65,7 +65,7 @@ export default function Inventario({
     return !!_currentUser.permisos.inventario?.[action];
   };
 
-  const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'movimientos' | 'precios'>('catalogo');
+  const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'movimientos' | 'precios' | 'estadisticas'>('catalogo');
   const [selectedMovementDetail, setSelectedMovementDetail] = useState<any>(null);
   const [successMsg, setSuccessMsg] = useState('');
 
@@ -481,6 +481,97 @@ export default function Inventario({
   const safeProducts = useMemo(() => Array.isArray(products) ? products : [], [products]);
   const safeMovements = useMemo(() => Array.isArray(movements) ? movements : [], [movements]);
   const safePriceHistory = useMemo(() => Array.isArray(priceHistory) ? priceHistory : [], [priceHistory]);
+
+  // Estadísticas Avanzadas de Inventario y Movimientos
+  const statisticsData = useMemo(() => {
+    const totalProdCount = safeProducts.length;
+    const totalStockQty = safeProducts.reduce((acc, p) => acc + (parseFloat(p?.stock_actual as any) || 0), 0);
+    const totalValueDetailUsd = safeProducts.reduce((acc, p) => acc + (p?.precio_detalle_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0);
+    const totalValueCostUsd = safeProducts.reduce((acc, p) => acc + (p?.precio_costo_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0);
+    const totalEstimatedProfitUsd = totalValueDetailUsd - totalValueCostUsd;
+    const avgMarginPct = totalValueCostUsd > 0 ? (totalEstimatedProfitUsd / totalValueCostUsd) * 100 : 0;
+
+    // Top 10 productos más vendidos desde los movimientos del Kardex
+    const salesMap: Record<string, { code: string; description: string; qty: number; totalUsd: number }> = {};
+    safeMovements.forEach(m => {
+      if (m?.type === 'Venta' || (typeof m?.qty === 'number' && m.qty < 0 && m.type !== 'Salida' && m.type !== 'Merma')) {
+        const key = m.productCode || m.productDescription;
+        if (!key) return;
+        const soldQty = Math.abs(m.qty);
+        const prod = safeProducts.find(p => p.barcode === m.productCode || p.description === m.productDescription);
+        const unitPrice = prod ? prod.precio_detalle_usd : 0;
+
+        if (!salesMap[key]) {
+          salesMap[key] = {
+            code: m.productCode || '',
+            description: m.productDescription || key,
+            qty: 0,
+            totalUsd: 0
+          };
+        }
+        salesMap[key].qty += soldQty;
+        salesMap[key].totalUsd += soldQty * unitPrice;
+      }
+    });
+
+    const topSoldProducts = Object.values(salesMap)
+      .sort((a, b) => b.qty - a.qty)
+      .slice(0, 10);
+
+    const maxSoldQty = topSoldProducts.length > 0 ? Math.max(...topSoldProducts.map(p => p.qty)) : 1;
+
+    // Movimientos por tipo
+    const movementsByTypeMap: Record<string, { type: string; count: number; qtyTotal: number; costUsd: number; priceUsd: number }> = {};
+    safeMovements.forEach(m => {
+      const typeKey = m?.type || 'Ajuste';
+      if (!movementsByTypeMap[typeKey]) {
+        movementsByTypeMap[typeKey] = { type: typeKey, count: 0, qtyTotal: 0, costUsd: 0, priceUsd: 0 };
+      }
+      const qtyAbs = Math.abs(m?.qty || 0);
+      const prod = safeProducts.find(p => p.barcode === m.productCode || p.description === m.productDescription);
+      const unitCost = prod ? prod.precio_costo_usd : 0;
+      const unitDetail = prod ? prod.precio_detalle_usd : 0;
+
+      movementsByTypeMap[typeKey].count += 1;
+      movementsByTypeMap[typeKey].qtyTotal += qtyAbs;
+      movementsByTypeMap[typeKey].costUsd += qtyAbs * unitCost;
+      movementsByTypeMap[typeKey].priceUsd += qtyAbs * unitDetail;
+    });
+
+    const movementsByType = Object.values(movementsByTypeMap).sort((a, b) => b.qtyTotal - a.qtyTotal);
+    const maxMovementQty = movementsByType.length > 0 ? Math.max(...movementsByType.map(m => m.qtyTotal)) : 1;
+
+    // Distribución por Categorías
+    const categoryMap: Record<string, { category: string; count: number; costUsd: number; detailUsd: number }> = {};
+    safeProducts.forEach(p => {
+      const cat = p.category || 'SIN CATEGORIA';
+      if (!categoryMap[cat]) {
+        categoryMap[cat] = { category: cat, count: 0, costUsd: 0, detailUsd: 0 };
+      }
+      const stk = parseFloat(p.stock_actual as any) || 0;
+      categoryMap[cat].count += 1;
+      categoryMap[cat].costUsd += p.precio_costo_usd * stk;
+      categoryMap[cat].detailUsd += p.precio_detalle_usd * stk;
+    });
+
+    const topCategories = Object.values(categoryMap)
+      .sort((a, b) => b.detailUsd - a.detailUsd)
+      .slice(0, 8);
+
+    return {
+      totalProdCount,
+      totalStockQty,
+      totalValueDetailUsd,
+      totalValueCostUsd,
+      totalEstimatedProfitUsd,
+      avgMarginPct,
+      topSoldProducts,
+      maxSoldQty,
+      movementsByType,
+      maxMovementQty,
+      topCategories
+    };
+  }, [safeProducts, safeMovements]);
 
   const prevProductsLengthRef = useRef(safeProducts.length);
 
@@ -1949,6 +2040,17 @@ export default function Inventario({
         >
           Historial Precios
         </button>
+        <button
+          onClick={() => setActiveSubTab('estadisticas')}
+          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all flex items-center gap-1.5 ${
+            activeSubTab === 'estadisticas'
+              ? 'bg-white border-slate-200 text-indigo-900 shadow-2xs font-extrabold'
+              : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
+          }`}
+        >
+          <BarChart3 className="w-3.5 h-3.5 text-indigo-600" />
+          Estadísticas
+        </button>
       </div>
 
       {/* RENDER ACTIVE PANEL */}
@@ -3178,6 +3280,309 @@ export default function Inventario({
           </div>
         );
       })()}
+
+      {/* ESTADÍSTICAS Y PANEL DE RENDIMIENTO */}
+      {activeSubTab === 'estadisticas' && (
+        <div className="space-y-6 animate-fade-in font-sans text-slate-800">
+          
+          {/* HEADER & SUMMARY TOOLBAR */}
+          <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-5 shadow-lg border border-slate-800 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-indigo-600/30 border border-indigo-400/40 rounded-xl shadow-inner">
+                <BarChart3 className="w-7 h-7 text-indigo-300" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold tracking-wide uppercase flex items-center gap-2">
+                  ESTADÍSTICAS Y RENDIMIENTO DEL INVENTARIO
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                </h3>
+                <p className="text-xs text-slate-300 font-medium">
+                  Análisis consolidado de valorización, rotación de mercancía y auditoría de Kardex.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 bg-slate-850/80 px-4 py-2 rounded-xl border border-slate-700/60 font-mono text-xs">
+              <span className="text-slate-400">Referencia BCV:</span>
+              <span className="font-extrabold text-emerald-400 text-sm">Bs {(bcvRateUSD || tasaDia || 0).toFixed(2)} / $</span>
+            </div>
+          </div>
+
+          {/* ROW 1: EXEC KPI SUMMARY CARDS (Montos de Inventario General) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            
+            {/* Card 1: No. Productos */}
+            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+              <div className="flex justify-between items-center text-slate-500 mb-2">
+                <span className="text-xs font-bold uppercase tracking-wider">No. Productos</span>
+                <Package className="w-4 h-4 text-sky-600" />
+              </div>
+              <div className="text-2xl font-black font-mono text-slate-900">
+                {statisticsData.totalProdCount.toLocaleString('es-VE')}
+              </div>
+              <div className="text-[10px] text-slate-400 font-semibold mt-1">Items registrados</div>
+            </div>
+
+            {/* Card 2: Existencia Total */}
+            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+              <div className="flex justify-between items-center text-slate-500 mb-2">
+                <span className="text-xs font-bold uppercase tracking-wider">Existencia Total</span>
+                <Layers className="w-4 h-4 text-indigo-600" />
+              </div>
+              <div className="text-2xl font-black font-mono text-indigo-900">
+                {statisticsData.totalStockQty.toLocaleString('es-VE', { maximumFractionDigits: 2 })}
+              </div>
+              <div className="text-[10px] text-slate-400 font-semibold mt-1">Unidades y Kilos en stock</div>
+            </div>
+
+            {/* Card 3: Precio Total (Detalle) */}
+            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+              <div className="flex justify-between items-center text-slate-500 mb-2">
+                <span className="text-xs font-bold uppercase tracking-wider">Precio Total</span>
+                <DollarSign className="w-4 h-4 text-amber-600" />
+              </div>
+              <div className="text-2xl font-black font-mono text-amber-900">
+                ${statisticsData.totalValueDetailUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <div className="text-[10px] text-slate-500 font-mono mt-1 font-bold">
+                Bs {(statisticsData.totalValueDetailUsd * (bcvRateUSD || tasaDia || 1)).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+            </div>
+
+            {/* Card 4: Costo Total */}
+            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+              <div className="flex justify-between items-center text-slate-500 mb-2">
+                <span className="text-xs font-bold uppercase tracking-wider">Costo Total</span>
+                <Calculator className="w-4 h-4 text-purple-600" />
+              </div>
+              <div className="text-2xl font-black font-mono text-purple-900">
+                ${statisticsData.totalValueCostUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <div className="text-[10px] text-slate-500 font-mono mt-1 font-bold">
+                Bs {(statisticsData.totalValueCostUsd * (bcvRateUSD || tasaDia || 1)).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+            </div>
+
+            {/* Card 5: Utilidad / Ganancia Estimada */}
+            <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+              <div className="flex justify-between items-center text-emerald-800 mb-2">
+                <span className="text-xs font-black uppercase tracking-wider">Utilidad Total</span>
+                <TrendingUp className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div className="text-2xl font-black font-mono text-emerald-950">
+                ${statisticsData.totalEstimatedProfitUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <div className="text-[10px] text-emerald-700 font-bold mt-1 flex items-center justify-between">
+                <span>Margen Est: +{statisticsData.avgMarginPct.toFixed(1)}%</span>
+                <span className="font-mono text-emerald-900 font-extrabold">Bs {(statisticsData.totalEstimatedProfitUsd * (bcvRateUSD || tasaDia || 1)).toLocaleString('es-VE', { maximumFractionDigits: 0 })}</span>
+              </div>
+            </div>
+
+          </div>
+
+          {/* ROW 2: TOP 10 PRODUCTOS MÁS VENDIDOS POR CANTIDAD */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <Award className="w-5 h-5 text-amber-500" />
+                <h4 className="font-extrabold text-sm uppercase text-slate-850 tracking-wider">TOP 10 - PRODUCTOS MÁS VENDIDOS POR CANTIDAD</h4>
+              </div>
+              <span className="text-xs text-slate-500 font-mono">Basado en registros auditados del Kardex</span>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-end">
+              {/* Table side (5 cols) */}
+              <div className="lg:col-span-5 border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+                <table className="w-full text-left text-xs font-sans">
+                  <thead className="bg-slate-100 text-slate-600 border-b border-slate-200 font-bold uppercase text-[10px]">
+                    <tr>
+                      <th className="p-2.5 text-center">#</th>
+                      <th className="p-2.5">Descripción</th>
+                      <th className="p-2.5 text-right">Cant.</th>
+                      <th className="p-2.5 text-right font-mono">Total ($)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {statisticsData.topSoldProducts.length > 0 ? (
+                      statisticsData.topSoldProducts.map((p, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="p-2.5 text-center font-bold font-mono text-slate-500">{idx + 1}</td>
+                          <td className="p-2.5 font-bold text-slate-800 uppercase text-[11px] truncate max-w-[160px]">{p.description}</td>
+                          <td className="p-2.5 text-right font-bold font-mono text-indigo-700">{p.qty.toLocaleString('es-VE')}</td>
+                          <td className="p-2.5 text-right font-mono text-emerald-600 font-bold">${p.totalUsd.toFixed(2)}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={4} className="p-4 text-center text-slate-400 italic text-xs">No hay ventas registradas aún en Kardex.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Bar Chart Visual Side (7 cols) */}
+              <div className="lg:col-span-7 bg-slate-50 border border-slate-200 rounded-xl p-5 h-72 flex flex-col justify-end">
+                <div className="flex items-end justify-between gap-2 h-56 pt-6 px-2">
+                  {statisticsData.topSoldProducts.length > 0 ? (
+                    statisticsData.topSoldProducts.map((p, idx) => {
+                      const heightPct = Math.max(10, Math.min(100, (p.qty / statisticsData.maxSoldQty) * 100));
+                      return (
+                        <div key={idx} className="flex-1 flex flex-col items-center gap-1 group h-full justify-end">
+                          <span className="text-[10px] font-bold font-mono text-indigo-900 group-hover:scale-110 transition-all">{p.qty}</span>
+                          <div
+                            style={{ height: `${heightPct}%` }}
+                            className="w-full max-w-[36px] bg-gradient-to-t from-blue-700 to-indigo-500 rounded-t-md shadow-sm group-hover:from-blue-600 group-hover:to-indigo-400 transition-all relative"
+                          >
+                            <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[9px] px-2 py-1 rounded font-mono font-bold whitespace-nowrap z-30 shadow-lg pointer-events-none">
+                              {p.description}: {p.qty} un (${p.totalUsd.toFixed(2)})
+                            </div>
+                          </div>
+                          <span className="text-[9px] font-bold text-slate-600 truncate w-full text-center tracking-tighter uppercase font-sans mt-1">
+                            {p.description.split(' ')[0]}
+                          </span>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="w-full text-center text-slate-400 text-xs my-auto">Sin datos de gráfico para ventas.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ROW 3: MONTOS DE MOVIMIENTOS DE INVENTARIO (Kardex audit values) */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <History className="w-5 h-5 text-indigo-600" />
+                <h4 className="font-extrabold text-sm uppercase text-slate-850 tracking-wider">MONTOS DE MOVIMIENTOS DE INVENTARIO</h4>
+              </div>
+              <span className="text-xs text-slate-500 font-mono">Consolidado por tipo de operación</span>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-end">
+              {/* Table side (5 cols) */}
+              <div className="lg:col-span-5 border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+                <table className="w-full text-left text-xs font-sans">
+                  <thead className="bg-slate-100 text-slate-600 border-b border-slate-200 font-bold uppercase text-[10px]">
+                    <tr>
+                      <th className="p-2.5">Tipo Movimiento</th>
+                      <th className="p-2.5 text-right font-mono">Cant.</th>
+                      <th className="p-2.5 text-right font-mono">Costos ($)</th>
+                      <th className="p-2.5 text-right font-mono">Precios ($)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {statisticsData.movementsByType.length > 0 ? (
+                      statisticsData.movementsByType.map((m, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50 font-mono">
+                          <td className="p-2.5 font-bold font-sans uppercase text-slate-800 text-[11px]">{m.type}</td>
+                          <td className="p-2.5 text-right font-bold text-slate-700">{m.qtyTotal.toLocaleString('es-VE', { maximumFractionDigits: 2 })}</td>
+                          <td className="p-2.5 text-right text-purple-700 font-bold">${m.costUsd.toFixed(2)}</td>
+                          <td className="p-2.5 text-right text-emerald-600 font-bold">${m.priceUsd.toFixed(2)}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={4} className="p-4 text-center text-slate-400 italic text-xs">No hay movimientos registrados en Kardex.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Bar Chart Visual Side (7 cols) */}
+              <div className="lg:col-span-7 bg-slate-50 border border-slate-200 rounded-xl p-5 h-72 flex flex-col justify-end">
+                <div className="flex items-end justify-between gap-3 h-56 pt-6 px-2">
+                  {statisticsData.movementsByType.length > 0 ? (
+                    statisticsData.movementsByType.map((m, idx) => {
+                      const heightPct = Math.max(10, Math.min(100, (m.qtyTotal / statisticsData.maxMovementQty) * 100));
+                      const barGradient = 
+                        m.type === 'Venta' || m.type === 'Ticket Venta' ? 'from-blue-700 to-indigo-500' :
+                        m.type === 'Entrada' ? 'from-emerald-600 to-teal-500' :
+                        m.type === 'Merma' ? 'from-rose-600 to-red-500' :
+                        m.type === 'Salida' ? 'from-amber-600 to-orange-500' : 'from-indigo-600 to-purple-500';
+
+                      return (
+                        <div key={idx} className="flex-1 flex flex-col items-center gap-1 group h-full justify-end">
+                          <span className="text-[10px] font-bold font-mono text-slate-800 group-hover:scale-110 transition-all">
+                            {m.qtyTotal.toLocaleString('es-VE', { maximumFractionDigits: 0 })}
+                          </span>
+                          <div
+                            style={{ height: `${heightPct}%` }}
+                            className={`w-full max-w-[42px] bg-gradient-to-t ${barGradient} rounded-t-md shadow-sm transition-all relative`}
+                          >
+                            <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[9px] px-2 py-1 rounded font-mono font-bold whitespace-nowrap z-30 shadow-lg pointer-events-none">
+                              {m.type}: {m.qtyTotal.toFixed(2)} unidades (${m.priceUsd.toFixed(2)})
+                            </div>
+                          </div>
+                          <span className="text-[9px] font-bold text-slate-700 truncate w-full text-center uppercase font-sans mt-1">
+                            {m.type}
+                          </span>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="w-full text-center text-slate-400 text-xs my-auto">Sin datos de movimientos para gráfico.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ROW 4: RENDIMIENTO Y DISTRIBUCIÓN POR CATEGORÍAS */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <Layers className="w-5 h-5 text-indigo-600" />
+                <h4 className="font-extrabold text-sm uppercase text-slate-850 tracking-wider">TOP CATEGORÍAS POR VALORIZACIÓN Y MARGEN</h4>
+              </div>
+              <span className="text-xs text-slate-500 font-mono">Participación de inventario</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {statisticsData.topCategories.map((c, idx) => {
+                const profit = c.detailUsd - c.costUsd;
+                const margin = c.costUsd > 0 ? (profit / c.costUsd) * 100 : 0;
+                const sharePct = statisticsData.totalValueDetailUsd > 0 ? (c.detailUsd / statisticsData.totalValueDetailUsd) * 100 : 0;
+
+                return (
+                  <div key={idx} className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2 hover:bg-slate-100/80 transition-all">
+                    <div className="flex justify-between items-start">
+                      <span className="font-extrabold text-xs text-slate-900 uppercase tracking-wide truncate max-w-[140px]">{c.category}</span>
+                      <span className="bg-indigo-100 text-indigo-800 text-[10px] font-extrabold font-mono rounded px-1.5 py-0.5">
+                        {sharePct.toFixed(1)}% del Inv.
+                      </span>
+                    </div>
+
+                    <div className="space-y-1 font-mono text-xs pt-1">
+                      <div className="flex justify-between text-slate-500 text-[11px]">
+                        <span>Productos:</span>
+                        <span className="font-bold text-slate-800">{c.count} items</span>
+                      </div>
+                      <div className="flex justify-between text-slate-500 text-[11px]">
+                        <span>Valor Detalle:</span>
+                        <span className="font-bold text-emerald-600">${c.detailUsd.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-500 text-[11px]">
+                        <span>Valor Costo:</span>
+                        <span className="font-bold text-purple-600">${c.costUsd.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between text-emerald-700 text-[11px] font-bold border-t border-slate-200 pt-1">
+                        <span>Margen Est.:</span>
+                        <span>+{margin.toFixed(1)}% (${profit.toFixed(2)})</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+        </div>
+      )}
 
       {/* MODAL: STOCK ADJUSTMENT - Light theme */}
       {showAdjustModal && selectedProduct && (
