@@ -17,6 +17,7 @@ interface CajaPOSProps {
   tasaDia: number;
   tasaVuelto: number;
   currentUser: User;
+  onAddClient?: (cli: Client) => Promise<void> | void;
   onRegisterSale: (sale: {
     factura_nro: string;
     client: Client;
@@ -76,6 +77,7 @@ const formatStockVal = (val: any, aGranel?: boolean) => {
 export default function CajaPOS({
   products,
   clients,
+  onAddClient,
   companyConfig,
   tasaDia,
   tasaVuelto,
@@ -107,6 +109,16 @@ export default function CajaPOS({
   const [isClosingCaja, setIsClosingCaja] = useState(false);
   const [userDismissedApertura, setUserDismissedApertura] = useState(false);
   const [showAperturaModal, setShowAperturaModal] = useState(!cajaAbierta);
+
+  // Quick Client Registration Modal State
+  const [showQuickClientModal, setShowQuickClientModal] = useState(false);
+  const [quickDoc, setQuickDoc] = useState('');
+  const [quickName, setQuickName] = useState('');
+  const [quickPhone, setQuickPhone] = useState('');
+  const [quickAddress, setQuickAddress] = useState('');
+  const [quickCreditLimit, setQuickCreditLimit] = useState('0');
+  const [quickDiscount, setQuickDiscount] = useState('0');
+  const [quickPrecioCosto, setQuickPrecioCosto] = useState(false);
   const [aperturaUsdVal, setAperturaUsdVal] = useState('');
   const [aperturaVesVal, setAperturaVesVal] = useState('');
 
@@ -491,6 +503,67 @@ export default function CajaPOS({
     }
     return clients.find(c => c.cedula_rif === 'V-00000000') || clients[0];
   });
+  
+  // Searchable Client Combobox State
+  const [clientSearchTerm, setClientSearchTerm] = useState<string>('');
+  const [isClientDropdownOpen, setIsClientDropdownOpen] = useState<boolean>(false);
+  const [clientSelectedIndex, setClientSelectedIndex] = useState<number>(-1);
+  const clientDropdownRef = useRef<HTMLDivElement>(null);
+  const clientListContainerRef = useRef<HTMLDivElement>(null);
+
+  const filteredClients = useMemo(() => {
+    const term = clientSearchTerm.trim().toLowerCase();
+    if (!term) return clients;
+    return clients.filter(c =>
+      c.nombre.toLowerCase().includes(term) ||
+      c.cedula_rif.toLowerCase().includes(term) ||
+      (c.telefono && c.telefono.toLowerCase().includes(term))
+    );
+  }, [clients, clientSearchTerm]);
+
+  // Scroll active client item into view
+  useEffect(() => {
+    if (clientSelectedIndex >= 0 && clientListContainerRef.current) {
+      const activeItem = clientListContainerRef.current.children[clientSelectedIndex] as HTMLElement;
+      if (activeItem) {
+        activeItem.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }, [clientSelectedIndex]);
+
+  // Click outside to close client dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (clientDropdownRef.current && !clientDropdownRef.current.contains(event.target as Node)) {
+        setIsClientDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSelectClient = (cli: Client) => {
+    setSelectedClient(cli);
+    setDiscountPct(cli.porcentaje_descuento);
+    setClientSearchTerm('');
+    setClientSelectedIndex(-1);
+    setIsClientDropdownOpen(false);
+    localStorage.setItem('pos_current_client_doc', cli.cedula_rif);
+
+    // Recalculate cart item prices for the selected client
+    if (cli.aplica_precio_costo) {
+      setSaleItems(prev => prev.map(item => {
+        const costPrice = item.product.precio_costo_usd;
+        return { ...item, priceUSD: costPrice, priceType: 'Costo', totalUSD: item.qty * costPrice };
+      }));
+    } else {
+      setSaleItems(prev => prev.map(item => {
+        const normalPrice = item.qty >= item.product.cantidad_mayorista ? item.product.precio_mayor_usd : item.product.precio_detalle_usd;
+        const normalType = item.qty >= item.product.cantidad_mayorista ? 'Mayor' : 'Detalle';
+        return { ...item, priceUSD: normalPrice, priceType: normalType, totalUSD: item.qty * normalPrice };
+      }));
+    }
+  };
   
   const [selectedSeller, setSelectedSeller] = useState<string>(currentUser.nombre);
   
@@ -1251,6 +1324,51 @@ export default function CajaPOS({
 
   const canConfirmCheckout = totalPaidUSD >= totalUSD && isPagoMovilValid && isBiopagoValid && isCreditValid;
 
+  const handleCreateQuickClient = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickDoc.trim() || !quickName.trim()) {
+      showAlert('Por favor ingrese la Cédula/RIF y el Nombre o Razón Social del cliente.', 'Campos Requeridos', 'warning');
+      return;
+    }
+
+    const limit = parseFloat(quickCreditLimit) || 0;
+    const discount = parseFloat(quickDiscount) || 0;
+
+    const newCli: Client = {
+      id: Date.now(),
+      cedula_rif: quickDoc.trim().toUpperCase(),
+      nombre: quickName.trim().toUpperCase(),
+      telefono: quickPhone.trim(),
+      direccion: quickAddress.trim(),
+      limite_credito: limit,
+      credito_disponible: limit,
+      porcentaje_descuento: discount,
+      estado: 'Activo',
+      aplica_precio_costo: quickPrecioCosto,
+      saldo_pendiente: 0
+    };
+
+    if (onAddClient) {
+      await onAddClient(newCli);
+    }
+
+    // Automatically set as active POS client
+    setSelectedClient(newCli);
+    setDiscountPct(newCli.porcentaje_descuento);
+    localStorage.setItem('pos_current_client_doc', newCli.cedula_rif);
+    showToast(`Cliente "${newCli.nombre}" registrado y seleccionado exitosamente.`, 'success');
+
+    // Reset fields & close modal
+    setQuickDoc('');
+    setQuickName('');
+    setQuickPhone('');
+    setQuickAddress('');
+    setQuickCreditLimit('0');
+    setQuickDiscount('0');
+    setQuickPrecioCosto(false);
+    setShowQuickClientModal(false);
+  };
+
   const handleConfirmCheckout = async (shouldPrint: boolean = false) => {
     if (!canConfirmCheckout) {
       showAlert('Información de cobro incompleta o inválida. Verifique los montos ingresados.', 'Pago Incompleto', 'warning');
@@ -1372,12 +1490,19 @@ export default function CajaPOS({
       }, 300);
     }
 
-    // Clear sale state
+    // Clear sale state and reset client to default 'Público General'
     setSaleItems([]);
     setDiscountPct(0);
     localStorage.removeItem('pos_current_cart');
     localStorage.removeItem('pos_current_discount');
     localStorage.removeItem('pos_current_client_doc');
+
+    const defaultCli = clients.find(c => c.cedula_rif === 'V-00000000') || clients[0];
+    if (defaultCli) {
+      setSelectedClient(defaultCli);
+      setDiscountPct(defaultCli.porcentaje_descuento);
+      setClientSearchTerm('');
+    }
   };
 
   // Focus Trap & Enter key listener for Checkout Modal
@@ -2129,39 +2254,140 @@ export default function CajaPOS({
             </div>
           </div>
 
-          {/* CLIENT SELECTOR */}
-          <div className="space-y-1">
-            <label className="text-[10px] text-slate-500 font-sans block">Cliente Facturación</label>
-            <select
-              value={selectedClient.id}
-              onChange={(e) => {
-                const cli = clients.find(c => String(c.id) === String(e.target.value));
-                if (cli) {
-                  setSelectedClient(cli);
-                  setDiscountPct(cli.porcentaje_descuento);
-                  // Recalculate all cart prices for the new client
-                  if (cli.aplica_precio_costo) {
-                    setSaleItems(prev => prev.map(item => {
-                      const costPrice = item.product.precio_costo_usd;
-                      return { ...item, priceUSD: costPrice, priceType: 'Costo', totalUSD: item.qty * costPrice };
-                    }));
-                  } else {
-                    setSaleItems(prev => prev.map(item => {
-                      const normalPrice = item.qty >= item.product.cantidad_mayorista ? item.product.precio_mayor_usd : item.product.precio_detalle_usd;
-                      const normalType = item.qty >= item.product.cantidad_mayorista ? 'Mayor' : 'Detalle';
-                      return { ...item, priceUSD: normalPrice, priceType: normalType, totalUSD: item.qty * normalPrice };
-                    }));
-                  }
-                }
-              }}
-              className={`w-full border rounded p-2.5 text-slate-800 outline-none focus:bg-white focus:border-winter-blueBtn font-sans ${selectedClient.aplica_precio_costo ? 'bg-amber-50 border-amber-400' : 'bg-slate-50 border-slate-350'}`}
-            >
-              {clients.map(c => (
-                <option key={c.id} value={c.id}>
-                  {c.nombre} ({c.cedula_rif}) {c.porcentaje_descuento > 0 ? `[Desc ${c.porcentaje_descuento}%]` : ''}{c.aplica_precio_costo ? ' ★ P.COSTO' : ''}
-                </option>
-              ))}
-            </select>
+          {/* SEARCHABLE CLIENT SELECTOR WITH LIVE SEARCH & QUICK (+) BUTTON */}
+          <div className="space-y-1 relative" ref={clientDropdownRef}>
+            <label className="text-[10px] text-slate-500 font-sans block font-semibold">Cliente Facturación</label>
+            <div className="flex items-center gap-1.5">
+              <div className="relative flex-grow">
+                <input
+                  type="text"
+                  placeholder="Buscar por Nombre o Cédula/RIF..."
+                  value={isClientDropdownOpen ? clientSearchTerm : `${selectedClient.nombre} (${selectedClient.cedula_rif})${selectedClient.aplica_precio_costo ? ' ★ P.COSTO' : ''}${selectedClient.porcentaje_descuento > 0 ? ` [Desc ${selectedClient.porcentaje_descuento}%]` : ''}`}
+                  onFocus={() => {
+                    setIsClientDropdownOpen(true);
+                    setClientSearchTerm('');
+                    setClientSelectedIndex(-1);
+                  }}
+                  onChange={(e) => {
+                    setClientSearchTerm(e.target.value);
+                    setClientSelectedIndex(-1);
+                    if (!isClientDropdownOpen) setIsClientDropdownOpen(true);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'ArrowDown') {
+                      if (filteredClients.length > 0) {
+                        e.preventDefault();
+                        if (!isClientDropdownOpen) setIsClientDropdownOpen(true);
+                        setClientSelectedIndex(prev => (prev < filteredClients.length - 1 ? prev + 1 : 0));
+                      }
+                    } else if (e.key === 'ArrowUp') {
+                      if (filteredClients.length > 0) {
+                        e.preventDefault();
+                        if (!isClientDropdownOpen) setIsClientDropdownOpen(true);
+                        setClientSelectedIndex(prev => (prev > 0 ? prev - 1 : filteredClients.length - 1));
+                      }
+                    } else if (e.key === 'Enter') {
+                      if (isClientDropdownOpen) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (clientSelectedIndex >= 0 && clientSelectedIndex < filteredClients.length) {
+                          handleSelectClient(filteredClients[clientSelectedIndex]);
+                        } else if (filteredClients.length === 1) {
+                          handleSelectClient(filteredClients[0]);
+                        }
+                      }
+                    } else if (e.key === 'Escape') {
+                      setIsClientDropdownOpen(false);
+                      setClientSelectedIndex(-1);
+                    }
+                  }}
+                  className={`w-full border rounded p-2.5 pr-8 text-slate-800 text-xs font-sans font-bold outline-none focus:bg-white focus:border-winter-blueBtn transition-all ${
+                    selectedClient.aplica_precio_costo ? 'bg-amber-50 border-amber-400 text-amber-900' : 'bg-slate-50 border-slate-350'
+                  }`}
+                />
+                
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsClientDropdownOpen(prev => !prev);
+                    if (!isClientDropdownOpen) {
+                      setClientSearchTerm('');
+                      setClientSelectedIndex(-1);
+                    }
+                  }}
+                  className="absolute right-2.5 top-3 text-slate-400 hover:text-slate-600 font-sans font-bold text-[10px]"
+                >
+                  ▼
+                </button>
+
+                {/* SEARCHABLE CLIENTS DROPDOWN LIST */}
+                {isClientDropdownOpen && (
+                  <div 
+                    ref={clientListContainerRef}
+                    className="absolute left-0 right-0 top-11 bg-white border border-slate-250 rounded-lg max-h-60 overflow-y-auto z-50 shadow-2xl divide-y divide-slate-100 animate-fade-in font-sans"
+                  >
+                    {filteredClients.length > 0 ? (
+                      filteredClients.map((c, idx) => {
+                        const isSelected = c.id === selectedClient.id;
+                        const isHighlighted = idx === clientSelectedIndex;
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onMouseEnter={() => setClientSelectedIndex(idx)}
+                            onClick={() => handleSelectClient(c)}
+                            className={`w-full text-left p-2.5 text-xs block transition-all ${
+                              isHighlighted
+                                ? 'bg-blue-100 text-slate-900 border-l-4 border-winter-blueBtn font-bold shadow-inner'
+                                : isSelected
+                                  ? 'bg-blue-50 text-slate-900 font-semibold'
+                                  : 'hover:bg-slate-100 text-slate-800 hover:text-slate-900 font-medium'
+                            }`}
+                          >
+                            <div className="flex justify-between items-center">
+                              <div>
+                                <span className="font-bold uppercase text-slate-800">{c.nombre}</span>
+                                <span className="text-[11px] font-mono font-bold text-slate-500 ml-2">({c.cedula_rif})</span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                {c.porcentaje_descuento > 0 && (
+                                  <span className="bg-sky-100 text-sky-800 border border-sky-200 rounded px-1.5 py-0.5 text-[9px] font-bold">
+                                    Desc {c.porcentaje_descuento}%
+                                  </span>
+                                )}
+                                {c.aplica_precio_costo && (
+                                  <span className="bg-amber-100 text-amber-800 border border-amber-300 rounded px-1.5 py-0.5 text-[9px] font-extrabold">
+                                    ★ P.COSTO
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            {c.telefono && (
+                              <div className="text-[10px] text-slate-400 font-sans mt-0.5">
+                                Tel: {c.telefono}
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <div className="p-3 text-center text-xs text-slate-400 font-sans italic">
+                        No se encontraron clientes registrados con "{clientSearchTerm}".
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowQuickClientModal(true)}
+                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-base px-3.5 py-2.5 rounded-lg shadow-sm transition-all flex items-center justify-center flex-shrink-0"
+                title="Registrar Nuevo Cliente (+)"
+              >
+                +
+              </button>
+            </div>
             {selectedClient.aplica_precio_costo && (
               <div className="flex items-center gap-1.5 bg-amber-100 border border-amber-300 rounded px-2 py-1 mt-1">
                 <span className="text-amber-700 text-[10px] font-bold font-sans">⚠ CLIENTE A PRECIO COSTO — Todos los productos se facturan al costo de inventario</span>
@@ -4824,6 +5050,140 @@ export default function CajaPOS({
             </div>
           </div>
         )
+      )}
+
+      {/* MODAL RÁPIDO: REGISTRAR NUEVO CLIENTE DESDE POS */}
+      {showQuickClientModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-[90] animate-fade-in font-mono text-slate-800">
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-md shadow-2xl p-6 space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                <Plus className="w-4 h-4 text-emerald-600 bg-emerald-50 rounded-full p-0.5" />
+                REGISTRAR NUEVO CLIENTE
+              </h3>
+              <button 
+                type="button"
+                onClick={() => setShowQuickClientModal(false)} 
+                className="text-slate-400 hover:text-slate-700 font-sans font-bold text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateQuickClient} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1 font-sans">Cédula / RIF <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej: V-12345678"
+                    value={quickDoc}
+                    onChange={(e) => setQuickDoc(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-slate-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1 font-sans">Teléfono</label>
+                  <input
+                    type="text"
+                    placeholder="Ej: 0414-1234567"
+                    value={quickPhone}
+                    onChange={(e) => setQuickPhone(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-slate-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-500 block mb-1 font-sans">Nombre o Razón Social <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Nombre completo..."
+                  value={quickName}
+                  onChange={(e) => setQuickName(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-slate-500 focus:outline-none font-sans"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-500 block mb-1 font-sans">Dirección de Domicilio</label>
+                <input
+                  type="text"
+                  placeholder="Ciudad, calle, local..."
+                  value={quickAddress}
+                  onChange={(e) => setQuickAddress(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-slate-500 focus:outline-none font-sans"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1 font-sans">Límite de Crédito ($ USD)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={quickCreditLimit}
+                    onChange={(e) => setQuickCreditLimit(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-slate-500 focus:outline-none font-mono text-center"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1 font-sans">Descuento Pre-aprobado (%)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    disabled={quickPrecioCosto}
+                    value={quickDiscount}
+                    onChange={(e) => setQuickDiscount(e.target.value)}
+                    className={`w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-slate-500 focus:outline-none font-mono text-center ${quickPrecioCosto ? 'opacity-50 cursor-not-allowed bg-slate-100' : ''}`}
+                  />
+                </div>
+              </div>
+
+              {/* Precio Costo Toggle */}
+              <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={quickPrecioCosto}
+                    onChange={(e) => {
+                      setQuickPrecioCosto(e.target.checked);
+                      if (e.target.checked) {
+                        setQuickDiscount('0');
+                      }
+                    }}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
+                </label>
+                <div>
+                  <span className="text-xs font-bold text-amber-800 font-sans">Cobrar a Precio Costo</span>
+                  <p className="text-[10px] text-amber-600 font-sans">Si se activa, todos los productos que compre este cliente se facturarán al precio de costo del inventario.</p>
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowQuickClientModal(false)}
+                  className="w-1/3 bg-slate-100 border border-slate-250 text-slate-655 py-2.5 rounded font-sans text-xs hover:bg-slate-200 transition-all font-bold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="w-2/3 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded font-bold font-sans text-xs tracking-wider transition-all shadow"
+                >
+                  REGISTRAR CLIENTE
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
     </div>

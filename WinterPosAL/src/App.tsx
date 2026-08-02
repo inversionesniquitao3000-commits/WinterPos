@@ -23,6 +23,7 @@ import TasaCambio from './components/TasaCambio';
 import ConfiguracionEmpresa from './components/ConfiguracionEmpresa';
 import VentasHistorico from './components/VentasHistorico';
 import LicenciaModal from './components/LicenciaModal';
+import ErrorBoundary from './components/ErrorBoundary';
 import { 
   ShoppingBag, Package, Users, 
   TrendingUp, Settings, LogOut, Globe, Cpu, History, Printer, CheckCircle2, ShieldCheck
@@ -42,41 +43,73 @@ export default function App() {
   
   // App States populated from local storage / backend API
   const [products, setProducts] = useState<Product[]>(() => {
-    const saved = localStorage.getItem('pos_products');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('pos_products');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+      return [];
+    }
   });
 
   const [clients, setClients] = useState<Client[]>(() => {
-    const saved = localStorage.getItem('pos_clients');
-    if (saved) return JSON.parse(saved);
+    try {
+      const saved = localStorage.getItem('pos_clients');
+      const parsed = saved ? JSON.parse(saved) : null;
+      if (Array.isArray(parsed)) return parsed;
+    } catch (_) {}
     return [
       { id: 1, cedula_rif: 'V-00000000', nombre: 'CONSUMIDOR FINAL', telefono: '', direccion: 'LOCAL', limite_credito: 0, credito_disponible: 0, porcentaje_descuento: 0, estado: 'Activo', saldo_pendiente: 0 }
     ];
   });
 
   const [companyConfig, setCompanyConfig] = useState<CompanyConfig>(() => {
-    const saved = localStorage.getItem('pos_biz_info');
-    return saved ? JSON.parse(saved) : mockConfig;
+    try {
+      const saved = localStorage.getItem('pos_biz_info');
+      return saved ? JSON.parse(saved) : mockConfig;
+    } catch (_) {
+      return mockConfig;
+    }
   });
 
   const [tasaHistory, setTasaHistory] = useState<TasaHistoryItem[]>(() => {
-    const saved = localStorage.getItem('pos_tasa_history');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('pos_tasa_history');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+      return [];
+    }
   });
 
   const [movements, setMovements] = useState<InventoryMovement[]>(() => {
-    const saved = localStorage.getItem('pos_movements');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('pos_movements');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+      return [];
+    }
   });
 
   const [priceHistory, setPriceHistory] = useState<PriceAdjustmentHistory[]>(() => {
-    const saved = localStorage.getItem('pos_price_history');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('pos_price_history');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+      return [];
+    }
   });
 
   const [sales, setSales] = useState<Sale[]>(() => {
-    const saved = localStorage.getItem('pos_sales_log');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('pos_sales_log');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+      return [];
+    }
   });
 
   // Invoice reference state: fetched from server after each sale so the operator
@@ -85,13 +118,23 @@ export default function App() {
   const [lastInvoiceInfo, setLastInvoiceInfo] = useState<{ last: string | null; next: string }>({ last: null, next: '---' });
 
   const [abonos, setAbonos] = useState<Abono[]>(() => {
-    const saved = localStorage.getItem('pos_abonos');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('pos_abonos');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+      return [];
+    }
   });
 
   const [cierres, setCierres] = useState<CierreCaja[]>(() => {
-    const saved = localStorage.getItem('pos_cierres_log');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('pos_cierres_log');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+      return [];
+    }
   });
 
   const [cajaAbierta, setCajaAbierta] = useState<boolean>(() => {
@@ -147,6 +190,7 @@ export default function App() {
   const [shiftDevolucionesUsd, setShiftDevolucionesUsd] = useState<number>(0);
   const [shiftDevolucionesVes, setShiftDevolucionesVes] = useState<number>(0);
 
+  const [bcvRateUSD, setBcvRateUSD] = useState<number>(0);
   const [lanIP, setLanIP] = useState('192.168.1.100');
   const [dbMode, setDbMode] = useState('local');
   const [reprintSale, setReprintSale] = useState<Sale | null>(null);
@@ -2192,6 +2236,7 @@ export default function App() {
             <CajaPOS
               products={products}
               clients={clients}
+              onAddClient={handleAddClient}
               companyConfig={companyConfig}
               tasaDia={tasaDia}
               tasaVuelto={tasaVuelto}
@@ -2222,23 +2267,25 @@ export default function App() {
           )}
 
           {activeTab === 'inventario' && (
-            <Inventario
-              products={products}
-              movements={movements}
-              priceHistory={priceHistory}
-              currentUser={currentUser}
-              tasaDia={tasaDia}
-              bcvRateUSD={bcvRateUSD}
-              companyConfig={companyConfig}
-              onAddProduct={handleAddProduct}
-              onAddProductsBulk={handleAddProductsBulk}
-              onUpdateProductStock={handleUpdateProductStock}
-              onUpdateProductPrices={handleUpdateProductPrices}
-              onUpdateProductPricesBulk={handleUpdateProductPricesBulk}
-              onDeleteProduct={handleDeleteProduct}
-              onUpdateProduct={handleUpdateProduct}
-              onUpdateProductStockBulk={handleUpdateProductStockBulk}
-            />
+            <ErrorBoundary moduleName="Inventario">
+              <Inventario
+                products={products}
+                movements={movements}
+                priceHistory={priceHistory}
+                currentUser={currentUser}
+                tasaDia={tasaDia}
+                bcvRateUSD={bcvRateUSD}
+                companyConfig={companyConfig}
+                onAddProduct={handleAddProduct}
+                onAddProductsBulk={handleAddProductsBulk}
+                onUpdateProductStock={handleUpdateProductStock}
+                onUpdateProductPrices={handleUpdateProductPrices}
+                onUpdateProductPricesBulk={handleUpdateProductPricesBulk}
+                onDeleteProduct={handleDeleteProduct}
+                onUpdateProduct={handleUpdateProduct}
+                onUpdateProductStockBulk={handleUpdateProductStockBulk}
+              />
+            </ErrorBoundary>
           )}
 
           {activeTab === 'ventas' && (

@@ -15,8 +15,8 @@ interface ClientesProps {
   onRegisterAbono: (
     clientId: number, 
     amountUSD: number, 
-    metodoPago?: 'Efectivo$' | 'EfectivoBs' | 'TarjetaBs' | 'PagoMovil' | 'Biopago',
-    referencia?: string
+    payments: import('../types').AbonoPayment[],
+    observacion?: string
   ) => void;
   onUpdateClient?: (updatedClient: Client) => Promise<boolean>;
   onDeleteClient?: (clientId: number) => Promise<boolean>;

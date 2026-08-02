@@ -344,22 +344,21 @@ export async function getProducts() {
       const res = await pool.query('SELECT * FROM Productos ORDER BY id ASC');
       if (res.rowCount > 0) {
         return res.rows.map(r => ({
-          id: r.id,
-          barcode: r.codigo_barras_clave,
-          description: r.descripcion,
-          category: r.categoria,
-          stock_actual: r.stock_actual,
-          stock_minimo: r.stock_minimo,
-          precio_costo_usd: parseFloat(r.precio_costo_usd),
-          precio_detalle_usd: parseFloat(r.precio_detalle_usd),
-          precio_mayor_usd: parseFloat(r.precio_mayor_usd),
-          navigator: r.cantidad_mayorista,
-          cantidad_mayorista: r.cantidad_mayorista,
-          exento_impuesto: r.exento_impuesto,
+          id: parseInt(r.id, 10),
+          barcode: r.codigo_barras_clave || '',
+          description: r.descripcion || '',
+          category: r.categoria || '',
+          stock_actual: parseFloat(r.stock_actual || 0),
+          stock_minimo: parseFloat(r.stock_minimo || 0),
+          precio_costo_usd: parseFloat(r.precio_costo_usd || 0),
+          precio_detalle_usd: parseFloat(r.precio_detalle_usd || 0),
+          precio_mayor_usd: parseFloat(r.precio_mayor_usd || 0),
+          cantidad_mayorista: parseInt(r.cantidad_mayorista || 12, 10),
+          exento_impuesto: !!r.exento_impuesto,
           imagen_url: r.imagen_url || '',
-          estado: r.estado,
-          a_granel: r.a_granel,
-          fecha_vencimiento: r.fecha_vencimiento,
+          estado: r.estado || 'Activo',
+          a_granel: !!r.a_granel,
+          fecha_vencimiento: r.fecha_vencimiento || null,
           porcentaje_impuesto: parseFloat(r.porcentaje_impuesto || 0)
         }));
       } else {
@@ -374,21 +373,21 @@ export async function getProducts() {
         }
         const res2 = await pool.query('SELECT * FROM Productos ORDER BY id ASC');
         return res2.rows.map(r => ({
-          id: r.id,
-          barcode: r.codigo_barras_clave,
-          description: r.descripcion,
-          category: r.categoria,
-          stock_actual: r.stock_actual,
-          stock_minimo: r.stock_minimo,
-          precio_costo_usd: parseFloat(r.precio_costo_usd),
-          precio_detalle_usd: parseFloat(r.precio_detalle_usd),
-          precio_mayor_usd: parseFloat(r.precio_mayor_usd),
-          cantidad_mayorista: r.cantidad_mayorista,
-          exento_impuesto: r.exento_impuesto,
+          id: parseInt(r.id, 10),
+          barcode: r.codigo_barras_clave || '',
+          description: r.descripcion || '',
+          category: r.categoria || '',
+          stock_actual: parseFloat(r.stock_actual || 0),
+          stock_minimo: parseFloat(r.stock_minimo || 0),
+          precio_costo_usd: parseFloat(r.precio_costo_usd || 0),
+          precio_detalle_usd: parseFloat(r.precio_detalle_usd || 0),
+          precio_mayor_usd: parseFloat(r.precio_mayor_usd || 0),
+          cantidad_mayorista: parseInt(r.cantidad_mayorista || 12, 10),
+          exento_impuesto: !!r.exento_impuesto,
           imagen_url: r.imagen_url || '',
-          estado: r.estado,
-          a_granel: r.a_granel,
-          fecha_vencimiento: r.fecha_vencimiento,
+          estado: r.estado || 'Activo',
+          a_granel: !!r.a_granel,
+          fecha_vencimiento: r.fecha_vencimiento || null,
           porcentaje_impuesto: parseFloat(r.porcentaje_impuesto || 0)
         }));
       }
@@ -1442,15 +1441,15 @@ export async function getMovements() {
         ORDER BY m.id DESC
       `);
       return res.rows.map(r => ({
-        id: r.id,
-        date: getLocalISODateString(new Date(r.date)),
-        productCode: r.productCode,
-        productDescription: r.productDescription,
+        id: parseInt(r.id, 10),
+        date: r.date ? getLocalISODateString(r.date) : getLocalISODateString(),
+        productCode: r.productCode || '',
+        productDescription: r.productDescription || '',
         type: r.tipo,
-        qty: r.qty,
-        stock_anterior: r.stock_anterior,
-        stock_posterior: r.stock_posterior,
-        motivo: r.motivo,
+        qty: parseFloat(r.qty || 0),
+        stock_anterior: parseFloat(r.stock_anterior || 0),
+        stock_posterior: parseFloat(r.stock_posterior || 0),
+        motivo: r.motivo || '',
         usuario: r.usuario || 'SISTEMA'
       }));
     } catch (err) {
@@ -1505,14 +1504,14 @@ export async function getPriceHistory() {
         ORDER BY h.id DESC
       `);
       return res.rows.map(r => ({
-        id: r.id,
-        date: getLocalISODateString(new Date(r.fecha)),
-        productCode: r.productCode,
-        productDescription: r.productDescription,
+        id: parseInt(r.id, 10),
+        date: r.fecha ? getLocalISODateString(r.fecha) : getLocalISODateString(),
+        productCode: r.productCode || '',
+        productDescription: r.productDescription || '',
         priceType: r.priceType,
-        oldPrice: parseFloat(r.oldPrice),
-        newPrice: parseFloat(r.newPrice),
-        motivo: r.motivo,
+        oldPrice: parseFloat(r.oldPrice || 0),
+        newPrice: parseFloat(r.newPrice || 0),
+        motivo: r.motivo || '',
         usuario: r.usuario || 'SISTEMA'
       }));
     } catch (err) {

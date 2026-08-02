@@ -981,7 +981,7 @@ export default function Inventario({
   };
 
   const getFilteredAndSortedHistory = () => {
-    let list = [...priceHistory];
+    let list = [...safePriceHistory];
 
     // 1. Text Search Filter
     if (historySearch.trim() !== '') {
@@ -1329,29 +1329,33 @@ export default function Inventario({
   const filteredProducts = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
 
-    return products.filter(p => {
-      const matchesSearch = !term || 
-        p.description.toLowerCase().includes(term) ||
-        p.barcode.toLowerCase().includes(term);
+    return safeProducts.filter(p => {
+      if (!p) return false;
+      const desc = (p.description || '').toLowerCase();
+      const code = (p.barcode || '').toLowerCase();
+      const matchesSearch = !term || desc.includes(term) || code.includes(term);
         
       const matchesCategory = selectedCategories.length === 0 ||
         selectedCategories.includes((p.category || '').trim().toUpperCase());
       
+      const stockAct = typeof p.stock_actual === 'number' ? p.stock_actual : (parseFloat(p.stock_actual as any) || 0);
+      const stockMin = typeof p.stock_minimo === 'number' ? p.stock_minimo : (parseFloat(p.stock_minimo as any) || 0);
+
       const matchesStock = 
         filterStock === 'todos' ? true :
-        filterStock === 'con_existencia' ? p.stock_actual > 0 :
-        filterStock === 'sin_existencia' ? p.stock_actual === 0 :
-        filterStock === 'menor_5' ? p.stock_actual <= 5 :
-        filterStock === 'menor_10' ? p.stock_actual <= 10 :
-        filterStock === 'menor_15' ? p.stock_actual <= 15 : true;
+        filterStock === 'con_existencia' ? stockAct > 0 :
+        filterStock === 'sin_existencia' ? stockAct === 0 :
+        filterStock === 'menor_5' ? stockAct <= 5 :
+        filterStock === 'menor_10' ? stockAct <= 10 :
+        filterStock === 'menor_15' ? stockAct <= 15 : true;
         
       const matchesMinStock = 
         filterMinStock === 'todos' ? true :
-        filterMinStock === 'bajo_minimo' ? p.stock_actual <= p.stock_minimo : true;
+        filterMinStock === 'bajo_minimo' ? stockAct <= stockMin : true;
         
       return matchesSearch && matchesCategory && matchesStock && matchesMinStock;
     });
-  }, [products, searchTerm, selectedCategories, filterStock, filterMinStock]);
+  }, [safeProducts, searchTerm, selectedCategories, filterStock, filterMinStock]);
 
   const sortedProducts = useMemo(() => {
     if (sortRules.length === 0) return filteredProducts;
@@ -1958,19 +1962,19 @@ export default function Inventario({
               <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-100 pb-1.5 md:pb-0 md:pr-4">
                 <span className="text-slate-500 font-sans font-bold">Precio 1 del Inventario :</span>
                 <span className="font-extrabold text-slate-900 text-sm">
-                  ${products.reduce((acc, p) => acc + p.precio_detalle_usd * (parseFloat(p.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  ${safeProducts.reduce((acc, p) => acc + (p?.precio_detalle_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
               <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-105 pb-1.5 md:pb-0 md:px-4">
                 <span className="text-slate-500 font-sans font-bold">Costo del Inventario :</span>
                 <span className="font-extrabold text-slate-900 text-sm">
-                  ${products.reduce((acc, p) => acc + p.precio_costo_usd * (parseFloat(p.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  ${safeProducts.reduce((acc, p) => acc + (p?.precio_costo_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
               <div className="flex justify-between items-center md:pl-4">
                 <span className="text-slate-500 font-sans font-bold">Total Productos :</span>
                 <span className="font-extrabold text-slate-900 text-sm">
-                  {products.length} <span className="text-[10px] text-slate-400 font-normal">({products.reduce((acc, p) => acc + (!p.a_granel ? (parseFloat(p.stock_actual as any) || 0) : 0), 0)} uds + {products.reduce((acc, p) => acc + (p.a_granel ? (parseFloat(p.stock_actual as any) || 0) : 0), 0).toFixed(3)} kg)</span>
+                  {safeProducts.length} <span className="text-[10px] text-slate-400 font-normal">({safeProducts.reduce((acc, p) => acc + (!p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0)} uds + {safeProducts.reduce((acc, p) => acc + (p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0).toFixed(3)} kg)</span>
                 </span>
               </div>
             </div>
@@ -1980,19 +1984,19 @@ export default function Inventario({
               <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-100 pb-1.5 md:pb-0 md:pr-4">
                 <span className="text-sky-700 font-sans font-bold">Precio 1 (Filtrado) :</span>
                 <span className="font-extrabold text-sky-850 text-sm">
-                  ${filteredProducts.reduce((acc, p) => acc + p.precio_detalle_usd * (parseFloat(p.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  ${filteredProducts.reduce((acc, p) => acc + (p?.precio_detalle_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
               <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-105 pb-1.5 md:pb-0 md:px-4">
                 <span className="text-sky-700 font-sans font-bold">Costo (Filtrado) :</span>
                 <span className="font-extrabold text-sky-850 text-sm">
-                  ${filteredProducts.reduce((acc, p) => acc + p.precio_costo_usd * (parseFloat(p.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  ${filteredProducts.reduce((acc, p) => acc + (p?.precio_costo_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
               <div className="flex justify-between items-center md:pl-4">
                 <span className="text-sky-700 font-sans font-bold">Total (Filtrado) :</span>
                 <span className="font-extrabold text-sky-850 text-sm">
-                  {filteredProducts.length} <span className="text-[10px] text-sky-500 font-normal">({filteredProducts.reduce((acc, p) => acc + (!p.a_granel ? (parseFloat(p.stock_actual as any) || 0) : 0), 0)} uds + {filteredProducts.reduce((acc, p) => acc + (p.a_granel ? (parseFloat(p.stock_actual as any) || 0) : 0), 0).toFixed(3)} kg)</span>
+                  {filteredProducts.length} <span className="text-[10px] text-sky-500 font-normal">({filteredProducts.reduce((acc, p) => acc + (!p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0)} uds + {filteredProducts.reduce((acc, p) => acc + (p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0).toFixed(3)} kg)</span>
                 </span>
               </div>
             </div>
