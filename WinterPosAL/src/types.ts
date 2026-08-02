@@ -141,6 +141,7 @@ export interface CompanyConfig {
   metodos_pago_activos: string[];
   permitir_multisesion?: boolean;
   compartir_apertura_caja?: boolean;
+  tasa_oficial_bcv?: number;
 }
 
 export interface Sale {

@@ -318,6 +318,11 @@ export default function Inventario({
   const [kardexView, setKardexView] = useState<'detallada' | 'resumen'>('detallada');
   const [selectedGroupedMovements, setSelectedGroupedMovements] = useState<InventoryMovement[] | null>(null);
 
+  // Filtros de período para el submódulo Estadísticas (Año y Mes)
+  const currentYear = new Date().getFullYear();
+  const [statsYear, setStatsYear] = useState<number | 'todos'>(currentYear);
+  const [statsMonth, setStatsMonth] = useState<number | 'todos'>('todos');
+
   const getTodayLocalDateStr = () => {
     const d = new Date();
     const year = d.getFullYear();
@@ -482,18 +487,59 @@ export default function Inventario({
   const safeMovements = useMemo(() => Array.isArray(movements) ? movements : [], [movements]);
   const safePriceHistory = useMemo(() => Array.isArray(priceHistory) ? priceHistory : [], [priceHistory]);
 
-  // Estadísticas Avanzadas de Inventario y Movimientos
+  const effectiveBcvRate = useMemo(() => {
+    if (bcvRateUSD && bcvRateUSD > 0) return bcvRateUSD;
+    if (tasaDia && tasaDia > 0) return tasaDia;
+    if (companyConfig?.tasa_oficial_bcv && companyConfig.tasa_oficial_bcv > 0) return companyConfig.tasa_oficial_bcv;
+    const cachedRate = parseFloat(localStorage.getItem('winterpos_bcv_rate') || '0');
+    if (cachedRate > 0) return cachedRate;
+    return 1;
+  }, [bcvRateUSD, tasaDia, companyConfig]);
+
+  const isBcvRateOnline = !!(bcvRateUSD && bcvRateUSD > 0);
+
+  const availableYears = useMemo(() => {
+    const yearsSet = new Set<number>();
+    yearsSet.add(currentYear);
+    safeMovements.forEach(m => {
+      if (m?.date) {
+        const y = new Date(m.date).getFullYear();
+        if (!isNaN(y)) yearsSet.add(y);
+      }
+    });
+    return Array.from(yearsSet).sort((a, b) => b - a);
+  }, [safeMovements, currentYear]);
+
+  // Estadísticas Avanzadas de Inventario y Movimientos (Filtrados por Año y Mes)
   const statisticsData = useMemo(() => {
     const totalProdCount = safeProducts.length;
-    const totalStockQty = safeProducts.reduce((acc, p) => acc + (parseFloat(p?.stock_actual as any) || 0), 0);
+    const unitProdCount = safeProducts.filter(p => !p?.a_granel).length;
+    const bulkProdCount = safeProducts.filter(p => p?.a_granel).length;
+
+    const unitStockQty = safeProducts.reduce((acc, p) => acc + (!p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0);
+    const bulkStockQty = safeProducts.reduce((acc, p) => acc + (p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0);
+    const totalStockQty = unitStockQty + bulkStockQty;
+
     const totalValueDetailUsd = safeProducts.reduce((acc, p) => acc + (p?.precio_detalle_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0);
     const totalValueCostUsd = safeProducts.reduce((acc, p) => acc + (p?.precio_costo_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0);
     const totalEstimatedProfitUsd = totalValueDetailUsd - totalValueCostUsd;
     const avgMarginPct = totalValueCostUsd > 0 ? (totalEstimatedProfitUsd / totalValueCostUsd) * 100 : 0;
 
-    // Top 10 productos más vendidos desde los movimientos del Kardex
+    // Filtrar movimientos por Año y Mes seleccionados
+    const filteredMovements = safeMovements.filter(m => {
+      if (!m?.date) return true;
+      const d = new Date(m.date);
+      const y = d.getFullYear();
+      const monthNum = d.getMonth() + 1; // 1..12
+
+      if (statsYear !== 'todos' && y !== statsYear) return false;
+      if (statsMonth !== 'todos' && monthNum !== statsMonth) return false;
+      return true;
+    });
+
+    // Top 10 productos más vendidos desde los movimientos del Kardex filtrados
     const salesMap: Record<string, { code: string; description: string; qty: number; totalUsd: number }> = {};
-    safeMovements.forEach(m => {
+    filteredMovements.forEach(m => {
       if (m?.type === 'Venta' || (typeof m?.qty === 'number' && m.qty < 0 && m.type !== 'Salida' && m.type !== 'Merma')) {
         const key = m.productCode || m.productDescription;
         if (!key) return;
@@ -520,9 +566,9 @@ export default function Inventario({
 
     const maxSoldQty = topSoldProducts.length > 0 ? Math.max(...topSoldProducts.map(p => p.qty)) : 1;
 
-    // Movimientos por tipo
+    // Movimientos por tipo filtrados
     const movementsByTypeMap: Record<string, { type: string; count: number; qtyTotal: number; costUsd: number; priceUsd: number }> = {};
-    safeMovements.forEach(m => {
+    filteredMovements.forEach(m => {
       const typeKey = m?.type || 'Ajuste';
       if (!movementsByTypeMap[typeKey]) {
         movementsByTypeMap[typeKey] = { type: typeKey, count: 0, qtyTotal: 0, costUsd: 0, priceUsd: 0 };
@@ -560,7 +606,11 @@ export default function Inventario({
 
     return {
       totalProdCount,
+      unitProdCount,
+      bulkProdCount,
       totalStockQty,
+      unitStockQty,
+      bulkStockQty,
       totalValueDetailUsd,
       totalValueCostUsd,
       totalEstimatedProfitUsd,
@@ -571,7 +621,7 @@ export default function Inventario({
       maxMovementQty,
       topCategories
     };
-  }, [safeProducts, safeMovements]);
+  }, [safeProducts, safeMovements, statsYear, statsMonth]);
 
   const prevProductsLengthRef = useRef(safeProducts.length);
 
@@ -3285,7 +3335,7 @@ export default function Inventario({
       {activeSubTab === 'estadisticas' && (
         <div className="space-y-6 animate-fade-in font-sans text-slate-800">
           
-          {/* HEADER & SUMMARY TOOLBAR */}
+          {/* HEADER & SUMMARY TOOLBAR CON FILTROS POR AÑO / MES Y RESGUARDO BCV OFFLINE */}
           <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-5 shadow-lg border border-slate-800 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div className="flex items-center gap-3">
               <div className="p-3 bg-indigo-600/30 border border-indigo-400/40 rounded-xl shadow-inner">
@@ -3297,14 +3347,65 @@ export default function Inventario({
                   <Sparkles className="w-4 h-4 text-amber-400" />
                 </h3>
                 <p className="text-xs text-slate-300 font-medium">
-                  Análisis consolidado de valorización, rotación de mercancía y auditoría de Kardex.
+                  Análisis de valorización, rotación de mercancía y movimientos de Kardex.
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-3 bg-slate-850/80 px-4 py-2 rounded-xl border border-slate-700/60 font-mono text-xs">
-              <span className="text-slate-400">Referencia BCV:</span>
-              <span className="font-extrabold text-emerald-400 text-sm">Bs {(bcvRateUSD || tasaDia || 0).toFixed(2)} / $</span>
+            {/* CONTROLES DE FILTRADO Y TASA BCV RESGUARDADA */}
+            <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
+              
+              {/* Filtro por Año */}
+              <div className="flex items-center gap-1.5 bg-slate-950/80 px-3 py-1.5 rounded-xl border border-slate-700/60 font-sans text-xs">
+                <span className="text-slate-400 font-bold">Año:</span>
+                <select
+                  value={statsYear}
+                  onChange={e => setStatsYear(e.target.value === 'todos' ? 'todos' : parseInt(e.target.value))}
+                  className="bg-slate-900 text-amber-400 font-extrabold font-mono px-2 py-0.5 rounded border border-slate-700 focus:outline-none cursor-pointer"
+                >
+                  <option value="todos">Todos los Años</option>
+                  {availableYears.map(y => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Filtro por Mes */}
+              <div className="flex items-center gap-1.5 bg-slate-950/80 px-3 py-1.5 rounded-xl border border-slate-700/60 font-sans text-xs">
+                <span className="text-slate-400 font-bold">Mes:</span>
+                <select
+                  value={statsMonth}
+                  onChange={e => setStatsMonth(e.target.value === 'todos' ? 'todos' : parseInt(e.target.value))}
+                  className="bg-slate-900 text-indigo-300 font-extrabold font-mono px-2 py-0.5 rounded border border-slate-700 focus:outline-none cursor-pointer"
+                >
+                  <option value="todos">Todos los Meses (1-12)</option>
+                  <option value={1}>Enero</option>
+                  <option value={2}>Febrero</option>
+                  <option value={3}>Marzo</option>
+                  <option value={4}>Abril</option>
+                  <option value={5}>Mayo</option>
+                  <option value={6}>Junio</option>
+                  <option value={7}>Julio</option>
+                  <option value={8}>Agosto</option>
+                  <option value={9}>Septiembre</option>
+                  <option value={10}>Octubre</option>
+                  <option value={11}>Noviembre</option>
+                  <option value={12}>Diciembre</option>
+                </select>
+              </div>
+
+              {/* Indicador de Tasa BCV (Detecta conexión en línea o usa resguardo offline) */}
+              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border font-mono text-xs ${
+                isBcvRateOnline 
+                  ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-300' 
+                  : 'bg-amber-950/50 border-amber-500/40 text-amber-300'
+              }`}>
+                <span className="text-[10px] font-sans uppercase font-bold text-slate-300">
+                  {isBcvRateOnline ? 'Tasa BCV:' : 'Tasa (Offline):'}
+                </span>
+                <span className="font-extrabold text-sm">Bs {effectiveBcvRate.toFixed(2)} / $</span>
+              </div>
+
             </div>
           </div>
 
@@ -3320,19 +3421,38 @@ export default function Inventario({
               <div className="text-2xl font-black font-mono text-slate-900">
                 {statisticsData.totalProdCount.toLocaleString('es-VE')}
               </div>
-              <div className="text-[10px] text-slate-400 font-semibold mt-1">Items registrados</div>
+              <div className="text-[10px] text-slate-500 font-sans font-medium mt-1 flex justify-between">
+                <span>{statisticsData.unitProdCount} por Piezas</span>
+                <span className="font-bold text-amber-700">{statisticsData.bulkProdCount} Granel</span>
+              </div>
             </div>
 
-            {/* Card 2: Existencia Total */}
+            {/* Card 2: Existencia Total (Separado Unidades vs Kilos) */}
             <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
-              <div className="flex justify-between items-center text-slate-500 mb-2">
-                <span className="text-xs font-bold uppercase tracking-wider">Existencia Total</span>
+              <div className="flex justify-between items-center text-slate-500 mb-1">
+                <span className="text-xs font-bold uppercase tracking-wider">Existencia Física</span>
                 <Layers className="w-4 h-4 text-indigo-600" />
               </div>
-              <div className="text-2xl font-black font-mono text-indigo-900">
-                {statisticsData.totalStockQty.toLocaleString('es-VE', { maximumFractionDigits: 2 })}
+              
+              <div className="space-y-1.5 py-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-600 font-sans">Unidades / Piezas:</span>
+                  <span className="text-sm font-black font-mono text-indigo-900">
+                    {statisticsData.unitStockQty.toLocaleString('es-VE', { maximumFractionDigits: 0 })} <span className="text-[9px] text-slate-400 font-normal font-sans">UDS</span>
+                  </span>
+                </div>
+                <div className="flex items-center justify-between border-t border-slate-100 pt-1">
+                  <span className="text-[11px] font-bold text-amber-800 font-sans">Kilos / A Granel:</span>
+                  <span className="text-sm font-black font-mono text-amber-900">
+                    {statisticsData.bulkStockQty.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} <span className="text-[9px] text-amber-600 font-bold font-sans">KG</span>
+                  </span>
+                </div>
               </div>
-              <div className="text-[10px] text-slate-400 font-semibold mt-1">Unidades y Kilos en stock</div>
+
+              <div className="text-[10px] text-slate-400 font-semibold mt-0.5 flex justify-between border-t border-slate-100 pt-1">
+                <span>Total Físico:</span>
+                <span className="font-mono font-extrabold text-slate-700">{statisticsData.totalStockQty.toLocaleString('es-VE', { maximumFractionDigits: 2 })}</span>
+              </div>
             </div>
 
             {/* Card 3: Precio Total (Detalle) */}
@@ -3345,7 +3465,7 @@ export default function Inventario({
                 ${statisticsData.totalValueDetailUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
               <div className="text-[10px] text-slate-500 font-mono mt-1 font-bold">
-                Bs {(statisticsData.totalValueDetailUsd * (bcvRateUSD || tasaDia || 1)).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                Bs {(statisticsData.totalValueDetailUsd * effectiveBcvRate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
             </div>
 
@@ -3359,7 +3479,7 @@ export default function Inventario({
                 ${statisticsData.totalValueCostUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
               <div className="text-[10px] text-slate-500 font-mono mt-1 font-bold">
-                Bs {(statisticsData.totalValueCostUsd * (bcvRateUSD || tasaDia || 1)).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                Bs {(statisticsData.totalValueCostUsd * effectiveBcvRate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
             </div>
 
@@ -3374,7 +3494,7 @@ export default function Inventario({
               </div>
               <div className="text-[10px] text-emerald-700 font-bold mt-1 flex items-center justify-between">
                 <span>Margen Est: +{statisticsData.avgMarginPct.toFixed(1)}%</span>
-                <span className="font-mono text-emerald-900 font-extrabold">Bs {(statisticsData.totalEstimatedProfitUsd * (bcvRateUSD || tasaDia || 1)).toLocaleString('es-VE', { maximumFractionDigits: 0 })}</span>
+                <span className="font-mono text-emerald-900 font-extrabold">Bs {(statisticsData.totalEstimatedProfitUsd * effectiveBcvRate).toLocaleString('es-VE', { maximumFractionDigits: 0 })}</span>
               </div>
             </div>
 
