@@ -10,6 +10,7 @@ const __dirname = path.dirname(__filename);
 const publicKeyPath = path.join(__dirname, 'keys', 'public_key.pem');
 const licensePathPrimary = path.join(__dirname, 'license.lic');
 const licensePathRoot = path.join(__dirname, '..', 'license.lic');
+const trialMetaPath = path.join(__dirname, '.trial_meta.json');
 
 // -------------------------------------------------------------
 // 1. HARDWARE FINGERPRINT GENERATOR (HWID)
@@ -43,7 +44,6 @@ export function generateMachineHWID() {
     const part1 = hash.substring(0, 4);
     const part2 = hash.substring(4, 8);
     const part3 = hash.substring(8, 12);
-    const part4 = hash.substring(12, 16);
 
     return `WPOS-${part1}-${part2}-${part3}`;
   } catch (err) {
@@ -73,7 +73,117 @@ export function getActiveTerminalsCount() {
 }
 
 // -------------------------------------------------------------
-// 2. LICENSE VERIFIER & STATUS CHECKER
+// 2. 3-DAY SECURE AUTO-TRIAL MANAGER (PERÍODO DE PRUEBA HARWARE)
+// -------------------------------------------------------------
+function getOrCreateTrialInfo(hwid, db = null) {
+  let trialStore = {};
+  try {
+    if (fs.existsSync(trialMetaPath)) {
+      trialStore = JSON.parse(fs.readFileSync(trialMetaPath, 'utf8'));
+    }
+  } catch (e) {}
+
+  const key = `trial_start_${hwid}`;
+  let trialStartTimestamp = trialStore[key];
+
+  // Also check DB if available
+  if (!trialStartTimestamp && db && typeof db.prepare === 'function') {
+    try {
+      db.prepare(`
+        CREATE TABLE IF NOT EXISTS system_meta (
+          key TEXT PRIMARY KEY,
+          value TEXT
+        )
+      `).run();
+      const row = db.prepare(`SELECT value FROM system_meta WHERE key = ?`).get(key);
+      if (row && row.value) {
+        trialStartTimestamp = parseInt(row.value, 10);
+      }
+    } catch (e) {}
+  }
+
+  const now = Date.now();
+  if (!trialStartTimestamp || isNaN(trialStartTimestamp)) {
+    trialStartTimestamp = now;
+    trialStore[key] = trialStartTimestamp;
+    try {
+      fs.writeFileSync(trialMetaPath, JSON.stringify(trialStore, null, 2), 'utf8');
+    } catch (e) {}
+
+    if (db && typeof db.prepare === 'function') {
+      try {
+        db.prepare(`INSERT INTO system_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(key, trialStartTimestamp.toString());
+      } catch (e) {}
+    }
+  }
+
+  const trialDurationMs = 3 * 24 * 60 * 60 * 1000; // 3 Days (72 Hours)
+  const trialEndTimestamp = trialStartTimestamp + trialDurationMs;
+  const msRemaining = trialEndTimestamp - now;
+
+  // Time tampering check during trial: if current time is significantly before trialStartTimestamp
+  if (now < trialStartTimestamp - (5 * 60 * 1000)) {
+    return {
+      status: 'TIME_TAMPER',
+      isValid: false,
+      isTrial: true,
+      hwid,
+      message: 'Desincronización de fecha detectada. La fecha de Windows es anterior a la fecha de la primera instalación.'
+    };
+  }
+
+  const daysRemaining = Math.ceil(msRemaining / (1000 * 60 * 60 * 24));
+  const hoursRemaining = Math.max(0, Math.ceil(msRemaining / (1000 * 60 * 60)));
+
+  const firstInstallStr = new Date(trialStartTimestamp).toISOString().substring(0, 10);
+  const trialExpireStr = new Date(trialEndTimestamp).toISOString().substring(0, 10);
+
+  if (msRemaining > 0) {
+    return {
+      status: 'TRIAL_ACTIVE',
+      isValid: true,
+      isTrial: true,
+      hwid,
+      daysRemaining: Math.max(1, daysRemaining),
+      hoursRemaining,
+      trialEndTimestamp,
+      payload: {
+        cliente: 'DEMO PRUEBA GRATUITA (3 DÍAS)',
+        rif: 'V-00000000',
+        hwid,
+        terminales: 3,
+        fechaEmision: firstInstallStr,
+        fechaExpiracion: trialExpireStr,
+        tipo: 'PRUEBA 3 DÍAS'
+      },
+      activeTerminals: getActiveTerminalsCount(),
+      maxTerminals: 3,
+      message: `Modo Prueba Gratuita Activo (${hoursRemaining}h restantes / ${daysRemaining}d)`
+    };
+  }
+
+  return {
+    status: 'TRIAL_EXPIRED',
+    isValid: false,
+    isTrial: true,
+    hwid,
+    daysRemaining: 0,
+    hoursRemaining: 0,
+    payload: {
+      cliente: 'DEMO PRUEBA EXPIRADA',
+      rif: 'V-00000000',
+      hwid,
+      terminales: 3,
+      fechaEmision: firstInstallStr,
+      fechaExpiracion: trialExpireStr,
+      tipo: 'PRUEBA 3 DÍAS'
+    },
+    message: 'Su período de prueba gratuita de 3 días ha expirado. Por favor active su licencia oficial para continuar.'
+  };
+}
+
+// -------------------------------------------------------------
+// 3. LICENSE VERIFIER & STATUS CHECKER
 // -------------------------------------------------------------
 export function verifyLicense(db = null) {
   const currentHWID = generateMachineHWID();
@@ -91,13 +201,8 @@ export function verifyLicense(db = null) {
   }
 
   if (!licenseFile) {
-    return {
-      status: 'NOT_FOUND',
-      isValid: false,
-      hwid: currentHWID,
-      payload: null,
-      message: 'No se encontró el archivo de licencia (license.lic) en el servidor central.'
-    };
+    // No license file => Enter 3-Day Secure Auto-Trial Mode
+    return getOrCreateTrialInfo(currentHWID, db);
   }
 
   // Parse JSON structure
@@ -105,24 +210,12 @@ export function verifyLicense(db = null) {
   try {
     licenseObj = JSON.parse(licenseFile);
   } catch (e) {
-    return {
-      status: 'INVALID_FORMAT',
-      isValid: false,
-      hwid: currentHWID,
-      payload: null,
-      message: 'El archivo de licencia está dañado o tiene un formato no válido.'
-    };
+    return getOrCreateTrialInfo(currentHWID, db);
   }
 
   const { payload, signature } = licenseObj || {};
   if (!payload || !signature) {
-    return {
-      status: 'INVALID_FORMAT',
-      isValid: false,
-      hwid: currentHWID,
-      payload: null,
-      message: 'La estructura del archivo de licencia es incorrecta.'
-    };
+    return getOrCreateTrialInfo(currentHWID, db);
   }
 
   // Verify RSA Digital Signature
@@ -144,23 +237,11 @@ export function verifyLicense(db = null) {
 
     const isSignatureValid = verifier.verify(publicKeyPem, signature, 'hex');
     if (!isSignatureValid) {
-      return {
-        status: 'INVALID_SIGNATURE',
-        isValid: false,
-        hwid: currentHWID,
-        payload,
-        message: 'La firma digital de la licencia no es auténtica o fue alterada.'
-      };
+      return getOrCreateTrialInfo(currentHWID, db);
     }
   } catch (err) {
     console.error('Error verificando firma RSA:', err);
-    return {
-      status: 'SIGNATURE_ERROR',
-      isValid: false,
-      hwid: currentHWID,
-      payload,
-      message: 'Error al procesar la verificación de la firma de la licencia.'
-    };
+    return getOrCreateTrialInfo(currentHWID, db);
   }
 
   // Check HWID Binding (Allows wildcard '*' or exact match)
@@ -253,6 +334,7 @@ export function verifyLicense(db = null) {
   return {
     status: 'VALID',
     isValid: true,
+    isTrial: false,
     hwid: currentHWID,
     payload,
     daysRemaining,
