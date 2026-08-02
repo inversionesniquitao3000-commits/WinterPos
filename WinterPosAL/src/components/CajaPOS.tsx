@@ -2194,8 +2194,8 @@ export default function CajaPOS({
                   <th className="px-4 py-2.5">DESCRIPCIÓN</th>
                   <th className="px-4 py-2.5 text-center w-24">TIPO P.</th>
                   <th className="px-4 py-2.5 text-center w-28">CANTIDAD</th>
-                  <th className="px-4 py-2.5 text-right w-24">PRECIO U.</th>
-                  <th className="px-4 py-2.5 text-right w-24">TOTAL</th>
+                  <th className="px-4 py-2.5 text-right whitespace-nowrap min-w-[110px] font-extrabold text-xs">PRECIO U.</th>
+                  <th className="px-4 py-2.5 text-right whitespace-nowrap min-w-[110px] font-extrabold text-xs">TOTAL</th>
                   <th className="px-4 py-2.5 w-12 text-center"></th>
                 </tr>
               </thead>
@@ -2257,16 +2257,16 @@ export default function CajaPOS({
                             </button>
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-right font-mono text-slate-700">
+                        <td className="px-4 py-3 text-right font-mono">
                           <div className="flex flex-col text-right">
-                            <span>${item.priceUSD.toFixed(2)}</span>
-                            <span className="text-[10px] text-slate-500 font-sans">Bs {(item.priceUSD * tasaDia).toFixed(2)}</span>
+                            <span className="text-sm font-black text-slate-900 font-mono">${item.priceUSD.toFixed(2)}</span>
+                            <span className="text-[11px] font-bold text-slate-500 font-sans">Bs {(item.priceUSD * tasaDia).toFixed(2)}</span>
                           </div>
                         </td>
                         <td className="px-4 py-3 text-right font-mono">
                           <div className="flex flex-col text-right">
-                            <span className="text-emerald-600 font-bold">${item.totalUSD.toFixed(2)}</span>
-                            <span className="text-[10px] text-slate-500 font-sans font-normal">Bs {(item.totalUSD * tasaDia).toFixed(2)}</span>
+                            <span className="text-base font-black text-emerald-600 font-mono">${item.totalUSD.toFixed(2)}</span>
+                            <span className="text-[11px] font-bold text-slate-500 font-sans">Bs {(item.totalUSD * tasaDia).toFixed(2)}</span>
                           </div>
                         </td>
                         <td className="px-4 py-3 text-center">
@@ -2583,150 +2583,159 @@ export default function CajaPOS({
                   Distribución de Métodos de Cobro
                 </h3>
 
-                {/* Cash USD */}
-                {companyConfig.metodos_pago_activos.includes('efectivo_usd') && (
-                <div>
-                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Efectivo ($ USD)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    value={payCashUSD}
-                    onChange={(e) => setPayCashUSD(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-emerald-600 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
-                  />
-                </div>
-                )}
+                {/* ROW 1: EFECTIVO (USD & VES Side by Side) */}
+                <div className="grid grid-cols-2 gap-3">
+                  {companyConfig.metodos_pago_activos.includes('efectivo_usd') && (
+                    <div>
+                      <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold">Efectivo ($ USD)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder="0.00"
+                        value={payCashUSD}
+                        onChange={(e) => setPayCashUSD(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-emerald-600 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
+                      />
+                    </div>
+                  )}
 
-                {/* Cash VES */}
-                {companyConfig.metodos_pago_activos.includes('efectivo_ves') && (
-                <div>
-                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Efectivo (Bs VES)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    value={payCashVES}
-                    onChange={(e) => setPayCashVES(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-purple-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
-                  />
-                </div>
-                )}
-
-                {/* Debit Card VES */}
-                {companyConfig.metodos_pago_activos.includes('tarjeta_ves') && (
-                <div>
-                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Tarjeta de Débito (Bs VES)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    value={payCardVES}
-                    onChange={(e) => setPayCardVES(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
-                  />
-                </div>
-                )}
-
-                {/* Pago Móvil (VES) */}
-                {companyConfig.metodos_pago_activos.includes('pago_movil') && (
-                <div className="space-y-2 border-t border-slate-200 pt-2">
-                  <label className="text-[10px] text-emerald-700 block font-bold font-sans">Pago Móvil (Bs VES)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    value={payPagoMovilVES}
-                    onChange={(e) => setPayPagoMovilVES(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
-                  />
-                  {pagoMovilVESVal > 0 && (
-                    <div className="space-y-1">
-                      <div className="grid grid-cols-2 gap-2">
-                        <select
-                          value={bankPagoMovil}
-                          onChange={(e) => setBankPagoMovil(e.target.value)}
-                          className="bg-slate-55 border border-slate-300 text-[10px] p-2 rounded text-slate-700 outline-none focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent font-sans"
-                        >
-                          <option value="">Banco Emisor...</option>
-                          {venezuelanBanks.map(b => <option key={b} value={b}>{b}</option>)}
-                        </select>
-                        <input
-                          type="text"
-                          placeholder="N° Referencia (>3 dig)..."
-                          value={refPagoMovil}
-                          onChange={(e) => setRefPagoMovil(e.target.value)}
-                          className="bg-slate-55 border border-slate-300 p-2 rounded text-[10px] font-bold text-yellow-600 outline-none focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent"
-                        />
-                      </div>
-                      {!isPagoMovilValid && (
-                        <span className="text-[9px] text-red-500 font-bold block mt-1 font-sans">
-                          * Ingrese Banco y Referencia (mín. 4 caracteres)
-                        </span>
-                      )}
+                  {companyConfig.metodos_pago_activos.includes('efectivo_ves') && (
+                    <div>
+                      <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold">Efectivo (Bs VES)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder="0.00"
+                        value={payCashVES}
+                        onChange={(e) => setPayCashVES(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-purple-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
+                      />
                     </div>
                   )}
                 </div>
+
+                {/* ROW 2: PAGO MÓVIL & BIOPAGO (Side by Side) */}
+                <div className="grid grid-cols-2 gap-3 border-t border-slate-200 pt-2">
+                  {companyConfig.metodos_pago_activos.includes('pago_movil') && (
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-emerald-700 block font-bold font-sans">Pago Móvil (Bs VES)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder="0.00"
+                        value={payPagoMovilVES}
+                        onChange={(e) => setPayPagoMovilVES(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
+                      />
+                    </div>
+                  )}
+
+                  {companyConfig.metodos_pago_activos.includes('biopago') && (
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] text-purple-750 block font-bold font-sans">Biopago (Bs VES)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder="0.00"
+                        value={payBiopagoVES}
+                        onChange={(e) => setPayBiopagoVES(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Pago Movil Bank & Reference details expansion */}
+                {pagoMovilVESVal > 0 && companyConfig.metodos_pago_activos.includes('pago_movil') && (
+                  <div className="bg-emerald-50/70 border border-emerald-200 p-2.5 rounded-lg space-y-1.5 animate-fade-in">
+                    <span className="text-[9.5px] font-bold text-emerald-800 uppercase block font-sans">Datos de Pago Móvil:</span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <select
+                        value={bankPagoMovil}
+                        onChange={(e) => setBankPagoMovil(e.target.value)}
+                        className="bg-white border border-slate-300 text-[10px] p-2 rounded text-slate-700 outline-none focus:ring-2 focus:ring-winter-blueBtn font-sans"
+                      >
+                        <option value="">Banco Emisor...</option>
+                        {venezuelanBanks.map(b => <option key={b} value={b}>{b}</option>)}
+                      </select>
+                      <input
+                        type="text"
+                        placeholder="N° Referencia (>3 dig)..."
+                        value={refPagoMovil}
+                        onChange={(e) => setRefPagoMovil(e.target.value)}
+                        className="bg-white border border-slate-300 p-2 rounded text-[10px] font-bold text-yellow-700 outline-none focus:ring-2 focus:ring-winter-blueBtn"
+                      />
+                    </div>
+                    {!isPagoMovilValid && (
+                      <span className="text-[9px] text-red-500 font-bold block mt-1 font-sans">
+                        * Ingrese Banco y Referencia (mín. 4 caracteres)
+                      </span>
+                    )}
+                  </div>
                 )}
 
-                {/* Biopago (VES) */}
-                {companyConfig.metodos_pago_activos.includes('biopago') && (
-                <div className="space-y-2 border-t border-slate-200 pt-2">
-                  <label className="text-[10px] text-purple-750 block font-bold font-sans">Biopago (Bs VES)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    value={payBiopagoVES}
-                    onChange={(e) => setPayBiopagoVES(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
-                  />
-                </div>
-                )}
+                {/* ROW 3: DEBIT CARD & CARDS/OTHER (Side by Side) */}
+                <div className="grid grid-cols-2 gap-3 border-t border-slate-200 pt-2">
+                  {companyConfig.metodos_pago_activos.includes('tarjeta_ves') && (
+                    <div>
+                      <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold">Tarjeta de Débito (Bs VES)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder="0.00"
+                        value={payCardVES}
+                        onChange={(e) => setPayCardVES(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
+                      />
+                    </div>
+                  )}
 
-                {/* Tarjeta $ USD */}
-                {companyConfig.metodos_pago_activos.includes('tarjeta_usd') && (
-                <div className="space-y-2 border-t border-slate-200 pt-2">
-                  <label className="text-[10px] text-blue-700 block font-bold font-sans">Tarjeta $ (USD)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    value={payCardUSD}
-                    onChange={(e) => setPayCardUSD(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-blue-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
-                  />
+                  {companyConfig.metodos_pago_activos.includes('tarjeta_usd') && (
+                    <div>
+                      <label className="text-[10px] text-blue-700 block mb-1 font-sans font-bold">Tarjeta $ (USD)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder="0.00"
+                        value={payCardUSD}
+                        onChange={(e) => setPayCardUSD(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-blue-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
+                      />
+                    </div>
+                  )}
                 </div>
-                )}
 
-                {/* Binance $ */}
-                {companyConfig.metodos_pago_activos.includes('binance') && (
-                <div className="space-y-2 border-t border-slate-200 pt-2">
-                  <label className="text-[10px] text-yellow-600 block font-bold font-sans">Binance ($ USD)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    value={payBinanceUSD}
-                    onChange={(e) => setPayBinanceUSD(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-yellow-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
-                  />
-                </div>
-                )}
+                {/* Binance & PayPal side by side if active */}
+                {(companyConfig.metodos_pago_activos.includes('binance') || companyConfig.metodos_pago_activos.includes('paypal')) && (
+                  <div className="grid grid-cols-2 gap-3 border-t border-slate-200 pt-2">
+                    {companyConfig.metodos_pago_activos.includes('binance') && (
+                      <div>
+                        <label className="text-[10px] text-yellow-600 block font-bold font-sans">Binance ($ USD)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          placeholder="0.00"
+                          value={payBinanceUSD}
+                          onChange={(e) => setPayBinanceUSD(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-yellow-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
+                        />
+                      </div>
+                    )}
 
-                {/* PayPal $ */}
-                {companyConfig.metodos_pago_activos.includes('paypal') && (
-                <div className="space-y-2 border-t border-slate-200 pt-2">
-                  <label className="text-[10px] text-indigo-600 block font-bold font-sans">PayPal ($ USD)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    value={payPaypalUSD}
-                    onChange={(e) => setPayPaypalUSD(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-indigo-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
-                  />
-                </div>
+                    {companyConfig.metodos_pago_activos.includes('paypal') && (
+                      <div>
+                        <label className="text-[10px] text-indigo-600 block font-bold font-sans">PayPal ($ USD)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          placeholder="0.00"
+                          value={payPaypalUSD}
+                          onChange={(e) => setPayPaypalUSD(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-indigo-700 focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none"
+                        />
+                      </div>
+                    )}
+                  </div>
                 )}
 
                 {/* Client Credit limit option */}
@@ -2801,7 +2810,7 @@ export default function CajaPOS({
                     <span className="font-mono font-bold text-slate-550 text-[10px] mt-0.5">{selectedClient.cedula_rif}</span>
                   </div>
 
-                  <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-200 pb-2">
+                  <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-200 pb-2 font-sans">
                     Resumen de Liquidación
                   </h3>
                   
@@ -2835,34 +2844,43 @@ export default function CajaPOS({
                       </div>
                     )}
 
-                    {/* HIGHLIGHTED TOTALS BOX */}
-                    <div className="bg-slate-100 border border-slate-250 p-2.5 rounded-lg my-1.5 space-y-1.5">
+                    {/* HIGHLIGHTED TOTALS BOX - Enhanced Font Sizes */}
+                    <div className="bg-slate-100 border border-slate-250 p-3 rounded-xl my-2 space-y-2 shadow-2xs">
                       <div className="flex justify-between items-baseline text-slate-900">
-                        <span className="font-sans font-black text-xs uppercase tracking-wide">TOTAL USD:</span>
-                        <span className="font-mono text-xl font-black text-emerald-700">${totalUSD.toFixed(2)}</span>
+                        <span className="font-sans font-black text-sm uppercase tracking-wide">TOTAL USD:</span>
+                        <span className="font-mono text-2xl font-black text-emerald-600">${totalUSD.toFixed(2)}</span>
                       </div>
-                      <div className="flex justify-between items-baseline text-slate-700">
-                        <span className="font-sans font-bold text-[10px] uppercase tracking-wide">TOTAL VES:</span>
-                        <span className="font-mono text-sm font-extrabold text-slate-800">Bs {totalVES.toFixed(2)}</span>
+                      <div className="flex justify-between items-baseline text-slate-700 border-t border-slate-200/80 pt-1.5">
+                        <span className="font-sans font-bold text-xs uppercase tracking-wide">TOTAL VES:</span>
+                        <span className="font-mono text-base font-extrabold text-slate-900">Bs {totalVES.toFixed(2)}</span>
                       </div>
                     </div>
                     
-                    <div className="border-t border-slate-200 pt-2 flex justify-between text-emerald-700 font-bold">
+                    <div className="border-t border-slate-200 pt-2 flex justify-between text-emerald-700 font-bold text-xs">
                       <span className="font-sans">Total Pagado USD:</span>
-                      <span className="font-mono">${totalPaidUSD.toFixed(2)}</span>
+                      <span className="font-mono font-black text-sm">${totalPaidUSD.toFixed(2)}</span>
                     </div>
 
-                    <div className="flex justify-between text-xs border-t border-slate-200 pt-2 items-baseline">
-                      <span className="text-slate-550 font-sans">Monto por Liquidar:</span>
-                      <div className="text-right font-mono flex flex-col items-end">
-                        <span className={`font-black ${remainingUSD > 0 ? 'text-red-500' : 'text-slate-500'}`}>
-                          ${remainingUSD.toFixed(2)} USD
+                    {/* MONTO POR LIQUIDAR - Highlighted in Vibrant Yellow when pending */}
+                    <div className={`p-3 rounded-xl transition-all ${
+                      remainingUSD > 0 
+                        ? 'bg-amber-200/90 border-2 border-amber-400 shadow-sm animate-pulse' 
+                        : 'bg-emerald-50 border border-emerald-200'
+                    }`}>
+                      <div className="flex justify-between items-center text-xs">
+                        <span className={`font-sans font-black ${remainingUSD > 0 ? 'text-amber-950 uppercase tracking-wide text-xs' : 'text-emerald-800'}`}>
+                          {remainingUSD > 0 ? '⚠️ Monto por Liquidar:' : '✅ Total Cancelado:'}
                         </span>
-                        {remainingUSD > 0 && (
-                          <span className="text-[10px] text-red-500/80 font-bold font-sans">
-                            Bs {(remainingUSD * tasaDia).toFixed(2)} VES
+                        <div className="text-right font-mono flex flex-col items-end">
+                          <span className={`font-black ${remainingUSD > 0 ? 'text-red-700 text-lg' : 'text-emerald-700 text-sm'}`}>
+                            ${remainingUSD.toFixed(2)} USD
                           </span>
-                        )}
+                          {remainingUSD > 0 && (
+                            <span className="text-xs text-red-800 font-black font-mono mt-0.5">
+                              Bs {(remainingUSD * tasaDia).toFixed(2)} VES
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 

@@ -59,7 +59,8 @@ export default function Inventario({
 }: InventarioProps) {
   const { showAlert, showConfirm } = useDialog();
   const hasPermission = (action: 'ver' | 'crear' | 'editar' | 'eliminar') => {
-    if (_currentUser.rol.toLowerCase() === 'administrador') return true;
+    if (!_currentUser || !_currentUser.rol) return true;
+    if ((_currentUser.rol || '').toLowerCase() === 'administrador') return true;
     if (!_currentUser.permisos) return true; // default fallback if none specified
     return !!_currentUser.permisos.inventario?.[action];
   };
@@ -477,11 +478,15 @@ export default function Inventario({
     isSavingAuditCorrections
   ]);
 
-  const prevProductsLengthRef = useRef(products.length);
+  const safeProducts = useMemo(() => Array.isArray(products) ? products : [], [products]);
+  const safeMovements = useMemo(() => Array.isArray(movements) ? movements : [], [movements]);
+  const safePriceHistory = useMemo(() => Array.isArray(priceHistory) ? priceHistory : [], [priceHistory]);
+
+  const prevProductsLengthRef = useRef(safeProducts.length);
 
   useEffect(() => {
-    if (showInvoiceLoadModal && products.length > prevProductsLengthRef.current) {
-      const newProduct = products[products.length - 1];
+    if (showInvoiceLoadModal && safeProducts.length > prevProductsLengthRef.current) {
+      const newProduct = safeProducts[safeProducts.length - 1];
       if (newProduct) {
         setInvoiceProducts(prev => {
           const exists = prev.some(item => item.product.id === newProduct.id);
@@ -496,8 +501,8 @@ export default function Inventario({
         });
       }
     }
-    prevProductsLengthRef.current = products.length;
-  }, [products, showInvoiceLoadModal]);
+    prevProductsLengthRef.current = safeProducts.length;
+  }, [safeProducts, showInvoiceLoadModal]);
 
   const groupedMovements = useMemo(() => {
     const groups: Record<string, {
@@ -511,7 +516,7 @@ export default function Inventario({
       movements: InventoryMovement[];
     }> = {};
 
-    movements.forEach(m => {
+    safeMovements.forEach(m => {
       const groupKey = `${m.date}_${m.motivo}_${m.usuario}_${m.type}`;
       if (!groups[groupKey]) {
         groups[groupKey] = {
@@ -531,17 +536,17 @@ export default function Inventario({
     });
 
     return Object.values(groups).reverse();
-  }, [movements]);
+  }, [safeMovements]);
 
   const existingCategories = useMemo(() => {
     const cats = new Set<string>();
-    products.forEach(p => {
-      if (p.category && p.category.trim() && p.category.trim().toUpperCase() !== 'SIN CATEGORIA') {
+    safeProducts.forEach(p => {
+      if (p && p.category && p.category.trim() && p.category.trim().toUpperCase() !== 'SIN CATEGORIA') {
         cats.add(p.category.trim().toUpperCase());
       }
     });
     return Array.from(cats);
-  }, [products]);
+  }, [safeProducts]);
 
   // Bulk Upload state
   const [bulkImportTab, setBulkImportTab] = useState<'pdf' | 'csv'>('pdf');
