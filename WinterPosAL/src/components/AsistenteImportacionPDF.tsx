@@ -1,11 +1,28 @@
 import { useState, useRef } from 'react';
-import * as pdfjsLib from 'pdfjs-dist';
-import * as XLSX from 'xlsx';
 import { Upload, Sparkles, CheckCircle2, AlertTriangle, Settings, RefreshCw, Wand2, ArrowRight, Eye, Trash2, Tag, Layers, Calculator, FileSpreadsheet, Search } from 'lucide-react';
 import type { Product } from '../types';
 
-// Configure pdfjs worker to standard CDN fallback for vite
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '3.11.174'}/pdf.worker.min.js`;
+// Dynamic loader for PDF.js to ensure Vite compiles even if npm package is missing
+const loadPdfJs = (): Promise<any> => {
+  return new Promise((resolve, reject) => {
+    if ((window as any).pdfjsLib) {
+      return resolve((window as any).pdfjsLib);
+    }
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    script.onload = () => {
+      const lib = (window as any).pdfjsLib;
+      if (lib) {
+        lib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        resolve(lib);
+      } else {
+        reject(new Error('No se pudo inicializar la librería PDF.js'));
+      }
+    };
+    script.onerror = () => reject(new Error('No se pudo cargar la librería PDF.js desde CDN'));
+    document.head.appendChild(script);
+  });
+};
 
 export interface ParsedImportProduct {
   barcode: string;
@@ -435,6 +452,7 @@ export default function AsistenteImportacionPDF({
     setErrorMessage('');
 
     try {
+      const pdfjsLib = await loadPdfJs();
       const arrayBuffer = await pdfFile.arrayBuffer();
       const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
       const pdf = await loadingTask.promise;

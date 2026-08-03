@@ -38,7 +38,7 @@ function getArg(name, defaultValue) {
 }
 
 const hwid = getArg('hwid', '');
-const client = getArg('client', 'CLIENTE WINTERPOS');
+const client = getArg('client', 'Inversiones Niquitao JB AL 3000').replace(/_/g, ' ');
 const rif = getArg('rif', 'J-000000000');
 const terminalsArg = getArg('terminals', '3');
 const daysArg = getArg('days', '365');

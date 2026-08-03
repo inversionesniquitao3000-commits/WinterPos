@@ -185,40 +185,33 @@ function getOrCreateTrialInfo(hwid, db = null) {
 // -------------------------------------------------------------
 // 3. LICENSE VERIFIER & STATUS CHECKER
 // -------------------------------------------------------------
+// -------------------------------------------------------------
+// 3. LICENSE VERIFIER & STATUS CHECKER
+// -------------------------------------------------------------
 export function verifyLicense(db = null) {
   const currentHWID = generateMachineHWID();
 
-  // Find license file
-  let licenseFile = null;
-  let licenseFilePath = null;
+  // Find all potential license files (*.lic in backend and root)
+  const candidateFilePaths = new Set();
+  if (fs.existsSync(licensePathPrimary)) candidateFilePaths.add(licensePathPrimary);
+  if (fs.existsSync(licensePathRoot)) candidateFilePaths.add(licensePathRoot);
 
-  if (fs.existsSync(licensePathPrimary)) {
-    licenseFilePath = licensePathPrimary;
-    licenseFile = fs.readFileSync(licensePathPrimary, 'utf8');
-  } else if (fs.existsSync(licensePathRoot)) {
-    licenseFilePath = licensePathRoot;
-    licenseFile = fs.readFileSync(licensePathRoot, 'utf8');
-  }
+  try {
+    const backendFiles = fs.readdirSync(__dirname);
+    backendFiles.filter(f => f.endsWith('.lic')).forEach(f => candidateFilePaths.add(path.join(__dirname, f)));
+  } catch (e) {}
 
-  if (!licenseFile) {
+  try {
+    const rootDir = path.join(__dirname, '..');
+    const rootFiles = fs.readdirSync(rootDir);
+    rootFiles.filter(f => f.endsWith('.lic')).forEach(f => candidateFilePaths.add(path.join(rootDir, f)));
+  } catch (e) {}
+
+  if (candidateFilePaths.size === 0) {
     // No license file => Enter 3-Day Secure Auto-Trial Mode
     return getOrCreateTrialInfo(currentHWID, db);
   }
 
-  // Parse JSON structure
-  let licenseObj;
-  try {
-    licenseObj = JSON.parse(licenseFile);
-  } catch (e) {
-    return getOrCreateTrialInfo(currentHWID, db);
-  }
-
-  const { payload, signature } = licenseObj || {};
-  if (!payload || !signature) {
-    return getOrCreateTrialInfo(currentHWID, db);
-  }
-
-  // Verify RSA Digital Signature
   if (!fs.existsSync(publicKeyPath)) {
     return {
       status: 'NO_PUBLIC_KEY',
@@ -229,119 +222,162 @@ export function verifyLicense(db = null) {
     };
   }
 
-  try {
-    const publicKeyPem = fs.readFileSync(publicKeyPath, 'utf8');
-    const verifier = crypto.createVerify('SHA256');
-    verifier.update(JSON.stringify(payload));
-    verifier.end();
+  const publicKeyPem = fs.readFileSync(publicKeyPath, 'utf8');
+  let lastMismatchResult = null;
+  let lastExpiredResult = null;
 
-    const isSignatureValid = verifier.verify(publicKeyPem, signature, 'hex');
-    if (!isSignatureValid) {
-      return getOrCreateTrialInfo(currentHWID, db);
-    }
-  } catch (err) {
-    console.error('Error verificando firma RSA:', err);
-    return getOrCreateTrialInfo(currentHWID, db);
-  }
-
-  // Check HWID Binding (Allows wildcard '*' or exact match)
-  const licenseHWID = (payload.hwid || '').toUpperCase().trim();
-  if (licenseHWID !== '*' && licenseHWID !== currentHWID) {
-    return {
-      status: 'HWID_MISMATCH',
-      isValid: false,
-      hwid: currentHWID,
-      payload,
-      message: `Esta licencia pertenece a otro equipo (HWID Registrado: ${licenseHWID}, HWID Actual: ${currentHWID}).`
-    };
-  }
-
-  // Check Expiration Date
-  const nowStr = new Date().toISOString().substring(0, 10);
-  const expStr = payload.fechaExpiracion;
-
-  let daysRemaining = null;
-  if (expStr && expStr !== 'VITALICIA') {
-    const nowTime = new Date(nowStr).getTime();
-    const expTime = new Date(expStr).getTime();
-    daysRemaining = Math.ceil((expTime - nowTime) / (1000 * 60 * 60 * 24));
-
-    if (daysRemaining < 0) {
-      return {
-        status: 'EXPIRED',
-        isValid: false,
-        hwid: currentHWID,
-        payload,
-        daysRemaining,
-        message: `Su período de licencia ha vencido el ${expStr}. Por favor contacte a soporte para renovar.`
-      };
-    }
-  }
-
-  // Check Anti-Time Tampering if DB is available
-  if (db && typeof db.prepare === 'function') {
+  // Process all candidate license files and entries
+  for (const filePath of candidateFilePaths) {
+    let licenseContent;
     try {
-      // Ensure system_meta table exists
-      db.prepare(`
-        CREATE TABLE IF NOT EXISTS system_meta (
-          key TEXT PRIMARY KEY,
-          value TEXT
-        )
-      `).run();
+      licenseContent = fs.readFileSync(filePath, 'utf8');
+    } catch (e) {
+      continue;
+    }
 
-      const row = db.prepare(`SELECT value FROM system_meta WHERE key = 'last_op_date'`).get();
-      const lastOpDate = row ? row.value : null;
+    let parsed;
+    try {
+      parsed = JSON.parse(licenseContent);
+    } catch (e) {
+      continue;
+    }
 
-      if (lastOpDate) {
-        // If current date is more than 1 day in the past relative to last operation => tampering
-        if (nowStr < lastOpDate) {
-          return {
-            status: 'TIME_TAMPER',
+    // Support single license object OR an array of license objects inside one file
+    const licenseEntries = Array.isArray(parsed) ? parsed : [parsed];
+
+    for (const entry of licenseEntries) {
+      const { payload, signature } = entry || {};
+      if (!payload || !signature) continue;
+
+      // Verify RSA Digital Signature
+      try {
+        const verifier = crypto.createVerify('SHA256');
+        verifier.update(JSON.stringify(payload));
+        verifier.end();
+
+        const isSignatureValid = verifier.verify(publicKeyPem, signature, 'hex');
+        if (!isSignatureValid) continue;
+      } catch (err) {
+        console.error('Error verificando firma RSA:', err);
+        continue;
+      }
+
+      // Check HWID Binding (Allows wildcard '*', exact match, array of HWIDs, or comma-separated string)
+      const rawHwid = payload.hwid;
+      let isHwidMatch = false;
+
+      if (Array.isArray(rawHwid)) {
+        isHwidMatch = rawHwid.map(h => String(h).toUpperCase().trim()).includes(currentHWID) || rawHwid.includes('*');
+      } else if (typeof rawHwid === 'string') {
+        const hwidList = rawHwid.split(/[,|\s]+/).map(h => h.toUpperCase().trim()).filter(Boolean);
+        isHwidMatch = hwidList.includes('*') || hwidList.includes(currentHWID);
+      }
+
+      if (!isHwidMatch) {
+        lastMismatchResult = {
+          status: 'HWID_MISMATCH',
+          isValid: false,
+          hwid: currentHWID,
+          payload,
+          message: `Esta licencia pertenece a otro equipo (HWID Registrado: ${payload.hwid}, HWID Actual: ${currentHWID}).`
+        };
+        continue;
+      }
+
+      // Check Expiration Date
+      const nowStr = new Date().toISOString().substring(0, 10);
+      const expStr = payload.fechaExpiracion;
+
+      let daysRemaining = null;
+      if (expStr && expStr !== 'VITALICIA') {
+        const nowTime = new Date(nowStr).getTime();
+        const expTime = new Date(expStr).getTime();
+        daysRemaining = Math.ceil((expTime - nowTime) / (1000 * 60 * 60 * 24));
+
+        if (daysRemaining < 0) {
+          lastExpiredResult = {
+            status: 'EXPIRED',
             isValid: false,
             hwid: currentHWID,
             payload,
             daysRemaining,
-            message: `Desincronización de fecha del sistema detectada. La fecha actual (${nowStr}) es anterior a la última operación registrada (${lastOpDate}).`
+            message: `Su período de licencia ha vencido el ${expStr}. Por favor contacte a soporte para renovar.`
           };
+          continue;
         }
       }
 
-      // Update last_op_date if nowStr is newer
-      if (!lastOpDate || nowStr > lastOpDate) {
-        db.prepare(`INSERT INTO system_meta (key, value) VALUES ('last_op_date', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(nowStr);
+      // Check Anti-Time Tampering if DB is available
+      if (db && typeof db.prepare === 'function') {
+        try {
+          // Ensure system_meta table exists
+          db.prepare(`
+            CREATE TABLE IF NOT EXISTS system_meta (
+              key TEXT PRIMARY KEY,
+              value TEXT
+            )
+          `).run();
+
+          const row = db.prepare(`SELECT value FROM system_meta WHERE key = 'last_op_date'`).get();
+          const lastOpDate = row ? row.value : null;
+
+          if (lastOpDate) {
+            // If current date is more than 1 day in the past relative to last operation => tampering
+            if (nowStr < lastOpDate) {
+              return {
+                status: 'TIME_TAMPER',
+                isValid: false,
+                hwid: currentHWID,
+                payload,
+                daysRemaining,
+                message: `Desincronización de fecha del sistema detectada. La fecha actual (${nowStr}) es anterior a la última operación registrada (${lastOpDate}).`
+              };
+            }
+          }
+
+          // Update last_op_date if nowStr is newer
+          if (!lastOpDate || nowStr > lastOpDate) {
+            db.prepare(`INSERT INTO system_meta (key, value) VALUES ('last_op_date', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(nowStr);
+          }
+        } catch (err) {
+          console.warn('Advertencia comprobando anti-time tampering:', err);
+        }
       }
-    } catch (err) {
-      console.warn('Advertencia comprobando anti-time tampering:', err);
+
+      // Check Max Terminals Allowed
+      const activeCount = getActiveTerminalsCount();
+      const maxTerminals = payload.terminales;
+      if (typeof maxTerminals === 'number' && activeCount > maxTerminals) {
+        return {
+          status: 'TERMINALS_EXCEEDED',
+          isValid: false,
+          hwid: currentHWID,
+          payload,
+          daysRemaining,
+          activeTerminals: activeCount,
+          maxTerminals,
+          message: `Ha alcanzado el límite máximo de cajas autorizadas (${activeCount}/${maxTerminals}). Actualice su plan.`
+        };
+      }
+
+      // Match found and verified! Return VALID status
+      return {
+        status: 'VALID',
+        isValid: true,
+        isTrial: false,
+        hwid: currentHWID,
+        payload,
+        daysRemaining,
+        activeTerminals: activeCount,
+        maxTerminals,
+        message: expStr === 'VITALICIA' ? 'Licencia Vitalicia Activa y Válida' : `Licencia Activa (${daysRemaining} días restantes)`
+      };
     }
   }
 
-  // Check Max Terminals Allowed
-  const activeCount = getActiveTerminalsCount();
-  const maxTerminals = payload.terminales;
-  if (typeof maxTerminals === 'number' && activeCount > maxTerminals) {
-    return {
-      status: 'TERMINALS_EXCEEDED',
-      isValid: false,
-      hwid: currentHWID,
-      payload,
-      daysRemaining,
-      activeTerminals: activeCount,
-      maxTerminals,
-      message: `Ha alcanzado el límite máximo de cajas autorizadas (${activeCount}/${maxTerminals}). Actualice su plan.`
-    };
-  }
-
-  return {
-    status: 'VALID',
-    isValid: true,
-    isTrial: false,
-    hwid: currentHWID,
-    payload,
-    daysRemaining,
-    activeTerminals: activeCount,
-    maxTerminals,
-    message: expStr === 'VITALICIA' ? 'Licencia Vitalicia Activa y Válida' : `Licencia Activa (${daysRemaining} días restantes)`
-  };
+  if (lastExpiredResult) return lastExpiredResult;
+  if (lastMismatchResult) return lastMismatchResult;
+  return getOrCreateTrialInfo(currentHWID, db);
 }
 
 // Save & Activate new license
