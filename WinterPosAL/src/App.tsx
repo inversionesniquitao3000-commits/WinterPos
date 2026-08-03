@@ -1754,7 +1754,16 @@ export default function App() {
   };
 
 
-  const handleRegisterCajaMovement = async (type: 'Entrada' | 'Salida' | 'Devolucion', description: string, usd: number, ves: number) => {
+  const handleRegisterCajaMovement = async (
+    type: 'Entrada' | 'Salida' | 'Devolucion', 
+    description: string, 
+    usd: number, 
+    ves: number,
+    metodoPago: string = 'EFECTIVO',
+    comisionVes: number = 0,
+    comisionUsd: number = 0
+  ) => {
+    const isDigitalAdvance = description.includes('[VENTA EFECTIVO] Cobro Digital') || (metodoPago !== 'EFECTIVO' && metodoPago !== 'EFECTIVO$' && metodoPago !== 'EFECTIVOBS');
     const mult = type === 'Entrada' ? 1 : -1;
     const nextUsd = cajaMovimientosUsd + usd * mult;
     const nextVes = cajaMovimientosVes + ves * mult;
@@ -1767,7 +1776,7 @@ export default function App() {
     if (type === 'Entrada') {
       if (description.startsWith('Abono')) {
         if (usd > 0) setShiftAbonosUsd(prev => prev + usd);
-      } else {
+      } else if (!isDigitalAdvance) {
         setShiftEntradasUsd(prev => prev + usd);
         setShiftEntradasVes(prev => prev + ves);
       }
@@ -1798,7 +1807,10 @@ export default function App() {
       ves,
       terminal: terminalName,
       usuarioId: currentUser?.id,
-      usuarioNombre: currentUser?.nombre
+      usuarioNombre: currentUser?.nombre,
+      metodo_pago: metodoPago,
+      comision_ves: comisionVes,
+      comision_usd: comisionUsd
     });
   };
 
@@ -2243,6 +2255,10 @@ export default function App() {
               currentUser={currentUser}
               onRegisterSale={handleRegisterSale}
               onRegisterCajaMovement={handleRegisterCajaMovement}
+              onProcessDivisaOperation={async (opData) => {
+                await postApiData('/cajas/divisas-operaciones', opData);
+                return true;
+              }}
               cajaAbierta={cajaAbierta}
               montoAperturaUsd={montoAperturaUsd}
               montoAperturaVes={montoAperturaVes}

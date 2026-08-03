@@ -670,8 +670,11 @@ app.post('/api/cajas/cerrar', async (req, res) => {
 });
 
 app.post('/api/cajas/movimiento', async (req, res) => {
-  const { tipo, descripcion, usd, ves, terminal, usuarioId, usuarioNombre } = req.body;
-  const success = await registrarCajaMovimiento(tipo, descripcion, usd, ves, terminal, usuarioId, usuarioNombre);
+  const { tipo, descripcion, usd, ves, terminal, usuarioId, usuarioNombre, metodo_pago, metodoPago, comision_ves, comisionVes, comision_usd, comisionUsd } = req.body;
+  const payMethod = metodo_pago || metodoPago || 'EFECTIVO';
+  const cVes = comision_ves || comisionVes || 0;
+  const cUsd = comision_usd || comisionUsd || 0;
+  const success = await registrarCajaMovimiento(tipo, descripcion, usd, ves, terminal, usuarioId, usuarioNombre, payMethod, cVes, cUsd);
   res.json({ success });
 });
 
@@ -997,6 +1000,51 @@ app.delete('/api/roles/:id', async (req, res) => {
   try {
     const success = await deleteRole(req.params.id);
     res.json({ success });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Registra operaciones de cambio de divisas y venta de efectivo con comisiones
+app.post('/api/cajas/divisas-operaciones', async (req, res) => {
+  try {
+    const op = req.body;
+    console.log(`[Divisas/Efectivo] Registrando operación ${op?.tipo_operacion}:`, op);
+    const file = path.join(__dirname, 'data', 'divisas_operaciones.json');
+    let list = [];
+    if (fs.existsSync(file)) {
+      try {
+        list = JSON.parse(fs.readFileSync(file, 'utf8'));
+      } catch (e) {
+        list = [];
+      }
+    }
+    const newOp = {
+      id: Date.now(),
+      timestamp: Date.now(),
+      ...op
+    };
+    list.push(newOp);
+    fs.writeFileSync(file, JSON.stringify(list, null, 2), 'utf8');
+    res.json({ success: true, operation: newOp });
+  } catch (err) {
+    console.error('Error registrando divisas-operaciones:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/cajas/divisas-operaciones', async (req, res) => {
+  try {
+    const file = path.join(__dirname, 'data', 'divisas_operaciones.json');
+    let list = [];
+    if (fs.existsSync(file)) {
+      try {
+        list = JSON.parse(fs.readFileSync(file, 'utf8'));
+      } catch (e) {
+        list = [];
+      }
+    }
+    res.json(list);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -217,6 +217,36 @@ export interface CierreDetails {
   devolucionVentasVes?: number;
   ventaTotalUsd?: number;
   terminal?: string;
+
+  // Movimientos de Cambio de Divisas y Venta de Efectivo (Avance)
+  cambioDivisasCount?: number;
+  cambioDivisasUsd?: number;
+  cambioDivisasEur?: number;
+  cambioDivisasVesSalida?: number;
+  ventaEfectivoCount?: number;
+  ventaEfectivoVesSalida?: number;
+  ventaEfectivoDigitalEntradaVes?: number;
+  ventaEfectivoComisionUsd?: number;
+  ventaEfectivoComisionVes?: number;
+}
+
+export interface DivisaOperation {
+  id?: number;
+  tipo_operacion: 'COMPRA_DIVISA' | 'VENTA_EFECTIVO';
+  currency: 'USD' | 'EUR';
+  monto_divisa: number;
+  tasa_aplicada: number;
+  es_tasa_manual?: boolean;
+  monto_ves_entregado: number;
+  metodo_cobro?: 'BIOPAGO' | 'PUNTO' | 'PAGO_MOVIL' | 'TRANSFERENCIA' | 'EFECTIVO_USD';
+  comision_pct?: number;
+  comision_monto_ves?: number;
+  comision_monto_usd?: number;
+  monto_digital_cobrado_ves?: number;
+  monto_digital_cobrado_usd?: number;
+  observacion?: string;
+  usuario: string;
+  fecha: string;
 }
 
 export interface CierreCaja {
@@ -226,6 +256,8 @@ export interface CierreCaja {
   fechaApertura?: string;
   costoTotalUsd?: number;
   utilidadUsd?: number;
+  ventaEfectivoComisionVes?: number;
+  ventaEfectivoComisionUsd?: number;
   usuario: string;
   usuarioId?: number;
   aperturaUsd: number;

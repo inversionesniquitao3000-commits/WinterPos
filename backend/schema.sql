@@ -137,6 +137,9 @@ CREATE TABLE IF NOT EXISTS Movimientos_Caja (
     monto_usd NUMERIC(12, 2) DEFAULT 0.00,
     monto_ves NUMERIC(12, 2) DEFAULT 0.00,
     estacion_nombre VARCHAR(50) DEFAULT 'CAJA_PRINCIPAL',
+    metodo_pago VARCHAR(50) DEFAULT 'EFECTIVO',
+    comision_ves NUMERIC(12, 2) DEFAULT 0.00,
+    comision_usd NUMERIC(12, 2) DEFAULT 0.00,
     fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

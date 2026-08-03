@@ -115,6 +115,9 @@ try {
     ALTER TABLE IF EXISTS Pagos_Venta ADD COLUMN IF NOT EXISTS monto_vuelto_usd NUMERIC DEFAULT 0;
     ALTER TABLE IF EXISTS Pagos_Venta ADD COLUMN IF NOT EXISTS monto_vuelto_ves NUMERIC DEFAULT 0;
     ALTER TABLE IF EXISTS Movimientos_Caja ADD COLUMN IF NOT EXISTS estacion_nombre VARCHAR(50) DEFAULT 'CAJA_PRINCIPAL';
+    ALTER TABLE IF EXISTS Movimientos_Caja ADD COLUMN IF NOT EXISTS metodo_pago VARCHAR(50) DEFAULT 'EFECTIVO';
+    ALTER TABLE IF EXISTS Movimientos_Caja ADD COLUMN IF NOT EXISTS comision_ves NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Movimientos_Caja ADD COLUMN IF NOT EXISTS comision_usd NUMERIC DEFAULT 0;
     ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS a_granel BOOLEAN DEFAULT FALSE;
     ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(50);
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS permitir_multisesion BOOLEAN DEFAULT TRUE;
@@ -2320,19 +2323,37 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
       let shiftDevolucionesUsd = 0;
       let shiftDevolucionesVes = 0;
 
+      let shiftPuntoVesMovs = 0;
+      let shiftBiopagoVesMovs = 0;
+      let shiftPagoMovilVesMovs = 0;
+
       for (const m of movsRes.rows) {
         const mUsd = parseFloat(m.monto_usd || '0');
         const mVes = parseFloat(m.monto_ves || '0');
         const tipo = m.tipo;
         const desc = m.descripcion || '';
+        const descUpper = desc.toUpperCase();
+        const mPago = String(m.metodo_pago || 'EFECTIVO').toUpperCase();
         
+        const isPunto = mPago === 'PUNTO' || mPago.includes('TARJETA') || descUpper.includes('PUNTO');
+        const isBiopago = mPago === 'BIOPAGO' || descUpper.includes('BIOPAGO');
+        const isPagoMovil = mPago === 'PAGO_MOVIL' || mPago === 'PAGOMOVIL' || descUpper.includes('PAGO MÓVIL') || descUpper.includes('PAGO_MOVIL');
+
+        const isDigitalAdvance = (descUpper.includes('VENTA EFECTIVO') || descUpper.includes('AVANCE')) && (isPunto || isBiopago || isPagoMovil || descUpper.includes('COBRO DIGITAL')) || (mPago !== 'EFECTIVO' && mPago !== 'EFECTIVO$' && mPago !== 'EFECTIVOBS');
+
+        if (tipo === 'Entrada' && isDigitalAdvance) {
+          if (isPunto) shiftPuntoVesMovs += mVes;
+          else if (isBiopago) shiftBiopagoVesMovs += mVes;
+          else if (isPagoMovil) shiftPagoMovilVesMovs += mVes;
+        }
+
         if (tipo === 'Entrada') {
           totalMovUsd += mUsd;
           totalMovVes += mVes;
           if (desc.startsWith('Abono')) {
             shiftAbonosUsd += mUsd;
             shiftAbonosVes += mVes;
-          } else {
+          } else if (!isDigitalAdvance) {
             shiftEntradasUsd += mUsd;
             shiftEntradasVes += mVes;
           }
@@ -2389,6 +2410,10 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
         movimientosVes: totalMovVes,
         shiftSales: shiftSalesList,
         shiftAbonosList,
+        shiftMovimientosList: movsRes.rows,
+        shiftPuntoVesMovs,
+        shiftBiopagoVesMovs,
+        shiftPagoMovilVesMovs,
         shiftAbonosUsd,
         shiftAbonosVes,
         shiftEntradasUsd,
@@ -2463,7 +2488,7 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
   };
 }
 
-export async function registrarCajaMovimiento(tipo, descripcion, usd, ves, terminal, usuarioId, usuarioNombre) {
+export async function registrarCajaMovimiento(tipo, descripcion, usd, ves, terminal, usuarioId, usuarioNombre, metodoPago = 'EFECTIVO', comisionVes = 0, comisionUsd = 0) {
   if (usePostgres) {
     try {
       const termName = terminal || 'CAJA_PRINCIPAL';
@@ -2500,9 +2525,9 @@ export async function registrarCajaMovimiento(tipo, descripcion, usd, ves, termi
         // In Postgres we allow 'Devolucion' check constraint
         const typeDb = (tipo === 'Entrada' || tipo === 'Salida' || tipo === 'Devolucion') ? tipo : 'Salida';
         await pool.query(
-          `INSERT INTO Movimientos_Caja (caja_id, tipo, descripcion, monto_usd, monto_ves, estacion_nombre)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [cajaId, typeDb, descripcion, usd, ves, termName]
+          `INSERT INTO Movimientos_Caja (caja_id, tipo, descripcion, monto_usd, monto_ves, estacion_nombre, metodo_pago, comision_ves, comision_usd)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [cajaId, typeDb, descripcion, usd, ves, termName, metodoPago || 'EFECTIVO', comisionVes || 0, comisionUsd || 0]
         );
         return true;
       }
@@ -2516,7 +2541,7 @@ export async function registrarCajaMovimiento(tipo, descripcion, usd, ves, termi
     if (!activeCheck.movimientos) {
       activeCheck.movimientos = [];
     }
-    activeCheck.movimientos.push({ tipo, descripcion, usd, ves, terminal });
+    activeCheck.movimientos.push({ tipo, descripcion, usd, ves, terminal, metodo_pago: metodoPago || 'EFECTIVO', comision_ves: comisionVes || 0, comision_usd: comisionUsd || 0 });
     const mult = tipo === 'Entrada' ? 1 : -1;
     activeCheck.movimientosUsd += usd * mult;
     activeCheck.movimientosVes += ves * mult;

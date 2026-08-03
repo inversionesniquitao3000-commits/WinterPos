@@ -1,14 +1,15 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Product, Client, User, CompanyConfig, SaleItem, Payment, Sale, CierreCaja, CierreDetails, Abono } from '../types';
+import { Product, Client, User, CompanyConfig, SaleItem, Payment, Sale, CierreCaja, CierreDetails, Abono, DivisaOperation } from '../types';
 import { 
   ShoppingBag, Search, Trash2, 
   XCircle, ArrowUpRight, 
   Calculator, CheckCircle2, Ticket,
   Clock, ListOrdered, Plus, AlertCircle, DollarSign, RotateCcw, Printer,
-  Calendar, Lock
+  Calendar, Lock, Coins, RefreshCw
 } from 'lucide-react';
 import { formatNumberToWordsUSD, printTicketReceipt } from '../utils';
 import { useDialog } from '../hooks/useDialog';
+import CambioDivisasModal from './CambioDivisasModal';
 
 interface CajaPOSProps {
   products: Product[];
@@ -30,7 +31,8 @@ interface CajaPOSProps {
     vueltoUSD: number;
     vueltoVES: number;
   }) => Promise<Sale | undefined> | void;
-  onRegisterCajaMovement: (type: 'Entrada' | 'Salida' | 'Devolucion', description: string, usd: number, ves: number) => void;
+  onRegisterCajaMovement: (type: 'Entrada' | 'Salida' | 'Devolucion', description: string, usd: number, ves: number, metodoPago?: string, comisionVes?: number, comisionUsd?: number) => void;
+  onProcessDivisaOperation?: (op: DivisaOperation) => Promise<boolean> | void;
   cajaAbierta: boolean;
   montoAperturaUsd: number;
   montoAperturaVes: number;
@@ -84,6 +86,7 @@ export default function CajaPOS({
   currentUser,
   onRegisterSale,
   onRegisterCajaMovement,
+  onProcessDivisaOperation,
   cajaAbierta,
   montoAperturaUsd: _montoAperturaUsd,
   montoAperturaVes: _montoAperturaVes,
@@ -185,6 +188,30 @@ export default function CajaPOS({
 
   // Devolución state variables
   const [showDevolucionModal, setShowDevolucionModal] = useState(false);
+  const [showCambioDivisasModal, setShowCambioDivisasModal] = useState(false);
+
+  const handleProcessDivisaOperation = (op: any) => {
+    if (op.tipo_operacion === 'COMPRA_DIVISA') {
+      const usdAmount = op.currency === 'USD' ? op.monto_divisa : 0;
+      const vesSalida = op.monto_ves_entregado;
+      onRegisterCajaMovement('Entrada', `[CAMBIO DIVISAS] Recepción ${op.monto_divisa} ${op.currency} a tasa ${op.tasa_aplicada.toFixed(2)}`, usdAmount, 0);
+      onRegisterCajaMovement('Salida', `[CAMBIO DIVISAS] Entrega de Bs Efectivo (${op.monto_divisa} ${op.currency} @ ${op.tasa_aplicada.toFixed(2)})`, 0, vesSalida);
+    } else if (op.tipo_operacion === 'VENTA_EFECTIVO') {
+      const vesSalida = op.monto_ves_entregado;
+      const vesEntradaDigital = op.monto_digital_cobrado_ves;
+      const metodoCobro = op.metodo_cobro || 'BIOPAGO';
+      const cVes = op.comision_monto_ves || 0;
+      const cUsd = op.comision_monto_usd || 0;
+      // 1. Salida de billetes en Bs de la gaveta física
+      onRegisterCajaMovement('Salida', `[VENTA EFECTIVO] Entrega Bs Efectivo (Comisión ${op.comision_pct}%)`, 0, vesSalida, 'EFECTIVO', 0, 0);
+      // 2. Entrada digital con su método de pago correspondiente (para guardar en la tabla Movimientos_Caja de Postgres)
+      onRegisterCajaMovement('Entrada', `[VENTA EFECTIVO] Cobro Digital via ${metodoCobro} (+${op.comision_pct}% comisión)`, 0, vesEntradaDigital, metodoCobro, cVes, cUsd);
+    }
+
+    if (onProcessDivisaOperation) {
+      onProcessDivisaOperation(op);
+    }
+  };
   const [devSearchTerm, setDevSearchTerm] = useState('');
   const [allSalesList, setAllSalesList] = useState<Sale[]>([]);
   const [devSelectedSale, setDevSelectedSale] = useState<Sale | null>(null);
@@ -210,6 +237,7 @@ export default function CajaPOS({
         }
         setShowDevConfirmModal(false);
         setShowDevolucionModal(false);
+        setShowCambioDivisasModal(false);
         if (typeof setShowEntradaRapidaModal === 'function') {
           setShowEntradaRapidaModal(false);
         }
@@ -1596,6 +1624,10 @@ export default function CajaPOS({
     let targetDevolucionUsd = shiftDevolucionesUsd;
     let targetDevolucionVes = shiftDevolucionesVes;
 
+    let serverPuntoVes = 0;
+    let serverBiopagoVes = 0;
+    let serverPagoMovilVes = 0;
+
     // Fetch fresh unified caja estado from server before generating final cierre card
     try {
       const termName = localStorage.getItem('pos_terminal_name') || 'CAJA_01';
@@ -1613,11 +1645,68 @@ export default function CajaPOS({
           if (typeof cajaData.shiftSalidasVes === 'number') targetSalidaVes = cajaData.shiftSalidasVes;
           if (typeof cajaData.shiftDevolucionesUsd === 'number') targetDevolucionUsd = cajaData.shiftDevolucionesUsd;
           if (typeof cajaData.shiftDevolucionesVes === 'number') targetDevolucionVes = cajaData.shiftDevolucionesVes;
+          if (typeof cajaData.shiftPuntoVesMovs === 'number') serverPuntoVes = cajaData.shiftPuntoVesMovs;
+          if (typeof cajaData.shiftBiopagoVesMovs === 'number') serverBiopagoVes = cajaData.shiftBiopagoVesMovs;
+          if (typeof cajaData.shiftPagoMovilVesMovs === 'number') serverPagoMovilVes = cajaData.shiftPagoMovilVesMovs;
         }
       }
     } catch (err) {
       console.warn('⚠️ No se pudo refrescar el estado de caja desde el servidor antes del cierre, utilizando cache local:', err);
     }
+
+    let shiftDivisaOps: any[] = [];
+    try {
+      const resOps = await fetch(getApiUrl('/cajas/divisas-operaciones'));
+      if (resOps.ok) {
+        const opsData = await resOps.json();
+        if (Array.isArray(opsData)) {
+          shiftDivisaOps = opsData;
+        }
+      }
+    } catch (e) {
+      console.warn('⚠️ Error al consultar divisas-operaciones para el cierre:', e);
+    }
+
+    const avanceBiopagoVes = Math.max(serverBiopagoVes, shiftDivisaOps.reduce((acc, op) => {
+      const isVentaEfectivo = op.tipo_operacion === 'VENTA_EFECTIVO' || String(op.descripcion || '').includes('[VENTA EFECTIVO]');
+      const isBiopago = op.metodo_cobro === 'BIOPAGO' || op.metodo_pago === 'BIOPAGO' || String(op.descripcion || '').includes('BIOPAGO');
+      if (isVentaEfectivo && isBiopago) {
+        return acc + (op.monto_digital_cobrado_ves || op.monto_ves || op.ves || 0);
+      }
+      return acc;
+    }, 0));
+
+    const avancePuntoVes = Math.max(serverPuntoVes, shiftDivisaOps.reduce((acc, op) => {
+      const isVentaEfectivo = op.tipo_operacion === 'VENTA_EFECTIVO' || String(op.descripcion || '').includes('[VENTA EFECTIVO]');
+      const isPunto = op.metodo_cobro === 'PUNTO' || op.metodo_pago === 'PUNTO' || String(op.descripcion || '').includes('PUNTO');
+      if (isVentaEfectivo && isPunto) {
+        return acc + (op.monto_digital_cobrado_ves || op.monto_ves || op.ves || 0);
+      }
+      return acc;
+    }, 0));
+
+    const avancePagoMovilVes = Math.max(serverPagoMovilVes, shiftDivisaOps.reduce((acc, op) => {
+      const isVentaEfectivo = op.tipo_operacion === 'VENTA_EFECTIVO' || String(op.descripcion || '').includes('[VENTA EFECTIVO]');
+      const isPagoMovil = op.metodo_cobro === 'PAGO_MOVIL' || op.metodo_pago === 'PAGO_MOVIL' || String(op.descripcion || '').includes('PAGO MÓVIL') || String(op.descripcion || '').includes('PAGO_MOVIL');
+      if (isVentaEfectivo && isPagoMovil) {
+        return acc + (op.monto_digital_cobrado_ves || op.monto_ves || op.ves || 0);
+      }
+      return acc;
+    }, 0));
+
+    const avanceComisionTotalVes = shiftDivisaOps.reduce((acc, op) => {
+      if (op.tipo_operacion === 'VENTA_EFECTIVO') {
+        return acc + (op.comision_monto_ves || 0);
+      }
+      return acc;
+    }, 0);
+
+    const avanceComisionTotalUsd = shiftDivisaOps.reduce((acc, op) => {
+      if (op.tipo_operacion === 'VENTA_EFECTIVO') {
+        return acc + (op.comision_monto_usd || 0);
+      }
+      return acc;
+    }, 0);
 
     // Detailed metrics calculation
     const aperturaUsd = targetAperturaUsd;
@@ -1696,7 +1785,7 @@ export default function CajaPOS({
     const abonoClientesUsd = abonosEfectivoUsd + abonosEfectivoBsUsd + abonosBiopagoUsd + abonosPagoMovilUsd + abonosPuntoUsd + abonosZelleUsd + abonosBinanceUsd + abonosPayPalUsd;
 
     const entradaEfectivoUsd = targetEntradaUsd;
-    const entradaEfectivoVes = targetEntradaVes;
+    const entradaEfectivoVes = Math.max(0, targetEntradaVes - (avanceBiopagoVes + avancePuntoVes + avancePagoMovilVes));
     const salidaEfectivoUsd = targetSalidaUsd;
     const salidaEfectivoVes = targetSalidaVes;
     const devolucionEfectivoUsd = targetDevolucionUsd;
@@ -1777,7 +1866,7 @@ export default function CajaPOS({
     const pagosBiopagoVes = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
       return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Biopago' ? a + getPayVes(p) : a, 0);
-    }, 0) + abonosBiopagoVes;
+    }, 0) + abonosBiopagoVes + avanceBiopagoVes;
 
     const pagosPagoMovilUsd = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
@@ -1787,7 +1876,7 @@ export default function CajaPOS({
     const pagosPagoMovilVes = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
       return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'PagoMovil' ? a + getPayVes(p) : a, 0);
-    }, 0) + abonosPagoMovilVes;
+    }, 0) + abonosPagoMovilVes + avancePagoMovilVes;
 
     const pagosPuntoUsd = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
@@ -1797,7 +1886,7 @@ export default function CajaPOS({
     const pagosPuntoVes = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
       return acc + (sale.pagos || []).reduce((a, p) => (p.metodo === 'Tarjeta$' || p.metodo === 'TarjetaBs') ? a + getPayVes(p) : a, 0);
-    }, 0) + abonosPuntoVes;
+    }, 0) + abonosPuntoVes + avancePuntoVes;
     
     const pagosTarjetaUsd = pagosEfectivoBsUsd; 
     const pagosCreditoUsd = targetShiftSales.reduce((acc, sale) => {
@@ -1961,7 +2050,9 @@ export default function CajaPOS({
       pagosPuntosUsd,
       devolucionVentasUsd,
       devolucionVentasVes,
-      ventaTotalUsd
+      ventaTotalUsd,
+      ventaEfectivoComisionVes: avanceComisionTotalVes,
+      ventaEfectivoComisionUsd: avanceComisionTotalUsd
     };
 
     setCierreResult(localCierreResult);
@@ -2605,9 +2696,10 @@ export default function CajaPOS({
           </div>
         </div>
 
-        {/* CONTROLS BUTTONS GRID */}
+        {/* CONTROLS BUTTONS GRID - 3 ROWS X 2 COLUMNS */}
         <div className="grid grid-cols-2 gap-1.5">
           
+          {/* FILA 1: Movimiento Caja y Cierre de Caja */}
           <button
             onClick={() => setShowMovementsModal(true)}
             disabled={!cajaAbierta}
@@ -2626,6 +2718,7 @@ export default function CajaPOS({
             Cierre de Caja
           </button>
 
+          {/* FILA 2: Entrada Rápida y Abono Cliente */}
           <button
             onClick={() => {
               setEntradaBarcode('');
@@ -2655,14 +2748,28 @@ export default function CajaPOS({
             Abono Cliente
           </button>
 
+          {/* FILA 3: Devolución de Producto y Cambio / Venta Efectivo */}
           <button
             onClick={handleOpenDevolucion}
             disabled={!cajaAbierta}
-            className="col-span-2 flex items-center justify-center py-2.5 px-3 bg-white border border-slate-200 rounded-lg hover:border-slate-350 hover:bg-slate-50 transition-all gap-1.5 text-center text-[11.5px] font-sans font-bold text-slate-700 shadow-sm disabled:opacity-40"
+            className="flex flex-col items-center justify-center py-2.5 px-2 bg-white border border-slate-200 rounded-lg hover:border-slate-350 hover:bg-slate-50 transition-all gap-1.5 text-center text-[11.5px] font-sans font-bold text-slate-700 shadow-sm disabled:opacity-40"
             title="Registrar devolución de algún producto vendido"
           >
             <RotateCcw className="w-[17px] h-[17px] text-rose-500" />
             Devolución de Producto (Ticket)
+          </button>
+
+          <button
+            onClick={() => setShowCambioDivisasModal(true)}
+            disabled={!cajaAbierta}
+            className="flex flex-col items-center justify-center py-2.5 px-2 bg-white border border-slate-200 rounded-lg hover:border-slate-350 hover:bg-slate-50 transition-all gap-1 text-center text-[11px] font-sans font-bold text-slate-700 shadow-sm disabled:opacity-40"
+            title="Cambio de divisas ($/€) y Venta de efectivo en Bs con comisión"
+          >
+            <div className="flex items-center gap-1">
+              <RefreshCw className="w-3.5 h-3.5 text-emerald-600" />
+              <Coins className="w-3.5 h-3.5 text-indigo-600" />
+            </div>
+            Cambio / Venta Efectivo
           </button>
 
         </div>
@@ -4219,6 +4326,12 @@ export default function CajaPOS({
                         <span>UTILIDAD BRUTA (SUBTOTAL):</span>
                         <span className="text-base font-black">$ {(cierreResult.utilidadUsd ?? ((cierreResult.ventaTotalUsd ?? 0) - (cierreResult.costoTotalUsd ?? 0))).toFixed(2)}</span>
                       </div>
+                      {(cierreResult.ventaEfectivoComisionVes ?? 0) > 0 && (
+                        <div className="flex justify-between font-mono text-emerald-900 font-extrabold bg-emerald-100/70 p-1.5 rounded border border-emerald-300">
+                          <span>Comisiones Venta Efectivo:</span>
+                          <span>+ Bs {cierreResult.ventaEfectivoComisionVes!.toFixed(2)} (${(cierreResult.ventaEfectivoComisionUsd ?? 0).toFixed(2)})</span>
+                        </div>
+                      )}
                       {(cierreResult.ventaTotalUsd ?? 0) > (cierreResult.ventaBrutaUsd ?? 0) && (
                         <div className="flex justify-between text-slate-500 font-mono text-[9.5px] mt-0.5 italic pt-1 border-t border-dashed border-emerald-200">
                           <span>Total Facturado (con IVA):</span>
@@ -5186,6 +5299,16 @@ export default function CajaPOS({
         </div>
       )}
 
+      {/* MODAL CAMBIO DE DIVISAS Y VENTA DE EFECTIVO */}
+      <CambioDivisasModal
+        isOpen={showCambioDivisasModal}
+        onClose={() => setShowCambioDivisasModal(false)}
+        tasaDia={tasaDia}
+        bcvRateUSD={tasaDia}
+        currentUser={currentUser}
+        companyConfig={companyConfig}
+        onProcessOperation={handleProcessDivisaOperation}
+      />
     </div>
   );
 }
