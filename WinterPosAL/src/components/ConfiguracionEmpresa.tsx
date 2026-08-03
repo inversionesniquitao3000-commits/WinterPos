@@ -4,7 +4,7 @@ import {
   Save, CheckCircle2, Users, HardDrive, Cpu, 
   Trash2, Edit, Plus, Download, Upload, ShieldAlert,
   Settings, CheckSquare, Square, Globe, ShieldCheck, Printer, FileText,
-  LogOut, Unplug
+  LogOut, Unplug, KeyRound, Lock, Eye, EyeOff
 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr } from '../utils';
@@ -15,7 +15,7 @@ interface ConfiguracionEmpresaProps {
   currentUser: User;
   getApiUrl: (path: string) => string;
   onReloadUsers?: () => void;
-  onWipeData?: (mode: 'inventory' | 'sales' | 'clients' | 'all' | 'stock' | 'client_balances') => void;
+  onWipeData?: (mode: 'inventory' | 'sales' | 'clients' | 'all' | 'stock' | 'client_balances' | 'accionistas') => void;
 }
 
 const MODULOS_PERMISOS = [
@@ -113,7 +113,15 @@ export default function ConfiguracionEmpresa({
   const { showAlert, showConfirm } = useDialog();
   // Navigation tabs
   const [activeTab, setActiveTab] = useState<'empresa' | 'usuarios' | 'perifericos' | 'db' | 'whatsapp'>('empresa');
-  const [subTabUsers, setSubTabUsers] = useState<'users' | 'roles' | 'sesiones' | 'politicas'>('users');
+  const [subTabUsers, setSubTabUsers] = useState<'users' | 'roles' | 'sesiones' | 'politicas' | 'masterpass'>('users');
+  // Master Pass state
+  const [mpCurrentPass, setMpCurrentPass] = useState('');
+  const [mpNewPass, setMpNewPass] = useState('');
+  const [mpConfirmPass, setMpConfirmPass] = useState('');
+  const [mpShowCurrent, setMpShowCurrent] = useState(false);
+  const [mpShowNew, setMpShowNew] = useState(false);
+  const [mpMessage, setMpMessage] = useState<{type: 'success' | 'error'; text: string} | null>(null);
+  const [mpLoading, setMpLoading] = useState(false);
   const [activeSessionsList, setActiveSessionsList] = useState<any[]>([]);
   const [activeGuideModule, setActiveGuideModule] = useState<string>('inventario');
   const [onlyClientBalances, setOnlyClientBalances] = useState(false);
@@ -290,6 +298,30 @@ export default function ConfiguracionEmpresa({
   const [backupSpecificDate, setBackupSpecificDate] = useState(() => {
     return localStorage.getItem('pos_backup_specific_date') || '';
   });
+  const [backupDir, setBackupDir] = useState(() => {
+    return localStorage.getItem('pos_backup_dir') || '';
+  });
+
+  useEffect(() => {
+    if (activeTab === 'db') {
+      fetch(getApiUrl('/db/backup/schedule'))
+        .then(res => res.json())
+        .then(data => {
+          if (data) {
+            if (data.schedule) setDbBackupSchedule(data.schedule);
+            if (data.hour) setBackupHour(data.hour);
+            if (data.specificDate) setBackupSpecificDate(data.specificDate);
+            if (data.backupDir) {
+              setBackupDir(data.backupDir);
+              localStorage.setItem('pos_backup_dir', data.backupDir);
+            } else if (data.defaultBackupDir) {
+              setBackupDir(data.defaultBackupDir);
+            }
+          }
+        })
+        .catch(_ => {});
+    }
+  }, [activeTab]);
 
   // Fetch users & roles list
   const fetchUsersAndRoles = async () => {
@@ -701,7 +733,7 @@ export default function ConfiguracionEmpresa({
   };
 
   // DB Admin Handlers
-  const handleWipeDb = async (mode: 'inventory' | 'sales' | 'clients' | 'all' | 'stock' | 'client_balances') => {
+  const handleWipeDb = async (mode: 'inventory' | 'sales' | 'clients' | 'all' | 'stock' | 'client_balances' | 'accionistas') => {
     if (!dbConfirmWord.trim().toUpperCase().includes('CONFIRMAR')) {
       showAlert('Debe escribir la palabra de seguridad "CONFIRMAR" para poder procesar la limpieza.', 'Palabra de Seguridad Incorrecta', 'error');
       return;
@@ -713,6 +745,7 @@ export default function ConfiguracionEmpresa({
     else if (mode === 'sales') confirmMsg = '¿ESTÁ TOTALMENTE SEGURO de vaciar el historial de ventas, correlativos de facturas y cierres de caja?';
     else if (mode === 'clients') confirmMsg = '¿ESTÁ TOTALMENTE SEGURO de vaciar la lista de clientes registrados?';
     else if (mode === 'client_balances') confirmMsg = '¿ESTÁ TOTALMENTE SEGURO de reiniciar a cero los saldos pendientes de los clientes y vaciar el historial de abonos? Se conservará la lista de clientes.';
+    else if (mode === 'accionistas') confirmMsg = '¿ESTÁ TOTALMENTE SEGURO de vaciar el módulo de accionistas e inversiones? Todos los accionistas y montos ingresados quedarán en cero (0).';
     else if (mode === 'all') confirmMsg = '⚠️ ADVERTENCIA CRÍTICA: Se formateará e inicializará el sistema por completo. Todo quedará en blanco. ¿Continuar?';
 
     const ok = await showConfirm(confirmMsg, 'Confirmar Limpieza del Sistema', { confirmLabel: 'Sí, Limpiar', isDanger: true });
@@ -767,7 +800,8 @@ export default function ConfiguracionEmpresa({
           wipeSales: mode === 'sales' || mode === 'all',
           wipeClients: mode === 'clients' || mode === 'all',
           wipeClientBalancesOnly: mode === 'client_balances',
-          wipeStock: mode === 'stock'
+          wipeStock: mode === 'stock',
+          wipeAccionistas: mode === 'accionistas' || mode === 'all'
         })
       });
 
@@ -852,11 +886,18 @@ export default function ConfiguracionEmpresa({
     localStorage.setItem('pos_backup_schedule', dbBackupSchedule);
     localStorage.setItem('pos_backup_hour', backupHour);
     localStorage.setItem('pos_backup_specific_date', backupSpecificDate);
+    if (backupDir) localStorage.setItem('pos_backup_dir', backupDir);
+
     try {
       const res = await fetch(getApiUrl('/db/backup/schedule'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ schedule: dbBackupSchedule, hour: backupHour, specificDate: backupSpecificDate })
+        body: JSON.stringify({ 
+          schedule: dbBackupSchedule, 
+          hour: backupHour, 
+          specificDate: backupSpecificDate,
+          backupDir: backupDir 
+        })
       });
       if (res.ok) {
         const scheduleLabel = dbBackupSchedule === 'Especifico'
@@ -1219,6 +1260,17 @@ export default function ConfiguracionEmpresa({
                 <Settings className="w-4 h-4 text-winter-configStart" />
                 Políticas de Multisesión
               </button>
+              <button
+                onClick={() => setSubTabUsers('masterpass')}
+                className={`pb-1 text-xs font-bold font-sans transition-all flex items-center gap-1.5 ${
+                  subTabUsers === 'masterpass'
+                    ? 'border-b-2 border-amber-500 text-amber-700 font-extrabold'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                <KeyRound className="w-4 h-4 text-amber-500" />
+                Master Pass
+              </button>
             </div>
 
             {/* SUBTAB: USERS LIST */}
@@ -1529,6 +1581,142 @@ export default function ConfiguracionEmpresa({
                     >
                       {formData.compartir_apertura_caja !== false ? '🔗 Compartir Misma Caja (Habilitado)' : '🔒 Apertura Independiente por Estación'}
                     </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* SUBTAB: MASTER PASS */}
+            {subTabUsers === 'masterpass' && (
+              <div className="bg-white border border-amber-200 rounded-xl p-6 shadow-sm space-y-5 font-sans">
+                <div className="border-b border-amber-100 pb-4 flex items-center gap-3">
+                  <div className="p-2 bg-amber-50 border border-amber-200 rounded-xl">
+                    <KeyRound className="w-5 h-5 text-amber-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-800 uppercase">
+                      Configuración de Clave Master Pass — Módulo Inversiones y Accionistas
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Esta clave protege el acceso al módulo privado de Control de Inversiones. Solo administradores pueden modificarla. La clave por defecto inicial es <strong className="font-mono">1234</strong>.
+                    </p>
+                  </div>
+                </div>
+
+                {mpMessage && (
+                  <div className={`px-4 py-3 rounded-lg text-xs flex items-center gap-2 font-medium ${
+                    mpMessage.type === 'success'
+                      ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+                      : 'bg-red-50 border border-red-200 text-red-800'
+                  }`}>
+                    {mpMessage.type === 'success' ? '✅' : '⚠️'} {mpMessage.text}
+                  </div>
+                )}
+
+                <div className="max-w-md space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide flex items-center gap-1">
+                      <Lock className="w-3.5 h-3.5" /> Clave Actual (verificación):
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={mpShowCurrent ? 'text' : 'password'}
+                        value={mpCurrentPass}
+                        onChange={(e) => setMpCurrentPass(e.target.value)}
+                        placeholder="Ingrese la clave actual"
+                        className="w-full border border-slate-300 focus:border-amber-400 focus:ring-1 focus:ring-amber-300 rounded-lg px-3 py-2.5 text-sm font-mono outline-none transition-all pr-10"
+                      />
+                      <button type="button" onClick={() => setMpShowCurrent(!mpShowCurrent)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                        {mpShowCurrent ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide flex items-center gap-1">
+                      <KeyRound className="w-3.5 h-3.5 text-amber-500" /> Nueva Clave Master Pass:
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={mpShowNew ? 'text' : 'password'}
+                        value={mpNewPass}
+                        onChange={(e) => setMpNewPass(e.target.value)}
+                        placeholder="Nueva clave de acceso"
+                        className="w-full border border-slate-300 focus:border-amber-400 focus:ring-1 focus:ring-amber-300 rounded-lg px-3 py-2.5 text-sm font-mono outline-none transition-all pr-10"
+                      />
+                      <button type="button" onClick={() => setMpShowNew(!mpShowNew)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                        {mpShowNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide">
+                      Confirmar Nueva Clave:
+                    </label>
+                    <input
+                      type="password"
+                      value={mpConfirmPass}
+                      onChange={(e) => setMpConfirmPass(e.target.value)}
+                      placeholder="Repita la nueva clave"
+                      className="w-full border border-slate-300 focus:border-amber-400 focus:ring-1 focus:ring-amber-300 rounded-lg px-3 py-2.5 text-sm font-mono outline-none transition-all"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={mpLoading || !isAdmin}
+                    onClick={async () => {
+                      setMpMessage(null);
+                      if (!mpCurrentPass.trim()) {
+                        setMpMessage({ type: 'error', text: 'Debe ingresar la clave actual para verificación.' });
+                        return;
+                      }
+                      if (!mpNewPass.trim()) {
+                        setMpMessage({ type: 'error', text: 'La nueva clave no puede estar vacía.' });
+                        return;
+                      }
+                      if (mpNewPass !== mpConfirmPass) {
+                        setMpMessage({ type: 'error', text: 'La nueva clave y la confirmación no coinciden.' });
+                        return;
+                      }
+                      setMpLoading(true);
+                      try {
+                        const res = await fetch(getApiUrl('/config/master-pass'), {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ currentPass: mpCurrentPass, newPass: mpNewPass })
+                        });
+                        const data = await res.json();
+                        if (res.ok && data.success) {
+                          setMpMessage({ type: 'success', text: 'Clave Master Pass actualizada exitosamente.' });
+                          setMpCurrentPass(''); setMpNewPass(''); setMpConfirmPass('');
+                        } else {
+                          setMpMessage({ type: 'error', text: data.message || 'No se pudo actualizar la clave.' });
+                        }
+                      } catch {
+                        setMpMessage({ type: 'error', text: 'Error de conexión con el servidor.' });
+                      } finally {
+                        setMpLoading(false);
+                      }
+                    }}
+                    className={`w-full py-2.5 rounded-xl font-bold text-xs uppercase tracking-wide transition-all flex items-center justify-center gap-2 shadow-sm ${
+                      !isAdmin ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-amber-500 hover:bg-amber-600 text-white'
+                    }`}
+                  >
+                    <KeyRound className="w-4 h-4" />
+                    {mpLoading ? 'Actualizando...' : 'Actualizar Clave Master Pass'}
+                  </button>
+
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 space-y-1">
+                    <div className="font-bold">⚠️ Información de Seguridad:</div>
+                    <ul className="list-disc pl-4 space-y-0.5 text-amber-700">
+                      <li>La clave por defecto inicial es: <strong className="font-mono">1234</strong></li>
+                      <li>Esta clave se solicita cada vez que el Administrador abre el Módulo de Inversiones y Accionistas.</li>
+                      <li>Comparta esta clave solo con personas de máxima confianza.</li>
+                    </ul>
                   </div>
                 </div>
               </div>
@@ -2067,10 +2255,23 @@ export default function ConfiguracionEmpresa({
                   </button>
                 </div>
 
+                <div className="border border-slate-200 rounded-lg p-4 space-y-3 flex flex-col justify-between">
+                  <div>
+                    <span className="font-bold text-slate-700 block">Vaciar Módulo de Accionistas e Inversiones</span>
+                    <p className="text-[10px] text-slate-500 font-sans">Elimina todos los accionistas registrados y sus aportes de capital, dejando el módulo de inversiones en cero (0).</p>
+                  </div>
+                  <button
+                    onClick={() => handleWipeDb('accionistas')}
+                    className="w-full bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 py-2 rounded font-bold font-sans text-xs transition-all"
+                  >
+                    Borrar Módulo de Accionistas
+                  </button>
+                </div>
+
                 <div className="border border-red-200 bg-red-50/20 rounded-lg p-4 space-y-3 flex flex-col justify-between">
                   <div>
                     <span className="font-bold text-red-700 block">⚠️ Limpieza General (Dejar en Blanco)</span>
-                    <p className="text-[10px] text-slate-500 font-sans">Elimina toda la información general: productos, clientes, ventas, abonos y cierres, listos para empezar una nueva instalación.</p>
+                    <p className="text-[10px] text-slate-500 font-sans">Elimina toda la información general: productos, clientes, ventas, abonos, accionistas y cierres, listos para empezar una nueva instalación.</p>
                   </div>
                   <button
                     onClick={() => handleWipeDb('all')}
@@ -2182,6 +2383,36 @@ export default function ConfiguracionEmpresa({
                     <p className="text-[10px] text-slate-400 font-sans">El servidor ejecutará el respaldo a esta hora local.</p>
                   </div>
                 )}
+              </div>
+
+              {/* Ruta / Carpeta de guardado */}
+              <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-100">
+                <label className="text-[10px] font-bold font-sans uppercase text-slate-500 tracking-wide flex items-center gap-1">
+                  <span>📁</span> Carpeta / Ruta de Guardado de la Copia de Seguridad
+                </label>
+                <div className="relative flex items-center">
+                  <input
+                    type="text"
+                    value={backupDir}
+                    onChange={(e) => setBackupDir(e.target.value)}
+                    placeholder="Ej: C:\Backups_WinterPos o ./data/backups"
+                    className="bg-slate-50 border border-slate-300 rounded-lg p-2.5 pl-3 pr-24 text-xs font-mono text-slate-800 focus:bg-white focus:border-amber-500 focus:outline-none w-full"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      fetch(getApiUrl('/db/backup/schedule'))
+                        .then(r => r.json())
+                        .then(d => { if (d.defaultBackupDir) setBackupDir(d.defaultBackupDir); });
+                    }}
+                    className="absolute right-2 text-[10px] font-sans font-bold text-amber-700 hover:text-amber-800 bg-amber-100 hover:bg-amber-200 px-2 py-1 rounded transition-colors"
+                  >
+                    Por Defecto
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-400 font-sans">
+                  Las copias de seguridad automáticas se guardarán en esta carpeta del servidor local.
+                </p>
               </div>
 
               {/* Fecha específica (calendario) — solo cuando se elige "Especifico" */}

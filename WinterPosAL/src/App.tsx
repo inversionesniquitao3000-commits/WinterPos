@@ -24,9 +24,11 @@ import ConfiguracionEmpresa from './components/ConfiguracionEmpresa';
 import VentasHistorico from './components/VentasHistorico';
 import LicenciaModal from './components/LicenciaModal';
 import ErrorBoundary from './components/ErrorBoundary';
+import { MasterPassModal } from './components/MasterPassModal';
+import { InversionesModulo } from './components/InversionesModulo';
 import { 
   ShoppingBag, Package, Users, 
-  TrendingUp, Settings, LogOut, Globe, Cpu, History, Printer, CheckCircle2, ShieldCheck
+  TrendingUp, Settings, LogOut, Globe, Cpu, History, Printer, CheckCircle2, ShieldCheck, Briefcase
 } from 'lucide-react';
 import { printTicketReceipt } from './utils';
 
@@ -197,9 +199,13 @@ export default function App() {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [sessionNotice, setSessionNotice] = useState<string>('');
 
-  // Active Pestaña Tab F1-F10
-  const [activeTab, setActiveTab] = useState<'caja' | 'inventario' | 'ventas' | 'clientes' | 'tasa' | 'config'>('caja');
+  // Active Pestaña Tab F1-F10 + Inversiones
+  const [activeTab, setActiveTab] = useState<'caja' | 'inventario' | 'ventas' | 'clientes' | 'tasa' | 'config' | 'inversiones'>('caja');
   const [users, setUsers] = useState<User[]>(mockUsers);
+  // Inversiones module: Master Pass modal guard + persistent sub-tab
+  const [showMasterPassModal, setShowMasterPassModal] = useState(false);
+  const [inversionesUnlocked, setInversionesUnlocked] = useState(false);
+  const [inversionesSubTab, setInversionesSubTab] = useState<'matriz' | 'historial' | 'utilidades' | 'accionistas'>('matriz');
 
   // Sync to localStorage
   useEffect(() => {
@@ -2239,6 +2245,28 @@ export default function App() {
             F10 Config.
           </button>
         )}
+
+        {/* Inversiones & Accionistas - Solo Administrador, con protección Master Pass */}
+        {currentUser && currentUser.rol === 'administrador' && (
+          <button
+            onClick={() => {
+              if (inversionesUnlocked) {
+                setActiveTab('inversiones');
+              } else {
+                setShowMasterPassModal(true);
+              }
+            }}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
+              activeTab === 'inversiones'
+                ? 'tab-grad-inversiones text-white shadow'
+                : 'text-amber-400 hover:text-white hover:bg-amber-900/30 border border-amber-700/40 hover:border-amber-500'
+            }`}
+            title="Módulo de Control de Inversiones y Accionistas (Solo Administrador)"
+          >
+            <Briefcase className="w-4 h-4" />
+            Inversiones
+          </button>
+        )}
       </nav>
 
       {/* MAIN CONTENT AREA */}
@@ -2432,6 +2460,18 @@ export default function App() {
               }}
             />
           )}
+
+          {/* TAB: INVERSIONES & ACCIONISTAS - Solo Administrador */}
+          {activeTab === 'inversiones' && currentUser && currentUser.rol === 'administrador' && (
+            <InversionesModulo
+              isOpen={true}
+              onClose={() => setActiveTab('caja')}
+              currentUser={currentUser}
+              inline={true}
+              subTab={inversionesSubTab}
+              onSubTabChange={setInversionesSubTab}
+            />
+          )}
         </div>
       </main>
 
@@ -2614,6 +2654,17 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* MASTER PASS MODAL - Guards Inversiones Tab access */}
+      <MasterPassModal
+        isOpen={showMasterPassModal}
+        onClose={() => setShowMasterPassModal(false)}
+        onSuccess={() => {
+          setShowMasterPassModal(false);
+          setInversionesUnlocked(true);
+          setActiveTab('inversiones');
+        }}
+      />
 
     </div>
   );

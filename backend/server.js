@@ -8,7 +8,8 @@ import {
   getSales, saveSale, getCierres, abrirCaja, cerrarCaja, getCajaEstado, registrarCajaMovimiento, updateCierre, deleteCierre,
   updateClient, deleteClient, getAbonos, deleteProduct, updateProduct, saveProductsBulk,
   saveUser, updateUser, deleteUser, getRoles, saveRole, updateRole, deleteRole, wipeDatabase, backupDatabase, restoreDatabase,
-  readJsonFile, writeJsonFile
+  readJsonFile, writeJsonFile,
+  getMasterPass, saveMasterPass, verifyMasterPass, getAccionistas, saveAccionista, deleteAccionista, getInversiones, saveInversion, deleteInversion
 } from './db-store.js';
 
 import { 
@@ -1081,13 +1082,40 @@ app.post('/api/db/restore', async (req, res) => {
   }
 });
 
+app.get('/api/db/backup/schedule', async (req, res) => {
+  try {
+    const defaultDir = path.resolve('./data/backups');
+    const sched = readJsonFile('backup_schedule.json', { 
+      schedule: 'Diario', 
+      hour: '02:00',
+      backupDir: defaultDir, 
+      lastBackup: '' 
+    });
+    if (!sched.backupDir) sched.backupDir = defaultDir;
+    res.json({ ...sched, defaultBackupDir: defaultDir });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/db/backup/schedule', async (req, res) => {
   try {
-    const { schedule } = req.body;
+    const { schedule, hour, specificDate, backupDir } = req.body;
+    const defaultDir = path.resolve('./data/backups');
     const sched = readJsonFile('backup_schedule.json', { schedule: 'Diario', lastBackup: '' });
-    sched.schedule = schedule;
+    
+    if (schedule !== undefined) sched.schedule = schedule;
+    if (hour !== undefined) sched.hour = hour;
+    if (specificDate !== undefined) sched.specificDate = specificDate;
+    if (backupDir !== undefined) sched.backupDir = backupDir.trim() || defaultDir;
+    
+    const targetDir = sched.backupDir || defaultDir;
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+    
     writeJsonFile('backup_schedule.json', sched);
-    res.json({ success: true });
+    res.json({ success: true, config: sched });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1101,6 +1129,7 @@ if (!fs.existsSync(BACKUPS_DIR)) {
 
 async function runBackupTask() {
   try {
+    const defaultDir = path.resolve('./data/backups');
     const sched = readJsonFile('backup_schedule.json', { schedule: 'Diario', lastBackup: '' });
     if (sched.schedule === 'Desactivado') return;
 
@@ -1112,7 +1141,7 @@ async function runBackupTask() {
     } else {
       const last = new Date(sched.lastBackup);
       const diffMs = now.getTime() - last.getTime();
-      const diffHours = diffMs / (1000 * 60 * 65); // approximate checking buffer
+      const diffHours = diffMs / (1000 * 60 * 60);
 
       if (sched.schedule === 'Diario' && diffHours >= 23.5) {
         shouldBackup = true;
@@ -1124,14 +1153,18 @@ async function runBackupTask() {
     }
 
     if (shouldBackup) {
-      console.log(`⏱️ [Backups] Iniciando copia de seguridad automática programada (${sched.schedule})...`);
+      const saveDir = sched.backupDir || defaultDir;
+      if (!fs.existsSync(saveDir)) {
+        fs.mkdirSync(saveDir, { recursive: true });
+      }
+      console.log(`⏱️ [Backups] Iniciando copia de seguridad automática programada (${sched.schedule}) en "${saveDir}"...`);
       const backupData = await backupDatabase();
       const fileName = `backup_auto_${now.toISOString().split('T')[0]}_${now.getTime()}.json`;
-      fs.writeFileSync(path.join(BACKUPS_DIR, fileName), JSON.stringify(backupData, null, 2), 'utf8');
+      fs.writeFileSync(path.join(saveDir, fileName), JSON.stringify(backupData, null, 2), 'utf8');
       
       sched.lastBackup = now.toISOString();
       writeJsonFile('backup_schedule.json', sched);
-      console.log(`✅ [Backups] Backup automático guardado correctamente: ${fileName}`);
+      console.log(`✅ [Backups] Backup automático guardado correctamente: ${path.join(saveDir, fileName)}`);
     }
   } catch (err) {
     console.error('⚠️ [Backups] Error en backup automático:', err.message);
@@ -1190,6 +1223,115 @@ app.post('/api/whatsapp/send-cierre', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('Error en /api/whatsapp/send-cierre:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// MASTER PASS & INVERSIONES DE ACCIONISTAS ENDPOINTS
+// -------------------------------------------------------------
+app.get('/api/config/master-pass', async (req, res) => {
+  try {
+    const masterPass = await getMasterPass();
+    res.json({ configured: true, masterPass });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/config/master-pass', async (req, res) => {
+  try {
+    const { currentPass, newPass } = req.body;
+    const isValid = await verifyMasterPass(currentPass);
+    if (!isValid) {
+      return res.status(401).json({ success: false, message: 'La clave Master Pass actual es incorrecta.' });
+    }
+    if (!newPass || newPass.trim().length === 0) {
+      return res.status(400).json({ success: false, message: 'La nueva clave Master Pass no puede estar vacía.' });
+    }
+    await saveMasterPass(newPass.trim());
+    res.json({ success: true, message: 'Clave Master Pass actualizada exitosamente.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/config/verify-master-pass', async (req, res) => {
+  try {
+    const { masterPass } = req.body;
+    const isValid = await verifyMasterPass(masterPass);
+    if (isValid) {
+      res.json({ success: true, message: 'Clave Master Pass autorizada.' });
+    } else {
+      res.status(401).json({ success: false, message: 'Clave Master Pass incorrecta.' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ACCIONISTAS REST API
+app.get('/api/inversiones/accionistas', async (req, res) => {
+  try {
+    const accionistas = await getAccionistas();
+    res.json(accionistas);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/inversiones/accionistas', async (req, res) => {
+  try {
+    const data = req.body;
+    if (!data.nombre || !data.nombre.trim()) {
+      return res.status(400).json({ error: 'El nombre del accionista es requerido.' });
+    }
+    const saved = await saveAccionista(data);
+    res.json(saved);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/inversiones/accionistas/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await deleteAccionista(id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// INVERSIONES REST API
+app.get('/api/inversiones', async (req, res) => {
+  try {
+    const inversiones = await getInversiones();
+    res.json(inversiones);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/inversiones', async (req, res) => {
+  try {
+    const data = req.body;
+    if (!data.accionista_id || !data.fecha || data.monto_usd === undefined) {
+      return res.status(400).json({ error: 'Accionista, fecha y monto son requeridos.' });
+    }
+    const saved = await saveInversion(data);
+    res.json(saved);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/inversiones/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await deleteInversion(id);
+    res.json({ success: true });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

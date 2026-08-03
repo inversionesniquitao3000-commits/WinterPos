@@ -343,3 +343,28 @@ export interface Abono {
   fecha: string;
 }
 
+export interface Accionista {
+  id: number;
+  nombre: string;
+  cedula_rif?: string;
+  telefono?: string;
+  estado: 'Activo' | 'Inactivo';
+  created_at?: string;
+}
+
+export interface InversionAccionista {
+  id: number;
+  accionista_id: number;
+  fecha: string;
+  monto_usd: number;
+  observacion?: string;
+  created_at?: string;
+}
+
+export interface ResumenAccionista {
+  accionista: Accionista;
+  totalInvertido: number;
+  porcentajeParticipacion: number;
+}
+
+

@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS Configuracion_Empresa (
     mensaje_pie_ticket TEXT,
     metodos_pago_activos JSONB NOT NULL DEFAULT '["efectivo_usd", "efectivo_ves", "debito", "pago_movil", "biopago", "credito"]'::jsonb,
     permitir_multisesion BOOLEAN DEFAULT TRUE,
-    compartir_apertura_caja BOOLEAN DEFAULT TRUE
+    compartir_apertura_caja BOOLEAN DEFAULT TRUE,
+    master_pass VARCHAR(255) DEFAULT '1234'
 );
 
 -- ==========================================
@@ -251,3 +252,25 @@ CREATE TABLE IF NOT EXISTS Historial_Precios (
     motivo VARCHAR(255) NOT NULL,
     fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ==========================================
+-- 14. ACCIONISTAS E INVERSIONES DE CAPITAL
+-- ==========================================
+CREATE TABLE IF NOT EXISTS Accionistas (
+    id BIGSERIAL PRIMARY KEY,
+    nombre VARCHAR(150) NOT NULL UNIQUE,
+    cedula_rif VARCHAR(50),
+    telefono VARCHAR(50),
+    estado VARCHAR(10) DEFAULT 'Activo' CHECK (estado IN ('Activo', 'Inactivo')),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS Inversiones_Accionistas (
+    id BIGSERIAL PRIMARY KEY,
+    accionista_id BIGINT NOT NULL REFERENCES Accionistas(id) ON DELETE CASCADE,
+    fecha VARCHAR(50) NOT NULL,
+    monto_usd NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    observacion TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+

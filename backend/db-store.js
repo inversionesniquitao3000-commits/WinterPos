@@ -122,6 +122,26 @@ try {
     ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(50);
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS permitir_multisesion BOOLEAN DEFAULT TRUE;
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS compartir_apertura_caja BOOLEAN DEFAULT TRUE;
+    ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS master_pass VARCHAR(255) DEFAULT '1234';
+
+    CREATE TABLE IF NOT EXISTS Accionistas (
+      id SERIAL PRIMARY KEY,
+      nombre VARCHAR(150) NOT NULL UNIQUE,
+      cedula_rif VARCHAR(50),
+      telefono VARCHAR(50),
+      estado VARCHAR(10) DEFAULT 'Activo',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS Inversiones_Accionistas (
+      id SERIAL PRIMARY KEY,
+      accionista_id INT REFERENCES Accionistas(id) ON DELETE CASCADE,
+      fecha VARCHAR(50) NOT NULL,
+      monto_usd NUMERIC(12,2) NOT NULL DEFAULT 0,
+      observacion TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE SEQUENCE IF NOT EXISTS seq_factura START WITH 1;
     UPDATE Cajas_Apertura_Cierre 
     SET estatus = 'Cerrada', fecha_cierre = CURRENT_TIMESTAMP 
@@ -173,7 +193,28 @@ try {
   }
   
   console.log('📋 Migración de base de datos PostgreSQL completada (columnas de cierres verificadas).');
-  
+
+  // Sync master_pass from config.json → PG (one-time migration if DB column is NULL)
+  try {
+    const mpRow = await client.query('SELECT id, master_pass FROM Configuracion_Empresa ORDER BY id DESC LIMIT 1');
+    if (mpRow.rowCount > 0 && !mpRow.rows[0].master_pass) {
+      const jsonPath = path.join(path.resolve('./data'), 'config.json');
+      let jsonPass = '1234';
+      if (fs.existsSync(jsonPath)) {
+        try {
+          const jsonData = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+          if (jsonData.master_pass) jsonPass = jsonData.master_pass;
+        } catch (_) {}
+      }
+      await client.query('UPDATE Configuracion_Empresa SET master_pass = $1 WHERE id = $2', [jsonPass, mpRow.rows[0].id]);
+      console.log(`🔑 Master Pass sincronizado a PostgreSQL: (valor restaurado desde respaldo).`);
+    } else if (mpRow.rowCount > 0) {
+      console.log(`🔑 Master Pass ya configurado en PostgreSQL.`);
+    }
+  } catch (mpErr) {
+    console.warn('⚠️ No se pudo sincronizar master_pass:', mpErr.message);
+  }
+
   client.release();
 } catch (err) {
   console.warn('⚠️ No se pudo conectar a PostgreSQL. Usando almacenamiento JSON local centralizado en el servidor.');
@@ -1169,6 +1210,11 @@ export async function wipeDatabase(options) {
         await pool.query("UPDATE Clientes SET credito_disponible = limite_credito");
         writeJsonFile('abonos.json', []);
       }
+      if (options.wipeAccionistas) {
+        await pool.query('TRUNCATE TABLE Accionistas, Inversiones_Accionistas RESTART IDENTITY CASCADE');
+        writeJsonFile('accionistas.json', []);
+        writeJsonFile('inversiones.json', []);
+      }
       if (isFullWipe) {
         // Clear users except admin
         await pool.query("DELETE FROM Usuarios WHERE usuario <> 'admin'");
@@ -1178,6 +1224,10 @@ export async function wipeDatabase(options) {
         await pool.query(`UPDATE Configuracion_Empresa SET 
           rif = '', nombre_comercio = '', direccion = '', telefono = '', 
           correo = '', mensaje_pie_ticket = '', metodos_pago_activos = '[]'::jsonb`);
+        // Clear shareholders & investments
+        await pool.query('TRUNCATE TABLE Accionistas, Inversiones_Accionistas RESTART IDENTITY CASCADE');
+        writeJsonFile('accionistas.json', []);
+        writeJsonFile('inversiones.json', []);
       }
       return true;
     } catch (err) {
@@ -1224,6 +1274,10 @@ export async function wipeDatabase(options) {
       credito_disponible: c.limite_credito || 0
     }));
     writeJsonFile('clients.json', updatedClients);
+  }
+  if (options.wipeAccionistas || isFullWipe) {
+    writeJsonFile('accionistas.json', []);
+    writeJsonFile('inversiones.json', []);
   }
   if (isFullWipe) {
     // Clear users except admin
@@ -1277,6 +1331,9 @@ export async function backupDatabase() {
     movements: await getMovements(),
     tasas: await getTasaHistory(),
     cierres: await getCierres(),
+    priceHistory: await getPriceHistory(),
+    accionistas: await getAccionistas(),
+    inversiones: await getInversiones(),
     timestamp: new Date().toISOString()
   };
 }
@@ -1284,8 +1341,6 @@ export async function backupDatabase() {
 export async function restoreDatabase(data) {
   if (usePostgres) {
     try {
-      // In Postgres, we'll restore by cleaning tables first, then inserting items
-      // This is a powerful backup utility. Let's make sure it handles clean-up and inserts
       if (data.products) {
         await pool.query('TRUNCATE TABLE Productos RESTART IDENTITY CASCADE');
         for (const p of data.products) {
@@ -1294,11 +1349,12 @@ export async function restoreDatabase(data) {
              precio_costo_usd, precio_detalle_usd, precio_mayor_usd, cantidad_mayorista, exento_impuesto, imagen_url, 
              estado, a_granel, fecha_vencimiento, porcentaje_impuesto) 
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
-            [p.id, p.barcode, p.description, p.category, p.stock_actual, p.stock_minimo,
+            [p.id, p.barcode || p.codigo_barras_clave, p.description || p.descripcion, p.category || p.categoria, p.stock_actual, p.stock_minimo,
              p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.cantidad_mayorista, p.exento_impuesto, p.imagen_url || '',
              p.estado || 'Activo', p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
           );
         }
+        await pool.query("SELECT setval(pg_get_serial_sequence('Productos', 'id'), COALESCE((SELECT MAX(id) FROM Productos), 1))");
       }
       if (data.clients) {
         await pool.query('TRUNCATE TABLE Clientes RESTART IDENTITY CASCADE');
@@ -1309,26 +1365,48 @@ export async function restoreDatabase(data) {
             [c.id, c.cedula_rif, c.nombre, c.telefono || '', c.direccion || '', c.limite_credito, c.credito_disponible, c.porcentaje_descuento, c.estado || 'Activo', c.aplica_precio_costo || false]
           );
         }
+        await pool.query("SELECT setval(pg_get_serial_sequence('Clientes', 'id'), COALESCE((SELECT MAX(id) FROM Clientes), 1))");
       }
       if (data.users) {
         await pool.query('TRUNCATE TABLE Usuarios RESTART IDENTITY CASCADE');
         for (const u of data.users) {
           await pool.query(
             'INSERT INTO Usuarios (id, usuario, nombre, rol, estado, clave, permisos) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-            [u.id, u.usuario, u.nombre, u.rol, u.estado || 'Activo', u.clave || 'admin', JSON.stringify(u.permisos)]
+            [u.id, u.usuario, u.nombre, u.rol, u.estado || 'Activo', u.clave || 'admin', typeof u.permisos === 'string' ? u.permisos : JSON.stringify(u.permisos)]
           );
         }
+        await pool.query("SELECT setval(pg_get_serial_sequence('Usuarios', 'id'), COALESCE((SELECT MAX(id) FROM Usuarios), 1))");
       }
       if (data.roles) {
         await pool.query('TRUNCATE TABLE Roles RESTART IDENTITY CASCADE');
         for (const r of data.roles) {
           await pool.query(
             'INSERT INTO Roles (id, nombre, permisos) VALUES ($1, $2, $3)',
-            [r.id, r.nombre, JSON.stringify(r.permisos)]
+            [r.id, r.nombre, typeof r.permisos === 'string' ? r.permisos : JSON.stringify(r.permisos)]
           );
         }
+        await pool.query("SELECT setval(pg_get_serial_sequence('Roles', 'id'), COALESCE((SELECT MAX(id) FROM Roles), 1))");
       }
-      // Config restore
+      if (data.accionistas) {
+        await pool.query('TRUNCATE TABLE Accionistas RESTART IDENTITY CASCADE');
+        for (const a of data.accionistas) {
+          await pool.query(
+            'INSERT INTO Accionistas (id, nombre, cedula_rif, telefono, estado) VALUES ($1, $2, $3, $4, $5)',
+            [a.id, a.nombre, a.cedula_rif || '', a.telefono || '', a.estado || 'Activo']
+          );
+        }
+        await pool.query("SELECT setval(pg_get_serial_sequence('Accionistas', 'id'), COALESCE((SELECT MAX(id) FROM Accionistas), 1))");
+      }
+      if (data.inversiones) {
+        await pool.query('TRUNCATE TABLE Inversiones_Accionistas RESTART IDENTITY CASCADE');
+        for (const inv of data.inversiones) {
+          await pool.query(
+            'INSERT INTO Inversiones_Accionistas (id, accionista_id, fecha, monto_usd, observacion) VALUES ($1, $2, $3, $4, $5)',
+            [inv.id, inv.accionista_id, inv.fecha, inv.monto_usd, inv.observacion || '']
+          );
+        }
+        await pool.query("SELECT setval(pg_get_serial_sequence('Inversiones_Accionistas', 'id'), COALESCE((SELECT MAX(id) FROM Inversiones_Accionistas), 1))");
+      }
       if (data.config) {
         await saveCompanyConfig(data.config);
       }
@@ -1348,6 +1426,12 @@ export async function restoreDatabase(data) {
   if (data.movements) writeJsonFile('movements.json', data.movements);
   if (data.tasas) writeJsonFile('tasas.json', data.tasas);
   if (data.cierres) writeJsonFile('cierres.json', data.cierres);
+  if (data.priceHistory) {
+    writeJsonFile('price-history.json', data.priceHistory);
+    writeJsonFile('price_history.json', data.priceHistory);
+  }
+  if (data.accionistas) writeJsonFile('accionistas.json', data.accionistas);
+  if (data.inversiones) writeJsonFile('inversiones.json', data.inversiones);
   return true;
 }
 
@@ -2658,5 +2742,304 @@ export async function saveProductsBulk(products) {
   writeJsonFile('products.json', allProducts);
   return savedList;
 }
+
+// ==========================================
+// MASTER PASS & INVERSIONES DE ACCIONISTAS
+// ==========================================
+
+export async function getMasterPass() {
+  if (usePostgres) {
+    try {
+      // Get current master_pass from DB; if NULL set default '1234'
+      const res = await pool.query('SELECT id, master_pass FROM Configuracion_Empresa ORDER BY id DESC LIMIT 1');
+      if (res.rowCount > 0) {
+        const row = res.rows[0];
+        if (!row.master_pass) {
+          // First time: set default
+          await pool.query('UPDATE Configuracion_Empresa SET master_pass = $1 WHERE id = $2', ['1234', row.id]);
+          return '1234';
+        }
+        return row.master_pass;
+      }
+      // No config row at all — should not happen but handle gracefully
+      return '1234';
+    } catch (err) {
+      console.error('Error al obtener master_pass (Postgres):', err.message);
+      throw err;
+    }
+  }
+  // JSON fallback (only if PG not connected)
+  const config = readJsonFile('config.json', mockConfig);
+  return config.master_pass || '1234';
+}
+
+export async function saveMasterPass(newPass) {
+  if (usePostgres) {
+    try {
+      const existing = await pool.query('SELECT id FROM Configuracion_Empresa ORDER BY id DESC LIMIT 1');
+      if (existing.rowCount > 0) {
+        await pool.query('UPDATE Configuracion_Empresa SET master_pass = $1 WHERE id = $2', [newPass, existing.rows[0].id]);
+        console.log(`✅ Master Pass actualizado en PostgreSQL.`);
+        return true;
+      }
+      throw new Error('No existe registro de Configuracion_Empresa en la BD.');
+    } catch (err) {
+      console.error('Error al guardar master_pass (Postgres):', err.message);
+      throw err;
+    }
+  }
+  // JSON fallback (only if PG not connected)
+  const config = readJsonFile('config.json', mockConfig);
+  config.master_pass = newPass;
+  writeJsonFile('config.json', config);
+  return true;
+}
+
+export async function verifyMasterPass(enteredPass) {
+  const currentPass = await getMasterPass();
+  return (enteredPass || '').trim() === (currentPass || '').trim();
+}
+
+// Initial seed data matching Image #1
+const mockAccionistas = [
+  { id: 1, nombre: 'Anderson', cedula_rif: 'V-00000001', telefono: '', estado: 'Activo' },
+  { id: 2, nombre: 'Andrea', cedula_rif: 'V-00000002', telefono: '', estado: 'Activo' },
+  { id: 3, nombre: 'Magaly', cedula_rif: 'V-00000003', telefono: '', estado: 'Activo' },
+  { id: 4, nombre: 'Ines', cedula_rif: 'V-00000004', telefono: '', estado: 'Activo' },
+  { id: 5, nombre: 'Ivan', cedula_rif: 'V-00000005', telefono: '', estado: 'Activo' }
+];
+
+const mockInversiones = [
+  { id: 1, accionista_id: 1, fecha: '2023-01-01', monto_usd: 2295.71, observacion: 'Aporte Consolidado Inicial' },
+  { id: 2, accionista_id: 1, fecha: '2023-01-26', monto_usd: 98.00, observacion: 'Aporte de capital' },
+  { id: 3, accionista_id: 1, fecha: '2023-09-04', monto_usd: 45.50, observacion: 'Aporte de capital' },
+  { id: 4, accionista_id: 1, fecha: '2023-09-30', monto_usd: 100.00, observacion: 'Aporte mensual' },
+
+  { id: 5, accionista_id: 2, fecha: '2023-01-01', monto_usd: 2418.34, observacion: 'Aporte Consolidado Inicial' },
+  { id: 6, accionista_id: 2, fecha: '2023-09-30', monto_usd: 100.00, observacion: 'Aporte mensual' },
+
+  { id: 7, accionista_id: 3, fecha: '2023-01-01', monto_usd: 2926.58, observacion: 'Aporte Consolidado Inicial' },
+  { id: 8, accionista_id: 3, fecha: '2023-09-30', monto_usd: 100.00, observacion: 'Aporte mensual' },
+
+  { id: 9, accionista_id: 4, fecha: '2023-01-01', monto_usd: 1173.73, observacion: 'Aporte Consolidado Inicial' },
+  { id: 10, accionista_id: 4, fecha: '2025-03-04', monto_usd: 200.00, observacion: 'Inversión adicional' },
+  { id: 11, accionista_id: 4, fecha: '2025-03-04', monto_usd: 52.07, observacion: 'Inversión adicional' },
+  { id: 12, accionista_id: 4, fecha: '2026-05-26', monto_usd: 50.00, observacion: 'Aporte de capital' },
+  { id: 13, accionista_id: 4, fecha: '2026-05-26', monto_usd: 30.00, observacion: 'Aporte de capital' },
+
+  { id: 14, accionista_id: 5, fecha: '2023-01-01', monto_usd: 60.00, observacion: 'Aporte Consolidado Inicial' },
+  { id: 15, accionista_id: 5, fecha: '2023-02-19', monto_usd: 5.00, observacion: 'Aporte de capital' },
+  { id: 16, accionista_id: 5, fecha: '2023-04-08', monto_usd: -50.00, observacion: 'Retiro / Ajuste de capital' }
+];
+
+export async function getAccionistas() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query('SELECT * FROM Accionistas ORDER BY id ASC');
+      if (res.rowCount > 0) {
+        return res.rows.map(r => ({
+          ...r,
+          id: Number(r.id)
+        }));
+      } else {
+        for (const a of mockAccionistas) {
+          await pool.query(
+            'INSERT INTO Accionistas (id, nombre, cedula_rif, telefono, estado) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING',
+            [a.id, a.nombre, a.cedula_rif, a.telefono, a.estado]
+          );
+        }
+        await pool.query("SELECT setval(pg_get_serial_sequence('Accionistas', 'id'), 5)");
+        const resSeed = await pool.query('SELECT * FROM Accionistas ORDER BY id ASC');
+        return resSeed.rows.map(r => ({ ...r, id: Number(r.id) }));
+      }
+    } catch (err) {
+      console.error('Error en getAccionistas (Postgres):', err.message);
+    }
+  }
+
+  const list = readJsonFile('accionistas.json', mockAccionistas);
+  if (!list || list.length === 0) {
+    writeJsonFile('accionistas.json', mockAccionistas);
+    return mockAccionistas;
+  }
+  return list;
+}
+
+export async function saveAccionista(data) {
+  if (usePostgres) {
+    try {
+      if (data.id) {
+        const res = await pool.query(
+          'UPDATE Accionistas SET nombre = $1, cedula_rif = $2, telefono = $3, estado = $4 WHERE id = $5 RETURNING *',
+          [data.nombre, data.cedula_rif || '', data.telefono || '', data.estado || 'Activo', data.id]
+        );
+        return { ...res.rows[0], id: Number(res.rows[0].id) };
+      } else {
+        const res = await pool.query(
+          'INSERT INTO Accionistas (nombre, cedula_rif, telefono, estado) VALUES ($1, $2, $3, $4) RETURNING *',
+          [data.nombre, data.cedula_rif || '', data.telefono || '', data.estado || 'Activo']
+        );
+        return { ...res.rows[0], id: Number(res.rows[0].id) };
+      }
+    } catch (err) {
+      console.error('Error en saveAccionista (Postgres):', err.message);
+      throw err;
+    }
+  }
+
+  const list = await getAccionistas();
+  if (data.id) {
+    const idx = list.findIndex(a => a.id === Number(data.id));
+    if (idx !== -1) {
+      list[idx] = { ...list[idx], ...data, id: Number(data.id) };
+    }
+  } else {
+    const newItem = {
+      id: Date.now(),
+      nombre: data.nombre,
+      cedula_rif: data.cedula_rif || '',
+      telefono: data.telefono || '',
+      estado: data.estado || 'Activo'
+    };
+    list.push(newItem);
+    data = newItem;
+  }
+  writeJsonFile('accionistas.json', list);
+  return data;
+}
+
+export async function deleteAccionista(id) {
+  if (usePostgres) {
+    try {
+      await pool.query('DELETE FROM Accionistas WHERE id = $1', [id]);
+      return true;
+    } catch (err) {
+      console.error('Error en deleteAccionista (Postgres):', err.message);
+      throw err;
+    }
+  }
+  const list = await getAccionistas();
+  const updated = list.filter(a => a.id !== Number(id));
+  writeJsonFile('accionistas.json', updated);
+  return true;
+}
+
+export async function getInversiones() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query('SELECT * FROM Inversiones_Accionistas ORDER BY fecha ASC, id ASC');
+      if (res.rowCount > 0) {
+        return res.rows.map(r => ({
+          ...r,
+          id: Number(r.id),
+          accionista_id: Number(r.accionista_id),
+          monto_usd: parseFloat(r.monto_usd)
+        }));
+      } else {
+        await getAccionistas();
+        for (const inv of mockInversiones) {
+          await pool.query(
+            'INSERT INTO Inversiones_Accionistas (id, accionista_id, fecha, monto_usd, observacion) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING',
+            [inv.id, inv.accionista_id, inv.fecha, inv.monto_usd, inv.observacion]
+          );
+        }
+        await pool.query("SELECT setval(pg_get_serial_sequence('Inversiones_Accionistas', 'id'), 16)");
+        const resSeed = await pool.query('SELECT * FROM Inversiones_Accionistas ORDER BY fecha ASC, id ASC');
+        return resSeed.rows.map(r => ({
+          ...r,
+          id: Number(r.id),
+          accionista_id: Number(r.accionista_id),
+          monto_usd: parseFloat(r.monto_usd)
+        }));
+      }
+    } catch (err) {
+      console.error('Error en getInversiones (Postgres):', err.message);
+    }
+  }
+
+  const list = readJsonFile('inversiones.json', mockInversiones);
+  if (!list || list.length === 0) {
+    writeJsonFile('inversiones.json', mockInversiones);
+    return mockInversiones;
+  }
+  return list;
+}
+
+export async function saveInversion(data) {
+  if (usePostgres) {
+    try {
+      if (data.id) {
+        const res = await pool.query(
+          'UPDATE Inversiones_Accionistas SET accionista_id = $1, fecha = $2, monto_usd = $3, observacion = $4 WHERE id = $5 RETURNING *',
+          [data.accionista_id, data.fecha, data.monto_usd, data.observacion || '', data.id]
+        );
+        return {
+          ...res.rows[0],
+          id: Number(res.rows[0].id),
+          accionista_id: Number(res.rows[0].accionista_id),
+          monto_usd: parseFloat(res.rows[0].monto_usd)
+        };
+      } else {
+        const res = await pool.query(
+          'INSERT INTO Inversiones_Accionistas (accionista_id, fecha, monto_usd, observacion) VALUES ($1, $2, $3, $4) RETURNING *',
+          [data.accionista_id, data.fecha, data.monto_usd, data.observacion || '']
+        );
+        return {
+          ...res.rows[0],
+          id: Number(res.rows[0].id),
+          accionista_id: Number(res.rows[0].accionista_id),
+          monto_usd: parseFloat(res.rows[0].monto_usd)
+        };
+      }
+    } catch (err) {
+      console.error('Error en saveInversion (Postgres):', err.message);
+      throw err;
+    }
+  }
+
+  const list = await getInversiones();
+  if (data.id) {
+    const idx = list.findIndex(i => i.id === Number(data.id));
+    if (idx !== -1) {
+      list[idx] = {
+        ...list[idx],
+        accionista_id: Number(data.accionista_id),
+        fecha: data.fecha,
+        monto_usd: parseFloat(data.monto_usd),
+        observacion: data.observacion || ''
+      };
+      data = list[idx];
+    }
+  } else {
+    const newItem = {
+      id: Date.now(),
+      accionista_id: Number(data.accionista_id),
+      fecha: data.fecha,
+      monto_usd: parseFloat(data.monto_usd),
+      observacion: data.observacion || ''
+    };
+    list.push(newItem);
+    data = newItem;
+  }
+  writeJsonFile('inversiones.json', list);
+  return data;
+}
+
+export async function deleteInversion(id) {
+  if (usePostgres) {
+    try {
+      await pool.query('DELETE FROM Inversiones_Accionistas WHERE id = $1', [id]);
+      return true;
+    } catch (err) {
+      console.error('Error en deleteInversion (Postgres):', err.message);
+      throw err;
+    }
+  }
+  const list = await getInversiones();
+  const updated = list.filter(i => i.id !== Number(id));
+  writeJsonFile('inversiones.json', updated);
+  return true;
+}
+
 
 

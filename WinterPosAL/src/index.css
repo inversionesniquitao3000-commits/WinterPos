@@ -33,6 +33,10 @@
   background: linear-gradient(180deg, #10624d 0%, #18896c 100%);
 }
 
+.tab-grad-inversiones {
+  background: linear-gradient(180deg, #78350f 0%, #b45309 100%);
+}
+
 /* Custom terminal animations and scanline styling */
 .scanline {
   background: linear-gradient(

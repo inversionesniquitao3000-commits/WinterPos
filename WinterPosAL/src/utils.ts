@@ -296,3 +296,53 @@ export function printTicketReceipt(
   printWindow.document.write(htmlContent);
   printWindow.document.close();
 }
+
+// ==========================================
+// SHARED API HELPER FUNCTIONS
+// ==========================================
+
+function getApiBaseUrl(): string {
+  const browserHost = window.location.hostname;
+  const isRemoteAccess = browserHost !== 'localhost' && browserHost !== '127.0.0.1';
+  const lanIP = localStorage.getItem('pos_lan_ip') || '192.168.1.100';
+  const dbMode = localStorage.getItem('pos_db_mode') || 'local';
+  const host = isRemoteAccess ? browserHost : (dbMode === 'local' ? 'localhost' : lanIP);
+  return `http://${host}:5000/api`;
+}
+
+export async function fetchApiData(path: string): Promise<any> {
+  try {
+    const res = await fetch(`${getApiBaseUrl()}${path}`);
+    if (res.ok) {
+      return await res.json();
+    }
+    const errData = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(errData.message || errData.error || `HTTP ${res.status}`);
+  } catch (err: any) {
+    console.error(`[API GET] Error en ${path}:`, err.message);
+    throw err;
+  }
+}
+
+export async function postApiData(path: string, body: any): Promise<any> {
+  const res = await fetch(`${getApiBaseUrl()}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json().catch(() => ({ error: res.statusText }));
+  if (!res.ok) {
+    throw new Error(data.message || data.error || `HTTP ${res.status}`);
+  }
+  return data;
+}
+
+export async function deleteApiData(path: string): Promise<any> {
+  const res = await fetch(`${getApiBaseUrl()}${path}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(errData.message || errData.error || `HTTP ${res.status}`);
+  }
+  return await res.json().catch(() => ({ success: true }));
+}
+
