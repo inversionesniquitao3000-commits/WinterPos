@@ -2120,7 +2120,58 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         const vueltosUsd = selectedCierre.vueltosEntregadosUsd ?? (selectedCierre as any).vueltosUsd ?? (selectedCierre as any).vueltosEntregadosUSD ?? (selectedCierre as any).vueltoUSD ?? 0;
         const vueltosVes = selectedCierre.vueltosEntregadosVes ?? (selectedCierre as any).vueltosVes ?? (selectedCierre as any).vueltosEntregadosVES ?? (selectedCierre as any).vueltoVES ?? 0;
 
-        let subtotalNetoUsd = selectedCierre.ventaBrutaUsd ?? (selectedCierre as any).subtotalUsd ?? 0;
+        const safeNum = (val: any) => {
+          const n = typeof val === 'number' ? val : parseFloat(String(val || 0));
+          return isNaN(n) ? 0 : n;
+        };
+
+        const isItemExempt = (i: any) => {
+          if (i.product?.exento_impuesto === true || (i.product?.porcentaje_impuesto !== undefined && i.product?.porcentaje_impuesto === 0)) return true;
+          if (i.exento_impuesto === true || (i.porcentaje_impuesto !== undefined && i.porcentaje_impuesto === 0)) return true;
+          const desc = (i.product?.description || i.product?.descripcion || (i as any)?.descripcion || (i as any)?.description || '').toLowerCase();
+          if (desc.includes('harina pan') || desc.includes('harina p.a.n.')) return true;
+          return false;
+        };
+
+        const calculateSaleNetWithoutIVA = (sale: any) => {
+          if (sale.factura_nro?.startsWith('DEV-')) return 0;
+          const items = sale.items || [];
+          if (!items.length) {
+            const total = safeNum(sale.totalUSD);
+            const iva = safeNum(sale.iva);
+            return Math.max(0, total - iva);
+          }
+
+          const discount = safeNum(sale.descuento);
+          const rawTotalSale = items.reduce((acc: number, i: any) => {
+            const qty = safeNum(i.qty ?? (i as any).cantidad);
+            const price = safeNum(i.priceUSD ?? (i as any).precio_unitario_usd) || (qty > 0 ? safeNum(i.totalUSD ?? (i as any).total_fila_usd) / qty : 0);
+            return acc + (price * qty);
+          }, 0);
+
+          const discountFactor = rawTotalSale > 0 ? (1 - (discount / rawTotalSale)) : 1;
+
+          let grossTaxable = 0;
+          let grossExempt = 0;
+
+          items.forEach((i: any) => {
+            const qty = safeNum(i.qty ?? (i as any).cantidad);
+            const price = safeNum(i.priceUSD ?? (i as any).precio_unitario_usd) || (qty > 0 ? safeNum(i.totalUSD ?? (i as any).total_fila_usd) / qty : 0);
+            const itemSale = price * qty;
+            if (isItemExempt(i)) {
+              grossExempt += itemSale;
+            } else {
+              grossTaxable += itemSale;
+            }
+          });
+
+          const netTaxable = grossTaxable * discountFactor;
+          const netExempt = grossExempt * discountFactor;
+          const baseImponible = netTaxable > 0 ? (netTaxable / 1.16) : 0;
+          return baseImponible + netExempt;
+        };
+
+        let subtotalNetoUsd = selectedCierre.subtotalNetoUsd ?? (selectedCierre as any).subtotalUsd ?? 0;
         if (!subtotalNetoUsd && sales && sales.length > 0) {
           const cierreDateStr = selectedCierre.fecha ? selectedCierre.fecha.split(',')[0].trim() : '';
           const matchingSales = sales.filter(s => {
@@ -2128,13 +2179,12 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
             return sDate === cierreDateStr || s.fecha === selectedCierre.fecha;
           });
           subtotalNetoUsd = matchingSales.reduce((acc, sale) => {
-            if (sale.factura_nro?.startsWith('DEV-')) return acc;
-            return acc + (sale.subtotal ?? sale.totalUSD);
+            return acc + calculateSaleNetWithoutIVA(sale);
           }, 0);
         }
-        if (!subtotalNetoUsd) subtotalNetoUsd = ventaTotalUsd;
+        if (!subtotalNetoUsd) subtotalNetoUsd = Math.max(0, ventaTotalUsd / 1.16);
         const utilidadSubtotal = subtotalNetoUsd - costoTotalUsd;
-        const utilidadUsd = selectedCierre.utilidadUsd && selectedCierre.costoTotalUsd ? selectedCierre.utilidadUsd : (ventaTotalUsd - costoTotalUsd);
+        const utilidadUsd = subtotalNetoUsd - costoTotalUsd;
 
         return (
           <div className="fixed inset-0 bg-slate-950/85 flex items-center justify-center p-4 z-50 font-mono text-slate-800 print:p-0">

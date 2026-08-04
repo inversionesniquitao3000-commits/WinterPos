@@ -2005,6 +2005,61 @@ export default function CajaPOS({
       return isNaN(cost) ? 0 : cost;
     };
 
+    const safeNum = (val: any) => {
+      const n = typeof val === 'number' ? val : parseFloat(String(val || 0));
+      return isNaN(n) ? 0 : n;
+    };
+
+    const isItemExempt = (i: any) => {
+      if (i.product?.exento_impuesto === true || (i.product?.porcentaje_impuesto !== undefined && i.product?.porcentaje_impuesto === 0)) return true;
+      if (i.exento_impuesto === true || (i.porcentaje_impuesto !== undefined && i.porcentaje_impuesto === 0)) return true;
+      const desc = (i.product?.description || i.product?.descripcion || (i as any)?.descripcion || (i as any)?.description || '').toLowerCase();
+      if (desc.includes('harina pan') || desc.includes('harina p.a.n.')) return true;
+      return false;
+    };
+
+    const calculateSaleNetWithoutIVA = (sale: any) => {
+      if (sale.factura_nro?.startsWith('DEV-')) return 0;
+      const items = sale.items || [];
+      if (!items.length) {
+        const total = safeNum(sale.totalUSD);
+        const iva = safeNum(sale.iva);
+        return Math.max(0, total - iva);
+      }
+
+      const discount = safeNum(sale.descuento);
+      const rawTotalSale = items.reduce((acc: number, i: any) => {
+        const qty = safeNum(i.qty ?? (i as any).cantidad);
+        const price = safeNum(i.priceUSD ?? (i as any).precio_unitario_usd) || (qty > 0 ? safeNum(i.totalUSD ?? (i as any).total_fila_usd) / qty : 0);
+        return acc + (price * qty);
+      }, 0);
+
+      const discountFactor = rawTotalSale > 0 ? (1 - (discount / rawTotalSale)) : 1;
+
+      let grossTaxable = 0;
+      let grossExempt = 0;
+
+      items.forEach((i: any) => {
+        const qty = safeNum(i.qty ?? (i as any).cantidad);
+        const price = safeNum(i.priceUSD ?? (i as any).precio_unitario_usd) || (qty > 0 ? safeNum(i.totalUSD ?? (i as any).total_fila_usd) / qty : 0);
+        const itemSale = price * qty;
+        if (isItemExempt(i)) {
+          grossExempt += itemSale;
+        } else {
+          grossTaxable += itemSale;
+        }
+      });
+
+      const netTaxable = grossTaxable * discountFactor;
+      const netExempt = grossExempt * discountFactor;
+      const baseImponible = netTaxable > 0 ? (netTaxable / 1.16) : 0;
+      return baseImponible + netExempt;
+    };
+
+    const subtotalNetoUsd = targetShiftSales.reduce((acc, sale) => {
+      return acc + calculateSaleNetWithoutIVA(sale);
+    }, 0);
+
     const costoTotalUsd = targetShiftSales.reduce((acc, sale) => {
       const isDev = sale.factura_nro?.startsWith('DEV-');
       const mult = isDev ? -1 : 1;
@@ -2014,7 +2069,7 @@ export default function CajaPOS({
       }, 0);
     }, 0);
 
-    const utilidadUsd = ventaTotalUsd - costoTotalUsd;
+    const utilidadUsd = subtotalNetoUsd - costoTotalUsd;
 
     const pagosBinanceUsd = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
@@ -2085,6 +2140,7 @@ export default function CajaPOS({
       devolucionVentasUsd,
       devolucionVentasVes,
       ventaTotalUsd,
+      subtotalNetoUsd,
       ventaEfectivoComisionVes: avanceComisionTotalVes,
       ventaEfectivoComisionUsd: avanceComisionTotalUsd
     };

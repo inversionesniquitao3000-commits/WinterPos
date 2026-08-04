@@ -1608,15 +1608,30 @@ export default function App() {
       setCajaMovimientosUsd(0);
       setCajaMovimientosVes(0);
       
-      // Reset shift metrics
+      // Reset shift metrics - ALL variables must be zeroed for a clean new session
       setShiftSales([]);
       setShiftAbonosUsd(0);
       setShiftEntradasUsd(0);
+      setShiftEntradasVes(0);
       setShiftSalidasUsd(0);
+      setShiftSalidasVes(0);
+      setShiftDevolucionesUsd(0);
+      setShiftDevolucionesVes(0);
+      // Clear abonos list so previous session abonos don't show in new session
+      setAbonos([]);
       localStorage.removeItem(`pos_shift_sales_${uKey}`);
       localStorage.removeItem(`pos_shift_abonos_${uKey}`);
       localStorage.removeItem(`pos_shift_entradas_${uKey}`);
+      localStorage.removeItem(`pos_shift_entradas_ves_${uKey}`);
       localStorage.removeItem(`pos_shift_salidas_${uKey}`);
+      localStorage.removeItem(`pos_shift_salidas_ves_${uKey}`);
+      localStorage.removeItem(`pos_shift_devoluciones_${uKey}`);
+      localStorage.removeItem(`pos_shift_devoluciones_ves_${uKey}`);
+      localStorage.removeItem('pos_abonos');
+      localStorage.removeItem('pos_shift_entradas_ves');
+      localStorage.removeItem('pos_shift_salidas_ves');
+      localStorage.removeItem('pos_movimientos_usd');
+      localStorage.removeItem('pos_movimientos_ves');
 
       localStorage.setItem(`pos_caja_abierta_${uKey}`, 'true');
       localStorage.setItem(`pos_apertura_usd_${uKey}`, usd.toString());
@@ -1726,6 +1741,8 @@ export default function App() {
     setShiftSalidasVes(0);
     setShiftDevolucionesUsd(0);
     setShiftDevolucionesVes(0);
+    // Clear abonos list so it doesn't carry over to next session
+    setAbonos([]);
     localStorage.removeItem(`pos_shift_sales_${uKey}`);
     localStorage.removeItem(`pos_shift_abonos_${uKey}`);
     localStorage.removeItem(`pos_shift_entradas_${uKey}`);
@@ -1734,6 +1751,7 @@ export default function App() {
     localStorage.removeItem(`pos_shift_salidas_ves_${uKey}`);
     localStorage.removeItem(`pos_shift_devoluciones_${uKey}`);
     localStorage.removeItem(`pos_shift_devoluciones_ves_${uKey}`);
+    localStorage.removeItem('pos_abonos');
 
     localStorage.removeItem(`pos_caja_abierta_${uKey}`);
     localStorage.removeItem(`pos_apertura_usd_${uKey}`);

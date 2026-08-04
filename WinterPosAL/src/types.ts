@@ -216,6 +216,7 @@ export interface CierreDetails {
   devolucionVentasUsd?: number;
   devolucionVentasVes?: number;
   ventaTotalUsd?: number;
+  subtotalNetoUsd?: number;
   terminal?: string;
 
   // Movimientos de Cambio de Divisas y Venta de Efectivo (Avance)

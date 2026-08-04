@@ -107,6 +107,7 @@ try {
     ALTER TABLE IF EXISTS Ventas_Detalle DROP CONSTRAINT IF EXISTS ventas_detalle_tipo_precio_check;
     ALTER TABLE IF EXISTS Pagos_Venta DROP CONSTRAINT IF EXISTS pagos_venta_metodo_pago_check;
     ALTER TABLE IF EXISTS Abonos DROP CONSTRAINT IF EXISTS abonos_metodo_pago_check;
+    ALTER TABLE IF EXISTS Abonos ADD COLUMN IF NOT EXISTS caja_id INT REFERENCES Cajas_Apertura_Cierre(id) ON DELETE SET NULL;
     ALTER TABLE IF EXISTS Usuarios ADD COLUMN IF NOT EXISTS clave VARCHAR(100) DEFAULT 'admin';
     ALTER TABLE IF EXISTS Usuarios ADD COLUMN IF NOT EXISTS permisos TEXT;
     ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS estacion_nombre VARCHAR(50) DEFAULT 'CAJA_PRINCIPAL';
@@ -169,6 +170,15 @@ try {
       IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'abonos') THEN
         ALTER TABLE Abonos ALTER COLUMN cliente_id TYPE BIGINT;
         ALTER TABLE Abonos ALTER COLUMN usuario_id TYPE BIGINT;
+        UPDATE Abonos a
+        SET caja_id = (
+          SELECT c.id FROM Cajas_Apertura_Cierre c
+          WHERE (c.usuario_id = a.usuario_id OR a.usuario_id IS NULL)
+            AND c.fecha_apertura <= a.fecha
+          ORDER BY c.id DESC
+          LIMIT 1
+        )
+        WHERE a.caja_id IS NULL;
       END IF;
       IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'ventas') THEN
         PERFORM setval(pg_get_serial_sequence('Ventas', 'id'), COALESCE((SELECT MAX(id) FROM Ventas), 1));
@@ -737,10 +747,19 @@ export async function registerAbono(clientId, montoUsd, montoVes, metodoPago = '
         }
         
         try {
+          // Determine active caja_id for this abono
+          let abonoCajaId = null;
+          try {
+            const abonoCajaRes = await pool.query(
+              "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY id DESC LIMIT 1",
+              [usuarioId || null]
+            );
+            if (abonoCajaRes.rowCount > 0) abonoCajaId = abonoCajaRes.rows[0].id;
+          } catch (_) {}
           await pool.query(
-            `INSERT INTO Abonos (cliente_id, usuario_id, monto_usd, monto_ves, metodo_pago, numero_referencia, observacion, fecha)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)`,
-            [realClientId, usuarioId || null, numUsd, numVes, metodoPago, referencia || null, observacion || null]
+            `INSERT INTO Abonos (cliente_id, usuario_id, caja_id, monto_usd, monto_ves, metodo_pago, numero_referencia, observacion, fecha)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)`,
+            [realClientId, usuarioId || null, abonoCajaId, numUsd, numVes, metodoPago, referencia || null, observacion || null]
           );
           console.log(`✅ [Abonos] Abono registrado en PostgreSQL — Cliente: ${clientNombre} (ID ${realClientId}) | $${numUsd} / Bs ${numVes} | Método: ${metodoPago}`);
         } catch (dbErr) {
@@ -2320,9 +2339,9 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
         FROM Ventas v
         LEFT JOIN Clientes c ON v.cliente_id = c.id
         LEFT JOIN Usuarios u ON v.usuario_id = u.id
-        WHERE v.caja_id = $1 OR (v.usuario_id = $2 AND v.fecha >= $3 AND ($4 = true OR v.estacion_nombre = $5))
+        WHERE v.caja_id = $1
         ORDER BY v.id ASC
-      `, [cajaId, caja.usuario_id, caja.fecha_apertura, compartirApertura, myTerminal]);
+      `, [cajaId]);
       
       const shiftSalesList = [];
       let salesCashUsd = 0;
@@ -2464,14 +2483,14 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
         }
       }
 
-      // Also query Abonos directly since opening time for complete accuracy
+      // Query Abonos strictly by caja_id for this exact session
       const abonosRes = await pool.query(`
         SELECT a.id, a.cliente_id, a.monto_usd as monto, a.monto_ves, a.metodo_pago, a.banco_emisor, a.numero_referencia as referencia, a.observacion, a.fecha, c.nombre, c.cedula_rif
         FROM Abonos a
         LEFT JOIN Clientes c ON a.cliente_id = c.id
-        WHERE a.fecha >= $1
+        WHERE a.caja_id = $1
         ORDER BY a.id ASC
-      `, [caja.fecha_apertura]);
+      `, [cajaId]);
 
       const shiftAbonosList = abonosRes.rows.map(r => ({
         ...r,
