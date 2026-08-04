@@ -53,9 +53,18 @@ export default function CambioDivisasModal({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
+  // Reset states when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setCompraMontoDivisa('');
+      setAvanceBsSolicitado('');
+      setLastProcessedTicket(null);
+    }
+  }, [isOpen]);
+
   // --- ESTADOS: COMPRA / CAMBIO DE DIVISAS ---
   const [compraCurrency, setCompraCurrency] = useState<'USD' | 'EUR'>('USD');
-  const [compraMontoDivisa, setCompraMontoDivisa] = useState<string>('10');
+  const [compraMontoDivisa, setCompraMontoDivisa] = useState<string>('');
   const [compraTasaMode, setCompraTasaMode] = useState<'oficial' | 'manual'>('oficial');
   const [compraTasaManual, setCompraTasaManual] = useState<string>(defaultRate.toFixed(2));
   const [compraObs, setCompraObs] = useState<string>('');
@@ -66,7 +75,7 @@ export default function CambioDivisasModal({
   const totalBsEntregarCompra = divisaValNum * effectiveCompraRate;
 
   // --- ESTADOS: VENTA DE EFECTIVO (AVANCE) ---
-  const [avanceBsSolicitado, setAvanceBsSolicitado] = useState<string>('1000');
+  const [avanceBsSolicitado, setAvanceBsSolicitado] = useState<string>('');
   const [avanceMetodoCobro, setAvanceMetodoCobro] = useState<'BIOPAGO' | 'PUNTO' | 'PAGO_MOVIL' | 'TRANSFERENCIA'>('BIOPAGO');
   const [avanceComisionPct, setAvanceComisionPct] = useState<number>(20);
   const [avanceComisionCustom, setAvanceComisionCustom] = useState<string>('20');
@@ -496,7 +505,7 @@ export default function CambioDivisasModal({
                         type="number"
                         step="1"
                         min="0"
-                        placeholder="1000"
+                        placeholder="0.00"
                         value={avanceBsSolicitado}
                         onChange={e => setAvanceBsSolicitado(e.target.value)}
                         className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-lg font-black font-mono text-slate-900 focus:bg-white focus:border-indigo-600 outline-none"

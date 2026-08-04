@@ -41,6 +41,33 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
   const [editSalidaUsd, setEditSalidaUsd] = useState('');
   const [editSalidaVes, setEditSalidaVes] = useState('');
 
+  const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
+
+  const handleHeaderMouseDown = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button, input, select')) return;
+    const startX = e.clientX - dragPos.x;
+    const startY = e.clientY - dragPos.y;
+    
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      setDragPos({
+        x: moveEvent.clientX - startX,
+        y: moveEvent.clientY - startY
+      });
+    };
+    
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+    
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
+
+  useEffect(() => {
+    setDragPos({ x: 0, y: 0 });
+  }, [selectedSale]);
+
   // Listen for Escape key to close modals in stack order
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -352,6 +379,68 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
       totalUtilidad
     };
   }, [finalFilteredSales]);
+
+  // Listen for arrow keys / Enter navigation for transactions list and detail modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeTag = document.activeElement?.tagName;
+      if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') {
+        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'Enter') {
+          return;
+        }
+      }
+
+      if (activeSubTab === 'ventas') {
+        if (selectedSale) {
+          // If invoice detail modal is open, navigate through the modal sales
+          const currentIndex = finalFilteredSales.findIndex(s => s.factura_nro === selectedSale.factura_nro);
+          if (currentIndex !== -1) {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+              if (currentIndex < finalFilteredSales.length - 1) {
+                e.preventDefault();
+                setSelectedSale(finalFilteredSales[currentIndex + 1]);
+              }
+            } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+              if (currentIndex > 0) {
+                e.preventDefault();
+                setSelectedSale(finalFilteredSales[currentIndex - 1]);
+              }
+            }
+          }
+        } else if (!cierreInvoicesModal && !selectedCierre && !editingCierre) {
+          // Navigate the selected row in the list
+          const currentIndex = selectedSaleRow 
+            ? finalFilteredSales.findIndex(s => s.factura_nro === selectedSaleRow.factura_nro)
+            : -1;
+          
+          if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+            e.preventDefault();
+            const nextIndex = currentIndex < finalFilteredSales.length - 1 ? currentIndex + 1 : 0;
+            if (finalFilteredSales[nextIndex]) {
+              setSelectedSaleRow(finalFilteredSales[nextIndex]);
+              const rowEl = document.getElementById(`sale-row-${finalFilteredSales[nextIndex].factura_nro}`);
+              rowEl?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
+          } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+            e.preventDefault();
+            const prevIndex = currentIndex > 0 ? currentIndex - 1 : finalFilteredSales.length - 1;
+            if (finalFilteredSales[prevIndex]) {
+              setSelectedSaleRow(finalFilteredSales[prevIndex]);
+              const rowEl = document.getElementById(`sale-row-${finalFilteredSales[prevIndex].factura_nro}`);
+              rowEl?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
+          } else if (e.key === 'Enter') {
+            if (selectedSaleRow) {
+              e.preventDefault();
+              setSelectedSale(selectedSaleRow);
+            }
+          }
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedSale, selectedSaleRow, finalFilteredSales, activeSubTab, cierreInvoicesModal, selectedCierre, editingCierre]);
 
   const toggleSelectAllSales = () => {
     if (selectedSaleIds.length === finalFilteredSales.length && finalFilteredSales.length > 0) {
@@ -1369,6 +1458,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                       return (
                         <tr 
                           key={sale.factura_nro} 
+                          id={`sale-row-${sale.factura_nro}`}
                           onClick={() => setSelectedSaleRow(sale)}
                           className={`transition-all cursor-pointer ${rowBg}`}
                         >
@@ -1990,6 +2080,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         const pagosPagoMovilVes = (selectedCierre as any).pagosPagoMovilVes ?? 0;
         const pagosBiopagoVes = (selectedCierre as any).pagosBiopagoVes ?? 0;
         const pagosPuntoVes = (selectedCierre as any).pagosPuntoVes ?? 0;
+        const pagosTransferenciaVes = (selectedCierre as any).pagosTransferenciaVes ?? 0;
         const pagosTarjetaUsd = selectedCierre.pagosTarjetaUsd ?? 0;
         const pagosBinanceUsd = selectedCierre.pagosBinanceUsd ?? 0;
         const pagosPayPalUsd = selectedCierre.pagosPayPalUsd ?? 0;
@@ -2245,6 +2336,11 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                         <span className="font-bold text-slate-800">Bs {pagosBiopagoVes.toFixed(2)}</span>
                       </div>
 
+                      <div className="flex justify-between">
+                        <span>Transferencia (Bs) :</span>
+                        <span className="font-bold text-slate-800">Bs {pagosTransferenciaVes.toFixed(2)}</span>
+                      </div>
+
                       {pagosTarjetaUsd > 0 && (
                         <div className="flex justify-between">
                           <span>Tarjeta ($ USD) :</span>
@@ -2293,29 +2389,42 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                     </div>
 
                     {/* PROFITABILITY BREAKDOWN */}
-                    <div className="pt-2.5 font-sans space-y-2 text-[11.5px] text-slate-700 bg-emerald-50/50 p-3 rounded border border-emerald-100 mt-2 select-text">
-                      <div className="font-bold text-[10px] text-emerald-855 uppercase border-b border-emerald-200/60 pb-1">
-                        CÁLCULO DE UTILIDAD DEL CIERRE
-                      </div>
-                      <div className="flex justify-between font-mono">
-                        <span>Subtotal Ventas (sin IVA):</span>
-                        <span className="font-bold text-slate-800">$ {(subtotalNetoUsd ?? 0).toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between font-mono">
-                        <span>Costo de Mercancía:</span>
-                        <span className="font-bold text-red-600">- $ {(costoTotalUsd ?? 0).toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between font-mono text-[12.5px] border-t border-emerald-300/80 pt-1 mt-1 font-extrabold text-emerald-700">
-                        <span>UTILIDAD BRUTA (SUBTOTAL):</span>
-                        <span className="text-base font-black">$ {(utilidadSubtotal ?? 0).toFixed(2)}</span>
-                      </div>
-                      {(ventaTotalUsd ?? 0) > (subtotalNetoUsd ?? 0) && (
-                        <div className="flex justify-between text-slate-500 font-mono text-[9.5px] mt-0.5 italic pt-1 border-t border-dashed border-emerald-200">
-                          <span>Total Facturado (con IVA):</span>
-                          <span>$ {(ventaTotalUsd ?? 0).toFixed(2)} (Utilidad Neta: ${(utilidadUsd ?? 0).toFixed(2)})</span>
+                    {(() => {
+                      const comisionVes = selectedCierre.ventaEfectivoComisionVes ?? (selectedCierre as any).venta_efectivo_comision_ves ?? 0;
+                      const comisionUsd = selectedCierre.ventaEfectivoComisionUsd ?? (selectedCierre as any).venta_efectivo_comision_usd ?? (tasaDia > 0 ? comisionVes / tasaDia : 0);
+                      const utilidadProductos = (subtotalNetoUsd ?? 0) - (costoTotalUsd ?? 0);
+                      const utilidadTotalCierre = utilidadProductos + comisionUsd;
+                      
+                      return (
+                        <div className="pt-2.5 font-sans space-y-2 text-[11.5px] text-slate-700 bg-emerald-50/50 p-3 rounded border border-emerald-100 mt-2 select-text">
+                          <div className="font-bold text-[10px] text-emerald-855 uppercase border-b border-emerald-200/60 pb-1">
+                            CÁLCULO DE UTILIDAD DEL CIERRE
+                          </div>
+                          <div className="flex justify-between font-mono">
+                            <span>Ventas Netas (sin IVA):</span>
+                            <span className="font-bold text-slate-800">$ {(subtotalNetoUsd ?? 0).toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between font-mono">
+                            <span>Costo de Mercancía:</span>
+                            <span className="font-bold text-red-600">- $ {(costoTotalUsd ?? 0).toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between font-mono text-[11.5px] border-t border-emerald-300/80 pt-1 mt-1 font-bold text-emerald-800">
+                            <span>Utilidad Bruta por Productos:</span>
+                            <span className="font-black">$ {utilidadProductos.toFixed(2)}</span>
+                          </div>
+                          {comisionVes > 0 && (
+                            <div className="flex justify-between font-mono text-emerald-900 font-extrabold bg-emerald-100/70 p-1.5 rounded border border-emerald-300">
+                              <span>+ Comisiones Venta Efectivo:</span>
+                              <span>+ Bs {comisionVes.toFixed(2)} (+${comisionUsd.toFixed(2)})</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between font-mono text-[13px] border-t-2 border-emerald-500 pt-1.5 mt-1 font-black text-emerald-950 bg-emerald-200/60 p-2 rounded-lg shadow-sm">
+                            <span>UTILIDAD NETA TOTAL CIERRE:</span>
+                            <span className="text-lg font-black text-emerald-700">$ {utilidadTotalCierre.toFixed(2)}</span>
+                          </div>
                         </div>
-                      )}
-                    </div>
+                      );
+                    })()}
                   </div>
                 </div>
 
@@ -2445,6 +2554,14 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         let totalNetSale = 0;
         let hasReturnsOnThisSale = relatedDevs.length > 0;
 
+        const isItemExempt = (i: any) => {
+          if (i.product?.exento_impuesto === true || (i.product?.porcentaje_impuesto !== undefined && i.product?.porcentaje_impuesto === 0)) return true;
+          if (i.exento_impuesto === true || (i.porcentaje_impuesto !== undefined && i.porcentaje_impuesto === 0)) return true;
+          const desc = (i.product?.description || i.product?.descripcion || (i as any)?.descripcion || (i as any)?.description || '').toLowerCase();
+          if (desc.includes('harina pan') || desc.includes('harina p.a.n.')) return true;
+          return false;
+        };
+
         const itemsWithProfit = (selectedSale.items ?? []).map(item => {
           const itemCost = safeNum(item.product?.precio_costo_usd ?? (item as any)?.precio_costo_usd ?? (item as any)?.costo_usd ?? 0);
           const rawQty = safeNum(item.qty ?? (item as any)?.cantidad ?? 0);
@@ -2467,7 +2584,10 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
           const activeQty = isDev ? rawQty : remainingQty;
           const activeItemCost = itemCost * activeQty;
           const activeItemSale = unitPrice * activeQty;
-          const activeItemProfit = activeItemSale - activeItemCost;
+          
+          const isExempt = isItemExempt(item);
+          const activeItemSaleSinIVA = isExempt ? activeItemSale : (activeItemSale / 1.16);
+          const activeItemProfit = activeItemSaleSinIVA - activeItemCost;
 
           if (!isDev) {
             totalNetCost += activeItemCost;
@@ -2479,7 +2599,13 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
 
           return {
             ...item,
-            product: item.product || { description: (item as any)?.descripcion || (item as any)?.description || 'Producto', barcode: (item as any)?.barcode || '' },
+            product: {
+              ...(item.product || {}),
+              description: item.product?.description || (item as any)?.descripcion || (item as any)?.description || 'Producto',
+              barcode: item.product?.barcode || (item as any)?.barcode || '',
+              exento_impuesto: isExempt,
+              porcentaje_impuesto: isExempt ? 0 : 16
+            },
             cost: itemCost,
             unitPrice,
             qty: rawQty,
@@ -2487,6 +2613,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
             remainingQty,
             activeItemCost,
             activeItemSale,
+            activeItemSaleSinIVA,
             activeItemProfit,
             isFullyReturned: !isDev && returnedQty > 0 && remainingQty === 0,
             isPartiallyReturned: !isDev && returnedQty > 0 && remainingQty > 0
@@ -2495,12 +2622,10 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
 
         const totalSaleItems = itemsWithProfit.filter(i => !i.isFullyReturned);
         const grossTaxable = totalSaleItems.reduce((acc, i) => {
-          const isExempt = i.product?.exento_impuesto === true || (i.product?.porcentaje_impuesto !== undefined && i.product?.porcentaje_impuesto === 0);
-          return acc + (isExempt ? 0 : i.activeItemSale);
+          return acc + (isItemExempt(i) ? 0 : i.activeItemSale);
         }, 0);
         const grossExempt = totalSaleItems.reduce((acc, i) => {
-          const isExempt = i.product?.exento_impuesto === true || (i.product?.porcentaje_impuesto !== undefined && i.product?.porcentaje_impuesto === 0);
-          return acc + (isExempt ? i.activeItemSale : 0);
+          return acc + (isItemExempt(i) ? i.activeItemSale : 0);
         }, 0);
 
         const subtotal = safeNum(isDev ? (selectedSale.subtotal ?? 0) : (hasReturnsOnThisSale ? totalNetSale : (selectedSale.subtotal ?? selectedSale.totalUSD ?? 0)));
@@ -2513,7 +2638,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
 
         const baseImponible = netTaxable > 0 ? netTaxable / 1.16 : 0;
         const ivaCalculado = netTaxable > 0 ? (netTaxable - baseImponible) : 0;
-        const iva = safeNum(selectedSale.iva) > 0 ? safeNum(selectedSale.iva) : ivaCalculado;
+        const iva = grossTaxable > 0 ? ivaCalculado : 0;
 
         const netProfitReal = (baseImponible + netExempt) - totalNetCost;
 
@@ -2525,22 +2650,70 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
           return Math.round(safe).toString();
         };
 
+        const currentIndex = finalFilteredSales.findIndex(s => s.factura_nro === selectedSale.factura_nro);
+        const totalSalesCount = finalFilteredSales.length;
+
         return (
-          <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-4 z-[100] font-mono text-slate-800 animate-fade-in">
-            <div className="bg-white border border-slate-355 rounded-xl overflow-hidden w-full max-w-4xl shadow-2xl flex flex-col">
+          <div className="fixed inset-0 bg-slate-900/10 flex items-center justify-center p-4 z-[100] font-mono text-slate-800 animate-fade-in">
+            <div 
+              style={{ transform: `translate(${dragPos.x}px, ${dragPos.y}px)` }}
+              className="bg-white border border-slate-300 rounded-xl overflow-hidden w-full max-w-4xl shadow-2xl flex flex-col transition-none"
+            >
               
               {/* Header Title Bar */}
-              <div className={`${isDev ? 'bg-rose-900' : 'bg-winter-header'} text-white px-5 py-3 flex items-center justify-between`}>
-                <h3 className="text-sm font-extrabold flex items-center gap-1.5 font-sans">
-                  <ShoppingCart className="w-4 h-4 text-winter-blueBtn" />
+              <div 
+                onMouseDown={handleHeaderMouseDown}
+                className={`${isDev ? 'bg-rose-900' : 'bg-winter-header'} text-white px-5 py-3 flex items-center justify-between cursor-move select-none`}
+              >
+                <h3 className="text-sm font-extrabold flex items-center gap-1.5 font-sans pointer-events-none">
+                  <span className="text-white/40 mr-1 select-none font-sans text-xs">⋮⋮</span>
+                  <ShoppingCart className="w-4 h-4 text-winter-blueBtn pointer-events-none" />
                   {isDev ? 'DETALLE DE DEVOLUCIÓN' : 'DETALLE DE FACTURA / VENTA'}
+                  {currentIndex !== -1 && (
+                    <span className="ml-2.5 px-2 py-0.5 bg-slate-800/40 border border-white/5 rounded text-[10.5px] text-white/95 font-sans font-extrabold">
+                      {currentIndex + 1} de {totalSalesCount}
+                    </span>
+                  )}
                 </h3>
-                <button 
-                  onClick={() => setSelectedSale(null)} 
-                  className="text-white opacity-70 hover:opacity-100 text-xs font-sans"
-                >
-                  ✕ Cerrar [ESC]
-                </button>
+                
+                <div className="flex items-center gap-4">
+                  {currentIndex !== -1 && (
+                    <div className="flex items-center gap-2 bg-slate-800/40 px-3 py-1 rounded border border-white/10 text-xs font-bold font-sans">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (currentIndex > 0) {
+                            setSelectedSale(finalFilteredSales[currentIndex - 1]);
+                          }
+                        }}
+                        disabled={currentIndex === 0}
+                        className="hover:text-winter-blueBtn transition-colors disabled:opacity-30 disabled:hover:text-white cursor-pointer disabled:cursor-not-allowed flex items-center gap-1"
+                      >
+                        ⬅️ Anterior
+                      </button>
+                      <span className="text-white/30 font-normal">|</span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (currentIndex < totalSalesCount - 1) {
+                            setSelectedSale(finalFilteredSales[currentIndex + 1]);
+                          }
+                        }}
+                        disabled={currentIndex === totalSalesCount - 1}
+                        className="hover:text-winter-blueBtn transition-colors disabled:opacity-30 disabled:hover:text-white cursor-pointer disabled:cursor-not-allowed flex items-center gap-1"
+                      >
+                        Siguiente ➡️
+                      </button>
+                    </div>
+                  )}
+                  
+                  <button 
+                    onClick={() => setSelectedSale(null)} 
+                    className="text-white opacity-70 hover:opacity-100 text-xs font-sans"
+                  >
+                    ✕ Cerrar [ESC]
+                  </button>
+                </div>
               </div>
 
               <div className="p-6 text-[10px] text-slate-700 leading-relaxed max-h-[75vh] overflow-y-auto bg-slate-50 space-y-4">
@@ -2581,8 +2754,8 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                         <th className="px-4 py-2.5 text-center">Cant</th>
                         <th className="px-4 py-2.5 text-right">Unit Venta</th>
                         <th className="px-4 py-2.5 text-right">Unit Costo</th>
-                        <th className="px-4 py-2.5 text-right">Total Venta Neta</th>
-                        {!isDev && <th className="px-4 py-2.5 text-right text-emerald-700">Utilidad Neta</th>}
+                        <th className="px-4 py-2.5 text-right">Total Venta (CON IVA)</th>
+                        {!isDev && <th className="px-4 py-2.5 text-right text-emerald-700">Utilidad Neta (SIN IVA)</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-150 font-mono">
@@ -2591,6 +2764,11 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                           <td className="px-4 py-2.5 font-sans">
                             <span className={`font-bold block text-[12px] ${item.isFullyReturned ? 'line-through text-slate-400' : 'text-slate-800'}`}>
                               {item.product?.description}
+                              {isItemExempt(item) && (
+                                <span className="ml-1.5 bg-emerald-50 text-emerald-700 border border-emerald-300 px-1 py-0.2 rounded text-[10px] font-bold font-sans inline-block">
+                                  (E)
+                                </span>
+                              )}
                             </span>
                             <span className="text-[9px] text-slate-400 block font-mono">{item.product?.barcode}</span>
                             {item.isFullyReturned && (
@@ -2661,6 +2839,12 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                         <span className="font-sans font-medium">{isDev ? 'Subtotal Devuelto:' : 'Subtotal USD Neto:'}</span>
                         <span className="font-bold">{isDev ? '-' : ''}$ {Math.abs(subtotal).toFixed(2)}</span>
                       </div>
+                      {netExempt > 0 && (
+                        <div className="flex justify-between text-slate-700">
+                          <span className="font-sans font-medium">Monto Exento (0% IVA):</span>
+                          <span>$ {netExempt.toFixed(2)}</span>
+                        </div>
+                      )}
                       {iva > 0 && (
                         <div className="flex justify-between text-slate-700">
                           <span className="font-sans font-medium">IVA (16%) USD:</span>
@@ -2674,7 +2858,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                         </div>
                       )}
                       <div className="flex justify-between font-black text-slate-900 border-t border-dashed border-slate-200 pt-2 font-sans text-[13px] items-baseline">
-                        <span>{isDev ? 'TOTAL REEMBOLSADO (USD):' : 'TOTAL FACTURADO NETO:'}</span>
+                        <span>{isDev ? 'TOTAL REEMBOLSADO (USD):' : 'TOTAL FACTURADO (CON IVA):'}</span>
                         <span className={`${isDev ? 'text-rose-600' : 'text-winter-blueBtn'} font-mono font-black text-[15px]`}>
                           {isDev ? '-' : ''}$ {Math.abs(totalUSD).toFixed(2)}
                         </span>
@@ -2818,12 +3002,12 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                               </div>
                             </>
                           )}
-                          {netExempt > 0 && (
-                            <div className="flex justify-between text-emerald-700 text-[10.5px]">
-                              <span>Venta Exenta (0% IVA):</span>
-                              <span className="font-mono font-bold">$ {netExempt.toFixed(2)}</span>
-                            </div>
-                          )}
+                          
+                          <div className="flex justify-between items-center bg-emerald-50 border border-emerald-200/80 px-2.5 py-1.5 rounded text-emerald-900 font-extrabold font-sans text-[10.5px] my-1.5 shadow-2xs">
+                            <span>Venta Neta Sin IVA (Exento + Base) :</span>
+                            <span className="font-mono font-bold text-emerald-800">$ {(baseImponible + netExempt).toFixed(2)}</span>
+                          </div>
+
                           <div className="flex justify-between border-t border-slate-200 pt-1">
                             <span>Costo Mercancía Vendida:</span>
                             <span className="font-bold text-red-600">- $ {totalNetCost.toFixed(2)}</span>

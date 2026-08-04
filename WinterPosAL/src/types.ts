@@ -307,6 +307,8 @@ export interface CierreCaja {
   pagosPuntoVes: number;         // Punto (Tarjeta/PagoMovil monto real)
   pagosPagoMovilUsd?: number;    // Pago Móvil USD
   pagosPagoMovilVes?: number;    // Pago Móvil VES
+  pagosTransferenciaUsd?: number; // Transferencia USD
+  pagosTransferenciaVes?: number; // Transferencia VES
   pagosBinanceUsd?: number;      // Binance $
   pagosPayPalUsd?: number;       // PayPal $
   pagosTarjetaUsd: number;

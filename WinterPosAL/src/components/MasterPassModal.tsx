@@ -28,6 +28,8 @@ export const MasterPassModal: React.FC<MasterPassModalProps> = ({
 
   useEffect(() => {
     if (!isOpen) return;
+    setPass('');
+    setErrorMsg('');
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         onClose();
@@ -120,7 +122,8 @@ export const MasterPassModal: React.FC<MasterPassModalProps> = ({
                 type={showPass ? 'text' : 'password'}
                 value={pass}
                 onChange={(e) => setPass(e.target.value)}
-                placeholder="••••••••"
+                placeholder="Ingrese clave..."
+                autoComplete="new-password"
                 autoFocus
                 className="w-full bg-slate-950 border border-slate-700 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 rounded-xl px-4 py-3 text-white text-base tracking-widest outline-none font-mono transition-all pr-12"
               />

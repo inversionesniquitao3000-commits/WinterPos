@@ -1662,7 +1662,8 @@ export async function getSales() {
         // Fetch items
         const itemsRes = await pool.query(`
           SELECT vd.cantidad as qty, vd.precio_unitario_usd, vd.tipo_precio, vd.total_fila_usd,
-                 p.codigo_barras_clave as barcode, p.descripcion, p.precio_costo_usd
+                 p.codigo_barras_clave as barcode, p.descripcion, p.precio_costo_usd,
+                 p.exento_impuesto, p.porcentaje_impuesto
           FROM Ventas_Detalle vd
           LEFT JOIN Productos p ON vd.producto_id = p.id
           WHERE vd.venta_id = $1
@@ -1694,7 +1695,9 @@ export async function getSales() {
             product: {
               barcode: i.barcode,
               description: i.descripcion,
-              precio_costo_usd: parseFloat(i.precio_costo_usd || 0)
+              precio_costo_usd: parseFloat(i.precio_costo_usd || 0),
+              exento_impuesto: !!i.exento_impuesto,
+              porcentaje_impuesto: parseFloat(i.porcentaje_impuesto || 0)
             }
           })),
           subtotal: parseFloat(row.subtotal_usd),
@@ -2359,7 +2362,9 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
         salesCashVes += (cashVes - vVES);
         
         const itemsRes = await pool.query(`
-          SELECT vd.cantidad as qty, vd.precio_unitario_usd, vd.total_fila_usd, p.codigo_barras_clave as barcode, p.descripcion, p.precio_costo_usd
+          SELECT vd.cantidad as qty, vd.precio_unitario_usd, vd.total_fila_usd, 
+                 p.codigo_barras_clave as barcode, p.descripcion, p.precio_costo_usd,
+                 p.exento_impuesto, p.porcentaje_impuesto
           FROM Ventas_Detalle vd
           LEFT JOIN Productos p ON vd.producto_id = p.id
           WHERE vd.venta_id = $1
@@ -2380,7 +2385,9 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
             product: {
               barcode: i.barcode,
               description: i.descripcion,
-              precio_costo_usd: parseFloat(i.precio_costo_usd || '0')
+              precio_costo_usd: parseFloat(i.precio_costo_usd || '0'),
+              exento_impuesto: !!i.exento_impuesto,
+              porcentaje_impuesto: parseFloat(i.porcentaje_impuesto || 0)
             }
           })),
           subtotal: parseFloat(row.subtotal_usd),
@@ -2410,6 +2417,7 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
       let shiftPuntoVesMovs = 0;
       let shiftBiopagoVesMovs = 0;
       let shiftPagoMovilVesMovs = 0;
+      let shiftTransferenciaVesMovs = 0;
 
       for (const m of movsRes.rows) {
         const mUsd = parseFloat(m.monto_usd || '0');
@@ -2422,13 +2430,15 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
         const isPunto = mPago === 'PUNTO' || mPago.includes('TARJETA') || descUpper.includes('PUNTO');
         const isBiopago = mPago === 'BIOPAGO' || descUpper.includes('BIOPAGO');
         const isPagoMovil = mPago === 'PAGO_MOVIL' || mPago === 'PAGOMOVIL' || descUpper.includes('PAGO MÓVIL') || descUpper.includes('PAGO_MOVIL');
+        const isTransferencia = mPago === 'TRANSFERENCIA' || descUpper.includes('TRANSFERENCIA');
 
-        const isDigitalAdvance = (descUpper.includes('VENTA EFECTIVO') || descUpper.includes('AVANCE')) && (isPunto || isBiopago || isPagoMovil || descUpper.includes('COBRO DIGITAL')) || (mPago !== 'EFECTIVO' && mPago !== 'EFECTIVO$' && mPago !== 'EFECTIVOBS');
+        const isDigitalAdvance = (descUpper.includes('VENTA EFECTIVO') || descUpper.includes('AVANCE')) && (isPunto || isBiopago || isPagoMovil || isTransferencia || descUpper.includes('COBRO DIGITAL')) || (mPago !== 'EFECTIVO' && mPago !== 'EFECTIVO$' && mPago !== 'EFECTIVOBS');
 
         if (tipo === 'Entrada' && isDigitalAdvance) {
           if (isPunto) shiftPuntoVesMovs += mVes;
           else if (isBiopago) shiftBiopagoVesMovs += mVes;
           else if (isPagoMovil) shiftPagoMovilVesMovs += mVes;
+          else if (isTransferencia) shiftTransferenciaVesMovs += mVes;
         }
 
         if (tipo === 'Entrada') {
@@ -2498,6 +2508,7 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
         shiftPuntoVesMovs,
         shiftBiopagoVesMovs,
         shiftPagoMovilVesMovs,
+        shiftTransferenciaVesMovs,
         shiftAbonosUsd,
         shiftAbonosVes,
         shiftEntradasUsd,

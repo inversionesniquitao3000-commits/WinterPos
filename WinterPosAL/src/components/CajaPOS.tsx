@@ -1627,7 +1627,9 @@ export default function CajaPOS({
     let serverPuntoVes = 0;
     let serverBiopagoVes = 0;
     let serverPagoMovilVes = 0;
+    let serverTransferenciaVes = 0;
 
+    let fetchedFechaApertura = localStorage.getItem('pos_apertura_fecha') || '';
     // Fetch fresh unified caja estado from server before generating final cierre card
     try {
       const termName = localStorage.getItem('pos_terminal_name') || 'CAJA_01';
@@ -1635,6 +1637,7 @@ export default function CajaPOS({
       if (res.ok) {
         const cajaData = await res.json();
         if (cajaData && cajaData.abierta) {
+          if (cajaData.fechaApertura) fetchedFechaApertura = cajaData.fechaApertura;
           if (Array.isArray(cajaData.shiftSales)) targetShiftSales = cajaData.shiftSales;
           if (Array.isArray(cajaData.shiftAbonosList)) targetShiftAbonos = cajaData.shiftAbonosList;
           if (typeof cajaData.aperturaUsd === 'number') targetAperturaUsd = cajaData.aperturaUsd;
@@ -1648,6 +1651,7 @@ export default function CajaPOS({
           if (typeof cajaData.shiftPuntoVesMovs === 'number') serverPuntoVes = cajaData.shiftPuntoVesMovs;
           if (typeof cajaData.shiftBiopagoVesMovs === 'number') serverBiopagoVes = cajaData.shiftBiopagoVesMovs;
           if (typeof cajaData.shiftPagoMovilVesMovs === 'number') serverPagoMovilVes = cajaData.shiftPagoMovilVesMovs;
+          if (typeof cajaData.shiftTransferenciaVesMovs === 'number') serverTransferenciaVes = cajaData.shiftTransferenciaVesMovs;
         }
       }
     } catch (err) {
@@ -1660,7 +1664,23 @@ export default function CajaPOS({
       if (resOps.ok) {
         const opsData = await resOps.json();
         if (Array.isArray(opsData)) {
-          shiftDivisaOps = opsData;
+          const aperturaMs = fetchedFechaApertura ? new Date(fetchedFechaApertura).getTime() : 0;
+          const termName = localStorage.getItem('pos_terminal_name') || 'CAJA_01';
+          
+          shiftDivisaOps = opsData.filter((op: any) => {
+            const opTime = op.timestamp || (op.fecha ? new Date(op.fecha).getTime() : 0);
+            // Exclude operations prior to current session opening
+            if (aperturaMs > 0 && opTime > 0 && opTime < (aperturaMs - 60000)) {
+              return false;
+            }
+            if (op.terminal && op.terminal !== termName) {
+              return false;
+            }
+            if (op.usuario_id && currentUser?.id && Number(op.usuario_id) !== Number(currentUser.id)) {
+              return false;
+            }
+            return true;
+          });
         }
       }
     } catch (e) {
@@ -1689,6 +1709,15 @@ export default function CajaPOS({
       const isVentaEfectivo = op.tipo_operacion === 'VENTA_EFECTIVO' || String(op.descripcion || '').includes('[VENTA EFECTIVO]');
       const isPagoMovil = op.metodo_cobro === 'PAGO_MOVIL' || op.metodo_pago === 'PAGO_MOVIL' || String(op.descripcion || '').includes('PAGO MÓVIL') || String(op.descripcion || '').includes('PAGO_MOVIL');
       if (isVentaEfectivo && isPagoMovil) {
+        return acc + (op.monto_digital_cobrado_ves || op.monto_ves || op.ves || 0);
+      }
+      return acc;
+    }, 0));
+
+    const avanceTransferenciaVes = Math.max(serverTransferenciaVes, shiftDivisaOps.reduce((acc, op) => {
+      const isVentaEfectivo = op.tipo_operacion === 'VENTA_EFECTIVO' || String(op.descripcion || '').includes('[VENTA EFECTIVO]');
+      const isTransferencia = op.metodo_cobro === 'TRANSFERENCIA' || op.metodo_pago === 'TRANSFERENCIA' || String(op.descripcion || '').includes('TRANSFERENCIA');
+      if (isVentaEfectivo && isTransferencia) {
         return acc + (op.monto_digital_cobrado_ves || op.monto_ves || op.ves || 0);
       }
       return acc;
@@ -1785,7 +1814,7 @@ export default function CajaPOS({
     const abonoClientesUsd = abonosEfectivoUsd + abonosEfectivoBsUsd + abonosBiopagoUsd + abonosPagoMovilUsd + abonosPuntoUsd + abonosZelleUsd + abonosBinanceUsd + abonosPayPalUsd;
 
     const entradaEfectivoUsd = targetEntradaUsd;
-    const entradaEfectivoVes = Math.max(0, targetEntradaVes - (avanceBiopagoVes + avancePuntoVes + avancePagoMovilVes));
+    const entradaEfectivoVes = targetEntradaVes;
     const salidaEfectivoUsd = targetSalidaUsd;
     const salidaEfectivoVes = targetSalidaVes;
     const devolucionEfectivoUsd = targetDevolucionUsd;
@@ -1877,6 +1906,9 @@ export default function CajaPOS({
       if (sale.factura_nro.startsWith('DEV-')) return acc;
       return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'PagoMovil' ? a + getPayVes(p) : a, 0);
     }, 0) + abonosPagoMovilVes + avancePagoMovilVes;
+
+    const pagosTransferenciaUsd = 0;
+    const pagosTransferenciaVes = avanceTransferenciaVes;
 
     const pagosPuntoUsd = targetShiftSales.reduce((acc, sale) => {
       if (sale.factura_nro.startsWith('DEV-')) return acc;
@@ -2043,6 +2075,8 @@ export default function CajaPOS({
       pagosPuntoVes,
       pagosPagoMovilUsd,
       pagosPagoMovilVes,
+      pagosTransferenciaUsd,
+      pagosTransferenciaVes,
       pagosBinanceUsd,
       pagosPayPalUsd,
       pagosTarjetaUsd,
@@ -4281,6 +4315,11 @@ export default function CajaPOS({
                       </div>
 
                       <div className="flex justify-between">
+                        <span>Transferencia :</span>
+                        <span className="font-bold text-slate-800">Bs {(cierreResult.pagosTransferenciaVes && !isNaN(cierreResult.pagosTransferenciaVes) ? cierreResult.pagosTransferenciaVes : 0).toFixed(2)}</span>
+                      </div>
+
+                      <div className="flex justify-between">
                         <span>A Crédito :</span>
                         <span className="font-bold text-slate-800">$ {(cierreResult.pagosCreditoUsd && !isNaN(cierreResult.pagosCreditoUsd) ? cierreResult.pagosCreditoUsd : 0).toFixed(2)}</span>
                       </div>
@@ -4310,35 +4349,44 @@ export default function CajaPOS({
                     </div>
 
                     {/* PROFITABILITY BREAKDOWN */}
-                    <div className="pt-2.5 font-sans space-y-2 text-[11.5px] text-slate-700 bg-emerald-50/50 p-3 rounded border border-emerald-100 mt-2 select-text">
-                      <div className="font-bold text-[10px] text-emerald-855 uppercase border-b border-emerald-200/60 pb-1 font-sans flex justify-between">
-                        <span>CÁLCULO DE UTILIDAD DEL CIERRE</span>
-                      </div>
-                      <div className="flex justify-between font-mono">
-                        <span>Ventas Netas (sin IVA):</span>
-                        <span className="font-bold text-slate-800">$ {(cierreResult.ventaTotalUsd ?? 0).toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between font-mono">
-                        <span>Costo de Mercancía:</span>
-                        <span className="font-bold text-red-600">- $ {(cierreResult.costoTotalUsd ?? 0).toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between font-mono text-[12.5px] border-t border-emerald-300/80 pt-1 mt-1 font-extrabold text-emerald-700">
-                        <span>UTILIDAD BRUTA (SUBTOTAL):</span>
-                        <span className="text-base font-black">$ {(cierreResult.utilidadUsd ?? ((cierreResult.ventaTotalUsd ?? 0) - (cierreResult.costoTotalUsd ?? 0))).toFixed(2)}</span>
-                      </div>
-                      {(cierreResult.ventaEfectivoComisionVes ?? 0) > 0 && (
-                        <div className="flex justify-between font-mono text-emerald-900 font-extrabold bg-emerald-100/70 p-1.5 rounded border border-emerald-300">
-                          <span>Comisiones Venta Efectivo:</span>
-                          <span>+ Bs {cierreResult.ventaEfectivoComisionVes!.toFixed(2)} (${(cierreResult.ventaEfectivoComisionUsd ?? 0).toFixed(2)})</span>
+                    {(() => {
+                      const subtotalNeto = cierreResult.subtotalNetoUsd ?? cierreResult.ventaTotalUsd ?? 0;
+                      const costoTotal = cierreResult.costoTotalUsd ?? 0;
+                      const utilidadBrutaProductos = subtotalNeto - costoTotal;
+                      const comisionVes = cierreResult.ventaEfectivoComisionVes ?? 0;
+                      const comisionUsd = cierreResult.ventaEfectivoComisionUsd ?? (tasaDia > 0 ? comisionVes / tasaDia : 0);
+                      const utilidadNetaTotalCierre = utilidadBrutaProductos + comisionUsd;
+
+                      return (
+                        <div className="pt-2.5 font-sans space-y-2 text-[11.5px] text-slate-700 bg-emerald-50/50 p-3 rounded border border-emerald-100 mt-2 select-text">
+                          <div className="font-bold text-[10px] text-emerald-855 uppercase border-b border-emerald-200/60 pb-1 font-sans flex justify-between">
+                            <span>CÁLCULO DE UTILIDAD DEL CIERRE</span>
+                          </div>
+                          <div className="flex justify-between font-mono">
+                            <span>Ventas Netas (sin IVA):</span>
+                            <span className="font-bold text-slate-800">$ {subtotalNeto.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between font-mono">
+                            <span>Costo de Mercancía:</span>
+                            <span className="font-bold text-red-600">- $ {costoTotal.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between font-mono text-[11.5px] border-t border-emerald-300/80 pt-1 mt-1 font-bold text-emerald-800">
+                            <span>Utilidad Bruta por Productos:</span>
+                            <span className="font-black">$ {utilidadBrutaProductos.toFixed(2)}</span>
+                          </div>
+                          {comisionVes > 0 && (
+                            <div className="flex justify-between font-mono text-emerald-900 font-extrabold bg-emerald-100/70 p-1.5 rounded border border-emerald-300">
+                              <span>+ Comisiones Venta Efectivo:</span>
+                              <span>+ Bs {comisionVes.toFixed(2)} (+${comisionUsd.toFixed(2)})</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between font-mono text-[13px] border-t-2 border-emerald-500 pt-1.5 mt-1 font-black text-emerald-950 bg-emerald-200/60 p-2 rounded-lg shadow-sm">
+                            <span>UTILIDAD NETA TOTAL CIERRE:</span>
+                            <span className="text-lg font-black text-emerald-700">$ {utilidadNetaTotalCierre.toFixed(2)}</span>
+                          </div>
                         </div>
-                      )}
-                      {(cierreResult.ventaTotalUsd ?? 0) > (cierreResult.ventaBrutaUsd ?? 0) && (
-                        <div className="flex justify-between text-slate-500 font-mono text-[9.5px] mt-0.5 italic pt-1 border-t border-dashed border-emerald-200">
-                          <span>Total Facturado (con IVA):</span>
-                          <span>$ {(cierreResult.ventaTotalUsd ?? 0).toFixed(2)} (Utilidad Neta: ${(cierreResult.utilidadUsd ?? ((cierreResult.ventaTotalUsd ?? 0) - (cierreResult.costoTotalUsd ?? 0))).toFixed(2)})</span>
-                        </div>
-                      )}
-                    </div>
+                      );
+                    })()}
                   </div>
 
                 </div>
