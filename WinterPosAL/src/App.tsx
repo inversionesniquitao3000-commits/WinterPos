@@ -2267,7 +2267,7 @@ export default function App() {
         )}
 
         {/* Inversiones & Accionistas - Solo Administrador, con protección Master Pass */}
-        {currentUser && currentUser.rol === 'administrador' && (
+        {currentUser && (currentUser.rol?.toLowerCase() === 'administrador' || currentUser.rol?.toLowerCase() === 'admin') && (
           <button
             onClick={() => {
               if (inversionesUnlocked) {
@@ -2482,15 +2482,19 @@ export default function App() {
           )}
 
           {/* TAB: INVERSIONES & ACCIONISTAS - Solo Administrador */}
-          {activeTab === 'inversiones' && currentUser && currentUser.rol === 'administrador' && (
-            <InversionesModulo
-              isOpen={true}
-              onClose={() => setActiveTab('caja')}
-              currentUser={currentUser}
-              inline={true}
-              subTab={inversionesSubTab}
-              onSubTabChange={setInversionesSubTab}
-            />
+          {activeTab === 'inversiones' && (
+            <ErrorBoundary moduleName="Control de Inversiones y Accionistas">
+              <InversionesModulo
+                isOpen={true}
+                onClose={() => setActiveTab('caja')}
+                currentUser={currentUser}
+                inline={true}
+                subTab={inversionesSubTab}
+                onSubTabChange={setInversionesSubTab}
+                tasaDia={tasaDia}
+                companyConfig={companyConfig}
+              />
+            </ErrorBoundary>
           )}
         </div>
       </main>

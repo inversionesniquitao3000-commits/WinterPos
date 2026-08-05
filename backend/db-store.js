@@ -25,21 +25,44 @@ if (!fs.existsSync(DATA_DIR)) {
 // Local timezone Date/Time formatter helper
 function getLocalISODateString(d = new Date()) {
   if (!d) return '';
+  let dateObj = d;
   if (typeof d === 'string') {
-    const cleaned = d.replace('T', ' ').substring(0, 16);
-    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(cleaned)) {
-      return cleaned;
+    const trimmed = d.trim();
+    if (!trimmed) return '';
+    
+    // 1. Date-only format: YYYY-MM-DD -> return as-is (do NOT parse as UTC midnight)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return trimmed;
     }
-    const parsed = new Date(d);
-    if (!isNaN(parsed.getTime())) d = parsed;
-    else return cleaned;
+    
+    // 2. Local date-time format: YYYY-MM-DD HH:mm or YYYY-MM-DD HH:mm:ss -> return YYYY-MM-DD HH:mm as-is
+    if (/^\d{4}-\d{2}-\d{2}[\sT]+\d{2}:\d{2}/.test(trimmed) && !trimmed.includes('Z') && !trimmed.includes('+')) {
+      return trimmed.replace('T', ' ').substring(0, 16);
+    }
+    
+    // 3. ISO format with explicit UTC timezone (Z or offset): parse to convert UTC to local system time
+    if (trimmed.includes('Z') || (trimmed.includes('+') && !trimmed.startsWith('+'))) {
+      const parsed = new Date(trimmed);
+      if (!isNaN(parsed.getTime())) {
+        dateObj = parsed;
+      } else {
+        return trimmed.replace('T', ' ').substring(0, 16);
+      }
+    } else {
+      return trimmed.replace('T', ' ').substring(0, 16);
+    }
+  }
+  if (!(dateObj instanceof Date) || isNaN(dateObj.getTime())) {
+    return '';
   }
   const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${dateObj.getFullYear()}-${pad(dateObj.getMonth() + 1)}-${pad(dateObj.getDate())} ${pad(dateObj.getHours())}:${pad(dateObj.getMinutes())}`;
 }
 
 let usePostgres = false;
 let pool = null;
+
+const sysTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Caracas';
 
 // Initialize PostgreSQL connection pool
 try {
@@ -55,10 +78,27 @@ try {
     connectionTimeoutMillis: 3000 // fail fast if not connected
   });
 
+  pool.on('connect', (client) => {
+    client.query(`SET TIME ZONE '${sysTimeZone}'`).catch(() => {});
+  });
+
   // Try to connect to test if Postgres is accessible with configured user/pass
   const client = await pool.connect();
-  console.log('✅ Base de datos central PostgreSQL conectada exitosamente.');
+  await client.query(`SET TIME ZONE '${sysTimeZone}'`).catch(() => {});
+  console.log(`✅ Base de datos central PostgreSQL conectada (Zona Horaria: ${sysTimeZone}).`);
   usePostgres = true;
+
+  // Auto-adjust existing UTC timestamps created today that were shifted ahead
+  try {
+    await client.query(`
+      UPDATE Ventas SET fecha = fecha - INTERVAL '4 hours' WHERE fecha > NOW();
+      UPDATE Movimientos_Inventario SET fecha = fecha - INTERVAL '4 hours' WHERE fecha > NOW();
+      UPDATE Cajas_Apertura_Cierre SET fecha_apertura = fecha_apertura - INTERVAL '4 hours' WHERE fecha_apertura > NOW();
+      UPDATE Cajas_Apertura_Cierre SET fecha_cierre = fecha_cierre - INTERVAL '4 hours' WHERE fecha_cierre IS NOT NULL AND fecha_cierre > NOW();
+    `);
+  } catch (tzFixErr) {
+    // Ignore if timestamps are already local
+  }
   
   // Run schema migration to add new closure fields if they do not exist
   await client.query(`
@@ -122,6 +162,15 @@ try {
     ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS a_granel BOOLEAN DEFAULT FALSE;
     ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(50);
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS permitir_multisesion BOOLEAN DEFAULT TRUE;
+    CREATE TABLE IF NOT EXISTS Gastos_Operativos (
+      id SERIAL PRIMARY KEY,
+      concepto VARCHAR(150) NOT NULL,
+      monto_usd NUMERIC(10,2) NOT NULL,
+      fecha VARCHAR(50) NOT NULL,
+      observacion TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    UPDATE Gastos_Operativos SET fecha = '2026-08-05' WHERE fecha LIKE '2026-08-04%' OR fecha LIKE '%20:00%';
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS compartir_apertura_caja BOOLEAN DEFAULT TRUE;
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS master_pass VARCHAR(255) DEFAULT '1234';
 
@@ -1751,7 +1800,8 @@ export async function saveSale(s) {
       await clientTarget.query('BEGIN');
       
       // Get IDs
-      const clientRes = await clientTarget.query('SELECT id FROM Clientes WHERE cedula_rif = $1', [s.client.cedula_rif]);
+      const clientDoc = s.client?.cedula_rif || s.client?.cedula || 'V-00000000';
+      const clientRes = await clientTarget.query('SELECT id FROM Clientes WHERE cedula_rif = $1 OR id = $2', [clientDoc, s.client?.id || 0]);
       const myTerminal = s.terminal || s.estacion_nombre || 'CAJA_PRINCIPAL';
 
       let userId = 1;
@@ -1841,7 +1891,11 @@ export async function saveSale(s) {
       // Insert Items & adjust stock
       const isDevSale = factura_nro.startsWith('DEV-');
       for (const item of s.items) {
-        const prodRes = await clientTarget.query('SELECT id, stock_actual, precio_detalle_usd, a_granel FROM Productos WHERE codigo_barras_clave = $1', [item.product.barcode]);
+        const barcode = item.product?.barcode || item.product?.codigo_barras_clave || '';
+        let prodRes = await clientTarget.query('SELECT id, stock_actual, precio_detalle_usd, a_granel FROM Productos WHERE codigo_barras_clave = $1', [barcode]);
+        if (prodRes.rowCount === 0 && item.product?.id) {
+          prodRes = await clientTarget.query('SELECT id, stock_actual, precio_detalle_usd, a_granel FROM Productos WHERE id = $1', [item.product.id]);
+        }
         if (prodRes.rowCount > 0) {
           const prodId = prodRes.rows[0].id;
           const currentStock = parseFloat(prodRes.rows[0].stock_actual || 0);
@@ -1864,9 +1918,9 @@ export async function saveSale(s) {
               saleId, 
               prodId, 
               cleanQty, 
-              item.precio_unitario_usd || item.priceUSD || item.product.precio_detalle_usd, 
+              item.precio_unitario_usd || item.priceUSD || item.product?.precio_detalle_usd || 0, 
               item.tipo_precio || item.priceType || 'Detalle', 
-              item.total_fila_usd || item.totalUSD || (cleanQty * (item.priceUSD || item.product.precio_detalle_usd))
+              item.total_fila_usd || item.totalUSD || (cleanQty * (item.priceUSD || item.product?.precio_detalle_usd || 0))
             ]
           );
           
@@ -1877,7 +1931,7 @@ export async function saveSale(s) {
           await clientTarget.query(
             `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
              VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [prodId, userId, isDevSale ? 'Devolución' : 'Venta', stockDelta, currentStock, newStock, isDevSale ? `Devolución Facturada: ${factura_nro}` : `Venta Facturada: ${factura_nro}`]
+            [prodId, userId, isDevSale ? 'Devolucion' : 'Venta', stockDelta, currentStock, newStock, isDevSale ? `Devolución Facturada: ${factura_nro}` : `Venta Facturada: ${factura_nro}`]
           );
         }
       }
@@ -2852,69 +2906,20 @@ export async function verifyMasterPass(enteredPass) {
   return (enteredPass || '').trim() === (currentPass || '').trim();
 }
 
-// Initial seed data matching Image #1
-const mockAccionistas = [
-  { id: 1, nombre: 'Anderson', cedula_rif: 'V-00000001', telefono: '', estado: 'Activo' },
-  { id: 2, nombre: 'Andrea', cedula_rif: 'V-00000002', telefono: '', estado: 'Activo' },
-  { id: 3, nombre: 'Magaly', cedula_rif: 'V-00000003', telefono: '', estado: 'Activo' },
-  { id: 4, nombre: 'Ines', cedula_rif: 'V-00000004', telefono: '', estado: 'Activo' },
-  { id: 5, nombre: 'Ivan', cedula_rif: 'V-00000005', telefono: '', estado: 'Activo' }
-];
-
-const mockInversiones = [
-  { id: 1, accionista_id: 1, fecha: '2023-01-01', monto_usd: 2295.71, observacion: 'Aporte Consolidado Inicial' },
-  { id: 2, accionista_id: 1, fecha: '2023-01-26', monto_usd: 98.00, observacion: 'Aporte de capital' },
-  { id: 3, accionista_id: 1, fecha: '2023-09-04', monto_usd: 45.50, observacion: 'Aporte de capital' },
-  { id: 4, accionista_id: 1, fecha: '2023-09-30', monto_usd: 100.00, observacion: 'Aporte mensual' },
-
-  { id: 5, accionista_id: 2, fecha: '2023-01-01', monto_usd: 2418.34, observacion: 'Aporte Consolidado Inicial' },
-  { id: 6, accionista_id: 2, fecha: '2023-09-30', monto_usd: 100.00, observacion: 'Aporte mensual' },
-
-  { id: 7, accionista_id: 3, fecha: '2023-01-01', monto_usd: 2926.58, observacion: 'Aporte Consolidado Inicial' },
-  { id: 8, accionista_id: 3, fecha: '2023-09-30', monto_usd: 100.00, observacion: 'Aporte mensual' },
-
-  { id: 9, accionista_id: 4, fecha: '2023-01-01', monto_usd: 1173.73, observacion: 'Aporte Consolidado Inicial' },
-  { id: 10, accionista_id: 4, fecha: '2025-03-04', monto_usd: 200.00, observacion: 'Inversión adicional' },
-  { id: 11, accionista_id: 4, fecha: '2025-03-04', monto_usd: 52.07, observacion: 'Inversión adicional' },
-  { id: 12, accionista_id: 4, fecha: '2026-05-26', monto_usd: 50.00, observacion: 'Aporte de capital' },
-  { id: 13, accionista_id: 4, fecha: '2026-05-26', monto_usd: 30.00, observacion: 'Aporte de capital' },
-
-  { id: 14, accionista_id: 5, fecha: '2023-01-01', monto_usd: 60.00, observacion: 'Aporte Consolidado Inicial' },
-  { id: 15, accionista_id: 5, fecha: '2023-02-19', monto_usd: 5.00, observacion: 'Aporte de capital' },
-  { id: 16, accionista_id: 5, fecha: '2023-04-08', monto_usd: -50.00, observacion: 'Retiro / Ajuste de capital' }
-];
-
 export async function getAccionistas() {
   if (usePostgres) {
     try {
       const res = await pool.query('SELECT * FROM Accionistas ORDER BY id ASC');
-      if (res.rowCount > 0) {
-        return res.rows.map(r => ({
-          ...r,
-          id: Number(r.id)
-        }));
-      } else {
-        for (const a of mockAccionistas) {
-          await pool.query(
-            'INSERT INTO Accionistas (id, nombre, cedula_rif, telefono, estado) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING',
-            [a.id, a.nombre, a.cedula_rif, a.telefono, a.estado]
-          );
-        }
-        await pool.query("SELECT setval(pg_get_serial_sequence('Accionistas', 'id'), 5)");
-        const resSeed = await pool.query('SELECT * FROM Accionistas ORDER BY id ASC');
-        return resSeed.rows.map(r => ({ ...r, id: Number(r.id) }));
-      }
+      return res.rows.map(r => ({
+        ...r,
+        id: Number(r.id)
+      }));
     } catch (err) {
       console.error('Error en getAccionistas (Postgres):', err.message);
     }
   }
 
-  const list = readJsonFile('accionistas.json', mockAccionistas);
-  if (!list || list.length === 0) {
-    writeJsonFile('accionistas.json', mockAccionistas);
-    return mockAccionistas;
-  }
-  return list;
+  return readJsonFile('accionistas.json', []);
 }
 
 export async function saveAccionista(data) {
@@ -2963,6 +2968,7 @@ export async function saveAccionista(data) {
 export async function deleteAccionista(id) {
   if (usePostgres) {
     try {
+      await pool.query('DELETE FROM Inversiones_Accionistas WHERE accionista_id = $1', [id]);
       await pool.query('DELETE FROM Accionistas WHERE id = $1', [id]);
       return true;
     } catch (err) {
@@ -2980,41 +2986,18 @@ export async function getInversiones() {
   if (usePostgres) {
     try {
       const res = await pool.query('SELECT * FROM Inversiones_Accionistas ORDER BY fecha ASC, id ASC');
-      if (res.rowCount > 0) {
-        return res.rows.map(r => ({
-          ...r,
-          id: Number(r.id),
-          accionista_id: Number(r.accionista_id),
-          monto_usd: parseFloat(r.monto_usd)
-        }));
-      } else {
-        await getAccionistas();
-        for (const inv of mockInversiones) {
-          await pool.query(
-            'INSERT INTO Inversiones_Accionistas (id, accionista_id, fecha, monto_usd, observacion) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING',
-            [inv.id, inv.accionista_id, inv.fecha, inv.monto_usd, inv.observacion]
-          );
-        }
-        await pool.query("SELECT setval(pg_get_serial_sequence('Inversiones_Accionistas', 'id'), 16)");
-        const resSeed = await pool.query('SELECT * FROM Inversiones_Accionistas ORDER BY fecha ASC, id ASC');
-        return resSeed.rows.map(r => ({
-          ...r,
-          id: Number(r.id),
-          accionista_id: Number(r.accionista_id),
-          monto_usd: parseFloat(r.monto_usd)
-        }));
-      }
+      return res.rows.map(r => ({
+        ...r,
+        id: Number(r.id),
+        accionista_id: Number(r.accionista_id),
+        monto_usd: parseFloat(r.monto_usd)
+      }));
     } catch (err) {
       console.error('Error en getInversiones (Postgres):', err.message);
     }
   }
 
-  const list = readJsonFile('inversiones.json', mockInversiones);
-  if (!list || list.length === 0) {
-    writeJsonFile('inversiones.json', mockInversiones);
-    return mockInversiones;
-  }
-  return list;
+  return readJsonFile('inversiones.json', []);
 }
 
 export async function saveInversion(data) {
@@ -3090,6 +3073,98 @@ export async function deleteInversion(id) {
   const list = await getInversiones();
   const updated = list.filter(i => i.id !== Number(id));
   writeJsonFile('inversiones.json', updated);
+  return true;
+}
+
+export async function getGastosOperativos() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query('SELECT * FROM Gastos_Operativos ORDER BY id DESC');
+      return res.rows.map(r => ({
+        id: Number(r.id),
+        concepto: r.concepto,
+        monto_usd: parseFloat(r.monto_usd || 0),
+        fecha: r.fecha ? String(r.fecha).replace('T', ' ').substring(0, 16) : getLocalISODateString(),
+        observacion: r.observacion || ''
+      }));
+    } catch (err) {
+      console.error('Error en getGastosOperativos (Postgres):', err.message);
+    }
+  }
+  return readJsonFile('gastos.json', []);
+}
+
+export async function saveGastoOperativo(data) {
+  if (usePostgres) {
+    try {
+      if (data.id) {
+        const res = await pool.query(
+          'UPDATE Gastos_Operativos SET concepto = $1, monto_usd = $2, fecha = $3, observacion = $4 WHERE id = $5 RETURNING *',
+          [data.concepto, data.monto_usd, data.fecha || getLocalISODateString(), data.observacion || '', data.id]
+        );
+        return {
+          ...res.rows[0],
+          id: Number(res.rows[0].id),
+          monto_usd: parseFloat(res.rows[0].monto_usd)
+        };
+      } else {
+        const res = await pool.query(
+          'INSERT INTO Gastos_Operativos (concepto, monto_usd, fecha, observacion) VALUES ($1, $2, $3, $4) RETURNING *',
+          [data.concepto, data.monto_usd, data.fecha || getLocalISODateString(), data.observacion || '']
+        );
+        return {
+          ...res.rows[0],
+          id: Number(res.rows[0].id),
+          monto_usd: parseFloat(res.rows[0].monto_usd)
+        };
+      }
+    } catch (err) {
+      console.error('Error en saveGastoOperativo (Postgres):', err.message);
+      throw err;
+    }
+  }
+
+  const list = readJsonFile('gastos.json', []);
+  if (data.id) {
+    const idx = list.findIndex(g => g.id === Number(data.id));
+    if (idx !== -1) {
+      list[idx] = {
+        ...list[idx],
+        concepto: data.concepto,
+        monto_usd: parseFloat(data.monto_usd),
+        fecha: data.fecha,
+        observacion: data.observacion || ''
+      };
+      data = list[idx];
+    }
+  } else {
+    const newItem = {
+      id: Date.now(),
+      concepto: data.concepto,
+      monto_usd: parseFloat(data.monto_usd),
+      fecha: data.fecha || getLocalISODateString(),
+      observacion: data.observacion || ''
+    };
+    list.unshift(newItem);
+    data = newItem;
+  }
+  writeJsonFile('gastos.json', list);
+  return data;
+}
+
+export async function deleteGastoOperativo(id) {
+  if (usePostgres) {
+    try {
+      await pool.query('DELETE FROM Gastos_Operativos WHERE id = $1', [id]);
+      return true;
+    } catch (err) {
+      console.error('Error en deleteGastoOperativo (Postgres):', err.message);
+      throw err;
+    }
+  }
+  const list = readJsonFile('gastos.json', []);
+  const updated = list.filter(g => g.id !== Number(id));
+  writeJsonFile('gastos.json', updated);
   return true;
 }
 

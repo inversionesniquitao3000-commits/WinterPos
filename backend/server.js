@@ -9,7 +9,8 @@ import {
   updateClient, deleteClient, getAbonos, deleteProduct, updateProduct, saveProductsBulk,
   saveUser, updateUser, deleteUser, getRoles, saveRole, updateRole, deleteRole, wipeDatabase, backupDatabase, restoreDatabase,
   readJsonFile, writeJsonFile,
-  getMasterPass, saveMasterPass, verifyMasterPass, getAccionistas, saveAccionista, deleteAccionista, getInversiones, saveInversion, deleteInversion
+  getMasterPass, saveMasterPass, verifyMasterPass, getAccionistas, saveAccionista, deleteAccionista, getInversiones, saveInversion, deleteInversion,
+  getGastosOperativos, saveGastoOperativo, deleteGastoOperativo
 } from './db-store.js';
 
 import { 
@@ -1330,6 +1331,39 @@ app.delete('/api/inversiones/:id', async (req, res) => {
   try {
     const { id } = req.params;
     await deleteInversion(id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GASTOS OPERATIVOS REST API
+app.get('/api/gastos', async (req, res) => {
+  try {
+    const gastos = await getGastosOperativos();
+    res.json(gastos);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/gastos', async (req, res) => {
+  try {
+    const data = req.body;
+    if (!data.concepto || data.monto_usd === undefined) {
+      return res.status(400).json({ error: 'Concepto y monto son requeridos.' });
+    }
+    const saved = await saveGastoOperativo(data);
+    res.json(saved);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/gastos/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await deleteGastoOperativo(id);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

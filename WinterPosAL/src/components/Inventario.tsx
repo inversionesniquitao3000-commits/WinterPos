@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Product, InventoryMovement, PriceAdjustmentHistory, User, CompanyConfig } from '../types';
-import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator, PauseCircle, Play, Trash2, Wand2, Sparkles, ShieldAlert, RotateCcw, BarChart3, TrendingUp, Award, DollarSign } from 'lucide-react';
+import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator, PauseCircle, Play, Trash2, Wand2, Sparkles, ShieldAlert, RotateCcw, BarChart3, TrendingUp, Award, DollarSign, Calendar, X } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr } from '../utils';
 import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
@@ -314,8 +314,12 @@ export default function Inventario({
   // History page filters
   const [historySearch, setHistorySearch] = useState('');
   
-  // Sub-navegación Kardex
+  // Sub-navegación y Filtros Kardex
   const [kardexView, setKardexView] = useState<'detallada' | 'resumen'>('detallada');
+  const [kardexSearchTerm, setKardexSearchTerm] = useState('');
+  const [kardexDateFilter, setKardexDateFilter] = useState('');
+  const [kardexTypeFilter, setKardexTypeFilter] = useState('todos');
+  const [kardexOperatorFilter, setKardexOperatorFilter] = useState('todos');
   const [selectedGroupedMovements, setSelectedGroupedMovements] = useState<InventoryMovement[] | null>(null);
 
   const ALL_STATS_MONTHS = [
@@ -691,6 +695,63 @@ export default function Inventario({
     prevProductsLengthRef.current = safeProducts.length;
   }, [safeProducts, showInvoiceLoadModal]);
 
+  const kardexOperatorsList = useMemo(() => {
+    const ops = new Set<string>();
+    safeMovements.forEach(m => {
+      if (m && m.usuario && m.usuario.trim()) {
+        ops.add(m.usuario.trim());
+      }
+    });
+    return Array.from(ops).sort();
+  }, [safeMovements]);
+
+  const filteredMovements = useMemo(() => {
+    let result = [...safeMovements];
+
+    // Ordenar por fecha más reciente primero (DESC)
+    result.sort((a, b) => {
+      const dateA = new Date(a.date).getTime() || 0;
+      const dateB = new Date(b.date).getTime() || 0;
+      if (dateA !== dateB) return dateB - dateA;
+      return (b.id || 0) - (a.id || 0);
+    });
+
+    // Filtro por Buscador (Código, Descripción o Motivo/Justificación)
+    if (kardexSearchTerm.trim() !== '') {
+      const term = kardexSearchTerm.toLowerCase();
+      result = result.filter(m => 
+        (m.productCode || '').toLowerCase().includes(term) ||
+        (m.productDescription || '').toLowerCase().includes(term) ||
+        (m.motivo || '').toLowerCase().includes(term)
+      );
+    }
+
+    // Filtro por Fecha
+    if (kardexDateFilter.trim() !== '') {
+      const dateTerm = kardexDateFilter.trim();
+      result = result.filter(m => (m.date || '').includes(dateTerm));
+    }
+
+    // Filtro por Tipo de Movimiento
+    if (kardexTypeFilter !== 'todos') {
+      result = result.filter(m => {
+        const mType = (m.type || '').toLowerCase();
+        const fType = kardexTypeFilter.toLowerCase();
+        if (fType === 'devolucion') {
+          return mType === 'devolucion' || mType === 'devolución';
+        }
+        return mType === fType;
+      });
+    }
+
+    // Filtro por Operador
+    if (kardexOperatorFilter !== 'todos') {
+      result = result.filter(m => (m.usuario || '').trim() === kardexOperatorFilter.trim());
+    }
+
+    return result;
+  }, [safeMovements, kardexSearchTerm, kardexDateFilter, kardexTypeFilter, kardexOperatorFilter]);
+
   const groupedMovements = useMemo(() => {
     const groups: Record<string, {
       key: string;
@@ -703,8 +764,9 @@ export default function Inventario({
       movements: InventoryMovement[];
     }> = {};
 
-    safeMovements.forEach(m => {
-      const groupKey = `${m.date}_${m.motivo}_${m.usuario}_${m.type}`;
+    filteredMovements.forEach(m => {
+      const dateMin = m.date ? m.date.substring(0, 16) : '';
+      const groupKey = `${dateMin}_${m.motivo}_${m.usuario}_${m.type}`;
       if (!groups[groupKey]) {
         groups[groupKey] = {
           key: groupKey,
@@ -722,8 +784,8 @@ export default function Inventario({
       groups[groupKey].movements.push(m);
     });
 
-    return Object.values(groups).reverse();
-  }, [safeMovements]);
+    return Object.values(groups);
+  }, [filteredMovements]);
 
   const existingCategories = useMemo(() => {
     const cats = new Set<string>();
@@ -2905,43 +2967,127 @@ export default function Inventario({
       {/* MOVIMIENTOS KARDEX PANEL */}
       {activeSubTab === 'movimientos' && (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col h-[500px]">
-          <div className="bg-slate-55 px-5 py-3 border-b border-slate-200 flex flex-wrap justify-between items-center gap-4">
-            <div className="flex items-center gap-4">
-              <h2 className="text-xs font-bold text-slate-600 uppercase tracking-widest flex items-center gap-2 font-sans">
-                <History className="w-4 h-4 text-winter-inventarioStart" />
-                Kardex de Movimientos de Inventario
-              </h2>
-              
-              {/* Selector de Sub-Navegación */}
-              <div className="flex bg-slate-200 p-0.5 rounded-lg border border-slate-300 text-[10.5px] font-sans">
-                <button
-                  type="button"
-                  onClick={() => setKardexView('detallada')}
-                  className={`px-3 py-1 rounded-md font-bold transition-all ${
-                    kardexView === 'detallada'
-                      ? 'bg-white text-slate-900 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-900'
-                  }`}
-                >
-                  Vista Detallada
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setKardexView('resumen')}
-                  className={`px-3 py-1 rounded-md font-bold transition-all ${
-                    kardexView === 'resumen'
-                      ? 'bg-white text-slate-900 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-900'
-                  }`}
-                >
-                  Vista Resumen
-                </button>
+          {/* HEADER & FILTER CONTROLS */}
+          <div className="bg-slate-55 px-5 py-3 border-b border-slate-200 space-y-3">
+            <div className="flex flex-wrap justify-between items-center gap-4">
+              <div className="flex items-center gap-4">
+                <h2 className="text-xs font-bold text-slate-600 uppercase tracking-widest flex items-center gap-2 font-sans">
+                  <History className="w-4 h-4 text-winter-inventarioStart" />
+                  Kardex de Movimientos de Inventario
+                </h2>
+                
+                {/* Selector de Sub-Navegación */}
+                <div className="flex bg-slate-200 p-0.5 rounded-lg border border-slate-300 text-[10.5px] font-sans">
+                  <button
+                    type="button"
+                    onClick={() => setKardexView('detallada')}
+                    className={`px-3 py-1 rounded-md font-bold transition-all ${
+                      kardexView === 'detallada'
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    Vista Detallada
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setKardexView('resumen')}
+                    className={`px-3 py-1 rounded-md font-bold transition-all ${
+                      kardexView === 'resumen'
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    Vista Resumen
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {(kardexSearchTerm || kardexDateFilter || kardexTypeFilter !== 'todos' || kardexOperatorFilter !== 'todos') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setKardexSearchTerm('');
+                      setKardexDateFilter('');
+                      setKardexTypeFilter('todos');
+                      setKardexOperatorFilter('todos');
+                    }}
+                    className="text-[10px] text-rose-600 hover:text-rose-800 font-sans font-bold bg-rose-50 border border-rose-200 px-2 py-0.5 rounded flex items-center gap-1 cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                    Limpiar Filtros
+                  </button>
+                )}
+                <span className="text-[10px] bg-slate-200 border border-slate-300 px-2.5 py-0.5 rounded text-slate-600 font-sans font-bold">
+                  {kardexView === 'detallada' ? filteredMovements.length : groupedMovements.length} {kardexView === 'detallada' ? 'registros' : 'lotes'}
+                </span>
               </div>
             </div>
 
-            <span className="text-[10px] bg-slate-200 border border-slate-300 px-2.5 py-0.5 rounded text-slate-600 font-sans">
-              {kardexView === 'detallada' ? movements.length : groupedMovements.length} {kardexView === 'detallada' ? 'transacciones' : 'lotes'}
-            </span>
+            {/* BARRA DE BÚSQUEDA Y FILTROS KARDEX */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 font-sans text-xs pt-1 border-t border-slate-200/80">
+              {/* Buscador de Producto / Código / Motivo */}
+              <div className="relative flex items-center">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="🔍 Código, producto o motivo..."
+                  value={kardexSearchTerm}
+                  onChange={(e) => setKardexSearchTerm(e.target.value)}
+                  className="w-full bg-white border border-slate-300 rounded-lg pl-8 pr-2.5 py-1.5 text-[11px] text-slate-800 focus:outline-none focus:border-winter-inventarioStart shadow-xs"
+                />
+              </div>
+
+              {/* Buscador / Filtro por Fecha */}
+              <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2 py-1 shadow-xs">
+                <Calendar className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                <input
+                  type="date"
+                  value={kardexDateFilter}
+                  onChange={(e) => setKardexDateFilter(e.target.value)}
+                  className="w-full text-[11px] font-mono text-slate-800 bg-transparent focus:outline-none"
+                />
+                {kardexDateFilter && (
+                  <button type="button" onClick={() => setKardexDateFilter('')} className="text-slate-400 hover:text-slate-600">
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+
+              {/* Filtro por Tipo de Movimiento */}
+              <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2 py-1 shadow-xs">
+                <span className="text-[10px] text-slate-400 font-bold uppercase flex-shrink-0">Tipo:</span>
+                <select
+                  value={kardexTypeFilter}
+                  onChange={(e) => setKardexTypeFilter(e.target.value)}
+                  className="w-full bg-transparent text-[11px] text-slate-800 font-sans focus:outline-none font-medium cursor-pointer"
+                >
+                  <option value="todos">Todos los Tipos</option>
+                  <option value="Venta">Venta</option>
+                  <option value="Devolucion">Devolución</option>
+                  <option value="Merma">Merma</option>
+                  <option value="Entrada">Entrada</option>
+                  <option value="Salida">Salida</option>
+                  <option value="Entrada Rápida">Entrada Rápida</option>
+                </select>
+              </div>
+
+              {/* Filtro por Operador */}
+              <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2 py-1 shadow-xs">
+                <span className="text-[10px] text-slate-400 font-bold uppercase flex-shrink-0">Operador:</span>
+                <select
+                  value={kardexOperatorFilter}
+                  onChange={(e) => setKardexOperatorFilter(e.target.value)}
+                  className="w-full bg-transparent text-[11px] text-slate-800 font-sans focus:outline-none font-medium cursor-pointer"
+                >
+                  <option value="todos">Todos los Operadores</option>
+                  {kardexOperatorsList.map(op => (
+                    <option key={op} value={op}>{op}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
           </div>
 
           <div className="flex-grow overflow-y-auto">
@@ -2962,14 +3108,14 @@ export default function Inventario({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-[11px] text-slate-700">
-                  {movements.length === 0 ? (
+                  {filteredMovements.length === 0 ? (
                     <tr>
                       <td colSpan={10} className="text-center py-8 text-slate-400 font-sans">
-                        No se han registrado movimientos de inventario.
+                        No se encontraron movimientos con los filtros aplicados.
                       </td>
                     </tr>
                   ) : (
-                    [...movements].reverse().map(m => {
+                    filteredMovements.map(m => {
                       let typeColor = 'text-blue-700 bg-blue-50 border-blue-200';
                       if (m.type === 'Entrada') typeColor = 'text-green-700 bg-green-50 border-green-200';
                       if (m.type === 'Salida') typeColor = 'text-orange-700 bg-orange-50 border-orange-200';

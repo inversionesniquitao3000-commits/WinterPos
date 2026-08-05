@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr } from '../utils';
+import { MasterPassModal } from './MasterPassModal';
 
 interface ConfiguracionEmpresaProps {
   config: CompanyConfig;
@@ -114,6 +115,8 @@ export default function ConfiguracionEmpresa({
   // Navigation tabs
   const [activeTab, setActiveTab] = useState<'empresa' | 'usuarios' | 'perifericos' | 'db' | 'whatsapp'>('empresa');
   const [subTabUsers, setSubTabUsers] = useState<'users' | 'roles' | 'sesiones' | 'politicas' | 'masterpass'>('users');
+  const [showMasterPassModal, setShowMasterPassModal] = useState(false);
+  const [dbUnlocked, setDbUnlocked] = useState(false);
   // Master Pass state
   const [mpCurrentPass, setMpCurrentPass] = useState('');
   const [mpNewPass, setMpNewPass] = useState('');
@@ -1017,7 +1020,13 @@ export default function ConfiguracionEmpresa({
         {isAdmin && (
           <div className="flex gap-2">
             <button
-              onClick={() => setActiveTab('db')}
+              onClick={() => {
+                if (dbUnlocked) {
+                  setActiveTab('db');
+                } else {
+                  setShowMasterPassModal(true);
+                }
+              }}
               className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all ${
                 activeTab === 'db'
                   ? 'bg-white border-slate-200 text-winter-configStart font-sans'
@@ -3077,6 +3086,17 @@ export default function ConfiguracionEmpresa({
           </form>
         </div>
       )}
+
+      {/* MASTER PASS MODAL FOR DATABASE ACCESS */}
+      <MasterPassModal
+        isOpen={showMasterPassModal}
+        onClose={() => setShowMasterPassModal(false)}
+        onSuccess={() => {
+          setShowMasterPassModal(false);
+          setDbUnlocked(true);
+          setActiveTab('db');
+        }}
+      />
 
     </div>
   );

@@ -310,6 +310,25 @@ function getApiBaseUrl(): string {
   return `http://${host}:5000/api`;
 }
 
+export function getLocalISODateString(d: any = new Date()): string {
+  if (!d) return '';
+  if (typeof d === 'string') {
+    const trimmed = d.trim();
+    if (!trimmed) return '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+    if (/^\d{4}-\d{2}-\d{2}[\sT]+\d{2}:\d{2}/.test(trimmed) && !trimmed.includes('Z') && !trimmed.includes('+')) {
+      return trimmed.replace('T', ' ').substring(0, 16);
+    }
+    const parsed = new Date(trimmed);
+    if (!isNaN(parsed.getTime())) d = parsed;
+    else return trimmed.replace('T', ' ').substring(0, 16);
+  }
+  const dateObj = d as Date;
+  if (!(dateObj instanceof Date) || isNaN(dateObj.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${dateObj.getFullYear()}-${pad(dateObj.getMonth() + 1)}-${pad(dateObj.getDate())} ${pad(dateObj.getHours())}:${pad(dateObj.getMinutes())}`;
+}
+
 export async function fetchApiData(path: string): Promise<any> {
   try {
     const res = await fetch(`${getApiBaseUrl()}${path}`);

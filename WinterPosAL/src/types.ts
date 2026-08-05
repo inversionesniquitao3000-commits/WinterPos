@@ -370,4 +370,14 @@ export interface ResumenAccionista {
   porcentajeParticipacion: number;
 }
 
+export interface GastoOperativo {
+  id: number;
+  concepto: string;
+  monto_usd: number;
+  fecha: string;
+  observacion?: string;
+  usuario?: string;
+  created_at?: string;
+}
+
 

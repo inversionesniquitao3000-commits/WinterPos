@@ -27,9 +27,14 @@ export const MasterPassModal: React.FC<MasterPassModalProps> = ({
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    if (isOpen) {
+      setPass('');
+      setErrorMsg('');
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
     if (!isOpen) return;
-    setPass('');
-    setErrorMsg('');
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         onClose();

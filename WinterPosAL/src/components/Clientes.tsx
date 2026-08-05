@@ -213,7 +213,7 @@ export default function Clientes({
   // 2. Credits and Abonos chronological list
   const creditAbonoList = useMemo(() => {
     const list: { 
-      tipo: 'Crédito' | 'Abono'; 
+      tipo: 'Crédito' | 'Abono' | 'Devolución'; 
       fecha: string; 
       ref: string; 
       nombre: string; 
@@ -224,19 +224,23 @@ export default function Clientes({
       referencia?: string;
     }[] = [];
     
-    // Extract credit payments from sales
+    // Extract credit payments from sales (both positive purchases and negative credit returns)
     sales.forEach(s => {
       const creditPayment = s.pagos?.find(p => p.metodo === 'CreditoCliente');
-      if (creditPayment && creditPayment.monto > 0) {
+      if (creditPayment && (creditPayment.monto !== 0 || (creditPayment as any).montoUSD !== 0)) {
+        const rawMonto = (creditPayment as any).montoUSD !== undefined && (creditPayment as any).montoUSD !== 0 
+          ? (creditPayment as any).montoUSD 
+          : creditPayment.monto;
+        const isDev = s.factura_nro.startsWith('DEV-') || rawMonto < 0;
         list.push({
-          tipo: 'Crédito',
+          tipo: isDev ? 'Devolución' : 'Crédito',
           fecha: s.fecha,
           ref: s.factura_nro,
-          nombre: s.client.nombre,
-          cedula_rif: s.client.cedula_rif,
-          monto: creditPayment.monto,
-          metodo: 'Crédito',
-          metodoRaw: 'Credito'
+          nombre: s.client?.nombre || 'CLIENTE',
+          cedula_rif: s.client?.cedula_rif || 'V-00000000',
+          monto: Math.abs(rawMonto),
+          metodo: isDev ? 'Devolución / Nota Crédito' : 'Crédito',
+          metodoRaw: isDev ? 'Devolucion' : 'Credito'
         });
       }
     });
@@ -593,12 +597,12 @@ export default function Clientes({
               <tr><td colspan="6" style="text-align: center; color: #777;">Sin movimientos registrados.</td></tr>
             ` : filteredCreditAbonoList.map(item => `
               <tr>
-                <td><span class="badge ${item.tipo === 'Crédito' ? 'badge-credit' : 'badge-abono'}">${item.tipo}</span></td>
+                <td><span class="badge ${item.tipo === 'Crédito' ? 'badge-credit' : (item.tipo === 'Devolución' ? 'badge-dev' : 'badge-abono')}">${item.tipo}</span></td>
                 <td>${item.fecha}</td>
                 <td>${item.ref}</td>
                 <td style="text-transform: uppercase;">${item.nombre}</td>
                 <td>${item.cedula_rif}</td>
-                <td class="text-right font-bold ${item.tipo === 'Crédito' ? 'text-credit' : 'text-abono'}">${item.tipo === 'Crédito' ? '+' : '-'}$${item.monto.toFixed(2)}</td>
+                <td class="text-right font-bold ${item.tipo === 'Crédito' ? 'text-credit' : (item.tipo === 'Devolución' ? 'text-dev' : 'text-abono')}">${item.tipo === 'Crédito' ? '+' : '-'}$${item.monto.toFixed(2)}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -704,6 +708,9 @@ export default function Clientes({
             .text-abono {
               color: #16a34a;
             }
+            .text-dev {
+              color: #9333ea;
+            }
             .badge {
               display: inline-block;
               padding: 1px 5px;
@@ -719,6 +726,10 @@ export default function Clientes({
             .badge-abono {
               background-color: #dcfce7;
               color: #15803d;
+            }
+            .badge-dev {
+              background-color: #f3e8ff;
+              color: #7e22ce;
             }
             .report-summary {
               display: flex;
@@ -1251,11 +1262,20 @@ export default function Clientes({
                     ) : (
                       filteredCreditAbonoList.map((item, idx) => {
                         const isCredit = item.tipo === 'Crédito';
+                        const isDev = item.tipo === 'Devolución';
                         return (
                           <tr key={idx} className="hover:bg-slate-55 transition-colors">
                             <td className="px-4 py-2.5">
-                              <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-sans font-bold flex items-center w-fit gap-1 ${isCredit ? 'bg-orange-100 text-orange-850' : 'bg-emerald-100 text-emerald-850'}`}>
-                                <span className={`w-1.5 h-1.5 rounded-full ${isCredit ? 'bg-orange-500' : 'bg-emerald-500'}`} />
+                              <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-sans font-bold flex items-center w-fit gap-1 ${
+                                isCredit ? 'bg-orange-100 text-orange-850' : 
+                                isDev ? 'bg-purple-100 text-purple-850' : 
+                                'bg-emerald-100 text-emerald-850'
+                              }`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${
+                                  isCredit ? 'bg-orange-500' : 
+                                  isDev ? 'bg-purple-500' : 
+                                  'bg-emerald-500'
+                                }`} />
                                 {item.tipo}
                               </span>
                             </td>
@@ -1266,6 +1286,8 @@ export default function Clientes({
                             <td className="px-4 py-2.5 font-sans">
                               {isCredit ? (
                                 <span className="text-[10px] font-bold text-orange-600">Crédito Otorgado</span>
+                              ) : isDev ? (
+                                <span className="text-[10px] font-bold text-purple-600">Devolución / Nota Crédito</span>
                               ) : (
                                 <div className="flex flex-col">
                                   <span className={`px-2 py-0.5 rounded text-[10px] font-bold w-fit ${
@@ -1282,7 +1304,9 @@ export default function Clientes({
                                 </div>
                               )}
                             </td>
-                            <td className={`px-4 py-2.5 text-right font-mono font-extrabold ${isCredit ? 'text-orange-600' : 'text-emerald-600'}`}>
+                            <td className={`px-4 py-2.5 text-right font-mono font-extrabold ${
+                              isCredit ? 'text-orange-600' : isDev ? 'text-purple-600' : 'text-emerald-600'
+                            }`}>
                               {isCredit ? '+' : '-'}${item.monto.toFixed(2)}
                             </td>
                           </tr>
