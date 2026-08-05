@@ -318,10 +318,55 @@ export default function Inventario({
   const [kardexView, setKardexView] = useState<'detallada' | 'resumen'>('detallada');
   const [selectedGroupedMovements, setSelectedGroupedMovements] = useState<InventoryMovement[] | null>(null);
 
-  // Filtros de período para el submódulo Estadísticas (Año y Mes)
+  const ALL_STATS_MONTHS = [
+    { id: 1, name: 'Enero', short: 'Ene' },
+    { id: 2, name: 'Febrero', short: 'Feb' },
+    { id: 3, name: 'Marzo', short: 'Mar' },
+    { id: 4, name: 'Abril', short: 'Abr' },
+    { id: 5, name: 'Mayo', short: 'May' },
+    { id: 6, name: 'Junio', short: 'Jun' },
+    { id: 7, name: 'Julio', short: 'Jul' },
+    { id: 8, name: 'Agosto', short: 'Ago' },
+    { id: 9, name: 'Septiembre', short: 'Sep' },
+    { id: 10, name: 'Octubre', short: 'Oct' },
+    { id: 11, name: 'Noviembre', short: 'Nov' },
+    { id: 12, name: 'Diciembre', short: 'Dic' },
+  ];
+
+  // Filtros de período para el submódulo Estadísticas (Año y Meses seleccionables)
   const currentYear = new Date().getFullYear();
   const [statsYear, setStatsYear] = useState<number | 'todos'>(currentYear);
-  const [statsMonth, setStatsMonth] = useState<number | 'todos'>('todos');
+  const [statsMonths, setStatsMonths] = useState<number[]>([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  const [showMonthMenu, setShowMonthMenu] = useState(false);
+  const monthMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (monthMenuRef.current && !monthMenuRef.current.contains(event.target as Node)) {
+        setShowMonthMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const toggleStatsMonth = (mId: number) => {
+    setStatsMonths(prev => {
+      if (prev.includes(mId)) {
+        return prev.filter(id => id !== mId);
+      } else {
+        return [...prev, mId].sort((a, b) => a - b);
+      }
+    });
+  };
+
+  const toggleAllStatsMonths = () => {
+    if (statsMonths.length > 0) {
+      setStatsMonths([]);
+    } else {
+      setStatsMonths([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    }
+  };
 
   const getTodayLocalDateStr = () => {
     const d = new Date();
@@ -525,7 +570,7 @@ export default function Inventario({
     const totalEstimatedProfitUsd = totalValueDetailUsd - totalValueCostUsd;
     const avgMarginPct = totalValueCostUsd > 0 ? (totalEstimatedProfitUsd / totalValueCostUsd) * 100 : 0;
 
-    // Filtrar movimientos por Año y Mes seleccionados
+    // Filtrar movimientos por Año y Meses seleccionados
     const filteredMovements = safeMovements.filter(m => {
       if (!m?.date) return true;
       const d = new Date(m.date);
@@ -533,7 +578,8 @@ export default function Inventario({
       const monthNum = d.getMonth() + 1; // 1..12
 
       if (statsYear !== 'todos' && y !== statsYear) return false;
-      if (statsMonth !== 'todos' && monthNum !== statsMonth) return false;
+      if (statsMonths.length === 0) return false;
+      if (statsMonths.length < 12 && !statsMonths.includes(monthNum)) return false;
       return true;
     });
 
@@ -621,7 +667,7 @@ export default function Inventario({
       maxMovementQty,
       topCategories
     };
-  }, [safeProducts, safeMovements, statsYear, statsMonth]);
+  }, [safeProducts, safeMovements, statsYear, statsMonths]);
 
   const prevProductsLengthRef = useRef(safeProducts.length);
 
@@ -3370,28 +3416,65 @@ export default function Inventario({
                 </select>
               </div>
 
-              {/* Filtro por Mes */}
-              <div className="flex items-center gap-1.5 bg-slate-950/80 px-3 py-1.5 rounded-xl border border-slate-700/60 font-sans text-xs">
-                <span className="text-slate-400 font-bold">Mes:</span>
-                <select
-                  value={statsMonth}
-                  onChange={e => setStatsMonth(e.target.value === 'todos' ? 'todos' : parseInt(e.target.value))}
-                  className="bg-slate-900 text-indigo-300 font-extrabold font-mono px-2 py-0.5 rounded border border-slate-700 focus:outline-none cursor-pointer"
-                >
-                  <option value="todos">Todos los Meses (1-12)</option>
-                  <option value={1}>Enero</option>
-                  <option value={2}>Febrero</option>
-                  <option value={3}>Marzo</option>
-                  <option value={4}>Abril</option>
-                  <option value={5}>Mayo</option>
-                  <option value={6}>Junio</option>
-                  <option value={7}>Julio</option>
-                  <option value={8}>Agosto</option>
-                  <option value={9}>Septiembre</option>
-                  <option value={10}>Octubre</option>
-                  <option value={11}>Noviembre</option>
-                  <option value={12}>Diciembre</option>
-                </select>
+              {/* Filtro por Meses (Multi-Selección) */}
+              <div className="relative font-sans text-xs" ref={monthMenuRef}>
+                <div className="flex items-center gap-1.5 bg-slate-950/80 px-3 py-1.5 rounded-xl border border-slate-700/60 font-sans text-xs">
+                  <span className="text-slate-400 font-bold">Meses:</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowMonthMenu(prev => !prev)}
+                    className="bg-slate-900 text-indigo-300 font-extrabold font-mono px-2.5 py-1 rounded border border-slate-700 hover:border-slate-500 focus:outline-none cursor-pointer flex items-center gap-1.5 max-w-[220px]"
+                  >
+                    <span className="truncate">
+                      {statsMonths.length === 12
+                        ? 'Todos los Meses (1-12)'
+                        : statsMonths.length === 0
+                          ? 'Ningún mes seleccionado'
+                          : statsMonths.length === 1
+                            ? ALL_STATS_MONTHS.find(m => m.id === statsMonths[0])?.name
+                            : `${statsMonths.length} Meses (${statsMonths.map(id => ALL_STATS_MONTHS.find(m => m.id === id)?.short).join(', ')})`
+                      }
+                    </span>
+                    <ChevronDown className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
+                  </button>
+                </div>
+
+                {showMonthMenu && (
+                  <div className="absolute right-0 mt-2 w-64 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 p-3 animate-fade-in font-sans text-xs">
+                    <div className="flex justify-between items-center pb-2 border-b border-slate-800 mb-2">
+                      <span className="font-extrabold text-slate-300 uppercase tracking-wider text-[11px]">Seleccionar Meses</span>
+                      <button
+                        type="button"
+                        onClick={toggleAllStatsMonths}
+                        className="text-[10px] text-indigo-400 hover:text-indigo-300 font-bold underline cursor-pointer"
+                      >
+                        {statsMonths.length > 0 ? 'Deseleccionar Todos' : 'Seleccionar Todos'}
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-1.5 max-h-56 overflow-y-auto pr-1">
+                      {ALL_STATS_MONTHS.map(m => {
+                        const isChecked = statsMonths.includes(m.id);
+                        return (
+                          <label
+                            key={m.id}
+                            className={`flex items-center gap-2 p-1.5 rounded cursor-pointer transition-colors select-none ${
+                              isChecked ? 'bg-indigo-950/70 border border-indigo-500/40 text-indigo-200 font-bold' : 'hover:bg-slate-800 text-slate-400'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleStatsMonth(m.id)}
+                              className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-800 text-indigo-500 focus:ring-indigo-500"
+                            />
+                            <span className="text-[11px] truncate">{m.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Indicador de Tasa BCV (Detecta conexión en línea o usa resguardo offline) */}
