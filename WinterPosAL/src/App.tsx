@@ -2412,6 +2412,7 @@ export default function App() {
                 return false;
               }}
               getApiUrl={getApiUrl}
+              tasaDia={tasaDia}
             />
 
           )}

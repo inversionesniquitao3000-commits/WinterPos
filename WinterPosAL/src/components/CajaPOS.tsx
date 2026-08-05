@@ -157,6 +157,7 @@ export default function CajaPOS({
     messageTemplate: ''
   });
   const [sendToWhatsApp, setSendToWhatsApp] = useState(true);
+  const [hideZeroLines, setHideZeroLines] = useState(true);
   const [isSendingWa, setIsSendingWa] = useState(false);
 
   const fetchWaCierreStatus = async () => {
@@ -4321,120 +4322,137 @@ export default function CajaPOS({
                         <span className="font-bold text-slate-800">$ {cierreResult.aperturaUsd.toFixed(2)} / Bs {cierreResult.aperturaVes.toFixed(2)}</span>
                       </div>
                       
+                      {/* Ventas en Efectivo ($) siempre se muestra por ser pilar */}
                       <div className="flex justify-between">
                         <span>Ventas en Efectivo ($) :</span>
                         <span className="font-bold text-slate-800">$ {cierreResult.ventasEfectivoUsd.toFixed(2)}</span>
                       </div>
 
-                      {(cierreResult.ventasEfectivoVes ?? 0) > 0 && (
+                      {((cierreResult.ventasEfectivoVes ?? 0) > 0 || !hideZeroLines) && (
                         <div className="flex justify-between font-bold text-slate-800">
                           <span>Ventas en Efectivo (Bs) :</span>
                           <span>Bs {cierreResult.ventasEfectivoVes!.toFixed(2)}</span>
                         </div>
                       )}
 
-                      {(cierreResult.abonosEfectivoUsd ?? 0) > 0 && (
+                      {((cierreResult.abonosEfectivoUsd ?? 0) > 0 || !hideZeroLines) && (
                         <div className="flex justify-between font-bold text-emerald-700">
                           <span>Abono Clientes (Efectivo $) :</span>
                           <span>$ {cierreResult.abonosEfectivoUsd!.toFixed(2)}</span>
                         </div>
                       )}
 
-                      {(cierreResult.abonosEfectivoBsVes ?? 0) > 0 && (
+                      {((cierreResult.abonosEfectivoBsVes ?? 0) > 0 || !hideZeroLines) && (
                         <div className="flex justify-between font-bold text-emerald-700">
                           <span>Abono Clientes (Efectivo Bs) :</span>
                           <span>Bs {cierreResult.abonosEfectivoBsVes!.toFixed(2)}</span>
                         </div>
                       )}
 
-                      {(cierreResult.abonosBiopagoVes ?? 0) > 0 && (
+                      {((cierreResult.abonosBiopagoVes ?? 0) > 0 || !hideZeroLines) && (
                         <div className="flex justify-between font-bold text-sky-700">
                           <span>Abono Clientes (Biopago) :</span>
                           <span>Bs {cierreResult.abonosBiopagoVes!.toFixed(2)}</span>
                         </div>
                       )}
 
-                      {(cierreResult.abonosPuntoVes ?? 0) > 0 && (
+                      {((cierreResult.abonosPuntoVes ?? 0) > 0 || !hideZeroLines) && (
                         <div className="flex justify-between font-bold text-indigo-700">
                           <span>Abono Clientes (Punto / Tarjeta) :</span>
                           <span>Bs {cierreResult.abonosPuntoVes!.toFixed(2)}</span>
                         </div>
                       )}
 
-                      {(cierreResult.abonosPagoMovilVes ?? 0) > 0 && (
+                      {((cierreResult.abonosPagoMovilVes ?? 0) > 0 || !hideZeroLines) && (
                         <div className="flex justify-between font-bold text-blue-700">
                           <span>Abono Clientes (Pago Móvil) :</span>
                           <span>Bs {cierreResult.abonosPagoMovilVes!.toFixed(2)}</span>
                         </div>
                       )}
 
-                      {(cierreResult.abonosZelleUsd ?? 0) > 0 && (
+                      {((cierreResult.abonosZelleUsd ?? 0) > 0 || !hideZeroLines) && (
                         <div className="flex justify-between font-bold text-purple-700">
                           <span>Abono Clientes (Zelle $) :</span>
                           <span>$ {cierreResult.abonosZelleUsd!.toFixed(2)}</span>
                         </div>
                       )}
 
-                      {(cierreResult.abonosBinanceUsd ?? 0) > 0 && (
+                      {((cierreResult.abonosBinanceUsd ?? 0) > 0 || !hideZeroLines) && (
                         <div className="flex justify-between font-bold text-amber-700">
                           <span>Abono Clientes (Binance $) :</span>
                           <span>$ {cierreResult.abonosBinanceUsd!.toFixed(2)}</span>
                         </div>
                       )}
 
-                      {(cierreResult.abonosPayPalUsd ?? 0) > 0 && (
+                      {((cierreResult.abonosPayPalUsd ?? 0) > 0 || !hideZeroLines) && (
                         <div className="flex justify-between font-bold text-sky-600">
                           <span>Abono Clientes (PayPal $) :</span>
                           <span>$ {cierreResult.abonosPayPalUsd!.toFixed(2)}</span>
                         </div>
                       )}
 
-                      {cierreResult.abonoClientesUsd === 0 && (
+                      {(cierreResult.abonoClientesUsd === 0 && !hideZeroLines) && (
                         <div className="flex justify-between">
                           <span>Abono de Clientes :</span>
                           <span className="font-bold text-slate-800">$ 0.00</span>
                         </div>
                       )}
 
-                      <div className="flex justify-between">
-                        <span>Entrada Efectivo ($) :</span>
-                        <span className="font-bold text-slate-800">$ {cierreResult.entradaEfectivoUsd.toFixed(2)}</span>
-                      </div>
+                      {(cierreResult.entradaEfectivoUsd > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between">
+                          <span>Entrada Efectivo ($) :</span>
+                          <span className="font-bold text-slate-800">$ {cierreResult.entradaEfectivoUsd.toFixed(2)}</span>
+                        </div>
+                      )}
 
-                      <div className="flex justify-between">
-                        <span>Entrada Efectivo (Bs) :</span>
-                        <span className="font-bold text-slate-800">Bs {(cierreResult.entradaEfectivoVes ?? 0).toFixed(2)}</span>
-                      </div>
+                      {((cierreResult.entradaEfectivoVes ?? 0) > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between">
+                          <span>Entrada Efectivo (Bs) :</span>
+                          <span className="font-bold text-slate-800">Bs {(cierreResult.entradaEfectivoVes ?? 0).toFixed(2)}</span>
+                        </div>
+                      )}
 
-                      <div className="flex justify-between text-red-555 font-bold">
-                        <span>Salida Efectivo ($) :</span>
-                        <span>- $ {cierreResult.salidaEfectivoUsd.toFixed(2)}</span>
-                      </div>
+                      {(cierreResult.salidaEfectivoUsd > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between text-red-555 font-bold">
+                          <span>Salida Efectivo ($) :</span>
+                          <span>- $ {cierreResult.salidaEfectivoUsd.toFixed(2)}</span>
+                        </div>
+                      )}
 
-                      <div className="flex justify-between text-red-555 font-bold">
-                        <span>Salida Efectivo (Bs) :</span>
-                        <span>- Bs {(cierreResult.salidaEfectivoVes ?? 0).toFixed(2)}</span>
-                      </div>
+                      {((cierreResult.salidaEfectivoVes ?? 0) > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between text-red-555 font-bold">
+                          <span>Salida Efectivo (Bs) :</span>
+                          <span>- Bs {(cierreResult.salidaEfectivoVes ?? 0).toFixed(2)}</span>
+                        </div>
+                      )}
 
-                      <div className="flex justify-between text-red-555 font-bold">
-                        <span>Devolución Efectivo ($) :</span>
-                        <span>- $ {cierreResult.devolucionEfectivoUsd.toFixed(2)}</span>
-                      </div>
+                      {(cierreResult.devolucionEfectivoUsd > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between text-red-555 font-bold">
+                          <span>Devolución Efectivo ($) :</span>
+                          <span>- $ {cierreResult.devolucionEfectivoUsd.toFixed(2)}</span>
+                        </div>
+                      )}
 
-                      <div className="flex justify-between text-red-555 font-bold">
-                        <span>Devolución Efectivo (Bs) :</span>
-                        <span>- Bs {(cierreResult.devolucionEfectivoVes ?? 0).toFixed(2)}</span>
-                      </div>
+                      {((cierreResult.devolucionEfectivoVes ?? 0) > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between text-red-555 font-bold">
+                          <span>Devolución Efectivo (Bs) :</span>
+                          <span>- Bs {(cierreResult.devolucionEfectivoVes ?? 0).toFixed(2)}</span>
+                        </div>
+                      )}
 
-                      <div className="flex justify-between text-amber-700 font-bold">
-                        <span>Vuelto Entregado ($) :</span>
-                        <span>- $ {(cierreResult.vueltosEntregadosUsd ?? 0).toFixed(2)}</span>
-                      </div>
+                      {((cierreResult.vueltosEntregadosUsd ?? 0) > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between text-amber-700 font-bold">
+                          <span>Vuelto Entregado ($) :</span>
+                          <span>- $ {(cierreResult.vueltosEntregadosUsd ?? 0).toFixed(2)}</span>
+                        </div>
+                      )}
 
-                      <div className="flex justify-between text-amber-700 font-bold">
-                        <span>Vuelto Entregado (Bs) :</span>
-                        <span>- Bs {(cierreResult.vueltosEntregadosVes ?? 0).toFixed(2)}</span>
-                      </div>
+                      {((cierreResult.vueltosEntregadosVes ?? 0) > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between text-amber-700 font-bold">
+                          <span>Vuelto Entregado (Bs) :</span>
+                          <span>- Bs {(cierreResult.vueltosEntregadosVes ?? 0).toFixed(2)}</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Dinero en Caja Expected Footer */}
@@ -4445,7 +4463,7 @@ export default function CajaPOS({
                           $ {cierreResult.dineroEnCajaExpected.toFixed(2)}
                         </span>
                       </div>
-                      <div className="text-[8.5px] text-slate-450 italic font-mono font-medium uppercase tracking-tighter text-right">
+                      <div className="text-[8.5px] text-slate-455 italic font-mono font-medium uppercase tracking-tighter text-right">
                         {formatNumberToWordsUSD(cierreResult.dineroEnCajaExpected)}
                       </div>
                     </div>
@@ -4458,10 +4476,12 @@ export default function CajaPOS({
                         <span>Ventas Totales :</span>
                         <span className="font-bold text-slate-800">$ {cierreResult.ventasTotalesUsd.toFixed(2)}</span>
                       </div>
-                      <div className="flex justify-between">
-                        <span>Descuentos :</span>
-                        <span className="font-bold text-slate-800">$ {cierreResult.descuentosUsd.toFixed(2)}</span>
-                      </div>
+                      {(cierreResult.descuentosUsd > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between">
+                          <span>Descuentos :</span>
+                          <span className="font-bold text-slate-800">$ {cierreResult.descuentosUsd.toFixed(2)}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between font-bold text-slate-900 border-b border-dashed border-slate-200 pb-1.5">
                         <span className="font-sans text-[11px] font-bold text-slate-500 uppercase">Venta Bruta :</span>
                         <span>$ {cierreResult.ventaBrutaUsd.toFixed(2)}</span>
@@ -4469,50 +4489,68 @@ export default function CajaPOS({
                     </div>
 
                     <div className="space-y-2 pt-1 font-mono text-[13px]">
-                      <div className="flex justify-between">
-                        <span>Efectivo $ :</span>
-                        <span className="font-bold text-slate-800">$ {(cierreResult.pagosEfectivoUsd && !isNaN(cierreResult.pagosEfectivoUsd) ? cierreResult.pagosEfectivoUsd : 0).toFixed(2)}</span>
-                      </div>
+                      {(cierreResult.pagosEfectivoUsd > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between">
+                          <span>Efectivo $ :</span>
+                          <span className="font-bold text-slate-800">$ {(cierreResult.pagosEfectivoUsd && !isNaN(cierreResult.pagosEfectivoUsd) ? cierreResult.pagosEfectivoUsd : 0).toFixed(2)}</span>
+                        </div>
+                      )}
                       
-                      <div className="flex justify-between">
-                        <span>Efectivo Bs :</span>
-                        <span className="font-bold text-slate-800">Bs {(cierreResult.pagosEfectivoBsVes && !isNaN(cierreResult.pagosEfectivoBsVes) ? cierreResult.pagosEfectivoBsVes : 0).toFixed(2)}</span>
-                      </div>
+                      {(cierreResult.pagosEfectivoBsVes > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between">
+                          <span>Efectivo Bs :</span>
+                          <span className="font-bold text-slate-800">Bs {(cierreResult.pagosEfectivoBsVes && !isNaN(cierreResult.pagosEfectivoBsVes) ? cierreResult.pagosEfectivoBsVes : 0).toFixed(2)}</span>
+                        </div>
+                      )}
 
-                      <div className="flex justify-between">
-                        <span>Biopago :</span>
-                        <span className="font-bold text-slate-800">Bs {(cierreResult.pagosBiopagoVes && !isNaN(cierreResult.pagosBiopagoVes) ? cierreResult.pagosBiopagoVes : 0).toFixed(2)}</span>
-                      </div>
+                      {(cierreResult.pagosBiopagoVes > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between">
+                          <span>Biopago :</span>
+                          <span className="font-bold text-slate-800">Bs {(cierreResult.pagosBiopagoVes && !isNaN(cierreResult.pagosBiopagoVes) ? cierreResult.pagosBiopagoVes : 0).toFixed(2)}</span>
+                        </div>
+                      )}
 
-                      <div className="flex justify-between">
-                        <span>Punto / Tarjeta :</span>
-                        <span className="font-bold text-slate-800">Bs {(cierreResult.pagosPuntoVes && !isNaN(cierreResult.pagosPuntoVes) ? cierreResult.pagosPuntoVes : 0).toFixed(2)}</span>
-                      </div>
+                      {(cierreResult.pagosPuntoVes > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between">
+                          <span>Punto / Tarjeta :</span>
+                          <span className="font-bold text-slate-800">Bs {(cierreResult.pagosPuntoVes && !isNaN(cierreResult.pagosPuntoVes) ? cierreResult.pagosPuntoVes : 0).toFixed(2)}</span>
+                        </div>
+                      )}
 
-                      <div className="flex justify-between">
-                        <span>Pago Móvil :</span>
-                        <span className="font-bold text-slate-800">Bs {(cierreResult.pagosPagoMovilVes && !isNaN(cierreResult.pagosPagoMovilVes) ? cierreResult.pagosPagoMovilVes : 0).toFixed(2)}</span>
-                      </div>
+                      {(cierreResult.pagosPagoMovilVes > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between">
+                          <span>Pago Móvil :</span>
+                          <span className="font-bold text-slate-800">Bs {(cierreResult.pagosPagoMovilVes && !isNaN(cierreResult.pagosPagoMovilVes) ? cierreResult.pagosPagoMovilVes : 0).toFixed(2)}</span>
+                        </div>
+                      )}
 
-                      <div className="flex justify-between">
-                        <span>Transferencia :</span>
-                        <span className="font-bold text-slate-800">Bs {(cierreResult.pagosTransferenciaVes && !isNaN(cierreResult.pagosTransferenciaVes) ? cierreResult.pagosTransferenciaVes : 0).toFixed(2)}</span>
-                      </div>
+                      {(cierreResult.pagosTransferenciaVes > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between">
+                          <span>Transferencia :</span>
+                          <span className="font-bold text-slate-800">Bs {(cierreResult.pagosTransferenciaVes && !isNaN(cierreResult.pagosTransferenciaVes) ? cierreResult.pagosTransferenciaVes : 0).toFixed(2)}</span>
+                        </div>
+                      )}
 
-                      <div className="flex justify-between">
-                        <span>A Crédito :</span>
-                        <span className="font-bold text-slate-800">$ {(cierreResult.pagosCreditoUsd && !isNaN(cierreResult.pagosCreditoUsd) ? cierreResult.pagosCreditoUsd : 0).toFixed(2)}</span>
-                      </div>
+                      {(cierreResult.pagosCreditoUsd > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between">
+                          <span>A Crédito :</span>
+                          <span className="font-bold text-slate-800">$ {(cierreResult.pagosCreditoUsd && !isNaN(cierreResult.pagosCreditoUsd) ? cierreResult.pagosCreditoUsd : 0).toFixed(2)}</span>
+                        </div>
+                      )}
 
-                      <div className="flex justify-between text-red-550 font-bold">
-                        <span>Devolución Ventas ($) :</span>
-                        <span>- $ {(cierreResult.devolucionVentasUsd && !isNaN(cierreResult.devolucionVentasUsd) ? cierreResult.devolucionVentasUsd : 0).toFixed(2)}</span>
-                      </div>
+                      {(cierreResult.devolucionVentasUsd > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between text-red-550 font-bold">
+                          <span>Devolución Ventas ($) :</span>
+                          <span>- $ {(cierreResult.devolucionVentasUsd && !isNaN(cierreResult.devolucionVentasUsd) ? cierreResult.devolucionVentasUsd : 0).toFixed(2)}</span>
+                        </div>
+                      )}
 
-                      <div className="flex justify-between text-red-550 font-bold">
-                        <span>Devolución Ventas (Bs) :</span>
-                        <span>- Bs {(cierreResult.devolucionVentasVes && !isNaN(cierreResult.devolucionVentasVes) ? cierreResult.devolucionVentasVes : 0).toFixed(2)}</span>
-                      </div>
+                      {(cierreResult.devolucionVentasVes > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between text-red-550 font-bold">
+                          <span>Devolución Ventas (Bs) :</span>
+                          <span>- Bs {(cierreResult.devolucionVentasVes && !isNaN(cierreResult.devolucionVentasVes) ? cierreResult.devolucionVentasVes : 0).toFixed(2)}</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Venta Total Footer */}
@@ -4628,22 +4666,36 @@ export default function CajaPOS({
                   ⚠️ NOTA: Al confirmar, se guardará el registro inmutable en el historial de arqueos y se cerrará su sesión de trabajo automáticamente.
                 </div>
 
-                {/* Option to send via WhatsApp (only if bot is enabled) */}
-                {waCierreStatus.enabled && (
-                  <label className="flex items-center gap-2 bg-indigo-50/50 border border-indigo-150 rounded-lg p-3 text-xs cursor-pointer select-none hover:bg-indigo-50 transition-all font-sans">
+                <div className="flex flex-col sm:flex-row gap-2.5">
+                  {waCierreStatus.enabled && (
+                    <label className="flex-1 flex items-center gap-2 bg-indigo-50/50 border border-indigo-150 rounded-lg p-3 text-xs cursor-pointer select-none hover:bg-indigo-50 transition-all font-sans">
+                      <input
+                        type="checkbox"
+                        checked={sendToWhatsApp}
+                        onChange={(e) => setSendToWhatsApp(e.target.checked)}
+                        disabled={isSendingWa}
+                        className="w-4 h-4 text-indigo-650 rounded border-slate-350 focus:ring-indigo-550"
+                      />
+                      <div className="flex flex-col">
+                        <span className="font-bold text-indigo-900">Enviar a WhatsApp</span>
+                        <span className="text-[9px] text-slate-500">Envía ticket y resumen de texto.</span>
+                      </div>
+                    </label>
+                  )}
+
+                  <label className="flex-1 flex items-center gap-2 bg-emerald-50/50 border border-emerald-150 rounded-lg p-3 text-xs cursor-pointer select-none hover:bg-emerald-50 transition-all font-sans">
                     <input
                       type="checkbox"
-                      checked={sendToWhatsApp}
-                      onChange={(e) => setSendToWhatsApp(e.target.checked)}
-                      disabled={isSendingWa}
-                      className="w-4 h-4 text-indigo-650 rounded border-slate-350 focus:ring-indigo-550"
+                      checked={hideZeroLines}
+                      onChange={(e) => setHideZeroLines(e.target.checked)}
+                      className="w-4 h-4 text-emerald-650 rounded border-slate-350 focus:ring-emerald-550"
                     />
                     <div className="flex flex-col">
-                      <span className="font-bold text-indigo-900">Enviar arqueo automáticamente a WhatsApp</span>
-                      <span className="text-[9px] text-slate-500">Se enviará el ticket gráfico y el resumen en texto al grupo.</span>
+                      <span className="font-bold text-emerald-900">Solo con data (Ocultar ceros)</span>
+                      <span className="text-[9px] text-slate-500">Oculta del ticket los rubros sin transacciones ($0.00).</span>
                     </div>
                   </label>
-                )}
+                </div>
 
                 <button
                   onClick={handleConfirmCierre}

@@ -12,9 +12,10 @@ interface VentasHistoricoProps {
   onUpdateCierre: (cierreId: number, updatedData: any) => Promise<boolean>;
   onDeleteCierre: (cierreId: number) => Promise<boolean>;
   getApiUrl: (path: string) => string;
+  tasaDia?: number;
 }
 
-export default function VentasHistorico({ sales, cierres, onReprintTicket, currentUser, onUpdateCierre, onDeleteCierre, getApiUrl }: VentasHistoricoProps) {
+export default function VentasHistorico({ sales, cierres, onReprintTicket, currentUser, onUpdateCierre, onDeleteCierre, getApiUrl, tasaDia = 0 }: VentasHistoricoProps) {
   const { showAlert } = useDialog();
   const [activeSubTab, setActiveSubTab] = useState<'ventas' | 'cierres'>('ventas');
   const [selectedCierre, setSelectedCierre] = useState<CierreCaja | null>(null);
@@ -27,6 +28,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
   const [sendingProgressMsg, setSendingProgressMsg] = useState<string>('');
   const [cierreInvoicesModal, setCierreInvoicesModal] = useState<CierreCaja | null>(null);
   const [cierreInvoiceSearch, setCierreInvoiceSearch] = useState('');
+  const [hideZeroLines, setHideZeroLines] = useState(true);
 
   const isAdmin = currentUser?.rol?.toLowerCase() === 'administrador';
 
@@ -2235,108 +2237,124 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                       <span className="font-bold text-slate-800">$ {ventasEfectivoUsd.toFixed(2)}</span>
                     </div>
 
-                    {abonosEfectivoUsd > 0 && (
+                    {((abonosEfectivoUsd ?? 0) > 0 || !hideZeroLines) && (
                       <div className="flex justify-between font-bold text-emerald-700">
                         <span>Abono Clientes (Efectivo $) :</span>
                         <span>$ {abonosEfectivoUsd.toFixed(2)}</span>
                       </div>
                     )}
 
-                    {abonosEfectivoBsVes > 0 && (
+                    {((abonosEfectivoBsVes ?? 0) > 0 || !hideZeroLines) && (
                       <div className="flex justify-between font-bold text-emerald-700">
                         <span>Abono Clientes (Efectivo Bs) :</span>
                         <span>Bs {abonosEfectivoBsVes.toFixed(2)}</span>
                       </div>
                     )}
 
-                    {abonosBiopagoVes > 0 && (
+                    {((abonosBiopagoVes ?? 0) > 0 || !hideZeroLines) && (
                       <div className="flex justify-between font-bold text-sky-700">
                         <span>Abono Clientes (Biopago) :</span>
                         <span>Bs {abonosBiopagoVes.toFixed(2)}</span>
                       </div>
                     )}
 
-                    {abonosPuntoVes > 0 && (
+                    {((abonosPuntoVes ?? 0) > 0 || !hideZeroLines) && (
                       <div className="flex justify-between font-bold text-indigo-700">
                         <span>Abono Clientes (Punto / Tarjeta) :</span>
                         <span>Bs {abonosPuntoVes.toFixed(2)}</span>
                       </div>
                     )}
 
-                    {abonosPagoMovilVes > 0 && (
+                    {((abonosPagoMovilVes ?? 0) > 0 || !hideZeroLines) && (
                       <div className="flex justify-between font-bold text-blue-700">
                         <span>Abono Clientes (Pago Móvil) :</span>
                         <span>Bs {abonosPagoMovilVes.toFixed(2)}</span>
                       </div>
                     )}
 
-                    {abonosZelleUsd > 0 && (
+                    {((abonosZelleUsd ?? 0) > 0 || !hideZeroLines) && (
                       <div className="flex justify-between font-bold text-purple-700">
                         <span>Abono Clientes (Zelle $) :</span>
                         <span>$ {abonosZelleUsd.toFixed(2)}</span>
                       </div>
                     )}
 
-                    {abonosBinanceUsd > 0 && (
+                    {((abonosBinanceUsd ?? 0) > 0 || !hideZeroLines) && (
                       <div className="flex justify-between font-bold text-amber-700">
                         <span>Abono Clientes (Binance $) :</span>
                         <span>$ {abonosBinanceUsd.toFixed(2)}</span>
                       </div>
                     )}
 
-                    {abonosPayPalUsd > 0 && (
+                    {((abonosPayPalUsd ?? 0) > 0 || !hideZeroLines) && (
                       <div className="flex justify-between font-bold text-sky-600">
                         <span>Abono Clientes (PayPal $) :</span>
                         <span>$ {abonosPayPalUsd.toFixed(2)}</span>
                       </div>
                     )}
 
-                    {abonoClientesUsd === 0 && (
+                    {(abonoClientesUsd === 0 && !hideZeroLines) && (
                       <div className="flex justify-between">
                         <span>Abono de Clientes :</span>
                         <span className="font-bold text-slate-800">$ 0.00</span>
                       </div>
                     )}
 
-                     <div className="flex justify-between">
-                      <span>Entrada Efectivo ($) :</span>
-                      <span className="font-bold text-slate-800">$ {entradaEfectivoUsd.toFixed(2)}</span>
-                    </div>
+                    {(entradaEfectivoUsd > 0 || !hideZeroLines) && (
+                      <div className="flex justify-between">
+                        <span>Entrada Efectivo ($) :</span>
+                        <span className="font-bold text-slate-800">$ {entradaEfectivoUsd.toFixed(2)}</span>
+                      </div>
+                    )}
 
-                    <div className="flex justify-between">
-                      <span>Entrada Efectivo (Bs) :</span>
-                      <span className="font-bold text-slate-800">Bs {entradaEfectivoVes.toFixed(2)}</span>
-                    </div>
+                    {(entradaEfectivoVes > 0 || !hideZeroLines) && (
+                      <div className="flex justify-between">
+                        <span>Entrada Efectivo (Bs) :</span>
+                        <span className="font-bold text-slate-800">Bs {entradaEfectivoVes.toFixed(2)}</span>
+                      </div>
+                    )}
 
-                    <div className="flex justify-between text-red-555 font-bold">
-                      <span>Salida Efectivo ($) :</span>
-                      <span>- $ {salidaEfectivoUsd.toFixed(2)}</span>
-                    </div>
+                    {(salidaEfectivoUsd > 0 || !hideZeroLines) && (
+                      <div className="flex justify-between text-red-555 font-bold">
+                        <span>Salida Efectivo ($) :</span>
+                        <span>- $ {salidaEfectivoUsd.toFixed(2)}</span>
+                      </div>
+                    )}
 
-                    <div className="flex justify-between text-red-555 font-bold">
-                      <span>Salida Efectivo (Bs) :</span>
-                      <span>- Bs {salidaEfectivoVes.toFixed(2)}</span>
-                    </div>
+                    {(salidaEfectivoVes > 0 || !hideZeroLines) && (
+                      <div className="flex justify-between text-red-555 font-bold">
+                        <span>Salida Efectivo (Bs) :</span>
+                        <span>- Bs {salidaEfectivoVes.toFixed(2)}</span>
+                      </div>
+                    )}
 
-                    <div className="flex justify-between text-red-555 font-bold">
-                      <span>Devolución Efectivo ($) :</span>
-                      <span>- $ {devolucionEfectivoUsd.toFixed(2)}</span>
-                    </div>
+                    {(devolucionEfectivoUsd > 0 || !hideZeroLines) && (
+                      <div className="flex justify-between text-red-555 font-bold">
+                        <span>Devolución Efectivo ($) :</span>
+                        <span>- $ {devolucionEfectivoUsd.toFixed(2)}</span>
+                      </div>
+                    )}
 
-                    <div className="flex justify-between text-red-555 font-bold">
-                      <span>Devolución Efectivo (Bs) :</span>
-                      <span>- Bs {devolucionEfectivoVes.toFixed(2)}</span>
-                    </div>
+                    {(devolucionEfectivoVes > 0 || !hideZeroLines) && (
+                      <div className="flex justify-between text-red-555 font-bold">
+                        <span>Devolución Efectivo (Bs) :</span>
+                        <span>- Bs {devolucionEfectivoVes.toFixed(2)}</span>
+                      </div>
+                    )}
 
-                    <div className="flex justify-between text-amber-700 font-bold">
-                      <span>Vuelto Entregado ($) :</span>
-                      <span>- $ {vueltosUsd.toFixed(2)}</span>
-                    </div>
+                    {(vueltosUsd > 0 || !hideZeroLines) && (
+                      <div className="flex justify-between text-amber-700 font-bold">
+                        <span>Vuelto Entregado ($) :</span>
+                        <span>- $ {vueltosUsd.toFixed(2)}</span>
+                      </div>
+                    )}
 
-                    <div className="flex justify-between text-amber-700 font-bold">
-                      <span>Vuelto Entregado (Bs) :</span>
-                      <span>- Bs {vueltosVes.toFixed(2)}</span>
-                    </div>
+                    {(vueltosVes > 0 || !hideZeroLines) && (
+                      <div className="flex justify-between text-amber-700 font-bold">
+                        <span>Vuelto Entregado (Bs) :</span>
+                        <span>- Bs {vueltosVes.toFixed(2)}</span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="border-t border-slate-300 pt-2.5 space-y-0.5">
@@ -2360,10 +2378,12 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                         <span>Ventas Totales :</span>
                         <span className="font-bold text-slate-800">$ {ventasTotalesUsd.toFixed(2)}</span>
                       </div>
-                      <div className="flex justify-between">
-                        <span>Descuentos :</span>
-                        <span className="font-bold text-slate-800">$ {descuentosUsd.toFixed(2)}</span>
-                      </div>
+                      {(descuentosUsd > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between">
+                          <span>Descuentos :</span>
+                          <span className="font-bold text-slate-800">$ {descuentosUsd.toFixed(2)}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between font-bold text-slate-900 border-b border-dashed border-slate-200 pb-1.5">
                         <span className="font-sans text-[11px] font-bold text-slate-500 uppercase">Venta Bruta :</span>
                         <span>$ {ventaBrutaUsd.toFixed(2)}</span>
@@ -2371,71 +2391,89 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                     </div>
 
                     <div className="space-y-1.5 pt-1 font-mono text-[12px]">
-                      <div className="flex justify-between">
-                        <span>Efectivo ($) :</span>
-                        <span className="font-bold text-slate-800">$ {pagosEfectivoUsd.toFixed(2)}</span>
-                      </div>
+                      {(pagosEfectivoUsd > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between">
+                          <span>Efectivo ($) :</span>
+                          <span className="font-bold text-slate-800">$ {pagosEfectivoUsd.toFixed(2)}</span>
+                        </div>
+                      )}
                       
-                      <div className="flex justify-between">
-                        <span>Efectivo (Bs) :</span>
-                        <span className="font-bold text-slate-800">Bs {pagosEfectivoBsVes.toFixed(2)}</span>
-                      </div>
+                      {(pagosEfectivoBsVes > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between">
+                          <span>Efectivo (Bs) :</span>
+                          <span className="font-bold text-slate-800">Bs {pagosEfectivoBsVes.toFixed(2)}</span>
+                        </div>
+                      )}
 
-                      <div className="flex justify-between">
-                        <span>Pago Móvil (Bs) :</span>
-                        <span className="font-bold text-slate-800">Bs {pagosPagoMovilVes.toFixed(2)}</span>
-                      </div>
+                      {(pagosPagoMovilVes > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between">
+                          <span>Pago Móvil (Bs) :</span>
+                          <span className="font-bold text-slate-800">Bs {pagosPagoMovilVes.toFixed(2)}</span>
+                        </div>
+                      )}
 
-                      <div className="flex justify-between">
-                        <span>Punto / Tarjetas (Bs) :</span>
-                        <span className="font-bold text-slate-800">Bs {pagosPuntoVes.toFixed(2)}</span>
-                      </div>
+                      {(pagosPuntoVes > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between">
+                          <span>Punto / Tarjetas (Bs) :</span>
+                          <span className="font-bold text-slate-800">Bs {pagosPuntoVes.toFixed(2)}</span>
+                        </div>
+                      )}
 
-                      <div className="flex justify-between">
-                        <span>Biopago (Bs) :</span>
-                        <span className="font-bold text-slate-800">Bs {pagosBiopagoVes.toFixed(2)}</span>
-                      </div>
+                      {(pagosBiopagoVes > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between">
+                          <span>Biopago (Bs) :</span>
+                          <span className="font-bold text-slate-800">Bs {pagosBiopagoVes.toFixed(2)}</span>
+                        </div>
+                      )}
 
-                      <div className="flex justify-between">
-                        <span>Transferencia (Bs) :</span>
-                        <span className="font-bold text-slate-800">Bs {pagosTransferenciaVes.toFixed(2)}</span>
-                      </div>
+                      {(pagosTransferenciaVes > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between">
+                          <span>Transferencia (Bs) :</span>
+                          <span className="font-bold text-slate-800">Bs {pagosTransferenciaVes.toFixed(2)}</span>
+                        </div>
+                      )}
 
-                      {pagosTarjetaUsd > 0 && (
+                      {(pagosTarjetaUsd > 0 || !hideZeroLines) && (
                         <div className="flex justify-between">
                           <span>Tarjeta ($ USD) :</span>
                           <span className="font-bold text-slate-800">$ {pagosTarjetaUsd.toFixed(2)}</span>
                         </div>
                       )}
 
-                      {pagosBinanceUsd > 0 && (
+                      {(pagosBinanceUsd > 0 || !hideZeroLines) && (
                         <div className="flex justify-between text-amber-700">
                           <span>Binance ($) :</span>
                           <span className="font-bold">$ {pagosBinanceUsd.toFixed(2)}</span>
                         </div>
                       )}
 
-                      {pagosPayPalUsd > 0 && (
+                      {(pagosPayPalUsd > 0 || !hideZeroLines) && (
                         <div className="flex justify-between text-indigo-700">
                           <span>PayPal ($) :</span>
                           <span className="font-bold">$ {pagosPayPalUsd.toFixed(2)}</span>
                         </div>
                       )}
 
-                      <div className="flex justify-between text-slate-700">
-                        <span>A Crédito ($) :</span>
-                        <span className="font-bold text-slate-800">$ {pagosCreditoUsd.toFixed(2)}</span>
-                      </div>
+                      {(pagosCreditoUsd > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between text-slate-700">
+                          <span>A Crédito ($) :</span>
+                          <span className="font-bold text-slate-800">$ {pagosCreditoUsd.toFixed(2)}</span>
+                        </div>
+                      )}
 
-                      <div className="flex justify-between text-red-550 font-bold">
-                        <span>Devolución Ventas ($) :</span>
-                        <span>- $ {devolucionVentasUsd.toFixed(2)}</span>
-                      </div>
+                      {(devolucionVentasUsd > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between text-red-550 font-bold">
+                          <span>Devolución Ventas ($) :</span>
+                          <span>- $ {devolucionVentasUsd.toFixed(2)}</span>
+                        </div>
+                      )}
 
-                      <div className="flex justify-between text-red-550 font-bold">
-                        <span>Devolución Ventas (Bs) :</span>
-                        <span>- Bs {devolucionVentasVes.toFixed(2)}</span>
-                      </div>
+                      {(devolucionVentasVes > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between text-red-550 font-bold">
+                          <span>Devolución Ventas (Bs) :</span>
+                          <span>- Bs {devolucionVentasVes.toFixed(2)}</span>
+                        </div>
+                      )}
                     </div>
 
                     <div className="border-t border-slate-300 pt-2 font-bold font-sans">
@@ -2539,11 +2577,23 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                     );
                   })()}
                 </div>
-                <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
+                  <label className="flex items-center gap-2 bg-emerald-50 border border-emerald-150 rounded-lg p-2 px-3 text-xs cursor-pointer select-none hover:bg-emerald-100/50 transition-all font-sans mr-auto w-full sm:w-auto">
+                    <input
+                      type="checkbox"
+                      checked={hideZeroLines}
+                      onChange={(e) => setHideZeroLines(e.target.checked)}
+                      className="w-4 h-4 text-emerald-650 rounded border-slate-350 focus:ring-emerald-550"
+                    />
+                    <div className="flex flex-col text-left">
+                      <span className="font-bold text-emerald-900">Solo con data (Ocultar ceros)</span>
+                    </div>
+                  </label>
+
                   <button
                     type="button"
                     onClick={() => handleResendWhatsAppCierre(selectedCierre)}
-                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-extrabold py-3 px-4 rounded-lg font-sans text-xs uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2"
+                    className="w-full sm:flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-extrabold py-3 px-4 rounded-lg font-sans text-xs uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2"
                   >
                     <MessageCircle className="w-4 h-4" />
                     REENVIAR POR WHATSAPP
@@ -2552,9 +2602,9 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                   <button
                     type="button"
                     onClick={() => setSelectedCierre(null)}
-                    className="sm:w-1/3 bg-slate-800 hover:bg-slate-900 text-white font-extrabold py-3 px-4 rounded-lg font-sans text-xs uppercase tracking-wider transition-all shadow-sm"
+                    className="w-full sm:w-1/4 bg-slate-800 hover:bg-slate-900 text-white font-extrabold py-3 px-4 rounded-lg font-sans text-xs uppercase tracking-wider transition-all shadow-sm"
                   >
-                    Cerrar Comprobante
+                    Cerrar
                   </button>
                 </div>
               </div>
