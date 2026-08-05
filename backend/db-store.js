@@ -327,7 +327,8 @@ export async function getCompanyConfig() {
           mensaje_pie_ticket: row.mensaje_pie_ticket,
           metodos_pago_activos: row.metodos_pago_activos,
           permitir_multisesion: row.permitir_multisesion !== false,
-          compartir_apertura_caja: row.compartir_apertura_caja !== false
+          compartir_apertura_caja: row.compartir_apertura_caja !== false,
+          logo_url: row.logo_url || ''
         };
       }
     } catch (err) {
@@ -354,15 +355,15 @@ export async function saveCompanyConfig(config) {
           `UPDATE Configuracion_Empresa SET 
             rif = $1, nombre_comercio = $2, direccion = $3, telefono = $4, 
             correo = $5, moneda_base = $6, mensaje_pie_ticket = $7, metodos_pago_activos = $8,
-            permitir_multisesion = $9, compartir_apertura_caja = $10
-           WHERE id = $11`,
-          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura, existing.rows[0].id]
+            permitir_multisesion = $9, compartir_apertura_caja = $10, logo_url = $11
+           WHERE id = $12`,
+          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura, config.logo_url || '', existing.rows[0].id]
         );
       } else {
         await pool.query(
-          `INSERT INTO Configuracion_Empresa (rif, nombre_comercio, direccion, telefono, correo, moneda_base, mensaje_pie_ticket, metodos_pago_activos, permitir_multisesion, compartir_apertura_caja)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura]
+          `INSERT INTO Configuracion_Empresa (rif, nombre_comercio, direccion, telefono, correo, moneda_base, mensaje_pie_ticket, metodos_pago_activos, permitir_multisesion, compartir_apertura_caja, logo_url)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura, config.logo_url || '']
         );
       }
       return config;

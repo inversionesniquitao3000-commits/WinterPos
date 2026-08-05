@@ -195,30 +195,36 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
         {/* Center Contents: Logo, Title, Inputs */}
         <div className="space-y-6 my-auto">
           
-          {/* Logo Star - SVG Styled precisely like mockup */}
+          {/* Logo Star / Custom Image */}
           <div className="text-center cursor-pointer" onClick={handleLogoClick}>
-            <svg className="w-24 h-24 mx-auto drop-shadow-lg" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-              {/* Swooshes */}
-              <path d="M 15,65 C 32,80 68,80 85,65" stroke="#14b8a6" strokeWidth="3" fill="none" strokeLinecap="round" />
-              <path d="M 8,58 C 28,78 72,78 92,58" stroke="#0ea5e9" strokeWidth="2.5" fill="none" strokeLinecap="round" />
-              <path d="M 22,71 C 37,84 63,84 78,71" stroke="#6366f1" strokeWidth="2" fill="none" strokeLinecap="round" />
-              
-              {/* 8-pointed star */}
-              <polygon 
-                points="50,8 54,32 78,32 59,45 68,69 50,54 32,69 41,45 22,32 46,32" 
-                fill="#0a2a50" 
-                stroke="#ffffff" 
-                strokeWidth="2.5" 
-                strokeLinejoin="miter"
-              />
-              <polygon 
-                points="50,13 53,33 73,33 57,44 65,64 50,51 35,64 43,44 27,33 47,33" 
-                fill="#1c3e6a" 
-                stroke="#3b82f6" 
-                strokeWidth="1" 
-                strokeLinejoin="miter"
-              />
-            </svg>
+            {companyConfig?.logo_url ? (
+              <div className="w-24 h-24 mx-auto rounded-2xl bg-white/10 p-2 border border-white/20 shadow-xl flex items-center justify-center backdrop-blur-sm">
+                <img src={companyConfig.logo_url} alt="Logo" className="w-full h-full object-contain" />
+              </div>
+            ) : (
+              <svg className="w-24 h-24 mx-auto drop-shadow-lg" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                {/* Swooshes */}
+                <path d="M 15,65 C 32,80 68,80 85,65" stroke="#14b8a6" strokeWidth="3" fill="none" strokeLinecap="round" />
+                <path d="M 8,58 C 28,78 72,78 92,58" stroke="#0ea5e9" strokeWidth="2.5" fill="none" strokeLinecap="round" />
+                <path d="M 22,71 C 37,84 63,84 78,71" stroke="#6366f1" strokeWidth="2" fill="none" strokeLinecap="round" />
+                
+                {/* 8-pointed star */}
+                <polygon 
+                  points="50,8 54,32 78,32 59,45 68,69 50,54 32,69 41,45 22,32 46,32" 
+                  fill="#0a2a50" 
+                  stroke="#ffffff" 
+                  strokeWidth="2.5" 
+                  strokeLinejoin="miter"
+                />
+                <polygon 
+                  points="50,13 53,33 73,33 57,44 65,64 50,51 35,64 43,44 27,33 47,33" 
+                  fill="#1c3e6a" 
+                  stroke="#3b82f6" 
+                  strokeWidth="1" 
+                  strokeLinejoin="miter"
+                />
+              </svg>
+            )}
 
             <h1 className="text-lg font-black text-yellow-400 tracking-wider mt-3 font-sans uppercase">
               {companyConfig.nombre_comercio?.trim() !== '' ? companyConfig.nombre_comercio : 'Sistema WinterPosAL'}

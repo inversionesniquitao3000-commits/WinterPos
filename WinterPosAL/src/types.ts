@@ -142,6 +142,7 @@ export interface CompanyConfig {
   permitir_multisesion?: boolean;
   compartir_apertura_caja?: boolean;
   tasa_oficial_bcv?: number;
+  logo_url?: string;
 }
 
 export interface Sale {

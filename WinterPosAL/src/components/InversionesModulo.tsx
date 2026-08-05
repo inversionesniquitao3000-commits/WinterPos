@@ -343,49 +343,121 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
     }
   };
 
-  const handleSendWhatsAppReport = () => {
+  const handleSendWhatsAppReport = async () => {
     const dateStr = getLocalISODateString().split(' ')[0];
     const companyName = companyConfig?.nombre_comercio || 'INVERSIONES NIQUITAO 3000 C.A.';
-    
-    let text = `💼 *REPORTE DE UTILIDADES Y GASTOS OPERATIVOS*\n`;
-    text += `🏬 *${companyName}*\n`;
-    text += `📅 *Fecha:* ${dateStr}\n`;
-    if (effectiveTasa > 1) {
-      text += `💱 *Tasa BCV:* ${effectiveTasa.toFixed(2)} Bs/USD\n`;
-    }
-    text += `----------------------------------\n`;
-    text += `📊 *RESUMEN FINANCIERO:*\n`;
-    text += `📈 *Utilidad Bruta:* $${utilidadBrutaNum.toFixed(2)} USD | Bs ${utilidadBrutaVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} VES\n`;
-    text += `🔻 *(-) Gastos Deducibles:* -$${totalGastosUSD.toFixed(2)} USD | -Bs ${totalGastosVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} VES\n`;
-    text += `💰 *(=) Utilidad Neta Distribuable:* *$${utilidadNetaUSD.toFixed(2)} USD* | *Bs ${utilidadNetaVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} VES*\n`;
-    
+
+    // Obtener desglose de gastos en string
+    let desgloseGastosStr = '';
     if (gastos.length > 0) {
-      text += `----------------------------------\n`;
-      text += `📝 *DESGLOSE DE GASTOS OPERATIVOS (${gastos.length}):*\n`;
-      gastos.forEach(g => {
+      desgloseGastosStr = gastos.map(g => {
         const mBs = g.monto_usd * effectiveTasa;
-        text += `• *${g.concepto}:* $${g.monto_usd.toFixed(2)} USD (Bs ${mBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
-        if (g.observacion) text += ` - _${g.observacion}_`;
-        text += `\n`;
-      });
+        let line = `• *${g.concepto}:* $${g.monto_usd.toFixed(2)} USD (Bs ${mBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
+        if (g.observacion) line += ` - _${g.observacion}_`;
+        return line;
+      }).join('\n');
+    } else {
+      desgloseGastosStr = '_Sin gastos deducibles registrados_';
     }
 
-    text += `----------------------------------\n`;
-    text += `👥 *DISTRIBUCIÓN A ACCIONISTAS:*\n`;
-    
-    accionistas.forEach((a, idx) => {
+    // Obtener desglose de accionistas en string
+    const desgloseAccionistasStr = accionistas.map((a, idx) => {
       const mtoInv = accionistasTotales[a.id] || 0;
       const pctInv = capitalGlobalTotal > 0 ? (mtoInv / capitalGlobalTotal) * 100 : 0;
       const mtoCobrarUsd = (mtoInv / (capitalGlobalTotal || 1)) * utilidadNetaUSD;
       const mtoCobrarVes = mtoCobrarUsd * effectiveTasa;
       
-      text += `${idx + 1}. *${a.nombre}* (${pctInv.toFixed(2)}% Inv)\n`;
-      text += `   - Capital: $${mtoInv.toFixed(2)} USD\n`;
-      text += `   - *Monto a Cobrar:* *$${mtoCobrarUsd.toFixed(2)} USD* | *Bs ${mtoCobrarVes.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} VES*\n\n`;
-    });
+      let item = `${idx + 1}. *${a.nombre}* (${pctInv.toFixed(2)}% Inv)\n`;
+      item += `   - Capital Invertido: $${mtoInv.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD\n`;
+      item += `   - 💵 *Monto a Cobrar:* *$${mtoCobrarUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD* | *Bs ${mtoCobrarVes.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} VES*`;
+      return item;
+    }).join('\n\n');
 
-    const encoded = encodeURIComponent(text);
-    window.open(`https://api.whatsapp.com/send?text=${encoded}`, '_blank');
+    let text = '';
+    try {
+      const statusRes = await fetchApiData('/whatsapp/status');
+      if (statusRes && statusRes.config && statusRes.config.utilidadesMessageTemplate) {
+        text = statusRes.config.utilidadesMessageTemplate
+          .replace(/{empresa}/g, companyName)
+          .replace(/{fecha}/g, dateStr)
+          .replace(/{tasaBcv}/g, effectiveTasa.toFixed(2))
+          .replace(/{utilidadBrutaUsd}/g, utilidadBrutaNum.toFixed(2))
+          .replace(/{utilidadBrutaVes}/g, utilidadBrutaVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+          .replace(/{totalGastosUsd}/g, totalGastosUSD.toFixed(2))
+          .replace(/{totalGastosVes}/g, totalGastosVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+          .replace(/{utilidadNetaUsd}/g, utilidadNetaUSD.toFixed(2))
+          .replace(/{utilidadNetaVes}/g, utilidadNetaVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
+          .replace(/{cantGastos}/g, gastos.length.toString())
+          .replace(/{desgloseGastos}/g, desgloseGastosStr)
+          .replace(/{desgloseAccionistas}/g, desgloseAccionistasStr);
+      }
+    } catch (e) {
+      console.warn('No se pudo obtener plantilla personalizada de utilidades, usando plantilla predeterminada:', e);
+    }
+
+    if (!text) {
+      text = `💼 *REPORTE DE UTILIDADES Y GASTOS OPERATIVOS*\n`;
+      text += `🏬 *${companyName}*\n`;
+      text += `📅 *Fecha:* ${dateStr}\n`;
+      if (effectiveTasa > 1) {
+        text += `💱 *Tasa BCV:* ${effectiveTasa.toFixed(2)} Bs/USD\n`;
+      }
+      text += `----------------------------------\n`;
+      text += `📊 *RESUMEN FINANCIERO:*\n`;
+      text += `📈 *Utilidad Bruta:* $${utilidadBrutaNum.toFixed(2)} USD | Bs ${utilidadBrutaVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} VES\n`;
+      text += `🔻 *(-) Gastos Deducibles:* -$${totalGastosUSD.toFixed(2)} USD | -Bs ${totalGastosVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} VES\n`;
+      text += `💰 *(=) Utilidad Neta Distribuable:* *$${utilidadNetaUSD.toFixed(2)} USD* | *Bs ${utilidadNetaVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} VES*\n`;
+      
+      if (gastos.length > 0) {
+        text += `----------------------------------\n`;
+        text += `📝 *DESGLOSE DE GASTOS OPERATIVOS (${gastos.length}):*\n`;
+        text += desgloseGastosStr + `\n`;
+      }
+
+      text += `----------------------------------\n`;
+      text += `👥 *MONTO A COBRAR POR ACCIONISTA:*\n`;
+      text += desgloseAccionistasStr + `\n`;
+    }
+
+    let waSuccess = false;
+    let imageBase64 = '';
+
+    try {
+      if (reportContainerRef.current) {
+        imageBase64 = await toPng(reportContainerRef.current, { backgroundColor: '#0f172a', quality: 0.95 });
+      }
+
+      const res = await postApiData('/whatsapp/send-cierre', {
+        imageBase64: imageBase64 || '',
+        textSummary: text
+      });
+
+      if (res && !res.error) {
+        waSuccess = true;
+        alert('¡Reporte de utilidades y gastos enviado exitosamente por WhatsApp al grupo registrado!');
+      }
+    } catch (err: any) {
+      console.warn('WhatsApp bot send error, using fallback:', err);
+    }
+
+    if (!waSuccess) {
+      try {
+        if (imageBase64) {
+          const resBlob = await fetch(imageBase64);
+          const blob = await resBlob.blob();
+          await navigator.clipboard.write([
+            new ClipboardItem({ [blob.type]: blob })
+          ]);
+          alert('⚠️ El bot de WhatsApp no envió el mensaje directamente (o no está activo).\n\nSe ha copiado la FOTO DEL REPORTE a tu portapapeles. Solo abre WhatsApp Web/App y presiona Ctrl + V para pegarla y enviarla junto con el reporte.');
+        } else {
+          await navigator.clipboard.writeText(text);
+          alert('⚠️ Se ha copiado el resumen detallado del reporte a tu portapapeles.\n\nPuedes pegarlo directamente en WhatsApp (Ctrl + V).');
+        }
+      } catch (clipErr) {
+        const encoded = encodeURIComponent(text);
+        window.open(`https://api.whatsapp.com/send?text=${encoded}`, '_blank');
+      }
+    }
   };
 
   const handleCopyUtilidades = () => {

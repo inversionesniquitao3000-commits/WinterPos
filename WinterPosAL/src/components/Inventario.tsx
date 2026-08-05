@@ -222,8 +222,11 @@ export default function Inventario({
   const [showCategoryMenu, setShowCategoryMenu] = useState(false);
   const categoryMenuRef = useRef<HTMLDivElement>(null);
 
-  const [filterStock, setFilterStock] = useState<'todos' | 'con_existencia' | 'sin_existencia' | 'menor_5' | 'menor_10' | 'menor_15'>('todos');
+  const [filterStock, setFilterStock] = useState<'todos' | 'con_existencia' | 'sin_existencia' | 'menor_igual' | 'mayor_igual'>('todos');
+  const [customStockValue, setCustomStockValue] = useState<string>('5');
   const [filterMinStock, setFilterMinStock] = useState<'todos' | 'bajo_minimo'>('todos');
+
+
 
   // Sorting states
   interface SortRule {
@@ -1573,10 +1576,11 @@ export default function Inventario({
   // Reset page when filters or search change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, selectedCategories, filterStock, filterMinStock]);
+  }, [searchTerm, selectedCategories, filterStock, customStockValue, filterMinStock]);
 
   const filteredProducts = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
+    const customVal = parseFloat(customStockValue) || 0;
 
     return safeProducts.filter(p => {
       if (!p) return false;
@@ -1594,9 +1598,8 @@ export default function Inventario({
         filterStock === 'todos' ? true :
         filterStock === 'con_existencia' ? stockAct > 0 :
         filterStock === 'sin_existencia' ? stockAct === 0 :
-        filterStock === 'menor_5' ? stockAct <= 5 :
-        filterStock === 'menor_10' ? stockAct <= 10 :
-        filterStock === 'menor_15' ? stockAct <= 15 : true;
+        filterStock === 'menor_igual' ? stockAct <= customVal :
+        filterStock === 'mayor_igual' ? stockAct >= customVal : true;
         
       const matchesMinStock = 
         filterMinStock === 'todos' ? true :
@@ -1604,7 +1607,7 @@ export default function Inventario({
         
       return matchesSearch && matchesCategory && matchesStock && matchesMinStock;
     });
-  }, [safeProducts, searchTerm, selectedCategories, filterStock, filterMinStock]);
+  }, [safeProducts, searchTerm, selectedCategories, filterStock, customStockValue, filterMinStock]);
 
   const sortedProducts = useMemo(() => {
     if (sortRules.length === 0) return filteredProducts;
@@ -2425,18 +2428,36 @@ export default function Inventario({
             {/* Stock Existence Filter */}
             <div className="flex flex-col gap-0.5">
               <label className="text-[10px] font-bold text-slate-500 font-sans uppercase">Existencia (Stock)</label>
-              <select
-                value={filterStock}
-                onChange={(e) => setFilterStock(e.target.value as any)}
-                className="bg-white border border-slate-300 rounded-lg py-1 px-2 text-xs text-slate-800 font-sans font-bold focus:border-winter-inventarioStart focus:outline-none shadow-sm"
-              >
-                <option value="todos">TODOS LOS PRODUCTOS</option>
-                <option value="con_existencia">CON EXISTENCIA (&gt; 0)</option>
-                <option value="sin_existencia">SIN EXISTENCIA (0)</option>
-                <option value="menor_5">EXISTENCIA MENOR O IGUAL A 5 (≤ 5)</option>
-                <option value="menor_10">EXISTENCIA MENOR O IGUAL A 10 (≤ 10)</option>
-                <option value="menor_15">EXISTENCIA MENOR O IGUAL A 15 (≤ 15)</option>
-              </select>
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={filterStock}
+                  onChange={(e) => setFilterStock(e.target.value as any)}
+                  className="bg-white border border-slate-300 rounded-lg py-1 px-2 text-xs text-slate-800 font-sans font-bold focus:border-winter-inventarioStart focus:outline-none shadow-sm flex-1"
+                >
+                  <option value="todos">TODOS LOS PRODUCTOS</option>
+                  <option value="con_existencia">CON EXISTENCIA (&gt; 0)</option>
+                  <option value="sin_existencia">SIN EXISTENCIA (0)</option>
+                  <option value="menor_igual">EXISTENCIA MENOR O IGUAL A (≤ NÚMERO)</option>
+                  <option value="mayor_igual">EXISTENCIA MAYOR O IGUAL A (≥ NÚMERO)</option>
+                </select>
+
+                {(filterStock === 'menor_igual' || filterStock === 'mayor_igual') && (
+                  <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg px-2 py-0.5 shadow-sm">
+                    <span className="text-[11px] font-extrabold text-indigo-700">
+                      {filterStock === 'menor_igual' ? '≤' : '≥'}
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={customStockValue}
+                      onChange={(e) => setCustomStockValue(e.target.value)}
+                      placeholder="Ej: 10"
+                      className="w-14 text-xs font-mono font-bold text-slate-800 outline-none"
+                    />
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Min Stock Warning Filter */}

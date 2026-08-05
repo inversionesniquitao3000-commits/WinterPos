@@ -382,6 +382,19 @@ export default function App() {
     loadConfig();
   }, [lanIP, dbMode]);
 
+  // Update browser favicon dynamically when company logo_url changes
+  useEffect(() => {
+    if (companyConfig?.logo_url) {
+      let faviconLink = document.querySelector("link[rel*='icon']") as HTMLLinkElement;
+      if (!faviconLink) {
+        faviconLink = document.createElement('link');
+        faviconLink.rel = 'shortcut icon';
+        document.head.appendChild(faviconLink);
+      }
+      faviconLink.href = companyConfig.logo_url;
+    }
+  }, [companyConfig?.logo_url]);
+
   // Fetch last invoice number from server for operator reference display
   const fetchLastInvoice = async () => {
     try {
@@ -2114,13 +2127,22 @@ export default function App() {
         </div>
 
         {/* Center business brand */}
-        <div className="text-center flex-grow mx-4 flex flex-col items-center justify-center min-w-0">
-          <h2 className="text-sm font-extrabold tracking-widest text-winter-yellow uppercase truncate w-full" title={companyConfig.nombre_comercio}>
-            {companyConfig.nombre_comercio}
-          </h2>
-          <span className="text-[10px] text-slate-350 block mt-0.5 font-sans truncate w-full">
-            RIF: {companyConfig.rif} | Telf: {companyConfig.telefono}
-          </span>
+        <div className="text-center flex-grow mx-4 flex items-center justify-center gap-2.5 min-w-0">
+          {companyConfig?.logo_url && (
+            <img 
+              src={companyConfig.logo_url} 
+              alt="Logo Comercio" 
+              className="w-8 h-8 object-contain rounded bg-white/10 p-0.5 border border-white/20 shadow-xs flex-shrink-0"
+            />
+          )}
+          <div className="flex flex-col items-center min-w-0">
+            <h2 className="text-sm font-extrabold tracking-widest text-winter-yellow uppercase truncate w-full" title={companyConfig.nombre_comercio}>
+              {companyConfig.nombre_comercio}
+            </h2>
+            <span className="text-[10px] text-slate-350 block mt-0.5 font-sans truncate w-full">
+              RIF: {companyConfig.rif} | Telf: {companyConfig.telefono}
+            </span>
+          </div>
         </div>
 
         {/* Right rates and network details */}

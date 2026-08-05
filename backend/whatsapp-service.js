@@ -32,7 +32,22 @@ const defaultConfig = {
 🛍️ *VENTAS TOTALES DEL TURNO:* $ {ventaTotalUsd} USD
 📉 *DESCUENTOS APLICADOS:* $ {descuentosUsd} USD
 
-*WinterPosAL Cloud System*`
+*WinterPosAL Cloud System*`,
+  utilidadesMessageTemplate: `💼 *REPORTE DE UTILIDADES Y GASTOS OPERATIVOS*
+🏬 *{empresa}*
+📅 *Fecha:* {fecha}
+💱 *Tasa BCV:* {tasaBcv} Bs/USD
+
+📊 *RESUMEN FINANCIERO:*
+📈 *Utilidad Bruta:* ${'{utilidadBrutaUsd}'} USD | Bs {utilidadBrutaVes} VES
+🔻 *(-) Gastos Deducibles:* -${'{totalGastosUsd}'} USD | -Bs {totalGastosVes} VES
+💰 *(=) Utilidad Neta Distribuable:* *${'{utilidadNetaUsd}'} USD* | *Bs {utilidadNetaVes} VES*
+
+📝 *DESGLOSE DE GASTOS OPERATIVOS ({cantGastos}):*
+{desgloseGastos}
+
+👥 *MONTO A COBRAR POR ACCIONISTA:*
+{desgloseAccionistas}`
 };
 
 // Global WhatsApp client state

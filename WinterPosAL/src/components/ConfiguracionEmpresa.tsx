@@ -103,6 +103,22 @@ const DEFAULT_WA_TEMPLATE = `📊 *REPORTE DE ARQUEO Y CIERRE DE CAJA*
 
 *WinterPosAL Cloud System*`;
 
+const DEFAULT_UTILIDADES_WA_TEMPLATE = `💼 *REPORTE DE UTILIDADES Y GASTOS OPERATIVOS*
+🏬 *{empresa}*
+📅 *Fecha:* {fecha}
+💱 *Tasa BCV:* {tasaBcv} Bs/USD
+
+📊 *RESUMEN FINANCIERO:*
+📈 *Utilidad Bruta:* ${'{utilidadBrutaUsd}'} USD | Bs {utilidadBrutaVes} VES
+🔻 *(-) Gastos Deducibles:* -${'{totalGastosUsd}'} USD | -Bs {totalGastosVes} VES
+💰 *(=) Utilidad Neta Distribuable:* *${'{utilidadNetaUsd}'} USD* | *Bs {utilidadNetaVes} VES*
+
+📝 *DESGLOSE DE GASTOS OPERATIVOS ({cantGastos}):*
+{desgloseGastos}
+
+👥 *MONTO A COBRAR POR ACCIONISTA:*
+{desgloseAccionistas}`;
+
 export default function ConfiguracionEmpresa({ 
   config, 
   onSaveConfig, 
@@ -190,8 +206,10 @@ export default function ConfiguracionEmpresa({
     enabled: false,
     groupId: '',
     groupName: 'Grupo de Cierres POS',
-    messageTemplate: ''
+    messageTemplate: '',
+    utilidadesMessageTemplate: ''
   });
+  const [waTemplateTab, setWaTemplateTab] = useState<'cierre' | 'utilidades'>('cierre');
   const [waStatus, setWaStatus] = useState<any>({
     status: 'DISCONNECTED',
     qr: '',
@@ -359,7 +377,8 @@ export default function ConfiguracionEmpresa({
         if (data.config) {
           setWaConfig({
             ...data.config,
-            messageTemplate: data.config.messageTemplate || DEFAULT_WA_TEMPLATE
+            messageTemplate: data.config.messageTemplate || DEFAULT_WA_TEMPLATE,
+            utilidadesMessageTemplate: data.config.utilidadesMessageTemplate || DEFAULT_UTILIDADES_WA_TEMPLATE
           });
         }
       }
@@ -938,7 +957,18 @@ export default function ConfiguracionEmpresa({
   const getTemplatePreview = (template: string) => {
     if (!template) return '';
     return template
-      .replace(/{fecha}/g, new Date().toLocaleString())
+      .replace(/{empresa}/g, config?.nombre_comercio || 'INVERSIONES NIQUITAO 3000 C.A.')
+      .replace(/{fecha}/g, new Date().toLocaleDateString())
+      .replace(/{tasaBcv}/g, '87.00')
+      .replace(/{utilidadBrutaUsd}/g, '293.84')
+      .replace(/{utilidadBrutaVes}/g, '25.564,08')
+      .replace(/{totalGastosUsd}/g, '82.00')
+      .replace(/{totalGastosVes}/g, '7.134,00')
+      .replace(/{utilidadNetaUsd}/g, '211.84')
+      .replace(/{utilidadNetaVes}/g, '18.430,08')
+      .replace(/{cantGastos}/g, '2')
+      .replace(/{desgloseGastos}/g, '• *⚡ Luz / Electricidad:* $50.00 USD (Bs 4.350,00)\n• *💧 Agua:* $32.00 USD (Bs 2.784,00)')
+      .replace(/{desgloseAccionistas}/g, '1. *JUAN PÉREZ* (50.00% Inv)\n   - Capital Invertido: $10,000.00 USD\n   - 💵 *Monto a Cobrar:* *$105.92 USD* | *Bs 9.215,04 VES*\n\n2. *MARÍA GÓMEZ* (50.00% Inv)\n   - Capital Invertido: $10,000.00 USD\n   - 💵 *Monto a Cobrar:* *$105.92 USD* | *Bs 9.215,04 VES*')
       .replace(/{usuario}/g, (currentUser?.nombre || 'ANDERSON LAGUNA').toUpperCase())
       .replace(/{terminal}/g, localStorage.getItem('pos_terminal_name') || 'CAJA_PRINCIPAL')
       .replace(/{dineroEnCajaExpected}/g, '150.00')
@@ -1118,6 +1148,73 @@ export default function ConfiguracionEmpresa({
                   onChange={handleInputChange}
                   className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-configStart focus:outline-none font-sans"
                 />
+              </div>
+
+              {/* LOGO DE LA EMPRESA */}
+              <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700 font-sans flex items-center gap-1.5">
+                    🖼️ Logo Oficial de la Empresa
+                  </label>
+                  <span className="text-[10px] text-slate-400 font-sans">Afecta Login, Encabezados, Favicon y Tickets</span>
+                </div>
+
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 rounded-xl border-2 border-dashed border-slate-300 bg-white flex items-center justify-center overflow-hidden flex-shrink-0 shadow-sm relative group">
+                    {formData.logo_url ? (
+                      <img src={formData.logo_url} alt="Logo Empresa" className="w-full h-full object-contain p-1" />
+                    ) : (
+                      <span className="text-2xl">🏢</span>
+                    )}
+                  </div>
+
+                  <div className="flex-1 space-y-2">
+                    <input
+                      type="text"
+                      name="logo_url"
+                      value={formData.logo_url || ''}
+                      onChange={handleInputChange}
+                      placeholder="Pegue URL de la imagen o use el botón para subir archivo..."
+                      className="w-full bg-white border border-slate-300 rounded p-2 text-xs text-slate-800 focus:border-winter-configStart focus:outline-none font-sans"
+                    />
+
+                    <div className="flex items-center gap-2">
+                      <label className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 cursor-pointer transition-all shadow-xs">
+                        <span>📁 Cargar Imagen Local</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              if (file.size > 2 * 1024 * 1024) {
+                                alert('La imagen es demasiado grande. Por favor seleccione una de máximo 2 MB.');
+                                return;
+                              }
+                              const reader = new FileReader();
+                              reader.onload = (uploadEvent) => {
+                                const base64 = uploadEvent.target?.result as string;
+                                setFormData(prev => ({ ...prev, logo_url: base64 }));
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                      </label>
+
+                      {formData.logo_url && (
+                        <button
+                          type="button"
+                          onClick={() => setFormData(prev => ({ ...prev, logo_url: '' }))}
+                          className="text-[11px] text-red-600 hover:text-red-800 font-bold px-2 py-1 rounded bg-red-50 hover:bg-red-100 transition-all"
+                        >
+                          Quitar Logo
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div className="border-t border-slate-100 pt-4 space-y-3">
@@ -2694,38 +2791,101 @@ export default function ConfiguracionEmpresa({
                 <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 border-t border-slate-100 pt-5">
                   {/* Template Editor */}
                   <div className="lg:col-span-3 space-y-4">
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-[10px] font-bold font-sans uppercase text-slate-500 tracking-wide">Plantilla del Mensaje de Arqueo</label>
-                      <textarea
-                        value={waConfig.messageTemplate}
-                        onChange={(e) => setWaConfig(prev => ({ ...prev, messageTemplate: e.target.value }))}
-                        disabled={!waConfig.enabled}
-                        rows={14}
-                        className="bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 focus:bg-white focus:border-indigo-500 focus:outline-none font-mono w-full disabled:opacity-50"
-                        placeholder="Escriba la plantilla del mensaje de WhatsApp..."
-                      />
+                    {/* Selector de Pestaña de Plantilla */}
+                    <div className="flex gap-2 border-b border-slate-200 pb-2">
+                      <button
+                        type="button"
+                        onClick={() => setWaTemplateTab('cierre')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold font-sans transition-all flex items-center gap-1.5 ${
+                          waTemplateTab === 'cierre'
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        📦 Plantilla Cierre de Caja
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setWaTemplateTab('utilidades')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold font-sans transition-all flex items-center gap-1.5 ${
+                          waTemplateTab === 'utilidades'
+                            ? 'bg-emerald-600 text-white shadow-sm'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        💼 Plantilla Distribución Utilidades
+                      </button>
                     </div>
-                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
-                      <span className="text-[9px] font-bold text-slate-600 uppercase font-sans tracking-wide block">Variables Disponibles (Reemplazo Dinámico)</span>
-                      <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[9.5px] font-sans text-slate-500">
-                        <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{fecha}'}</code>: Fecha y hora</div>
-                        <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{usuario}'}</code>: Nombre del cajero</div>
-                        <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{terminal}'}</code>: Nombre de la terminal</div>
-                        <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{dineroEnCajaExpected}'}</code>: USD esperado</div>
-                        <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{expectedVes}'}</code>: VES esperado</div>
-                        <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{realUsd}'}</code>: USD real contado</div>
-                        <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{realVes}'}</code>: VES real contado</div>
-                        <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{diffUsd}'}</code>: Diferencia USD</div>
-                        <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{diffVes}'}</code>: Diferencia VES</div>
-                        <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{ventaTotalUsd}'}</code>: Venta neta total</div>
-                        <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{descuentosUsd}'}</code>: Descuentos total</div>
-                      </div>
-                    </div>
+
+                    {waTemplateTab === 'cierre' ? (
+                      <>
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] font-bold font-sans uppercase text-slate-500 tracking-wide">Plantilla del Mensaje de Arqueo y Cierre</label>
+                          <textarea
+                            value={waConfig.messageTemplate}
+                            onChange={(e) => setWaConfig(prev => ({ ...prev, messageTemplate: e.target.value }))}
+                            disabled={!waConfig.enabled}
+                            rows={14}
+                            className="bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 focus:bg-white focus:border-indigo-500 focus:outline-none font-mono w-full disabled:opacity-50"
+                            placeholder="Escriba la plantilla del mensaje de WhatsApp..."
+                          />
+                        </div>
+                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+                          <span className="text-[9px] font-bold text-slate-600 uppercase font-sans tracking-wide block">Variables Disponibles (Arqueo y Cierre)</span>
+                          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[9.5px] font-sans text-slate-500">
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{fecha}'}</code>: Fecha y hora</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{usuario}'}</code>: Nombre del cajero</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{terminal}'}</code>: Nombre de la terminal</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{dineroEnCajaExpected}'}</code>: USD esperado</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{expectedVes}'}</code>: VES esperado</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{realUsd}'}</code>: USD real contado</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{realVes}'}</code>: VES real contado</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{diffUsd}'}</code>: Diferencia USD</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{diffVes}'}</code>: Diferencia VES</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{ventaTotalUsd}'}</code>: Venta neta total</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{descuentosUsd}'}</code>: Descuentos total</div>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] font-bold font-sans uppercase text-slate-500 tracking-wide">Plantilla del Reporte de Utilidades y Gastos</label>
+                          <textarea
+                            value={waConfig.utilidadesMessageTemplate || ''}
+                            onChange={(e) => setWaConfig(prev => ({ ...prev, utilidadesMessageTemplate: e.target.value }))}
+                            disabled={!waConfig.enabled}
+                            rows={14}
+                            className="bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 focus:bg-white focus:border-indigo-500 focus:outline-none font-mono w-full disabled:opacity-50"
+                            placeholder="Escriba la plantilla del reporte de utilidades..."
+                          />
+                        </div>
+                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+                          <span className="text-[9px] font-bold text-slate-600 uppercase font-sans tracking-wide block">Variables Disponibles (Distribución de Utilidades)</span>
+                          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[9.5px] font-sans text-slate-500">
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-emerald-700 font-mono font-bold">{'{empresa}'}</code>: Nombre del comercio</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-emerald-700 font-mono font-bold">{'{fecha}'}</code>: Fecha del reporte</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-emerald-700 font-mono font-bold">{'{tasaBcv}'}</code>: Tasa oficial de cambio</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-emerald-700 font-mono font-bold">{'{utilidadBrutaUsd}'}</code>: Utilidad Bruta $</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-emerald-700 font-mono font-bold">{'{utilidadBrutaVes}'}</code>: Utilidad Bruta Bs</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-emerald-700 font-mono font-bold">{'{totalGastosUsd}'}</code>: Total Gastos $</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-emerald-700 font-mono font-bold">{'{totalGastosVes}'}</code>: Total Gastos Bs</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-emerald-700 font-mono font-bold">{'{utilidadNetaUsd}'}</code>: Utilidad Neta $</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-emerald-700 font-mono font-bold">{'{utilidadNetaVes}'}</code>: Utilidad Neta Bs</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-emerald-700 font-mono font-bold">{'{cantGastos}'}</code>: Cantidad de gastos</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-emerald-700 font-mono font-bold">{'{desgloseGastos}'}</code>: Lista de gastos</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-emerald-700 font-mono font-bold">{'{desgloseAccionistas}'}</code>: Cobro accionistas</div>
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
 
                   {/* Live Preview */}
                   <div className="lg:col-span-2 flex flex-col">
-                    <span className="text-[10px] font-bold font-sans uppercase text-slate-500 tracking-wide mb-1.5">Vista Previa (Diseño WhatsApp)</span>
+                    <span className="text-[10px] font-bold font-sans uppercase text-slate-500 tracking-wide mb-1.5">
+                      Vista Previa ({waTemplateTab === 'cierre' ? 'Cierre de Caja' : 'Distribución Utilidades'})
+                    </span>
                     <div className="flex-grow border border-slate-200 rounded-xl overflow-hidden shadow-md flex flex-col min-h-[450px]" style={{ backgroundColor: '#efeae2' }}>
                       {/* Header preview bubble */}
                       <div className="bg-[#075e54] px-4 py-2.5 flex items-center gap-2">
@@ -2743,12 +2903,12 @@ export default function ConfiguracionEmpresa({
                         {/* Image preview mock */}
                         <div className="bg-[#d9fdd3] p-1.5 rounded-lg shadow-sm border border-emerald-100/50 self-start max-w-[90%] flex flex-col">
                           <div className="bg-slate-100/80 rounded flex items-center justify-center h-28 w-full text-slate-400 font-sans text-[10px] gap-1.5 flex-shrink-0">
-                            🖼️ <span>[Imagen del Cierre y Arqueo]</span>
+                            🖼️ <span>[{waTemplateTab === 'cierre' ? 'Imagen del Cierre y Arqueo' : 'Imagen del Reporte de Utilidades'}]</span>
                           </div>
-                          {waConfig.messageTemplate ? (
+                          { (waTemplateTab === 'cierre' ? waConfig.messageTemplate : waConfig.utilidadesMessageTemplate) ? (
                             <div 
-                              className="p-2 text-slate-800 text-[10px] font-sans text-left leading-relaxed break-all select-text"
-                              dangerouslySetInnerHTML={{ __html: formatWhatsAppMessage(getTemplatePreview(waConfig.messageTemplate)) }}
+                              className="p-2 text-slate-800 text-[10px] font-sans text-left leading-relaxed break-all select-text whitespace-pre-wrap"
+                              dangerouslySetInnerHTML={{ __html: formatWhatsAppMessage(getTemplatePreview(waTemplateTab === 'cierre' ? waConfig.messageTemplate : (waConfig.utilidadesMessageTemplate || ''))) }}
                             />
                           ) : (
                             <span className="p-2 text-slate-400 italic text-[10px] font-sans text-left">
