@@ -359,13 +359,19 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
 
   // Calculate totals and utility for the filtered sales
   const filteredSalesTotals = useMemo(() => {
+    let totalBrutas = 0;
     let totalVentas = 0;
     let totalCosto = 0;
     
     finalFilteredSales.forEach(s => {
       const isDev = s.factura_nro.startsWith('DEV-');
+      const val = s.totalUSD ?? 0;
+
+      if (!isDev && val > 0) {
+        totalBrutas += val;
+      }
       
-      totalVentas += (s.totalUSD ?? 0);
+      totalVentas += val;
       (s.items ?? []).forEach(item => {
         const itemCost = item.product?.precio_costo_usd ?? 0;
         totalCosto += itemCost * (item.qty ?? 0) * (isDev ? -1 : 1);
@@ -374,6 +380,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
     
     const totalUtilidad = totalVentas - totalCosto;
     return {
+      totalBrutas,
       totalVentas,
       totalCosto,
       totalUtilidad
@@ -1368,15 +1375,18 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                   />
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2 font-sans text-[10px]">
-                <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-250">
-                  Facturas: <strong className="font-mono">{finalFilteredSales.length}</strong>
+              <div className="flex flex-wrap items-center gap-2.5 font-sans text-xs">
+                <span className="bg-slate-100 text-slate-700 px-3 py-1 rounded-md border border-slate-250 font-medium">
+                  Facturas: <strong className="font-mono text-sm text-slate-900 font-bold ml-0.5">{finalFilteredSales.length}</strong>
                 </span>
-                <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-250">
-                  Ventas Filtro: <strong className="font-mono text-winter-blueBtn">${filteredSalesTotals.totalVentas.toFixed(2)}</strong>
+                <span className="bg-blue-50 text-blue-900 px-3 py-1 rounded-md border border-blue-200 font-medium">
+                  Ventas Brutas: <strong className="font-mono text-sm text-blue-700 font-extrabold ml-0.5">${filteredSalesTotals.totalBrutas.toFixed(2)}</strong>
                 </span>
-                <span className="bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded border border-emerald-200">
-                  Utilidad Filtro: <strong className="font-mono font-bold text-emerald-600">${filteredSalesTotals.totalUtilidad.toFixed(2)}</strong>
+                <span className="bg-slate-100 text-slate-700 px-3 py-1 rounded-md border border-slate-250 font-medium">
+                  Ventas Netas: <strong className="font-mono text-sm text-winter-blueBtn font-extrabold ml-0.5">${filteredSalesTotals.totalVentas.toFixed(2)}</strong>
+                </span>
+                <span className="bg-emerald-50 text-emerald-900 px-3 py-1 rounded-md border border-emerald-200 font-medium">
+                  Utilidad Filtro: <strong className="font-mono text-sm font-extrabold text-emerald-600 ml-0.5">${filteredSalesTotals.totalUtilidad.toFixed(2)}</strong>
                 </span>
               </div>
             </div>

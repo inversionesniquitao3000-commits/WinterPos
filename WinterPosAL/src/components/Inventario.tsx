@@ -3669,30 +3669,30 @@ export default function Inventario({
                 const sharePct = statisticsData.totalValueDetailUsd > 0 ? (c.detailUsd / statisticsData.totalValueDetailUsd) * 100 : 0;
 
                 return (
-                  <div key={idx} className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2 hover:bg-slate-100/80 transition-all">
-                    <div className="flex justify-between items-start">
-                      <span className="font-extrabold text-xs text-slate-900 uppercase tracking-wide truncate max-w-[140px]">{c.category}</span>
-                      <span className="bg-indigo-100 text-indigo-800 text-[10px] font-extrabold font-mono rounded px-1.5 py-0.5">
+                  <div key={idx} className="bg-slate-50 border border-slate-200/90 rounded-xl p-4 space-y-2.5 hover:bg-slate-100/90 transition-all shadow-2xs">
+                    <div className="flex justify-between items-center pb-0.5 border-b border-slate-200/60">
+                      <span className="font-black text-sm text-slate-900 uppercase tracking-wide truncate max-w-[160px]" title={c.category}>{c.category}</span>
+                      <span className="bg-indigo-100 text-indigo-800 text-xs font-extrabold font-mono rounded-md px-2 py-0.5 whitespace-nowrap">
                         {sharePct.toFixed(1)}% del Inv.
                       </span>
                     </div>
 
-                    <div className="space-y-1 font-mono text-xs pt-1">
-                      <div className="flex justify-between text-slate-500 text-[11px]">
+                    <div className="space-y-1.5 text-xs pt-0.5">
+                      <div className="flex justify-between items-center text-slate-600 font-sans">
                         <span>Productos:</span>
-                        <span className="font-bold text-slate-800">{c.count} items</span>
+                        <span className="font-extrabold font-mono text-slate-900 text-xs">{c.count} items</span>
                       </div>
-                      <div className="flex justify-between text-slate-500 text-[11px]">
+                      <div className="flex justify-between items-center text-slate-600 font-sans">
                         <span>Valor Detalle:</span>
-                        <span className="font-bold text-emerald-600">${c.detailUsd.toFixed(2)}</span>
+                        <span className="font-extrabold font-mono text-emerald-600 text-xs">${c.detailUsd.toFixed(2)}</span>
                       </div>
-                      <div className="flex justify-between text-slate-500 text-[11px]">
+                      <div className="flex justify-between items-center text-slate-600 font-sans">
                         <span>Valor Costo:</span>
-                        <span className="font-bold text-purple-600">${c.costUsd.toFixed(2)}</span>
+                        <span className="font-extrabold font-mono text-purple-600 text-xs">${c.costUsd.toFixed(2)}</span>
                       </div>
-                      <div className="flex justify-between text-emerald-700 text-[11px] font-bold border-t border-slate-200 pt-1">
+                      <div className="flex justify-between items-center text-emerald-800 font-sans font-bold border-t border-slate-200 pt-1.5 mt-1">
                         <span>Margen Est.:</span>
-                        <span>+{margin.toFixed(1)}% (${profit.toFixed(2)})</span>
+                        <span className="font-mono font-extrabold text-emerald-700 text-xs">+{margin.toFixed(1)}% (${profit.toFixed(2)})</span>
                       </div>
                     </div>
                   </div>

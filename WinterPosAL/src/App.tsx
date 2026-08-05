@@ -1850,51 +1850,53 @@ export default function App() {
     vueltoUSD: number;
     vueltoVES: number;
   }) => {
-    // 1. Decrement products stock and log Kardex (only for regular sales, not returns)
+    // 1. Increment/Decrement products stock and log Kardex (FAC- decrements, DEV- increments)
     const isDev = sale.factura_nro.startsWith('DEV-');
-    if (!isDev) {
-      setProducts(prevProds =>
-        prevProds.map(p => {
-          const item = sale.items.find(i => i.product.id === p.id);
-          if (item) {
-            const cleanQty = p.a_granel ? item.qty : Math.round(item.qty);
-            let nextStock = p.stock_actual - cleanQty;
-            if (!p.a_granel) {
-              nextStock = Math.round(nextStock);
-            }
-            nextStock = Math.max(0, nextStock);
-            
-            const newMov: InventoryMovement = {
-              id: Math.random(),
-              date: getLocalISODateString(),
-              productCode: p.barcode,
-              productDescription: p.description,
-              type: 'Venta',
-              qty: -cleanQty,
-              stock_anterior: p.stock_actual,
-              stock_posterior: nextStock,
-              motivo: `Venta Facturada: ${sale.factura_nro}`,
-              usuario: currentUser?.nombre || 'SISTEMA'
-            };
-            setMovements(prevMovs => [...prevMovs, newMov]);
-
-            return { ...p, stock_actual: nextStock };
+    setProducts(prevProds =>
+      prevProds.map(p => {
+        const item = sale.items.find(i => (i.product?.id === p.id || i.product?.barcode === p.barcode));
+        if (item) {
+          const rawQty = Math.abs(item.qty);
+          const cleanQty = p.a_granel ? rawQty : Math.round(rawQty);
+          const stockDelta = isDev ? cleanQty : -cleanQty;
+          let nextStock = p.stock_actual + stockDelta;
+          if (!p.a_granel) {
+            nextStock = Math.round(nextStock);
           }
-          return p;
-        })
-      );
-    }
+          nextStock = Math.max(0, nextStock);
+          
+          const newMov: InventoryMovement = {
+            id: Math.random(),
+            date: getLocalISODateString(),
+            productCode: p.barcode,
+            productDescription: p.description,
+            type: isDev ? 'Devolución' : 'Venta',
+            qty: stockDelta,
+            stock_anterior: p.stock_actual,
+            stock_posterior: nextStock,
+            motivo: isDev ? `Devolución Facturada: ${sale.factura_nro}` : `Venta Facturada: ${sale.factura_nro}`,
+            usuario: currentUser?.nombre || 'SISTEMA'
+          };
+          setMovements(prevMovs => [...prevMovs, newMov]);
 
-    // 2. Increment client pending balance if Credit was used
-    const creditPayment = sale.pagos.find(p => p.metodo === 'CreditoCliente');
-    if (creditPayment && creditPayment.montoUSD > 0) {
+          return { ...p, stock_actual: nextStock };
+        }
+        return p;
+      })
+    );
+
+    // 2. Increment/Decrement client pending balance if Credit was used (supports credit sales and credit returns)
+    const creditPayment = sale.pagos?.find(p => p.metodo === 'CreditoCliente');
+    if (creditPayment && creditPayment.montoUSD !== 0) {
       setClients(prevClients =>
         prevClients.map(c => {
-          if (c.id === sale.client.id) {
+          if (c.id === sale.client?.id || c.cedula_rif === sale.client?.cedula_rif) {
+            const nextSaldo = Math.max(0, (c.saldo_pendiente || 0) + creditPayment.montoUSD);
+            const nextCredito = Math.min(c.limite_credito || 0, Math.max(0, c.credito_disponible - creditPayment.montoUSD));
             return {
               ...c,
-              saldo_pendiente: c.saldo_pendiente + creditPayment.montoUSD,
-              credito_disponible: Math.max(0, c.credito_disponible - creditPayment.montoUSD)
+              saldo_pendiente: nextSaldo,
+              credito_disponible: nextCredito
             };
           }
           return c;

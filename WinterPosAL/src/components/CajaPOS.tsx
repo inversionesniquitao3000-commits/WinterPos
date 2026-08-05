@@ -443,29 +443,35 @@ export default function CajaPOS({
     if (!currentSale) return;
     setShowDevConfirmModal(false);
     try {
-      // 1. Update product stock (for each returned item, increase stock)
-      for (const item of devItems) {
-        if (item.returnQty > 0) {
-          await onUpdateProductStock(
-            item.product.id,
-            'Devolución',
-            item.returnQty,
-            `Devolución FAC: ${currentSale.factura_nro} - ${devMotivo}`
-          );
-        }
+      const isCreditSale = currentSale.pagos?.some(p => p.metodo === 'CreditoCliente');
+      let returnPagos: Payment[] = [];
+
+      if (isCreditSale) {
+        // Return for credit sale -> restores client credit and reduces pending debt (no cash movement from drawer)
+        returnPagos = [{
+          metodo: 'CreditoCliente',
+          monto: -devRefundTotal,
+          montoUSD: -devRefundTotal
+        }];
+      } else {
+        // Return for cash / immediate payment sale -> refunds cash from drawer
+        const refundCurrency = devRefundCurrency === 'VES' ? 'EfectivoBs' : 'Efectivo$';
+        const refundUsd = devRefundCurrency === 'USD' ? devRefundTotal : 0;
+        const refundVes = devRefundCurrency === 'VES' ? devRefundTotal * tasaDia : 0;
+
+        onRegisterCajaMovement(
+          'Devolucion',
+          `Devolución de Efectivo FAC: ${currentSale.factura_nro} - Motivo: ${devMotivo}`,
+          refundUsd,
+          refundVes
+        );
+
+        returnPagos = [{ 
+          metodo: refundCurrency as any, 
+          monto: devRefundCurrency === 'USD' ? -devRefundTotal : -(devRefundTotal * tasaDia), 
+          montoUSD: -devRefundTotal 
+        }];
       }
-
-      const refundCurrency = devRefundCurrency === 'VES' ? 'EfectivoBs' : 'Efectivo$';
-      const refundUsd = devRefundCurrency === 'USD' ? devRefundTotal : 0;
-      const refundVes = devRefundCurrency === 'VES' ? devRefundTotal * tasaDia : 0;
-
-      // 2. Register manual cash movement of type Devolucion
-      onRegisterCajaMovement(
-        'Devolucion',
-        `Devolución de Efectivo FAC: ${currentSale.factura_nro} - Motivo: ${devMotivo}`,
-        refundUsd,
-        refundVes
-      );
 
       // 3. Register the return as a Sale record in the Ventas history (negative sales)
       const rawDevCode = `DEV-${currentSale.factura_nro.replace('FAC-', '')}`;
@@ -496,18 +502,19 @@ export default function CajaPOS({
         descuento: 0,
         totalUSD: -devRefundTotal,
         totalVES: -(devRefundTotal * tasaDia),
-        pagos: [{ 
-          metodo: refundCurrency as any, 
-          monto: devRefundCurrency === 'USD' ? -devRefundTotal : -(devRefundTotal * tasaDia), 
-          montoUSD: -devRefundTotal 
-        }],
+        pagos: returnPagos,
         vueltoUSD: 0,
         vueltoVES: 0
       };
 
       await onRegisterSale(returnSaleResult);
 
-      showToast(`Devolución de $${devRefundTotal.toFixed(2)} USD procesada con éxito. El inventario y la caja han sido actualizados.`, 'success');
+      if (isCreditSale) {
+        showToast(`Devolución de $${devRefundTotal.toFixed(2)} USD procesada con éxito. Se abonó el monto a la cuenta del cliente y el inventario fue actualizado.`, 'success');
+      } else {
+        showToast(`Devolución de $${devRefundTotal.toFixed(2)} USD procesada con éxito. El inventario y la caja han sido actualizados.`, 'success');
+      }
+      
       setShowDevolucionModal(false);
       setDevSelectedSale(null);
       setDevItems([]);

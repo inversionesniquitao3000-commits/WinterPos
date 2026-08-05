@@ -1839,15 +1839,18 @@ export async function saveSale(s) {
       const saleId = saleRes.rows[0].id;
       
       // Insert Items & adjust stock
+      const isDevSale = factura_nro.startsWith('DEV-');
       for (const item of s.items) {
         const prodRes = await clientTarget.query('SELECT id, stock_actual, precio_detalle_usd, a_granel FROM Productos WHERE codigo_barras_clave = $1', [item.product.barcode]);
         if (prodRes.rowCount > 0) {
           const prodId = prodRes.rows[0].id;
-          const currentStock = prodRes.rows[0].stock_actual;
+          const currentStock = parseFloat(prodRes.rows[0].stock_actual || 0);
           const isGranel = !!prodRes.rows[0].a_granel;
           
-          const cleanQty = isGranel ? item.qty : Math.round(item.qty);
-          let newStock = currentStock - cleanQty;
+          const rawQty = Math.abs(item.qty);
+          const cleanQty = isGranel ? rawQty : Math.round(rawQty);
+          const stockDelta = isDevSale ? cleanQty : -cleanQty;
+          let newStock = currentStock + stockDelta;
           if (!isGranel) {
             newStock = Math.round(newStock);
           }
@@ -1867,26 +1870,29 @@ export async function saveSale(s) {
             ]
           );
           
-          // Update Stock
+          // Update Stock (increment for DEV-, decrement for FAC-)
           await clientTarget.query('UPDATE Productos SET stock_actual = $1 WHERE id = $2', [newStock, prodId]);
           
           // Log Kardex
           await clientTarget.query(
             `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
              VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [prodId, userId, 'Venta', -cleanQty, currentStock, newStock, `Venta Facturada: ${factura_nro}`]
+            [prodId, userId, isDevSale ? 'Devolución' : 'Venta', stockDelta, currentStock, newStock, isDevSale ? `Devolución Facturada: ${factura_nro}` : `Venta Facturada: ${factura_nro}`]
           );
         }
       }
       
       // Insert Payments
       for (const p of s.pagos) {
-        // Adjust client credit if Credit was used
-        if (p.metodo === 'CreditoCliente' && p.monto > 0) {
-          await clientTarget.query(
-            'UPDATE Clientes SET credito_disponible = credito_disponible - $1 WHERE id = $2',
-            [p.monto, clientId]
-          );
+        // Adjust client credit if Credit was used (positive for credit purchase, negative for credit return)
+        if (p.metodo === 'CreditoCliente' && (p.monto || p.montoUSD)) {
+          const mUSD = p.montoUSD || p.monto || 0;
+          if (mUSD !== 0) {
+            await clientTarget.query(
+              'UPDATE Clientes SET credito_disponible = GREATEST(0, LEAST(limite_credito, credito_disponible - $1)) WHERE id = $2',
+              [mUSD, clientId]
+            );
+          }
         }
         
         try {
@@ -1935,6 +1941,22 @@ export async function saveSale(s) {
     const maxNum = numbers.length > 0 ? Math.max(...numbers) : 0;
     factura_nro_json = `FAC-${String(maxNum + 1).padStart(6, '0')}`;
   }
+  // Adjust client credit in JSON fallback if Credit was used
+  const creditPayment = (s.pagos || []).find(p => p.metodo === 'CreditoCliente');
+  if (creditPayment) {
+    const montoUsd = creditPayment.montoUSD || creditPayment.monto || 0;
+    if (montoUsd !== 0) {
+      const clients = readJsonFile('clients.json', mockClients);
+      const cIdx = clients.findIndex(c => c.cedula_rif === s.client?.cedula_rif || c.id === s.client?.id);
+      if (cIdx !== -1) {
+        const lim = clients[cIdx].limite_credito || 0;
+        clients[cIdx].credito_disponible = Math.min(lim, Math.max(0, (clients[cIdx].credito_disponible || 0) - montoUsd));
+        clients[cIdx].saldo_pendiente = Math.max(0, lim - clients[cIdx].credito_disponible);
+        writeJsonFile('clients.json', clients);
+      }
+    }
+  }
+
   const newSale = {
     ...s,
     factura_nro: factura_nro_json,
