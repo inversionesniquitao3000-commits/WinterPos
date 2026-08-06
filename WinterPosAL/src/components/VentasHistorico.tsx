@@ -2198,8 +2198,6 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
           }, 0);
         }
         if (!subtotalNetoUsd) subtotalNetoUsd = Math.max(0, ventaTotalUsd / 1.16);
-        const utilidadSubtotal = subtotalNetoUsd - costoTotalUsd;
-        const utilidadUsd = subtotalNetoUsd - costoTotalUsd;
 
         return (
           <div className="fixed inset-0 bg-slate-950/85 flex items-center justify-center p-4 z-50 font-mono text-slate-800 print:p-0">

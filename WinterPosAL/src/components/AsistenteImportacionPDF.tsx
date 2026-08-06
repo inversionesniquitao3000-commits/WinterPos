@@ -1,5 +1,25 @@
 import { useState, useRef } from 'react';
 import { Upload, Sparkles, CheckCircle2, AlertTriangle, Settings, RefreshCw, Wand2, ArrowRight, Eye, Trash2, Tag, Layers, Calculator, FileSpreadsheet, Search } from 'lucide-react';
+// Dynamic loader for XLSX (SheetJS)
+const loadXlsx = (): Promise<any> => {
+  return new Promise((resolve, reject) => {
+    if ((window as any).XLSX) {
+      return resolve((window as any).XLSX);
+    }
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    script.onload = () => {
+      const lib = (window as any).XLSX;
+      if (lib) {
+        resolve(lib);
+      } else {
+        reject(new Error('No se pudo inicializar la librería XLSX'));
+      }
+    };
+    script.onerror = () => reject(new Error('No se pudo cargar la librería XLSX desde CDN'));
+    document.head.appendChild(script);
+  });
+};
 import type { Product } from '../types';
 
 // Dynamic loader for PDF.js to ensure Vite compiles even if npm package is missing
@@ -475,7 +495,7 @@ export default function AsistenteImportacionPDF({
           str: item.str,
           x: item.transform[4],
           y: Math.round(item.transform[5])
-        })).filter(i => i.str.trim().length > 0);
+        })).filter((i: TextItem) => i.str.trim().length > 0);
 
         // Group by Y position with tolerance of 3 units
         const linesMap: { y: number; items: TextItem[] }[] = [];
@@ -534,6 +554,7 @@ export default function AsistenteImportacionPDF({
     setErrorMessage('');
 
     try {
+      const XLSX = await loadXlsx();
       const buffer = await excelFile.arrayBuffer();
       const workbook = XLSX.read(buffer, { type: 'array' });
       const firstSheetName = workbook.SheetNames[0];

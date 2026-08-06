@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
-  Briefcase, Plus, Users, Calculator, History, Table, DollarSign, Calendar, FileText, 
-  Trash2, Edit, X, RefreshCw, Download, Check, ShieldCheck, ShieldAlert, PieChart, Sparkles, Copy,
-  Camera, Send, Share2, Receipt
+  Briefcase, Plus, Users, Calculator, History, Table, DollarSign, 
+  Trash2, Edit, X, RefreshCw, Check, ShieldCheck, ShieldAlert, Copy,
+  Camera, Send, Receipt
 } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import { Accionista, InversionAccionista, GastoOperativo } from '../types';
@@ -22,7 +22,7 @@ interface InversionesModuloProps {
 export const InversionesModulo: React.FC<InversionesModuloProps> = ({
   isOpen,
   onClose,
-  currentUser,
+  currentUser: _currentUser,
   inline = false,
   subTab: controlledSubTab,
   onSubTabChange,

@@ -1853,12 +1853,12 @@ export default function Inventario({
 
     const categoryFilterLabel = selectedCategories.length === 0 ? 'TODAS' : selectedCategories.join(', ');
     const stockFilterLabel = 
-      filterStock === 'todos' ? 'TODOS' :
-      filterStock === 'con_existencia' ? 'CON EXISTENCIA (>0)' :
-      filterStock === 'sin_existencia' ? 'SIN EXISTENCIA (0)' :
-      filterStock === 'menor_5' ? 'EXISTENCIA ≤ 5' :
-      filterStock === 'menor_10' ? 'EXISTENCIA ≤ 10' :
-      filterStock === 'menor_15' ? 'EXISTENCIA ≤ 15' : 'TODOS';
+      (filterStock as string) === 'todos' ? 'TODOS' :
+      (filterStock as string) === 'con_existencia' ? 'CON EXISTENCIA (>0)' :
+      (filterStock as string) === 'sin_existencia' ? 'SIN EXISTENCIA (0)' :
+      (filterStock as string) === 'menor_5' ? 'EXISTENCIA ≤ 5' :
+      (filterStock as string) === 'menor_10' ? 'EXISTENCIA ≤ 10' :
+      (filterStock as string) === 'menor_15' ? 'EXISTENCIA ≤ 15' : 'TODOS';
     const minStockFilterLabel = 
       filterMinStock === 'todos' ? 'TODOS' : 'BAJO STOCK MÍNIMO';
 

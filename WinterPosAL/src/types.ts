@@ -323,7 +323,11 @@ export interface CierreCaja {
   devolucionVentasUsd: number;
   devolucionVentasVes?: number;
   ventaTotalUsd: number;
-  realVes: number;
+  subtotalNetoUsd?: number;
+  cambioDivisasCount?: number;
+  cambioDivisasUsd?: number;
+  cambioDivisasEur?: number;
+  cambioDivisasVesSalida?: number;
   expectedVes: number;
 }
 

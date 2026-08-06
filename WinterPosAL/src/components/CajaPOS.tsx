@@ -2510,7 +2510,7 @@ export default function CajaPOS({
       }
     }
 
-    await onCerrarCaja(cierreResult.realUsd, cierreResult.realVes, {
+    await onCerrarCaja(cierreResult.realUsd, cierreResult.realVes ?? 0, {
       ...cierreResult,
       terminal: localStorage.getItem('pos_terminal_name') || 'CAJA_01'
     });
@@ -4775,14 +4775,14 @@ export default function CajaPOS({
                         </div>
                       )}
 
-                      {(cierreResult.pagosPagoMovilVes > 0 || !hideZeroLines) && (
+                      {((cierreResult.pagosPagoMovilVes || 0) > 0 || !hideZeroLines) && (
                         <div className="flex justify-between">
                           <span>Pago Móvil :</span>
                           <span className="font-bold text-slate-800">Bs {(cierreResult.pagosPagoMovilVes && !isNaN(cierreResult.pagosPagoMovilVes) ? cierreResult.pagosPagoMovilVes : 0).toFixed(2)}</span>
                         </div>
                       )}
 
-                      {(cierreResult.pagosTransferenciaVes > 0 || !hideZeroLines) && (
+                      {((cierreResult.pagosTransferenciaVes || 0) > 0 || !hideZeroLines) && (
                         <div className="flex justify-between">
                           <span>Transferencia :</span>
                           <span className="font-bold text-slate-800">Bs {(cierreResult.pagosTransferenciaVes && !isNaN(cierreResult.pagosTransferenciaVes) ? cierreResult.pagosTransferenciaVes : 0).toFixed(2)}</span>
@@ -4803,7 +4803,7 @@ export default function CajaPOS({
                         </div>
                       )}
 
-                      {(cierreResult.devolucionVentasVes > 0 || !hideZeroLines) && (
+                      {((cierreResult.devolucionVentasVes || 0) > 0 || !hideZeroLines) && (
                         <div className="flex justify-between text-red-550 font-bold">
                           <span>Devolución Ventas (Bs) :</span>
                           <span>- Bs {(cierreResult.devolucionVentasVes && !isNaN(cierreResult.devolucionVentasVes) ? cierreResult.devolucionVentasVes : 0).toFixed(2)}</span>
