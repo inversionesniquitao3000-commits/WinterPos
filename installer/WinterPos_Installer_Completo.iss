@@ -7,7 +7,7 @@
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "WinterPos AL"
 #define MyAppURL "https://winterpos.local"
-#define MyAppExeName "Iniciar_WinterPos.bat"
+#define MyAppExeName "Iniciar_WinterPos.vbs"
 
 [Setup]
 AppId={{D3F9B7A2-7E81-4C09-8F2B-9C8D4E1A5B3C}
@@ -26,21 +26,31 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
+SetupIconFile=app_icon.ico
+UninstallDisplayIcon={app}\installer\app_icon.ico
 
 [Languages]
 Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+Name: "debugmode"; Description: "⚙️ Activar Modo Depuración / Debugger (Muestra la consola CMD con logs en vivo)"; GroupDescription: "Opciones de Auditoría:"; Flags: unchecked
 
 [Files]
-; Copy all workspace files (Backend, Frontend Dist, Batch, Node dependencies, PostgreSQL installer)
-Source: "..\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*,.wwebjs_auth\*,.wwebjs_cache\*,node_modules\.cache\*,installer_output\*,WinterPosAL\node_modules\*"
+; Copy runtime files (Backend, Compiled Frontend Dist, Launchers, Dependencies, PostgreSQL installer) - EXCLUDES React source code and dev files
+Source: "..\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*,.vscode\*,.gemini\*,brain\*,scratch\*,installer\*,installer_output\*,.wwebjs_auth\*,.wwebjs_cache\*,node_modules\.cache\*,WinterPosAL\src\*,WinterPosAL\public\*,WinterPosAL\node_modules\*,WinterPosAL\tsconfig*.json,WinterPosAL\vite.config.ts,WinterPosAL\generar_manuales.js"
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+; Modo Silencioso (Por defecto)
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\installer\app_icon.ico"; Check: not IsDebugModeSelected
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; IconFilename: "{app}\installer\app_icon.ico"; Check: not IsDebugModeSelected
+
+; Modo Depuración / Debugger (Si se selecciona la casilla Debugger)
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\Iniciar_WinterPos.bat"; Tasks: desktopicon; IconFilename: "{app}\installer\app_icon.ico"; Check: IsDebugModeSelected
+
+; Acceso directo de diagnóstico permanente en Menú Inicio
+Name: "{group}\{#MyAppName} - Modo Depuración (Logs CMD)"; Filename: "{app}\Iniciar_WinterPos.bat"; IconFilename: "{app}\installer\app_icon.ico"
 Name: "{group}\Desinstalar {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
 ; Install PostgreSQL silently in Server Mode if PostgreSQL installer is present in installer folder
@@ -56,6 +66,11 @@ Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""PostgreSQL 
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: shellexec postinstall skipifsilent
 
 [Code]
+function IsDebugModeSelected: Boolean;
+begin
+  Result := WizardIsTaskSelected('debugmode');
+end;
+
 var
   RolePage: TWizardPage;
   ServerRadio: TRadioButton;
