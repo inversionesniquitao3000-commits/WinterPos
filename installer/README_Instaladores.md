@@ -1,20 +1,22 @@
-# INSTRUCCIONES DE COMPILACIÓN DE INSTALADORES - WINTERPOS PUNTO DE VENTA
+## 💡 ACLARACIÓN IMPORTANTE SOBRE LOS ARCHIVOS Y PESOS
 
-Este directorio contiene los scripts oficiales de Inno Setup para compilar los ejecutables de distribución comercial del sistema **WinterPosAL**.
+* **Los archivos `.iss` de la carpeta `installer\` (pesan ~8 KB):** Son **scripts de texto** con instrucciones de código. No son los programas instaladores en sí, sino las "recetas" que lee el programa Inno Setup para construir los ejecutables.
+* **Los ejecutables `.exe` compilados (pesan entre ~9 MB y ~350 MB):** Son los verdaderos instaladores comerciales que se generan en la carpeta `installer_output\` después de compilar.
 
 ---
 
-## 🛠️ ARCHIVOS DE INSTALADOR (.ISS) INCLUIDOS
+## 🛠️ ARCHIVOS DE INSTALADOR (.ISS) Y SUS RESULTADOS COMPILADOS
 
 1. **`WinterPos_Installer_Completo.iss` (Recomendado para Producción Offline)**
-   * **Nombre de salida:** `WinterPosSetup_Completo_Offline.exe`
-   * **Tamaño aprox:** ~350 MB (incluye motor PostgreSQL 15 + Node portátil + Frontend dist).
+   * **Script `.iss` (Texto):** ~8 KB.
+   * **Ejecutable final compilado (`WinterPosSetup_Completo_Offline.exe`):** ~350 MB.
+   * **¿Por qué pesa ~350 MB el `.exe` final?** Porque al compilar empaqueta dentro del mismo ejecutable el instalador oficial de PostgreSQL 15 (~300 MB) + el motor `node.exe` (~35 MB) + los módulos del backend y la interfaz web `dist/`.
    * **Uso:** Ideal para instalar en negocios nuevos sin conexión a internet. Instala la base de datos automáticamente en segundo plano (`--mode unattended`).
 
 2. **`WinterPos_Installer_Liviano.iss` (Instalador de Red LAN)**
-   * **Nombre de salida:** `WinterPosSetup_Liviano.exe`
-   * **Tamaño aprox:** ~9 MB.
-   * **Uso:** Ideal para instalar en Cajas Secundarias (Terminales Cliente) o servidores que ya cuentan con PostgreSQL previamente instalado.
+   * **Script `.iss` (Texto):** ~8 KB.
+   * **Ejecutable final compilado (`WinterPosSetup_Liviano.exe`):** ~9 MB a ~40 MB.
+   * **Uso:** Ideal para Cajas Secundarias (Terminales Cliente) o servidores que ya tienen PostgreSQL previamente instalado. No incluye la base de datos dentro del paquete.
 
 3. **`WinterPos_Installer.iss` (Instalador Estándar)**
    * **Nombre de salida:** `WinterPosSetup_v1.0.exe`

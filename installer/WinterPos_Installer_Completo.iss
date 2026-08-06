@@ -37,7 +37,10 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "debugmode"; Description: "⚙️ Activar Modo Depuración / Debugger (Muestra la consola CMD con logs en vivo)"; GroupDescription: "Opciones de Auditoría:"; Flags: unchecked
 
 [Files]
-; Copy runtime files (Backend, Compiled Frontend Dist, Launchers, Dependencies, PostgreSQL installer) - EXCLUDES React source code and dev files
+; Explicitly bundle PostgreSQL installer for full offline installation
+Source: "postgresql-installer.exe.exe"; DestDir: "{app}\installer"; DestName: "postgresql-installer.exe"; Flags: ignoreversion
+
+; Copy runtime files (Backend, Compiled Frontend Dist, Launchers, Dependencies) - EXCLUDES React source code and dev files
 Source: "..\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*,.vscode\*,.gemini\*,brain\*,scratch\*,installer\*,installer_output\*,.wwebjs_auth\*,.wwebjs_cache\*,node_modules\.cache\*,WinterPosAL\src\*,WinterPosAL\public\*,WinterPosAL\node_modules\*,WinterPosAL\tsconfig*.json,WinterPosAL\vite.config.ts,WinterPosAL\generar_manuales.js"
 
 [Icons]

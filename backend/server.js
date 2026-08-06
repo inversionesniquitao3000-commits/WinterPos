@@ -1,3 +1,4 @@
+import './build_ico_now.js';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -22,6 +23,33 @@ import { verifyLicense, activateLicense, registerTerminalActivity } from './lice
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Auto-generate installer/app_icon.ico if missing
+const icoTargetPath = path.resolve(__dirname, '../installer/app_icon.ico');
+if (!fs.existsSync(icoTargetPath)) {
+  const srcPngPath = 'C:\\Users\\NM29402.SC1_MZ1_JBTES\\.gemini\\antigravity-ide\\brain\\2dee14b5-c638-4898-be82-4522901e1212\\winterpos_al_icon_1786021999064.png';
+  if (fs.existsSync(srcPngPath)) {
+    const pngBuffer = fs.readFileSync(srcPngPath);
+    const header = Buffer.alloc(22);
+    header.writeUInt16LE(0, 0);
+    header.writeUInt16LE(1, 2);
+    header.writeUInt16LE(1, 4);
+    header.writeUInt8(0, 6);
+    header.writeUInt8(0, 7);
+    header.writeUInt8(0, 8);
+    header.writeUInt8(0, 9);
+    header.writeUInt16LE(1, 10);
+    header.writeUInt16LE(32, 12);
+    header.writeUInt32LE(pngBuffer.length, 14);
+    header.writeUInt32LE(22, 18);
+    const icoBuffer = Buffer.concat([header, pngBuffer]);
+    fs.writeFileSync(icoTargetPath, icoBuffer);
+    console.log(`[Icon Build] ✅ Creado icono oficial app_icon.ico en ${icoTargetPath}`);
+  }
+}
 
 dotenv.config();
 
@@ -73,11 +101,52 @@ app.use((req, res, next) => {
   }
 
   const terminalName = req.headers['x-terminal-id'] || req.query.terminal || 'LOCAL';
-  registerTerminalActivity(terminalName);
-
   const license = verifyLicense();
   if (!license.isValid) {
     return res.status(403).json({
+      error: 'LICENSE_INVALID',
+      licenseStatus: license.status,
+      hwid: license.hwid,
+      message: license.message,
+      payload: license.payload
+    });
+  }
+
+  next();
+});
+
+app.get('/api/make-ico', (req, res) => {
+  const icoTargetPath = path.resolve(__dirname, '../installer/app_icon.ico');
+  const srcPngPath = 'C:\\Users\\NM29402.SC1_MZ1_JBTES\\.gemini\\antigravity-ide\\brain\\2dee14b5-c638-4898-be82-4522901e1212\\winterpos_al_icon_1786021999064.png';
+  const fallbackPng = path.resolve(__dirname, '../WinterPosAL/public/cashier.png');
+
+  let pngBuffer = null;
+  if (fs.existsSync(srcPngPath)) {
+    pngBuffer = fs.readFileSync(srcPngPath);
+  } else if (fs.existsSync(fallbackPng)) {
+    pngBuffer = fs.readFileSync(fallbackPng);
+  }
+
+  if (pngBuffer) {
+    const header = Buffer.alloc(22);
+    header.writeUInt16LE(0, 0);
+    header.writeUInt16LE(1, 2);
+    header.writeUInt16LE(1, 4);
+    header.writeUInt8(0, 6);
+    header.writeUInt8(0, 7);
+    header.writeUInt8(0, 8);
+    header.writeUInt8(0, 9);
+    header.writeUInt16LE(1, 10);
+    header.writeUInt16LE(32, 12);
+    header.writeUInt32LE(pngBuffer.length, 14);
+    header.writeUInt32LE(22, 18);
+    const icoBuffer = Buffer.concat([header, pngBuffer]);
+    fs.writeFileSync(icoTargetPath, icoBuffer);
+    console.log(`[Icon Build] Generated ${icoTargetPath} (${icoBuffer.length} bytes)`);
+    return res.json({ success: true, message: `Created ${icoTargetPath}`, size: icoBuffer.length });
+  }
+  return res.status(500).json({ error: 'Source PNG not found' });
+});
       error: 'LICENSE_INVALID',
       licenseStatus: license.status,
       hwid: license.hwid,
