@@ -115,7 +115,7 @@ export default function CajaPOS({
 
   // Quick Client Registration Modal State
   const [showQuickClientModal, setShowQuickClientModal] = useState(false);
-  const [quickDoc, setQuickDoc] = useState('');
+  const [quickDoc, setQuickDoc] = useState('V-');
   const [quickName, setQuickName] = useState('');
   const [quickPhone, setQuickPhone] = useState('');
   const [quickAddress, setQuickAddress] = useState('');
@@ -144,6 +144,8 @@ export default function CajaPOS({
   const [showCierreModal, setShowCierreModal] = useState(false);
   const [cierreRealUsd, setCierreRealUsd] = useState('0');
   const [cierreRealVes, setCierreRealVes] = useState('0');
+  const [cierreRealEur, setCierreRealEur] = useState('0');
+  const [hasEurInShift, setHasEurInShift] = useState(false);
   const [cierreResult, setCierreResult] = useState<CierreCaja | null>(null);
 
   // Manual movements state
@@ -180,6 +182,30 @@ export default function CajaPOS({
   useEffect(() => {
     if (showCierreModal) {
       fetchWaCierreStatus();
+      // Check if there are EUR operations in active shift
+      const checkEurOps = async () => {
+        try {
+          const res = await fetch(getApiUrl('/cajas/divisas-operaciones'));
+          if (res.ok) {
+            const list = await res.json();
+            if (Array.isArray(list)) {
+              const aperturaStr = localStorage.getItem('pos_apertura_fecha') || '';
+              const aperturaMs = aperturaStr ? new Date(aperturaStr).getTime() : 0;
+              const termName = localStorage.getItem('pos_terminal_name') || 'CAJA_01';
+              const eurOps = list.filter((op: any) => {
+                const opTime = op.timestamp || (op.fecha ? new Date(op.fecha).getTime() : 0);
+                if (aperturaMs > 0 && opTime > 0 && opTime < (aperturaMs - 60000)) return false;
+                if (op.terminal && op.terminal !== termName) return false;
+                return op.currency === 'EUR' || (op.tipo_operacion === 'COMPRA_DIVISA' && op.currency === 'EUR');
+              });
+              setHasEurInShift(eurOps.length > 0);
+            }
+          }
+        } catch (e) {
+          console.warn('⚠️ Error al verificar operaciones de Euro para el cierre:', e);
+        }
+      };
+      checkEurOps();
     }
   }, [showCierreModal]);
   const [movType, setMovType] = useState<'Entrada' | 'Salida'>('Entrada');
@@ -193,7 +219,9 @@ export default function CajaPOS({
 
   const handleProcessDivisaOperation = (op: any) => {
     if (op.tipo_operacion === 'COMPRA_DIVISA') {
-      const usdAmount = op.currency === 'USD' ? op.monto_divisa : 0;
+      const usdAmount = op.currency === 'USD' 
+        ? op.monto_divisa 
+        : (op.monto_ves_entregado && tasaDia > 0 ? op.monto_ves_entregado / tasaDia : op.monto_divisa);
       const vesSalida = op.monto_ves_entregado;
       onRegisterCajaMovement('Entrada', `[CAMBIO DIVISAS] Recepción ${op.monto_divisa} ${op.currency} a tasa ${op.tasa_aplicada.toFixed(2)}`, usdAmount, 0);
       onRegisterCajaMovement('Salida', `[CAMBIO DIVISAS] Entrega de Bs Efectivo (${op.monto_divisa} ${op.currency} @ ${op.tasa_aplicada.toFixed(2)})`, 0, vesSalida);
@@ -249,6 +277,7 @@ export default function CajaPOS({
         setShowDevConfirmModal(false);
         setShowDevolucionModal(false);
         setShowCambioDivisasModal(false);
+        setShowQuickClientModal(false);
         if (typeof setShowEntradaRapidaModal === 'function') {
           setShowEntradaRapidaModal(false);
         }
@@ -1081,6 +1110,7 @@ export default function CajaPOS({
         setShowOnHoldModal(false);
         setCierreResult(null);
         setShowDevolucionModal(false);
+        setShowQuickClientModal(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -1737,6 +1767,7 @@ export default function CajaPOS({
     e.preventDefault();
     const realUsd = parseFloat(cierreRealUsd) || 0;
     const realVes = parseFloat(cierreRealVes) || 0;
+    const realEur = parseFloat(cierreRealEur) || 0;
 
     let targetShiftSales = shiftSales;
     let targetShiftAbonos = abonos || [];
@@ -1862,6 +1893,29 @@ export default function CajaPOS({
       return acc;
     }, 0);
 
+    const cambioDivisasUsd = shiftDivisaOps.reduce((acc, op) => {
+      if (op.tipo_operacion === 'COMPRA_DIVISA' && (op.currency === 'USD' || !op.currency)) {
+        return acc + (Number(op.monto_divisa) || 0);
+      }
+      return acc;
+    }, 0);
+
+    const cambioDivisasEur = shiftDivisaOps.reduce((acc, op) => {
+      if (op.tipo_operacion === 'COMPRA_DIVISA' && op.currency === 'EUR') {
+        return acc + (Number(op.monto_divisa) || 0);
+      }
+      return acc;
+    }, 0);
+
+    const cambioDivisasVesSalida = shiftDivisaOps.reduce((acc, op) => {
+      if (op.tipo_operacion === 'COMPRA_DIVISA') {
+        return acc + (Number(op.monto_ves_entregado) || 0);
+      }
+      return acc;
+    }, 0);
+
+    const cambioDivisasCount = shiftDivisaOps.filter(op => op.tipo_operacion === 'COMPRA_DIVISA').length;
+
     // Detailed metrics calculation
     const aperturaUsd = targetAperturaUsd;
     const aperturaVes = targetAperturaVes;
@@ -1971,7 +2025,8 @@ export default function CajaPOS({
       return acc;
     }, 0);
 
-    const rawExpectedUsd = aperturaUsd + ventasEfectivoUsd + abonosEfectivoUsd + entradaEfectivoUsd - salidaEfectivoUsd - devolucionEfectivoUsd - vueltosEntregadosUsd;
+    const cambioDivisasTotalUsdEquiv = cambioDivisasUsd + (tasaDia > 0 ? (cambioDivisasVesSalida - (cambioDivisasUsd * tasaDia)) / tasaDia : cambioDivisasEur);
+    const rawExpectedUsd = aperturaUsd + ventasEfectivoUsd + abonosEfectivoUsd + entradaEfectivoUsd + cambioDivisasTotalUsdEquiv - salidaEfectivoUsd - devolucionEfectivoUsd - vueltosEntregadosUsd;
     const dineroEnCajaExpected = Math.max(0, parseFloat(rawExpectedUsd.toFixed(2)));
 
     const rawExpectedVes = aperturaVes + ventasEfectivoVes + abonosEfectivoBsVes + entradaEfectivoVes - salidaEfectivoVes - devolucionEfectivoVes - vueltosEntregadosVes;
@@ -2144,41 +2199,44 @@ export default function CajaPOS({
     };
 
     const calculateSaleNetWithoutIVA = (sale: any) => {
-      if (sale.factura_nro?.startsWith('DEV-')) return 0;
+      const isDev = sale.factura_nro?.startsWith('DEV-');
       const items = sale.items || [];
+      let netVal = 0;
       if (!items.length) {
-        const total = safeNum(sale.totalUSD);
-        const iva = safeNum(sale.iva);
-        return Math.max(0, total - iva);
+        const total = Math.abs(safeNum(sale.totalUSD));
+        const iva = Math.abs(safeNum(sale.iva));
+        netVal = Math.max(0, total - iva);
+      } else {
+        const discount = safeNum(sale.descuento);
+        const rawTotalSale = items.reduce((acc: number, i: any) => {
+          const qty = safeNum(i.qty ?? (i as any).cantidad);
+          const price = safeNum(i.priceUSD ?? (i as any).precio_unitario_usd) || (qty > 0 ? Math.abs(safeNum(i.totalUSD ?? (i as any).total_fila_usd)) / qty : 0);
+          return acc + (price * qty);
+        }, 0);
+
+        const discountFactor = rawTotalSale > 0 ? (1 - (discount / rawTotalSale)) : 1;
+
+        let grossTaxable = 0;
+        let grossExempt = 0;
+
+        items.forEach((i: any) => {
+          const qty = safeNum(i.qty ?? (i as any).cantidad);
+          const price = safeNum(i.priceUSD ?? (i as any).precio_unitario_usd) || (qty > 0 ? Math.abs(safeNum(i.totalUSD ?? (i as any).total_fila_usd)) / qty : 0);
+          const itemSale = price * qty;
+          if (isItemExempt(i)) {
+            grossExempt += itemSale;
+          } else {
+            grossTaxable += itemSale;
+          }
+        });
+
+        const netTaxable = grossTaxable * discountFactor;
+        const netExempt = grossExempt * discountFactor;
+        const baseImponible = netTaxable > 0 ? (netTaxable / 1.16) : 0;
+        netVal = baseImponible + netExempt;
       }
 
-      const discount = safeNum(sale.descuento);
-      const rawTotalSale = items.reduce((acc: number, i: any) => {
-        const qty = safeNum(i.qty ?? (i as any).cantidad);
-        const price = safeNum(i.priceUSD ?? (i as any).precio_unitario_usd) || (qty > 0 ? safeNum(i.totalUSD ?? (i as any).total_fila_usd) / qty : 0);
-        return acc + (price * qty);
-      }, 0);
-
-      const discountFactor = rawTotalSale > 0 ? (1 - (discount / rawTotalSale)) : 1;
-
-      let grossTaxable = 0;
-      let grossExempt = 0;
-
-      items.forEach((i: any) => {
-        const qty = safeNum(i.qty ?? (i as any).cantidad);
-        const price = safeNum(i.priceUSD ?? (i as any).precio_unitario_usd) || (qty > 0 ? safeNum(i.totalUSD ?? (i as any).total_fila_usd) / qty : 0);
-        const itemSale = price * qty;
-        if (isItemExempt(i)) {
-          grossExempt += itemSale;
-        } else {
-          grossTaxable += itemSale;
-        }
-      });
-
-      const netTaxable = grossTaxable * discountFactor;
-      const netExempt = grossExempt * discountFactor;
-      const baseImponible = netTaxable > 0 ? (netTaxable / 1.16) : 0;
-      return baseImponible + netExempt;
+      return isDev ? -Math.abs(netVal) : netVal;
     };
 
     const subtotalNetoUsd = targetShiftSales.reduce((acc, sale) => {
@@ -2266,6 +2324,16 @@ export default function CajaPOS({
       devolucionVentasVes,
       ventaTotalUsd,
       subtotalNetoUsd,
+      cambioDivisasCount,
+      cambioDivisasUsd,
+      cambioDivisasEur,
+      cambioDivisasVesSalida,
+      realUsd,
+      realVes,
+      realEur,
+      diffEur: realEur - cambioDivisasEur,
+      diffVes: realVes - expectedVes,
+      diffUsd: realUsd - dineroEnCajaExpected,
       ventaEfectivoComisionVes: avanceComisionTotalVes,
       ventaEfectivoComisionUsd: avanceComisionTotalUsd
     };
@@ -2687,7 +2755,10 @@ export default function CajaPOS({
 
               <button
                 type="button"
-                onClick={() => setShowQuickClientModal(true)}
+                onClick={() => {
+                  if (!quickDoc || quickDoc.trim() === '') setQuickDoc('V-');
+                  setShowQuickClientModal(true);
+                }}
                 className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-base px-3.5 py-2.5 rounded-lg shadow-sm transition-all flex items-center justify-center flex-shrink-0"
                 title="Registrar Nuevo Cliente (+)"
               >
@@ -4286,6 +4357,21 @@ export default function CajaPOS({
                   />
                 </div>
 
+                {hasEurInShift && (
+                  <div>
+                    <label className="text-[11px] text-indigo-700 block mb-1 font-sans font-bold">Efectivo en Caja Real (€ EUR)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      required
+                      value={cierreRealEur}
+                      onChange={(e) => setCierreRealEur(e.target.value)}
+                      className="w-full bg-indigo-50/50 border border-indigo-300 rounded p-2 text-xs font-bold font-mono text-indigo-900 focus:bg-white focus:border-indigo-600 focus:outline-none"
+                    />
+                  </div>
+                )}
+
                 <button
                   type="submit"
                   className="w-full bg-red-600 hover:bg-red-700 active:scale-[0.99] text-white py-3 rounded-lg font-extrabold font-sans text-xs tracking-wider transition-all shadow-md shadow-red-200 flex items-center justify-center gap-2"
@@ -4409,6 +4495,20 @@ export default function CajaPOS({
                         <div className="flex justify-between">
                           <span>Entrada Efectivo (Bs) :</span>
                           <span className="font-bold text-slate-800">Bs {(cierreResult.entradaEfectivoVes ?? 0).toFixed(2)}</span>
+                        </div>
+                      )}
+
+                      {((cierreResult.cambioDivisasUsd ?? 0) > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between text-emerald-700 font-bold">
+                          <span>Divisas Compradas ($) :</span>
+                          <span>+ $ {(cierreResult.cambioDivisasUsd ?? 0).toFixed(2)}</span>
+                        </div>
+                      )}
+
+                      {((cierreResult.cambioDivisasEur ?? 0) > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between text-indigo-700 font-bold">
+                          <span>Divisas Compradas (€) :</span>
+                          <span>+ € {(cierreResult.cambioDivisasEur ?? 0).toFixed(2)}</span>
                         </div>
                       )}
 
@@ -4611,10 +4711,15 @@ export default function CajaPOS({
 
                 {/* Arqueo Audit differences table */}
                 {(() => {
+                  const expectedEur = cierreResult.cambioDivisasEur || 0;
+                  const realEurVal = hasEurInShift || expectedEur > 0 ? (parseFloat(cierreRealEur) || 0) : 0;
                   const diffUsd = parseFloat(cierreRealUsd) - cierreResult.dineroEnCajaExpected;
                   const diffVes = parseFloat(cierreRealVes) - cierreResult.expectedVes;
-                  const hasLoss = diffUsd < -0.01 || diffVes < -0.01;
-                  const hasGain = diffUsd > 0.01 || diffVes > 0.01;
+                  const diffEur = realEurVal - expectedEur;
+                  const showEur = hasEurInShift || expectedEur > 0 || realEurVal > 0;
+
+                  const hasLoss = diffUsd < -0.01 || diffVes < -0.01 || (showEur && diffEur < -0.01);
+                  const hasGain = diffUsd > 0.01 || diffVes > 0.01 || (showEur && diffEur > 0.01);
                   
                   let boxBgClass = 'bg-slate-50 border-slate-200';
                   let titleClass = 'text-slate-800 border-slate-100';
@@ -4642,17 +4747,29 @@ export default function CajaPOS({
                         <span className="text-right">${cierreResult.dineroEnCajaExpected.toFixed(2)}</span>
                         <span className="text-right text-emerald-600">${parseFloat(cierreRealUsd).toFixed(2)}</span>
                       </div>
+                      {showEur && (
+                        <div className="grid grid-cols-3 gap-2 font-mono font-bold text-slate-750 text-[12px]">
+                          <span className="text-indigo-700">Euros EUR:</span>
+                          <span className="text-right">€{expectedEur.toFixed(2)}</span>
+                          <span className="text-right text-indigo-600">€{realEurVal.toFixed(2)}</span>
+                        </div>
+                      )}
                       <div className="grid grid-cols-3 gap-2 font-mono font-bold text-slate-750 text-[12px] border-b border-slate-205 pb-1.5">
                         <span className="text-purple-750">Bolívares Bs:</span>
                         <span className="text-right">Bs {cierreResult.expectedVes.toFixed(2)}</span>
                         <span className="text-right text-purple-600">Bs {parseFloat(cierreRealVes).toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between font-extrabold text-[12px] text-slate-800 font-mono">
-                        <span>DIFERENCIA USD / VES:</span>
+                        <span>DIFERENCIA {showEur ? 'USD / EUR / VES:' : 'USD / VES:'}</span>
                         <div className="text-right space-y-0.5">
                           <span className={diffUsd >= 0 ? 'text-emerald-600' : 'text-rose-600 font-black'}>
                             USD: ${diffUsd.toFixed(2)}
                           </span>
+                          {showEur && (
+                            <span className={`block ${diffEur >= 0 ? 'text-emerald-600' : 'text-rose-600 font-black'}`}>
+                              EUR: € {diffEur.toFixed(2)}
+                            </span>
+                          )}
                           <span className={`block ${diffVes >= 0 ? 'text-emerald-600' : 'text-rose-600 font-black'}`}>
                             VES: Bs {diffVes.toFixed(2)}
                           </span>
@@ -5602,8 +5719,17 @@ export default function CajaPOS({
                     required
                     placeholder="Ej: V-12345678"
                     value={quickDoc}
-                    onChange={(e) => setQuickDoc(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-slate-500 focus:outline-none"
+                    onChange={(e) => {
+                      let val = e.target.value;
+                      if (!val || val.trim() === '') {
+                        setQuickDoc('V-');
+                      } else if (!val.startsWith('V-') && !val.startsWith('J-') && !val.startsWith('E-') && !val.startsWith('G-') && !val.startsWith('P-')) {
+                        setQuickDoc('V-' + val.replace(/^[^\d]+/, ''));
+                      } else {
+                        setQuickDoc(val);
+                      }
+                    }}
+                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-slate-500 focus:outline-none font-mono font-bold"
                   />
                 </div>
                 <div>

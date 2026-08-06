@@ -295,6 +295,10 @@ export interface CierreCaja {
   vueltosEntregadosVes?: number;
   dineroEnCajaExpected: number;
   realUsd: number; 
+  realVes?: number;
+  realEur?: number;
+  diffEur?: number;
+  diffVes?: number;
   
   // Detailed sales metrics
   ventasTotalesUsd: number;

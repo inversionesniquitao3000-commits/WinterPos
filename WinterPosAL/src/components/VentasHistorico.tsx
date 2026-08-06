@@ -2146,41 +2146,44 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         };
 
         const calculateSaleNetWithoutIVA = (sale: any) => {
-          if (sale.factura_nro?.startsWith('DEV-')) return 0;
+          const isDev = sale.factura_nro?.startsWith('DEV-');
           const items = sale.items || [];
+          let netVal = 0;
           if (!items.length) {
-            const total = safeNum(sale.totalUSD);
-            const iva = safeNum(sale.iva);
-            return Math.max(0, total - iva);
+            const total = Math.abs(safeNum(sale.totalUSD));
+            const iva = Math.abs(safeNum(sale.iva));
+            netVal = Math.max(0, total - iva);
+          } else {
+            const discount = safeNum(sale.descuento);
+            const rawTotalSale = items.reduce((acc: number, i: any) => {
+              const qty = safeNum(i.qty ?? (i as any).cantidad);
+              const price = safeNum(i.priceUSD ?? (i as any).precio_unitario_usd) || (qty > 0 ? Math.abs(safeNum(i.totalUSD ?? (i as any).total_fila_usd)) / qty : 0);
+              return acc + (price * qty);
+            }, 0);
+
+            const discountFactor = rawTotalSale > 0 ? (1 - (discount / rawTotalSale)) : 1;
+
+            let grossTaxable = 0;
+            let grossExempt = 0;
+
+            items.forEach((i: any) => {
+              const qty = safeNum(i.qty ?? (i as any).cantidad);
+              const price = safeNum(i.priceUSD ?? (i as any).precio_unitario_usd) || (qty > 0 ? Math.abs(safeNum(i.totalUSD ?? (i as any).total_fila_usd)) / qty : 0);
+              const itemSale = price * qty;
+              if (isItemExempt(i)) {
+                grossExempt += itemSale;
+              } else {
+                grossTaxable += itemSale;
+              }
+            });
+
+            const netTaxable = grossTaxable * discountFactor;
+            const netExempt = grossExempt * discountFactor;
+            const baseImponible = netTaxable > 0 ? (netTaxable / 1.16) : 0;
+            netVal = baseImponible + netExempt;
           }
 
-          const discount = safeNum(sale.descuento);
-          const rawTotalSale = items.reduce((acc: number, i: any) => {
-            const qty = safeNum(i.qty ?? (i as any).cantidad);
-            const price = safeNum(i.priceUSD ?? (i as any).precio_unitario_usd) || (qty > 0 ? safeNum(i.totalUSD ?? (i as any).total_fila_usd) / qty : 0);
-            return acc + (price * qty);
-          }, 0);
-
-          const discountFactor = rawTotalSale > 0 ? (1 - (discount / rawTotalSale)) : 1;
-
-          let grossTaxable = 0;
-          let grossExempt = 0;
-
-          items.forEach((i: any) => {
-            const qty = safeNum(i.qty ?? (i as any).cantidad);
-            const price = safeNum(i.priceUSD ?? (i as any).precio_unitario_usd) || (qty > 0 ? safeNum(i.totalUSD ?? (i as any).total_fila_usd) / qty : 0);
-            const itemSale = price * qty;
-            if (isItemExempt(i)) {
-              grossExempt += itemSale;
-            } else {
-              grossTaxable += itemSale;
-            }
-          });
-
-          const netTaxable = grossTaxable * discountFactor;
-          const netExempt = grossExempt * discountFactor;
-          const baseImponible = netTaxable > 0 ? (netTaxable / 1.16) : 0;
-          return baseImponible + netExempt;
+          return isDev ? -Math.abs(netVal) : netVal;
         };
 
         let subtotalNetoUsd = selectedCierre.subtotalNetoUsd ?? (selectedCierre as any).subtotalUsd ?? 0;
@@ -2311,6 +2314,20 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                       <div className="flex justify-between">
                         <span>Entrada Efectivo (Bs) :</span>
                         <span className="font-bold text-slate-800">Bs {entradaEfectivoVes.toFixed(2)}</span>
+                      </div>
+                    )}
+
+                    {((selectedCierre.cambioDivisasUsd ?? 0) > 0 || !hideZeroLines) && (
+                      <div className="flex justify-between text-emerald-700 font-bold">
+                        <span>Divisas Compradas ($) :</span>
+                        <span>+ $ {(selectedCierre.cambioDivisasUsd ?? 0).toFixed(2)}</span>
+                      </div>
+                    )}
+
+                    {((selectedCierre.cambioDivisasEur ?? 0) > 0 || !hideZeroLines) && (
+                      <div className="flex justify-between text-indigo-700 font-bold">
+                        <span>Divisas Compradas (€) :</span>
+                        <span>+ € {(selectedCierre.cambioDivisasEur ?? 0).toFixed(2)}</span>
                       </div>
                     )}
 
@@ -2533,7 +2550,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                 <div className="font-extrabold text-center text-slate-800 border-b border-slate-100 pb-2 uppercase text-sm tracking-wider">
                   DISCREPANCIAS EN ARQUEO FÍSICO
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                   {(() => {
                     const boxBgClass = diffUsd < -0.01 
                       ? 'bg-rose-50 border-rose-200 ring-2 ring-rose-500/10' 
@@ -2549,6 +2566,32 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                           <span>Diferencia:</span>
                           <span className={diffUsd >= 0 ? 'text-emerald-600' : 'text-rose-600 font-black'}>
                             ${diffUsd.toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {(() => {
+                    const expectedEur = selectedCierre.cambioDivisasEur || 0;
+                    const realEurVal = selectedCierre.realEur !== undefined ? selectedCierre.realEur : expectedEur;
+                    const diffEur = selectedCierre.diffEur !== undefined ? selectedCierre.diffEur : (realEurVal - expectedEur);
+                    if (expectedEur <= 0 && realEurVal <= 0) return null;
+
+                    const boxBgClass = diffEur < -0.01 
+                      ? 'bg-rose-50 border-rose-200 ring-2 ring-rose-500/10' 
+                      : diffEur > 0.01 
+                        ? 'bg-emerald-50/70 border-emerald-200' 
+                        : 'bg-slate-50 border-slate-200';
+                    return (
+                      <div className={`p-4 ${boxBgClass} border rounded-lg text-sm font-mono select-text space-y-1 transition-all`}>
+                        <div className="text-indigo-700 font-sans text-[12px] mb-1.5 font-bold uppercase tracking-wide">Euros EUR:</div>
+                        <div className="flex justify-between"><span>Gaveta Esperado:</span> <span>€{expectedEur.toFixed(2)}</span></div>
+                        <div className="flex justify-between"><span>Recibido Real:</span> <span className="text-indigo-800 font-bold">€{realEurVal.toFixed(2)}</span></div>
+                        <div className="flex justify-between border-t border-dashed border-slate-300 pt-1.5 font-bold text-slate-800">
+                          <span>Diferencia:</span>
+                          <span className={diffEur >= 0 ? 'text-emerald-600' : 'text-rose-600 font-black'}>
+                            € {diffEur.toFixed(2)}
                           </span>
                         </div>
                       </div>

@@ -61,7 +61,7 @@ export default function Clientes({
 
   // Form states
   const [newName, setNewName] = useState('');
-  const [newDoc, setNewDoc] = useState('');
+  const [newDoc, setNewDoc] = useState('V-');
   const [newPhone, setNewPhone] = useState('');
   const [newAddress, setNewAddress] = useState('');
   const [newCreditLimit, setNewCreditLimit] = useState('0');
@@ -1448,8 +1448,17 @@ export default function Clientes({
                     required
                     placeholder="Ej: V-12345678"
                     value={newDoc}
-                    onChange={(e) => setNewDoc(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-slate-500 focus:outline-none"
+                    onChange={(e) => {
+                      let val = e.target.value;
+                      if (!val || val.trim() === '') {
+                        setNewDoc('V-');
+                      } else if (!val.startsWith('V-') && !val.startsWith('J-') && !val.startsWith('E-') && !val.startsWith('G-') && !val.startsWith('P-')) {
+                        setNewDoc('V-' + val.replace(/^[^\d]+/, ''));
+                      } else {
+                        setNewDoc(val);
+                      }
+                    }}
+                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-slate-500 focus:outline-none font-mono font-bold"
                   />
                 </div>
                 <div>
