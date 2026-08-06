@@ -53,9 +53,6 @@ if (!fs.existsSync(icoTargetPath)) {
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -146,16 +143,6 @@ app.get('/api/make-ico', (req, res) => {
     return res.json({ success: true, message: `Created ${icoTargetPath}`, size: icoBuffer.length });
   }
   return res.status(500).json({ error: 'Source PNG not found' });
-});
-      error: 'LICENSE_INVALID',
-      licenseStatus: license.status,
-      hwid: license.hwid,
-      message: license.message,
-      payload: license.payload
-    });
-  }
-
-  next();
 });
 
 // Serve static frontend build if dist directory exists

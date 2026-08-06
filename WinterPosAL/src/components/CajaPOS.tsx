@@ -2328,8 +2328,6 @@ export default function CajaPOS({
       cambioDivisasUsd,
       cambioDivisasEur,
       cambioDivisasVesSalida,
-      realUsd,
-      realVes,
       realEur,
       diffEur: realEur - cambioDivisasEur,
       diffVes: realVes - expectedVes,

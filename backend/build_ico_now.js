@@ -27,6 +27,10 @@ try {
     fs.writeFileSync(icoTargetPath, icoBuffer);
     console.log(`[Icon Build] SUCCESS! Created app_icon.ico at ${icoTargetPath}`);
   }
+} catch (errIco) {
+  console.error('[Icon Build Error]', errIco.message);
+}
+
 try {
   const doubleExe = path.resolve(__dirname, '../installer/postgresql-installer.exe.exe');
   const singleExe = path.resolve(__dirname, '../installer/postgresql-installer.exe');
