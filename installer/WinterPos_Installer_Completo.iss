@@ -40,24 +40,30 @@ Name: "debugmode"; Description: "⚙️ Activar Modo Depuración / Debugger (Mue
 ; Explicitly bundle PostgreSQL installer for full offline installation
 Source: "postgresql-installer.exe.exe"; DestDir: "{app}\installer"; DestName: "postgresql-installer.exe"; Flags: ignoreversion
 
+; Icono principal del sistema
+Source: "app_icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+
 ; Copy runtime files (Backend, Compiled Frontend Dist, Launchers, Dependencies) - EXCLUDES React source code and dev files
 Source: "..\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*,.vscode\*,.gemini\*,brain\*,scratch\*,installer\*,installer_output\*,.wwebjs_auth\*,.wwebjs_cache\*,node_modules\.cache\*,WinterPosAL\src\*,WinterPosAL\public\*,WinterPosAL\node_modules\*,WinterPosAL\tsconfig*.json,WinterPosAL\vite.config.ts,WinterPosAL\generar_manuales.js"
 
 [Icons]
 ; Modo Silencioso (Por defecto)
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\installer\app_icon.ico"; Check: not IsDebugModeSelected
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; IconFilename: "{app}\installer\app_icon.ico"; Check: not IsDebugModeSelected
+Name: "{group}\WinterPosAL"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\app_icon.ico"; Check: not IsDebugModeSelected
+Name: "{autodesktop}\WinterPosAL"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; IconFilename: "{app}\app_icon.ico"; Check: not IsDebugModeSelected
 
 ; Modo Depuración / Debugger (Si se selecciona la casilla Debugger)
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\Iniciar_WinterPos.bat"; Tasks: desktopicon; IconFilename: "{app}\installer\app_icon.ico"; Check: IsDebugModeSelected
+Name: "{autodesktop}\WinterPosAL"; Filename: "{app}\Iniciar_WinterPos.bat"; Tasks: desktopicon; IconFilename: "{app}\app_icon.ico"; Check: IsDebugModeSelected
 
 ; Acceso directo de diagnóstico permanente en Menú Inicio
-Name: "{group}\{#MyAppName} - Modo Depuración (Logs CMD)"; Filename: "{app}\Iniciar_WinterPos.bat"; IconFilename: "{app}\installer\app_icon.ico"
-Name: "{group}\Desinstalar {#MyAppName}"; Filename: "{uninstallexe}"
+Name: "{group}\WinterPosAL - Modo Depuración (Logs CMD)"; Filename: "{app}\Iniciar_WinterPos.bat"; IconFilename: "{app}\app_icon.ico"
+Name: "{group}\Desinstalar WinterPosAL"; Filename: "{uninstallexe}"
 
 [Run]
 ; Install PostgreSQL silently in Server Mode if PostgreSQL installer is present in installer folder
 Filename: "{app}\installer\postgresql-installer.exe"; Parameters: "--mode unattended --superpassword postgres --serverport 5432"; Flags: runhidden; StatusMsg: "Instalando motor PostgreSQL 15 en segundo plano (Modo Offline)..."; Check: IsPgSetupPresentAndServerMode
+
+; Register Windows Service automatically (Runs silently in background)
+Filename: "cmd.exe"; Parameters: "/c node ""{app}\tools\install_service.js"""; Flags: runhidden; StatusMsg: "Registrando servicio de segundo plano WinterPos..."; Check: IsServerModeSelected
 
 ; Add Firewall Rule for WinterPos Web Server (Port 5000)
 Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""WinterPos Server (Puerto 5000)"" dir=in action=allow protocol=TCP localport=5000 profile=any"; Flags: runhidden; StatusMsg: "Configurando Cortafuegos de Windows (Puerto 5000)..."
@@ -82,6 +88,11 @@ var
   IpEdit: TNewEdit;
   IpLabel: TNewStaticText;
   HelpText: TNewStaticText;
+
+function IsServerModeSelected: Boolean;
+begin
+  Result := (ServerRadio <> nil) and ServerRadio.Checked;
+end;
 
 function IsPgSetupPresentAndServerMode: Boolean;
 begin

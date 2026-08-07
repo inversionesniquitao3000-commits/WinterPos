@@ -209,6 +209,7 @@ try {
         PERFORM setval(pg_get_serial_sequence('Roles', 'id'), COALESCE((SELECT MAX(id) FROM Roles), 1));
       END IF;
       IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'productos') THEN
+        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS porcentaje_impuesto NUMERIC DEFAULT 0;
         UPDATE Productos SET porcentaje_impuesto = 16 WHERE exento_impuesto = FALSE AND (porcentaje_impuesto IS NULL OR porcentaje_impuesto = 0);
         UPDATE Productos SET porcentaje_impuesto = 0 WHERE exento_impuesto = TRUE;
         PERFORM setval(pg_get_serial_sequence('Productos', 'id'), COALESCE((SELECT MAX(id) FROM Productos), 1));

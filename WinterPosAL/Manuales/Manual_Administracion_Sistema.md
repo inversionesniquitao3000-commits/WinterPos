@@ -102,11 +102,39 @@ El sistema permite vincular un número de WhatsApp para enviar automáticamente 
 #### 2. Modo Simulación (Falta de Navegador Chrome/Puppeteer)
 Si el estado muestra **`Modo Simulación Activo`**, significa que el servidor no ha podido iniciar el navegador virtual (Chrome/Chromium) necesario para conectarse a WhatsApp Web.
 * **¿Qué hacer desde la interfaz?**
-  Bajo el estado del servicio, verá un recuadro de advertencia con el botón **`🔧 Instalar/Reparar Chrome (Puppeteer)`**. Haga clic en él para que el servidor descargue e instale automáticamente los componentes de Chrome necesarios. El proceso tomará un par de minutos y recargará la aplicación al finalizar para reconectarse.
+  Bajo el estado del servicio, verá un recuadro de advertencia con el botón **`🔧 Instalar/Reparar Chrome (Puppeteer)`**. Haga clic en él para que el servidor descargar e instalar automáticamente los componentes de Chrome necesarios. El proceso tomará un par de minutos y recargará la aplicación al finalizar para reconectarse.
 * **¿Qué hacer desde la terminal (si falla el botón)?**
   Abra una consola en la carpeta `backend/` y ejecute:
   ```bash
   npx puppeteer install
   ```
   Reinicie el backend (`npm start`) para forzar la reconexión.
+
+---
+
+### MÓDULO 5: SERVICIO DE WINDOWS (EJECUCIÓN EN SEGUNDO PLANO / SILENCIOSA)
+
+Para garantizar una experiencia limpia en el punto de venta y evitar que el usuario u operador cierre accidentalmente la consola de comandos (ventana negra), **WinterPos** se ejecuta como un **Servicio nativo de Windows** (`WinterPosBackendService`).
+
+#### 1. Características del Servicio
+* **Nombre del Servicio:** `WinterPosBackendService`
+* **Inicio Automático:** Se inicia automáticamente con el arranque del sistema operativo Windows, incluso antes de iniciar sesión.
+* **Ejecución Imperceptible:** Funciona 100% en segundo plano sin mostrar ninguna ventana de consola CMD ni interferir en la pantalla del usuario.
+* **Verificación de Columna PostgreSQL:** Al arrancar como servicio, el backend realiza la verificación y migración automática de tablas (creando automáticamente columnas faltantes como `porcentaje_impuesto` si no existen).
+
+#### 2. Comandos de Administración del Servicio (Consola de Administrador)
+
+* **Instalar / Registrar el Servicio:**
+  ```cmd
+  node tools/install_service.js
+  ```
+* **Desinstalar el Servicio:**
+  ```cmd
+  node tools/uninstall_service.js
+  ```
+* **Gestión desde Servicios de Windows (`services.msc`):**
+  1. Presione las teclas `Windows + R`, escriba `services.msc` y presione Enter.
+  2. Busque el servicio llamado **`WinterPosBackendService`**.
+  3. Desde allí puede **Iniciar**, **Detener**, **Reiniciar** o cambiar el tipo de inicio del servicio.
+
 

@@ -1441,6 +1441,20 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Servidor API de WinterPosAL corriendo en http://localhost:${PORT}`);
   console.log(`Expuesto en red LAN para recibir conexiones de otras terminales.`);
   
+  // Launch Native App Window (Edge App Mode / Browser) on startup
+  setTimeout(() => {
+    import('child_process').then(({ exec }) => {
+      const targetUrl = `http://localhost:${PORT}`;
+      if (process.platform === 'win32') {
+        exec(`start msedge --app=${targetUrl} --window-size=1280,800`, (err) => {
+          if (err) exec(`start ${targetUrl}`);
+        });
+      } else {
+        exec(`start ${targetUrl}`);
+      }
+    }).catch(() => {});
+  }, 1500);
+
   // Initialize WhatsApp connection at startup if enabled
   setTimeout(() => {
     initWhatsAppClient();

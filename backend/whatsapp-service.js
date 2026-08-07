@@ -113,9 +113,10 @@ function findChromeExecutable() {
       'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
       'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
       path.join(homeDir, 'AppData\\Local\\Google\\Chrome\\Application\\chrome.exe'),
-      'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe',
       'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-      'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'
+      'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+      path.join(homeDir, 'AppData\\Local\\Microsoft\\Edge\\Application\\msedge.exe'),
+      'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe'
     ];
     for (const p of paths) {
       if (fs.existsSync(p)) {
