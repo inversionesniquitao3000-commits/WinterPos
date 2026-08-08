@@ -121,11 +121,11 @@ function findChromeExecutable() {
 
     // High Priority: Google Chrome (preferred engine for whatsapp-web.js)
     const chromePaths = [
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
       path.join(progFiles, 'Google\\Chrome\\Application\\chrome.exe'),
       path.join(progFilesX86, 'Google\\Chrome\\Application\\chrome.exe'),
-      path.join(localAppData, 'Google\\Chrome\\Application\\chrome.exe'),
-      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
+      path.join(localAppData, 'Google\\Chrome\\Application\\chrome.exe')
     ];
 
     for (const p of chromePaths) {
@@ -170,11 +170,8 @@ function findChromeExecutable() {
       }
     }
 
-    // Fallback Priority: Edge / Brave / Chromium
+    // Fallback Priority: Brave / Chromium (Excluido Microsoft Edge)
     const fallbackPaths = [
-      path.join(progFilesX86, 'Microsoft\\Edge\\Application\\msedge.exe'),
-      path.join(progFiles, 'Microsoft\\Edge\\Application\\msedge.exe'),
-      path.join(localAppData, 'Microsoft\\Edge\\Application\\msedge.exe'),
       path.join(progFiles, 'BraveSoftware\\Brave-Browser\\Application\\brave.exe')
     ];
 

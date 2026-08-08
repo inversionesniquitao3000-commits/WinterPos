@@ -1503,7 +1503,7 @@ freePortIfOccupied(PORT).then(() => {
       import('child_process').then(({ exec }) => {
         const targetUrl = `http://localhost:${PORT}`;
         if (process.platform === 'win32') {
-          exec(`start msedge --app=${targetUrl} --window-size=1280,800`, (err) => {
+          exec(`start chrome --app=${targetUrl} --window-size=1280,800`, (err) => {
             if (err) exec(`start ${targetUrl}`);
           });
         } else {

@@ -32,8 +32,7 @@ setTimeout(() => {
   }
   
   if (process.platform === 'win32') {
-    // Try Google Chrome app mode first, fallback to msedge app mode
-    const cmd = `start chrome --app=${targetUrl} --window-size=1280,800 || start msedge --app=${targetUrl} --window-size=1280,800 --name="WinterPos Punto de Venta"`;
+    const cmd = `start chrome --app=${targetUrl} --window-size=1280,800`;
     exec(cmd, { windowsHide: true }, (err) => {
       if (err) {
         exec(`start ${targetUrl}`, { windowsHide: true });
