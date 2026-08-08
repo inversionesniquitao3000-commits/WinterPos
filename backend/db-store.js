@@ -78,10 +78,6 @@ try {
     connectionTimeoutMillis: 3000 // fail fast if not connected
   });
 
-  pool.on('connect', (client) => {
-    client.query(`SET TIME ZONE '${sysTimeZone}'`).catch(() => {});
-  });
-
   // Try to connect to test if Postgres is accessible with configured user/pass
   const client = await pool.connect();
   await client.query(`SET TIME ZONE '${sysTimeZone}'`).catch(() => {});
@@ -173,6 +169,7 @@ try {
     UPDATE Gastos_Operativos SET fecha = '2026-08-05' WHERE fecha LIKE '2026-08-04%' OR fecha LIKE '%20:00%';
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS compartir_apertura_caja BOOLEAN DEFAULT TRUE;
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS master_pass VARCHAR(255) DEFAULT '1234';
+    ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS logo_url TEXT DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS Accionistas (
       id SERIAL PRIMARY KEY,
@@ -336,12 +333,22 @@ export async function getCompanyConfig() {
       console.error('Error en getCompanyConfig (Postgres):', err.message);
     }
   }
-  const c = readJsonFile('config.json', mockConfig);
+  const c = readJsonFile('config.json', null);
+  if (!c) {
+    return { ...mockConfig };
+  }
   return {
-    ...mockConfig,
-    ...c,
+    rif: c.rif ?? '',
+    nombre_comercio: c.nombre_comercio ?? '',
+    direccion: c.direccion ?? '',
+    telefono: c.telefono ?? '',
+    correo: c.correo ?? '',
+    moneda_base: c.moneda_base || 'USD',
+    mensaje_pie_ticket: c.mensaje_pie_ticket ?? '',
+    metodos_pago_activos: c.metodos_pago_activos || [],
     permitir_multisesion: c.permitir_multisesion !== false,
-    compartir_apertura_caja: c.compartir_apertura_caja !== false
+    compartir_apertura_caja: c.compartir_apertura_caja !== false,
+    logo_url: c.logo_url || ''
   };
 }
 
@@ -385,14 +392,6 @@ export async function getUsers() {
     tasa: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
     config: { ver: true, crear: true, editar: true, eliminar: true, admin: true }
   };
-  const defaultPermsUser = {
-    caja: { ver: true, crear: true, editar: true, eliminar: false, admin: false },
-    inventario: { ver: true, crear: false, editar: false, eliminar: false, admin: false },
-    ventas: { ver: true, crear: false, editar: false, eliminar: false, admin: false },
-    clientes: { ver: true, crear: true, editar: true, eliminar: false, admin: false },
-    tasa: { ver: true, crear: false, editar: false, eliminar: false, admin: false },
-    config: { ver: false, crear: false, editar: false, eliminar: false, admin: false }
-  };
 
   if (usePostgres) {
     try {
@@ -405,21 +404,15 @@ export async function getUsers() {
           rol: r.rol,
           estado: r.estado,
           clave: r.clave || 'admin',
-          permisos: r.permisos ? JSON.parse(r.permisos) : (r.rol?.toLowerCase() === 'administrador' ? defaultPermsAdmin : defaultPermsUser)
+          permisos: r.permisos ? (typeof r.permisos === 'string' ? JSON.parse(r.permisos) : r.permisos) : defaultPermsAdmin
         }));
       } else {
-        console.log('Seeding default users to Postgres database...');
-        const localUsers = readJsonFile('users.json', mockUsers);
-        for (const u of localUsers) {
-          const clave = u.clave || 'admin';
-          const perms = u.permisos || (u.rol?.toLowerCase() === 'administrador' ? defaultPermsAdmin : defaultPermsUser);
-          await pool.query(
-            `INSERT INTO Usuarios (id, usuario, clave, nombre, rol, estado, permisos)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [u.id, u.usuario, clave, u.nombre, u.rol, u.estado || 'Activo', JSON.stringify(perms)]
-          );
-        }
-        await pool.query("SELECT setval(pg_get_serial_sequence('Usuarios', 'id'), COALESCE((SELECT MAX(id) FROM Usuarios), 1))");
+        // Only seed default admin if Usuarios table is completely empty
+        await pool.query(
+          `INSERT INTO Usuarios (usuario, clave, nombre, rol, estado, permisos)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          ['admin', 'admin', 'Administrador', 'ADMINISTRADOR', 'Activo', JSON.stringify(defaultPermsAdmin)]
+        );
         const res2 = await pool.query('SELECT id, usuario, nombre, rol, estado, clave, permisos FROM Usuarios ORDER BY id ASC');
         return res2.rows.map(r => ({
           id: r.id,
@@ -428,79 +421,55 @@ export async function getUsers() {
           rol: r.rol,
           estado: r.estado,
           clave: r.clave || 'admin',
-          permisos: r.permisos ? JSON.parse(r.permisos) : (r.rol?.toLowerCase() === 'administrador' ? defaultPermsAdmin : defaultPermsUser)
+          permisos: r.permisos ? (typeof r.permisos === 'string' ? JSON.parse(r.permisos) : r.permisos) : defaultPermsAdmin
         }));
       }
     } catch (err) {
       console.error('Error en getUsers (Postgres):', err.message);
     }
   }
-  const localUsers = readJsonFile('users.json', mockUsers);
-  return localUsers.map(u => ({
-    clave: 'admin',
-    permisos: u.permisos || (u.rol?.toLowerCase() === 'administrador' ? defaultPermsAdmin : defaultPermsUser),
-    ...u
-  }));
+  const localUsers = readJsonFile('users.json', null);
+  if (!localUsers || localUsers.length === 0) {
+    return [{
+      id: 1,
+      usuario: 'admin',
+      nombre: 'Administrador',
+      rol: 'ADMINISTRADOR',
+      estado: 'Activo',
+      clave: 'admin',
+      permisos: defaultPermsAdmin
+    }];
+  }
+  return localUsers;
 }
 
 export async function getProducts() {
   if (usePostgres) {
     try {
       const res = await pool.query('SELECT * FROM Productos ORDER BY id ASC');
-      if (res.rowCount > 0) {
-        return res.rows.map(r => ({
-          id: parseInt(r.id, 10),
-          barcode: r.codigo_barras_clave || '',
-          description: r.descripcion || '',
-          category: r.categoria || '',
-          stock_actual: parseFloat(r.stock_actual || 0),
-          stock_minimo: parseFloat(r.stock_minimo || 0),
-          precio_costo_usd: parseFloat(r.precio_costo_usd || 0),
-          precio_detalle_usd: parseFloat(r.precio_detalle_usd || 0),
-          precio_mayor_usd: parseFloat(r.precio_mayor_usd || 0),
-          cantidad_mayorista: parseInt(r.cantidad_mayorista || 12, 10),
-          exento_impuesto: !!r.exento_impuesto,
-          imagen_url: r.imagen_url || '',
-          estado: r.estado || 'Activo',
-          a_granel: !!r.a_granel,
-          fecha_vencimiento: r.fecha_vencimiento || null,
-          porcentaje_impuesto: parseFloat(r.porcentaje_impuesto || 0)
-        }));
-      } else {
-        console.log('Seeding default products to Postgres database...');
-        const localProducts = readJsonFile('products.json', mockProducts);
-        for (const p of localProducts) {
-          await pool.query(
-            `INSERT INTO Productos (id, codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, precio_costo_usd, precio_detalle_usd, precio_mayor_usd, cantidad_mayorista, exento_impuesto, imagen_url, estado, a_granel, fecha_vencimiento, porcentaje_impuesto)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
-            [p.id, p.barcode, p.description, p.category, p.stock_actual || 0, p.stock_minimo || 0, p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.cantidad_mayorista || 12, p.exento_impuesto, p.imagen_url, p.estado || 'Activo', p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
-          );
-        }
-        const res2 = await pool.query('SELECT * FROM Productos ORDER BY id ASC');
-        return res2.rows.map(r => ({
-          id: parseInt(r.id, 10),
-          barcode: r.codigo_barras_clave || '',
-          description: r.descripcion || '',
-          category: r.categoria || '',
-          stock_actual: parseFloat(r.stock_actual || 0),
-          stock_minimo: parseFloat(r.stock_minimo || 0),
-          precio_costo_usd: parseFloat(r.precio_costo_usd || 0),
-          precio_detalle_usd: parseFloat(r.precio_detalle_usd || 0),
-          precio_mayor_usd: parseFloat(r.precio_mayor_usd || 0),
-          cantidad_mayorista: parseInt(r.cantidad_mayorista || 12, 10),
-          exento_impuesto: !!r.exento_impuesto,
-          imagen_url: r.imagen_url || '',
-          estado: r.estado || 'Activo',
-          a_granel: !!r.a_granel,
-          fecha_vencimiento: r.fecha_vencimiento || null,
-          porcentaje_impuesto: parseFloat(r.porcentaje_impuesto || 0)
-        }));
-      }
+      return res.rows.map(r => ({
+        id: parseInt(r.id, 10),
+        barcode: r.codigo_barras_clave || '',
+        description: r.descripcion || '',
+        category: r.categoria || '',
+        stock_actual: parseFloat(r.stock_actual || 0),
+        stock_minimo: parseFloat(r.stock_minimo || 0),
+        precio_costo_usd: parseFloat(r.precio_costo_usd || 0),
+        precio_detalle_usd: parseFloat(r.precio_detalle_usd || 0),
+        precio_mayor_usd: parseFloat(r.precio_mayor_usd || 0),
+        cantidad_mayorista: parseInt(r.cantidad_mayorista || 12, 10),
+        exento_impuesto: !!r.exento_impuesto,
+        imagen_url: r.imagen_url || '',
+        estado: r.estado || 'Activo',
+        a_granel: !!r.a_granel,
+        fecha_vencimiento: r.fecha_vencimiento || null,
+        porcentaje_impuesto: parseFloat(r.porcentaje_impuesto || 0)
+      }));
     } catch (err) {
       console.error('Error en getProducts (Postgres):', err.message);
     }
   }
-  return readJsonFile('products.json', mockProducts);
+  return readJsonFile('products.json', []);
 }
 
 export async function saveProduct(p) {
@@ -673,50 +642,27 @@ export async function getClients() {
   if (usePostgres) {
     try {
       const res = await pool.query('SELECT * FROM Clientes ORDER BY id ASC');
-      if (res.rowCount > 0) {
-        return res.rows.map(r => ({
-          id: r.id,
-          cedula_rif: r.cedula_rif,
-          nombre: r.nombre,
-          telefono: r.telefono || '',
-          direccion: r.direccion || '',
-          limite_credito: parseFloat(r.limite_credito),
-          credito_disponible: parseFloat(r.credito_disponible),
-          porcentaje_descuento: parseFloat(r.porcentaje_descuento),
-          estado: r.estado,
-          aplica_precio_costo: !!r.aplica_precio_costo,
-          saldo_pendiente: parseFloat(r.limite_credito) - parseFloat(r.credito_disponible)
-        }));
-      } else {
-        console.log('Seeding default clients to Postgres database...');
-        const localClients = readJsonFile('clients.json', mockClients);
-        for (const c of localClients) {
-          await pool.query(
-            `INSERT INTO Clientes (id, cedula_rif, nombre, telefono, direccion, limite_credito, credito_disponible, porcentaje_descuento, estado, aplica_precio_costo)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-            [c.id, c.cedula_rif, c.nombre, c.telefono || '', c.direccion || '', c.limite_credito || 0.00, c.credito_disponible || 0.00, c.porcentaje_descuento || 0.00, c.estado || 'Activo', !!c.aplica_precio_costo]
-          );
-        }
-        const res2 = await pool.query('SELECT * FROM Clientes ORDER BY id ASC');
-        return res2.rows.map(r => ({
-          id: r.id,
-          cedula_rif: r.cedula_rif,
-          nombre: r.nombre,
-          telefono: r.telefono || '',
-          direccion: r.direccion || '',
-          limite_credito: parseFloat(r.limite_credito),
-          credito_disponible: parseFloat(r.credito_disponible),
-          porcentaje_descuento: parseFloat(r.porcentaje_descuento),
-          estado: r.estado,
-          aplica_precio_costo: !!r.aplica_precio_costo,
-          saldo_pendiente: parseFloat(r.limite_credito) - parseFloat(r.credito_disponible)
-        }));
-      }
+      return res.rows.map(r => ({
+        id: r.id,
+        cedula_rif: r.cedula_rif,
+        nombre: r.nombre,
+        telefono: r.telefono || '',
+        direccion: r.direccion || '',
+        limite_credito: parseFloat(r.limite_credito || 0),
+        credito_disponible: parseFloat(r.credito_disponible || 0),
+        porcentaje_descuento: parseFloat(r.porcentaje_descuento || 0),
+        estado: r.estado || 'Activo',
+        aplica_precio_costo: !!r.aplica_precio_costo,
+        saldo_pendiente: parseFloat(r.limite_credito || 0) - parseFloat(r.credito_disponible || 0)
+      }));
     } catch (err) {
       console.error('Error en getClients (Postgres):', err.message);
     }
   }
-  return readJsonFile('clients.json', mockClients);
+  const genericClient = { id: 1, cedula_rif: 'V-00000000', nombre: 'Consumidor Final', limite_credito: 0, credito_disponible: 0, porcentaje_descuento: 0, estado: 'Activo' };
+  const clients = readJsonFile('clients.json', null);
+  if (!clients || clients.length === 0) return [genericClient];
+  return clients;
 }
 
 export async function saveClient(c) {
@@ -1150,13 +1096,12 @@ export async function getRoles() {
           permisos: r.permisos ? (typeof r.permisos === 'string' ? JSON.parse(r.permisos) : r.permisos) : {}
         }));
       } else {
-        console.log('Seeding default roles to Postgres database...');
-        for (const role of defaultRoles) {
-          await pool.query(
-            'INSERT INTO Roles (nombre, permisos) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-            [role.nombre, JSON.stringify(role.permisos)]
-          );
-        }
+        // Seed default admin role only if Roles table is completely empty
+        const adminRole = defaultRoles[0];
+        await pool.query(
+          'INSERT INTO Roles (nombre, permisos) VALUES ($1, $2)',
+          [adminRole.nombre, JSON.stringify(adminRole.permisos)]
+        );
         const res2 = await pool.query('SELECT id, nombre, permisos FROM Roles ORDER BY id ASC');
         return res2.rows.map(r => ({
           id: r.id,
@@ -1168,7 +1113,9 @@ export async function getRoles() {
       console.error('Error en getRoles (Postgres):', err.message);
     }
   }
-  return readJsonFile('roles.json', defaultRoles);
+  const localRoles = readJsonFile('roles.json', null);
+  if (!localRoles || localRoles.length === 0) return [defaultRoles[0]];
+  return localRoles;
 }
 
 export async function saveRole(r) {
@@ -1253,61 +1200,122 @@ export async function deleteRole(id) {
 }
 
 export async function wipeDatabase(options) {
-  const isFullWipe = options.wipeInventory && options.wipeSales && options.wipeClients;
+  const isFullWipe = options.mode === 'all' || (options.wipeInventory && options.wipeSales && options.wipeClients);
+  console.log('[DB Wipe] Ejecutando wipeDatabase. Opciones:', options, 'isFullWipe:', isFullWipe, 'usePostgres:', usePostgres);
 
   if (usePostgres) {
-    try {
-      if (options.wipeInventory) {
-        await pool.query('TRUNCATE TABLE Productos, Movimientos_Inventario, Historial_Precios RESTART IDENTITY CASCADE');
+    if (isFullWipe) {
+      const fullTables = [
+        'Ventas_Detalle',
+        'Pagos_Venta',
+        'Ventas',
+        'Movimientos_Caja',
+        'Cajas_Apertura_Cierre',
+        'Movimientos_Inventario',
+        'Historial_Precios',
+        'Productos',
+        'Abonos',
+        'Accionistas',
+        'Inversiones_Accionistas',
+        'Tasas_Cambio'
+      ];
+      for (const t of fullTables) {
+        try {
+          await pool.query(`TRUNCATE TABLE ${t} RESTART IDENTITY CASCADE`);
+          console.log(`[DB Wipe Postgres] Tabla ${t} vaciada exitosamente.`);
+        } catch (errT) {
+          console.warn(`[DB Wipe Postgres Warning] No se pudo truncar ${t}:`, errT.message);
+        }
       }
-      if (options.wipeStock) {
-        await pool.query('UPDATE Productos SET stock_actual = 0');
-        await pool.query('TRUNCATE TABLE Movimientos_Inventario RESTART IDENTITY CASCADE');
-      }
-      if (options.wipeSales) {
-        await pool.query('TRUNCATE TABLE Ventas, Ventas_Detalle, Pagos_Venta RESTART IDENTITY CASCADE');
-        await pool.query('TRUNCATE TABLE Cajas_Apertura_Cierre, Movimientos_Caja RESTART IDENTITY CASCADE');
-        await pool.query('TRUNCATE TABLE Movimientos_Inventario RESTART IDENTITY CASCADE');
-        await pool.query('TRUNCATE TABLE Historial_Precios RESTART IDENTITY CASCADE');
-        writeJsonFile('abonos.json', []);
-      }
-      if (options.wipeClients) {
-        await pool.query("DELETE FROM Clientes WHERE cedula_rif <> 'V-00000000'");
-        await pool.query("UPDATE Clientes SET limite_credito = 0, credito_disponible = 0");
-      }
-      if (options.wipeClientBalancesOnly) {
-        await pool.query("TRUNCATE TABLE Abonos RESTART IDENTITY CASCADE");
-        await pool.query("UPDATE Clientes SET credito_disponible = limite_credito");
-        writeJsonFile('abonos.json', []);
-      }
-      if (options.wipeAccionistas) {
-        await pool.query('TRUNCATE TABLE Accionistas, Inversiones_Accionistas RESTART IDENTITY CASCADE');
-        writeJsonFile('accionistas.json', []);
-        writeJsonFile('inversiones.json', []);
-      }
-      if (isFullWipe) {
-        // Clear users except admin
-        await pool.query("DELETE FROM Usuarios WHERE usuario <> 'admin'");
-        // Clear perfiles/roles except Administrador
+
+      try {
+        await pool.query("DELETE FROM Clientes WHERE LOWER(cedula_rif) <> 'v-00000000'");
+        await pool.query("UPDATE Clientes SET limite_credito = 0, credito_disponible = 0, porcentaje_descuento = 0");
+      } catch (errC) { console.warn('[DB Wipe Postgres Warning] Clientes:', errC.message); }
+
+      try {
+        await pool.query("DELETE FROM Usuarios WHERE LOWER(usuario) <> 'admin'");
+      } catch (errU) { console.warn('[DB Wipe Postgres Warning] Usuarios:', errU.message); }
+
+      try {
         await pool.query("DELETE FROM Roles WHERE LOWER(nombre) <> 'administrador'");
-        // Clear basic and fiscal data
+      } catch (errR) { console.warn('[DB Wipe Postgres Warning] Roles:', errR.message); }
+
+      try {
         await pool.query(`UPDATE Configuracion_Empresa SET 
           rif = '', nombre_comercio = '', direccion = '', telefono = '', 
-          correo = '', mensaje_pie_ticket = '', metodos_pago_activos = '[]'::jsonb`);
-        // Clear shareholders & investments
-        await pool.query('TRUNCATE TABLE Accionistas, Inversiones_Accionistas RESTART IDENTITY CASCADE');
-        writeJsonFile('accionistas.json', []);
-        writeJsonFile('inversiones.json', []);
-      }
+          correo = '', mensaje_pie_ticket = '', logo_url = '', metodos_pago_activos = '[]'::jsonb`);
+      } catch (errCfg) { console.warn('[DB Wipe Postgres Warning] Configuracion_Empresa:', errCfg.message); }
+
+      // Clear JSON files
+      writeJsonFile('products.json', []);
+      writeJsonFile('movements.json', []);
+      writeJsonFile('price-history.json', []);
+      writeJsonFile('price_history.json', []);
+      writeJsonFile('sales.json', []);
+      writeJsonFile('abonos.json', []);
+      writeJsonFile('cierres.json', []);
+      writeJsonFile('caja_activa.json', { abierta: false, id: null, monto_usd: 0, monto_ves: 0 });
+      writeJsonFile('caja_estado.json', { abierta: false, id: null, monto_usd: 0, monto_ves: 0 });
+      writeJsonFile('tasa_history.json', []);
+      writeJsonFile('tasas.json', []);
+      writeJsonFile('accionistas.json', []);
+      writeJsonFile('inversiones.json', []);
       return true;
-    } catch (err) {
-      console.error('Error en wipeDatabase (Postgres):', err.message);
-      throw err;
     }
+
+    if (options.wipeInventory) {
+      try { await pool.query('TRUNCATE TABLE Productos, Movimientos_Inventario, Historial_Precios RESTART IDENTITY CASCADE'); } catch (e) {}
+      writeJsonFile('products.json', []);
+      writeJsonFile('movements.json', []);
+      writeJsonFile('price-history.json', []);
+      writeJsonFile('price_history.json', []);
+    }
+    if (options.wipeStock) {
+      try {
+        await pool.query('UPDATE Productos SET stock_actual = 0');
+        await pool.query('TRUNCATE TABLE Movimientos_Inventario RESTART IDENTITY CASCADE');
+      } catch (e) {}
+      const products = readJsonFile('products.json', []);
+      writeJsonFile('products.json', products.map(p => ({ ...p, stock_actual: 0 })));
+      writeJsonFile('movements.json', []);
+    }
+    if (options.wipeSales) {
+      try { await pool.query('TRUNCATE TABLE Ventas, Ventas_Detalle, Pagos_Venta, Cajas_Apertura_Cierre, Movimientos_Caja RESTART IDENTITY CASCADE'); } catch (e) {}
+      writeJsonFile('sales.json', []);
+      writeJsonFile('abonos.json', []);
+      writeJsonFile('cierres.json', []);
+      writeJsonFile('caja_activa.json', { abierta: false, id: null, monto_usd: 0, monto_ves: 0 });
+    }
+    if (options.wipeClients) {
+      try {
+        await pool.query("DELETE FROM Clientes WHERE LOWER(cedula_rif) <> 'v-00000000'");
+        await pool.query("UPDATE Clientes SET limite_credito = 0, credito_disponible = 0, porcentaje_descuento = 0");
+      } catch (e) {}
+      writeJsonFile('clients.json', [{ id: 1, cedula_rif: 'V-00000000', nombre: 'Consumidor Final', limite_credito: 0, credito_disponible: 0, porcentaje_descuento: 0, estado: 'Activo' }]);
+    }
+    if (options.wipeClientBalancesOnly) {
+      try {
+        await pool.query("TRUNCATE TABLE Abonos RESTART IDENTITY CASCADE");
+        await pool.query("UPDATE Clientes SET credito_disponible = limite_credito");
+      } catch (e) {}
+      writeJsonFile('abonos.json', []);
+    }
+    if (options.wipeAccionistas) {
+      try { await pool.query('TRUNCATE TABLE Accionistas, Inversiones_Accionistas RESTART IDENTITY CASCADE'); } catch (e) {}
+      writeJsonFile('accionistas.json', []);
+      writeJsonFile('inversiones.json', []);
+    }
+    if (options.wipeRatesHistory) {
+      try { await pool.query('TRUNCATE TABLE Tasas_Cambio RESTART IDENTITY CASCADE'); } catch (e) {}
+      writeJsonFile('tasa_history.json', []);
+      writeJsonFile('tasas.json', []);
+    }
+    return true;
   }
 
   // JSON Mode
-  if (options.wipeInventory) {
+  if (options.wipeInventory || isFullWipe) {
     writeJsonFile('products.json', []);
     writeJsonFile('movements.json', []);
     writeJsonFile('price-history.json', []);
@@ -1319,7 +1327,7 @@ export async function wipeDatabase(options) {
     writeJsonFile('products.json', updatedProducts);
     writeJsonFile('movements.json', []);
   }
-  if (options.wipeSales) {
+  if (options.wipeSales || isFullWipe) {
     writeJsonFile('sales.json', []);
     writeJsonFile('abonos.json', []);
     writeJsonFile('cierres.json', []);
@@ -1327,17 +1335,15 @@ export async function wipeDatabase(options) {
     writeJsonFile('price-history.json', []);
     writeJsonFile('price_history.json', []);
     writeJsonFile('caja_activa.json', { abierta: false, id: null, monto_usd: 0, monto_ves: 0 });
-    // Also write fallback file just in case
     writeJsonFile('caja_estado.json', { abierta: false, id: null, monto_usd: 0, monto_ves: 0 });
   }
-  if (options.wipeClients) {
-    const clients = readJsonFile('clients.json', mockClients);
-    const genericClients = clients.filter(c => c.cedula_rif === 'V-00000000');
-    writeJsonFile('clients.json', genericClients);
+  if (options.wipeClients || isFullWipe) {
+    const genericClient = { id: 1, cedula_rif: 'V-00000000', nombre: 'Consumidor Final', limite_credito: 0, credito_disponible: 0, porcentaje_descuento: 0, estado: 'Activo' };
+    writeJsonFile('clients.json', [genericClient]);
   }
   if (options.wipeClientBalancesOnly) {
     writeJsonFile('abonos.json', []);
-    const clients = readJsonFile('clients.json', mockClients);
+    const clients = readJsonFile('clients.json', []);
     const updatedClients = clients.map(c => ({
       ...c,
       saldo_pendiente: 0,
@@ -1345,34 +1351,48 @@ export async function wipeDatabase(options) {
     }));
     writeJsonFile('clients.json', updatedClients);
   }
+  if (options.wipeRatesHistory || isFullWipe) {
+    writeJsonFile('tasa_history.json', []);
+    writeJsonFile('tasas.json', []);
+  }
   if (options.wipeAccionistas || isFullWipe) {
     writeJsonFile('accionistas.json', []);
     writeJsonFile('inversiones.json', []);
   }
   if (isFullWipe) {
     // Clear users except admin
-    const users = readJsonFile('users.json', mockUsers);
-    const adminUsers = users.filter(u => u.usuario === 'admin');
-    writeJsonFile('users.json', adminUsers);
+    const defaultAdminUser = {
+      id: 1,
+      usuario: 'admin',
+      nombre: 'Administrador',
+      rol: 'ADMINISTRADOR',
+      estado: 'Activo',
+      clave: 'admin',
+      permisos: {
+        caja: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        inventario: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        ventas: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        clientes: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        tasa: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        config: { ver: true, crear: true, editar: true, eliminar: true, admin: true }
+      }
+    };
+    writeJsonFile('users.json', [defaultAdminUser]);
 
     // Clear perfiles/roles except Administrador
-    const roles = readJsonFile('roles.json', []);
-    const rolesSource = roles.length > 0 ? roles : [
-      {
-        id: 1,
-        nombre: "Administrador",
-        permisos: {
-          caja: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
-          inventario: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
-          ventas: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
-          clientes: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
-          tasa: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
-          config: { ver: true, crear: true, editar: true, eliminar: true, admin: true }
-        }
+    const defaultAdminRole = {
+      id: 1,
+      nombre: "Administrador",
+      permisos: {
+        caja: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        inventario: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        ventas: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        clientes: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        tasa: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        config: { ver: true, crear: true, editar: true, eliminar: true, admin: true }
       }
-    ];
-    const adminRoles = rolesSource.filter(r => r.nombre.toLowerCase() === 'administrador');
-    writeJsonFile('roles.json', adminRoles);
+    };
+    writeJsonFile('roles.json', [defaultAdminRole]);
 
     // Clear basic and fiscal data
     writeJsonFile('config.json', {

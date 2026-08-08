@@ -107,20 +107,80 @@ async function destroyWhatsAppClient() {
 }
 
 function findChromeExecutable() {
+  const config = getWhatsAppConfig();
+  if (config.chromePath && fs.existsSync(config.chromePath)) {
+    console.log('[WhatsApp] Usando ejecutable de Chrome configurado manualmente:', config.chromePath);
+    return config.chromePath;
+  }
+
   if (process.platform === 'win32') {
     const homeDir = os.homedir();
-    const paths = [
+    const localAppData = process.env.LOCALAPPDATA || path.join(homeDir, 'AppData\\Local');
+    const progFiles = process.env.PROGRAMFILES || 'C:\\Program Files';
+    const progFilesX86 = process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)';
+
+    // High Priority: Google Chrome (preferred engine for whatsapp-web.js)
+    const chromePaths = [
+      path.join(progFiles, 'Google\\Chrome\\Application\\chrome.exe'),
+      path.join(progFilesX86, 'Google\\Chrome\\Application\\chrome.exe'),
+      path.join(localAppData, 'Google\\Chrome\\Application\\chrome.exe'),
       'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-      path.join(homeDir, 'AppData\\Local\\Google\\Chrome\\Application\\chrome.exe'),
-      'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-      'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-      path.join(homeDir, 'AppData\\Local\\Microsoft\\Edge\\Application\\msedge.exe'),
-      'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe'
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
     ];
-    for (const p of paths) {
+
+    for (const p of chromePaths) {
       if (fs.existsSync(p)) {
-        console.log('[WhatsApp] Encontrado navegador compatible para Puppeteer en:', p);
+        console.log('[WhatsApp] Encontrado Google Chrome nativo en:', p);
+        return p;
+      }
+    }
+
+    // Medium Priority: Downloaded Puppeteer Chrome in .cache/puppeteer
+    const puppeteerCacheDirs = [
+      path.join(homeDir, '.cache', 'puppeteer'),
+      path.join(localAppData, 'Puppeteer'),
+      'C:\\ProgramData\\puppeteer'
+    ];
+
+    for (const cacheDir of puppeteerCacheDirs) {
+      if (fs.existsSync(cacheDir)) {
+        try {
+          const findExeRecursively = (dir) => {
+            const files = fs.readdirSync(dir);
+            for (const file of files) {
+              const fullPath = path.join(dir, file);
+              const stat = fs.statSync(fullPath);
+              if (stat.isDirectory()) {
+                const found = findExeRecursively(fullPath);
+                if (found) return found;
+              } else if (file.toLowerCase() === 'chrome.exe') {
+                return fullPath;
+              }
+            }
+            return null;
+          };
+          const foundChrome = findExeRecursively(cacheDir);
+          if (foundChrome) {
+            console.log('[WhatsApp] Encontrado Chromium de Puppeteer en caché:', foundChrome);
+            return foundChrome;
+          }
+        } catch (errCache) {
+          // ignore cache read errors
+        }
+      }
+    }
+
+    // Fallback Priority: Edge / Brave / Chromium
+    const fallbackPaths = [
+      path.join(progFilesX86, 'Microsoft\\Edge\\Application\\msedge.exe'),
+      path.join(progFiles, 'Microsoft\\Edge\\Application\\msedge.exe'),
+      path.join(localAppData, 'Microsoft\\Edge\\Application\\msedge.exe'),
+      path.join(progFiles, 'BraveSoftware\\Brave-Browser\\Application\\brave.exe')
+    ];
+
+    for (const p of fallbackPaths) {
+      if (fs.existsSync(p)) {
+        console.log('[WhatsApp] Encontrado navegador alternativo en:', p);
         return p;
       }
     }

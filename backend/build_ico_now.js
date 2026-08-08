@@ -1,43 +1,87 @@
-import fs from 'fs';
+import { execSync } from 'child_process';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const icoTargetPath = path.resolve(__dirname, '../installer/app_icon.ico');
-const srcPngPath = 'C:\\Users\\NM29402.SC1_MZ1_JBTES\\.gemini\\antigravity-ide\\brain\\2dee14b5-c638-4898-be82-4522901e1212\\winterpos_al_icon_1786021999064.png';
+const projectRoot = path.resolve(__dirname, '..');
+const icoTargetPath = path.join(projectRoot, 'installer', 'app_icon.ico');
+const srcPngPath = path.join(projectRoot, 'WinterPosAL', 'public', 'cashier.png');
+
+console.log('[Icon Build] Generando app_icon.ico compatible con Inno Setup...');
 
 try {
   if (fs.existsSync(srcPngPath)) {
-    const pngBuffer = fs.readFileSync(srcPngPath);
-    const header = Buffer.alloc(22);
-    header.writeUInt16LE(0, 0);
-    header.writeUInt16LE(1, 2);
-    header.writeUInt16LE(1, 4);
-    header.writeUInt8(0, 6);
-    header.writeUInt8(0, 7);
-    header.writeUInt8(0, 8);
-    header.writeUInt8(0, 9);
-    header.writeUInt16LE(1, 10);
-    header.writeUInt16LE(32, 12);
-    header.writeUInt32LE(pngBuffer.length, 14);
-    header.writeUInt32LE(22, 18);
-    const icoBuffer = Buffer.concat([header, pngBuffer]);
-    fs.writeFileSync(icoTargetPath, icoBuffer);
-    console.log(`[Icon Build] SUCCESS! Created app_icon.ico at ${icoTargetPath}`);
+    const psScript = `
+      Add-Type -TypeDefinition @"
+      using System;
+      using System.Drawing;
+      using System.Drawing.Imaging;
+      using System.IO;
+
+      public class IcoConverter {
+          public static void ConvertPngToIco(string pngPath, string icoPath) {
+              using (Bitmap src = new Bitmap(pngPath)) {
+                  using (FileStream fs = new FileStream(icoPath, FileMode.Create)) {
+                      using (BinaryWriter bw = new BinaryWriter(fs)) {
+                          int[] sizes = new int[] { 16, 32, 48, 256 };
+                          int count = sizes.Length;
+
+                          bw.Write((ushort)0);
+                          bw.Write((ushort)1);
+                          bw.Write((ushort)count);
+
+                          byte[][] pngBytes = new byte[count][];
+                          for (int i = 0; i < count; i++) {
+                              int sz = sizes[i];
+                              using (Bitmap resized = new Bitmap(src, new Size(sz, sz))) {
+                                  using (MemoryStream ms = new MemoryStream()) {
+                                      resized.Save(ms, ImageFormat.Png);
+                                      pngBytes[i] = ms.ToArray();
+                                  }
+                              }
+                          }
+
+                          int offset = 6 + (16 * count);
+
+                          for (int i = 0; i < count; i++) {
+                              int sz = sizes[i];
+                              bw.Write((byte)(sz == 256 ? 0 : sz));
+                              bw.Write((byte)(sz == 256 ? 0 : sz));
+                              bw.Write((byte)0);
+                              bw.Write((byte)0);
+                              bw.Write((ushort)1);
+                              bw.Write((ushort)32);
+                              bw.Write((uint)pngBytes[i].Length);
+                              bw.Write((uint)offset);
+                              offset += pngBytes[i].Length;
+                          }
+
+                          for (int i = 0; i < count; i++) {
+                              bw.Write(pngBytes[i]);
+                          }
+                      }
+                  }
+              }
+          }
+      }
+"@ -ReferencedAssemblies "System.Drawing.dll"
+
+      [IcoConverter]::ConvertPngToIco("${srcPngPath.replace(/\\/g, '\\\\')}", "${icoTargetPath.replace(/\\/g, '\\\\')}")
+    `;
+    
+    const tempPsFile = path.join(__dirname, 'make_icon_inno.ps1');
+    fs.writeFileSync(tempPsFile, psScript, 'utf8');
+    
+    execSync(`powershell -ExecutionPolicy Bypass -File "${tempPsFile}"`);
+    if (fs.existsSync(tempPsFile)) fs.unlinkSync(tempPsFile);
+
+    console.log(`[Icon Build] ÉXITO! app_icon.ico creado correctamente en: ${icoTargetPath}`);
+  } else {
+    console.error('[Icon Build Error] No se encontró el archivo de origen:', srcPngPath);
   }
 } catch (errIco) {
   console.error('[Icon Build Error]', errIco.message);
-}
-
-try {
-  const doubleExe = path.resolve(__dirname, '../installer/postgresql-installer.exe.exe');
-  const singleExe = path.resolve(__dirname, '../installer/postgresql-installer.exe');
-  if (fs.existsSync(doubleExe)) {
-    fs.renameSync(doubleExe, singleExe);
-    console.log(`[PG Rename] Renamed ${doubleExe} -> ${singleExe}`);
-  }
-} catch (errPg) {
-  console.error('[PG Rename Error]', errPg.message);
 }

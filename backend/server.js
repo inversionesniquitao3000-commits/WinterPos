@@ -22,6 +22,8 @@ import { verifyLicense, activateLicense, registerTerminalActivity } from './lice
 
 import path from 'path';
 import fs from 'fs';
+import net from 'net';
+import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1248,13 +1250,28 @@ app.post('/api/whatsapp/install-chromium', async (req, res) => {
   try {
     const { exec } = await import('child_process');
     exec('npx puppeteer install', async (error, stdout, stderr) => {
-      if (error) {
-        console.error('[WhatsApp Error] Error al instalar Chromium:', error.message);
-        return res.status(500).json({ success: false, error: error.message, details: stderr });
+      // Intenta reinicializar el cliente incluso si npx falla (por estar offline pero tener Chrome instalado)
+      try {
+        await initWhatsAppClient();
+        const currentStatus = getWhatsAppStatus();
+
+        if (currentStatus.isMock) {
+          console.warn('[WhatsApp] La instalación o reconexión no logró iniciar un navegador Chrome real.');
+          return res.status(400).json({
+            success: false,
+            error: 'No se encontró Google Chrome en la computadora o falló la descarga automática. Por favor instale Google Chrome en esta PC (C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe) para usar el servicio real de WhatsApp.',
+            details: error ? error.message : stderr
+          });
+        }
+
+        res.json({
+          success: true,
+          message: 'Google Chrome / Puppeteer configurado y listo. Conexión de WhatsApp inicializada.',
+          output: stdout
+        });
+      } catch (initErr) {
+        res.status(500).json({ success: false, error: `Error al reiniciar WhatsApp: ${initErr.message}` });
       }
-      console.log('[WhatsApp] Chromium instalado con éxito. Reiniciando cliente de WhatsApp...');
-      await initWhatsAppClient();
-      res.json({ success: true, message: 'Chromium instalado con éxito. Intentando reconexión...', output: stdout });
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -1436,27 +1453,68 @@ app.get('*', (req, res, next) => {
   res.status(404).send('WinterPos API backend running. Frontend dist build not found.');
 });
 
-// Start Server
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Servidor API de WinterPosAL corriendo en http://localhost:${PORT}`);
-  console.log(`Expuesto en red LAN para recibir conexiones de otras terminales.`);
-  
-  // Launch Native App Window (Edge App Mode / Browser) on startup
-  setTimeout(() => {
-    import('child_process').then(({ exec }) => {
-      const targetUrl = `http://localhost:${PORT}`;
-      if (process.platform === 'win32') {
-        exec(`start msedge --app=${targetUrl} --window-size=1280,800`, (err) => {
-          if (err) exec(`start ${targetUrl}`);
-        });
-      } else {
-        exec(`start ${targetUrl}`);
+// Helper: Auto-free port if occupied by a previous node process on startup
+function freePortIfOccupied(port) {
+  return new Promise((resolve) => {
+    const tester = net.createServer();
+    tester.once('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.log(`⚠️ Puerto ${port} en uso. Liberando proceso previo automáticamente...`);
+        try {
+          if (process.platform === 'win32') {
+            const output = execSync(`netstat -ano | findstr :${port}`).toString();
+            const lines = output.trim().split('\n');
+            const pids = new Set();
+            for (const line of lines) {
+              const parts = line.trim().split(/\s+/);
+              if (parts.length >= 5 && parts[1].includes(`:${port}`)) {
+                const pid = parseInt(parts[4], 10);
+                if (pid && pid !== process.pid) pids.add(pid);
+              }
+            }
+            for (const pid of pids) {
+              try {
+                execSync(`taskkill /F /PID ${pid}`);
+                console.log(`✅ Proceso anterior (${pid}) liberado del puerto ${port}.`);
+              } catch (_) {}
+            }
+          }
+        } catch (e) {
+          console.warn(`Advertencia al liberar puerto ${port}:`, e.message);
+        }
       }
-    }).catch(() => {});
-  }, 1500);
+      resolve();
+    });
+    tester.once('listening', () => {
+      tester.close(() => resolve());
+    });
+    tester.listen(port);
+  });
+}
 
-  // Initialize WhatsApp connection at startup if enabled
-  setTimeout(() => {
-    initWhatsAppClient();
-  }, 1000);
+// Start Server with Auto-Port Freeing
+freePortIfOccupied(PORT).then(() => {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Servidor API de WinterPosAL corriendo en http://localhost:${PORT}`);
+    console.log(`Expuesto en red LAN para recibir conexiones de otras terminales.`);
+    
+    // Launch Native App Window (Edge App Mode / Browser) on startup
+    setTimeout(() => {
+      import('child_process').then(({ exec }) => {
+        const targetUrl = `http://localhost:${PORT}`;
+        if (process.platform === 'win32') {
+          exec(`start msedge --app=${targetUrl} --window-size=1280,800`, (err) => {
+            if (err) exec(`start ${targetUrl}`);
+          });
+        } else {
+          exec(`start ${targetUrl}`);
+        }
+      }).catch(() => {});
+    }, 1500);
+
+    // Initialize WhatsApp connection at startup if enabled
+    setTimeout(() => {
+      initWhatsAppClient();
+    }, 1000);
+  });
 });

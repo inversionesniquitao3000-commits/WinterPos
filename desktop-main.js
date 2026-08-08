@@ -9,28 +9,34 @@ const __dirname = path.dirname(__filename);
 
 const backendDir = path.join(__dirname, 'backend');
 
-console.log('====================================================');
-console.log('    INICIANDO WINTERPOS PUNTO DE VENTA DESK-APP     ');
-console.log('====================================================');
+const isDebug = process.env.DEBUG_MODE === 'true';
 
-// Start backend server and DB initialization without shell warning
+if (isDebug) {
+  console.log('====================================================');
+  console.log('    INICIANDO WINTERPOS PUNTO DE VENTA (DEBUG CMD)  ');
+  console.log('====================================================');
+}
+
+// Start backend server and DB initialization silently unless DEBUG_MODE is set
 const serverProcess = spawn(process.execPath, ['setup-launcher.js'], {
   cwd: backendDir,
-  stdio: 'inherit'
+  stdio: isDebug ? 'inherit' : 'ignore',
+  windowsHide: !isDebug
 });
 
 // Window Launcher - Opens dedicated Native App Window
 setTimeout(() => {
   const targetUrl = 'http://localhost:5000';
-  console.log(`[Desktop App] Lanzando ventana nativa de escritorio para: ${targetUrl}`);
+  if (isDebug) {
+    console.log(`[Desktop App] Lanzando ventana nativa de escritorio para: ${targetUrl}`);
+  }
   
   if (process.platform === 'win32') {
-    // Launch in app mode using Edge Chromium engine for dedicated app window experience
-    const cmd = `start msedge --app=${targetUrl} --window-size=1280,800 --name="WinterPos Punto de Venta"`;
-    exec(cmd, (err) => {
+    // Try Google Chrome app mode first, fallback to msedge app mode
+    const cmd = `start chrome --app=${targetUrl} --window-size=1280,800 || start msedge --app=${targetUrl} --window-size=1280,800 --name="WinterPos Punto de Venta"`;
+    exec(cmd, { windowsHide: true }, (err) => {
       if (err) {
-        console.log('[Desktop App] Fallback: Abriendo en navegador predeterminado...');
-        exec(`start ${targetUrl}`);
+        exec(`start ${targetUrl}`, { windowsHide: true });
       }
     });
   } else if (process.platform === 'darwin') {
@@ -44,3 +50,4 @@ process.on('SIGINT', () => {
   if (serverProcess) serverProcess.kill();
   process.exit();
 });
+

@@ -2500,6 +2500,27 @@ export default function App() {
                     credito_disponible: c.limite_credito
                   })));
                 }
+                if (mode === 'all') {
+                  setTasaHistory([]);
+                  setUsers(prev => prev.filter(u => u.usuario.toLowerCase() === 'admin'));
+                  setCompanyConfig({
+                    rif: '',
+                    nombre_comercio: '',
+                    direccion: '',
+                    telefono: '',
+                    correo: '',
+                    moneda_base: 'USD',
+                    mensaje_pie_ticket: '',
+                    metodos_pago_activos: []
+                  });
+                  localStorage.removeItem('pos_tasa_history');
+                  localStorage.removeItem('pos_biz_info');
+                  localStorage.removeItem('pos_users');
+                  localStorage.removeItem('pos_roles');
+                  localStorage.removeItem('pos_products');
+                  localStorage.removeItem('pos_sales_log');
+                  localStorage.removeItem('pos_clients');
+                }
               }}
             />
           )}

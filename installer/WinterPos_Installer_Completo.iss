@@ -34,33 +34,42 @@ Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+Name: "installpg"; Description: "🐘 Instalar Motor de Base de Datos PostgreSQL 15 (Recomendado para Servidor Central)"; GroupDescription: "Componentes del Servidor:"
+Name: "installnode"; Description: "💚 Instalar Entorno de Ejecución Node.js v20 (Recomendado si la PC no posee Node.js previamente)"; GroupDescription: "Componentes del Servidor:"
 Name: "debugmode"; Description: "⚙️ Activar Modo Depuración / Debugger (Muestra la consola CMD con logs en vivo)"; GroupDescription: "Opciones de Auditoría:"; Flags: unchecked
 
 [Files]
-; Explicitly bundle PostgreSQL installer for full offline installation
-Source: "postgresql-installer.exe.exe"; DestDir: "{app}\installer"; DestName: "postgresql-installer.exe"; Flags: ignoreversion
+; Explicitly bundle PostgreSQL & Node.js installers for full offline installation
+Source: "postgresql-installer.exe"; DestDir: "{app}\installer"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "postgresql-installer.exe.exe"; DestDir: "{app}\installer"; DestName: "postgresql-installer.exe"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "node-installer.msi"; DestDir: "{app}\installer"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "node-installer.msi.msi"; DestDir: "{app}\installer"; DestName: "node-installer.msi"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; Icono principal del sistema
 Source: "app_icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "app_icon.ico"; DestDir: "{app}\installer"; Flags: ignoreversion
 
 ; Copy runtime files (Backend, Compiled Frontend Dist, Launchers, Dependencies) - EXCLUDES React source code and dev files
 Source: "..\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*,.vscode\*,.gemini\*,brain\*,scratch\*,installer\*,installer_output\*,.wwebjs_auth\*,.wwebjs_cache\*,node_modules\.cache\*,WinterPosAL\src\*,WinterPosAL\public\*,WinterPosAL\node_modules\*,WinterPosAL\tsconfig*.json,WinterPosAL\vite.config.ts,WinterPosAL\generar_manuales.js"
 
 [Icons]
-; Modo Silencioso (Por defecto)
-Name: "{group}\WinterPosAL"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\app_icon.ico"; Check: not IsDebugModeSelected
-Name: "{autodesktop}\WinterPosAL"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; IconFilename: "{app}\app_icon.ico"; Check: not IsDebugModeSelected
+; Modo Silencioso Principal (Por defecto para Cajero / Operario)
+Name: "{group}\WinterPosAL"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\app_icon.ico"; IconIndex: 0
+Name: "{autodesktop}\WinterPosAL"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; IconFilename: "{app}\app_icon.ico"; IconIndex: 0
 
 ; Modo Depuración / Debugger (Si se selecciona la casilla Debugger)
-Name: "{autodesktop}\WinterPosAL"; Filename: "{app}\Iniciar_WinterPos.bat"; Tasks: desktopicon; IconFilename: "{app}\app_icon.ico"; Check: IsDebugModeSelected
+Name: "{autodesktop}\WinterPosAL (Debug CMD)"; Filename: "{app}\Iniciar_WinterPos.bat"; Tasks: desktopicon; IconFilename: "{app}\app_icon.ico"; IconIndex: 0; Check: IsDebugModeSelected
 
 ; Acceso directo de diagnóstico permanente en Menú Inicio
-Name: "{group}\WinterPosAL - Modo Depuración (Logs CMD)"; Filename: "{app}\Iniciar_WinterPos.bat"; IconFilename: "{app}\app_icon.ico"
+Name: "{group}\WinterPosAL - Modo Depuración (Logs CMD)"; Filename: "{app}\Iniciar_WinterPos.bat"; IconFilename: "{app}\app_icon.ico"; IconIndex: 0
 Name: "{group}\Desinstalar WinterPosAL"; Filename: "{uninstallexe}"
 
 [Run]
-; Install PostgreSQL silently in Server Mode if PostgreSQL installer is present in installer folder
-Filename: "{app}\installer\postgresql-installer.exe"; Parameters: "--mode unattended --superpassword postgres --serverport 5432"; Flags: runhidden; StatusMsg: "Instalando motor PostgreSQL 15 en segundo plano (Modo Offline)..."; Check: IsPgSetupPresentAndServerMode
+; Install Node.js silently if selected by user and installer exists
+Filename: "msiexec.exe"; Parameters: "/i ""{app}\installer\node-installer.msi"" /qn /norestart"; Flags: runhidden; StatusMsg: "Instalando entorno Node.js v20 en segundo plano..."; Check: ShouldInstallNode
+
+; Install PostgreSQL silently in Server Mode if PostgreSQL installer is present in installer folder and selected
+Filename: "{app}\installer\postgresql-installer.exe"; Parameters: "--mode unattended --superpassword postgres --serverport 5432"; Flags: runhidden; StatusMsg: "Instalando motor PostgreSQL 15 en segundo plano (Modo Offline)..."; Check: ShouldInstallPg
 
 ; Register Windows Service automatically (Runs silently in background)
 Filename: "cmd.exe"; Parameters: "/c node ""{app}\tools\install_service.js"""; Flags: runhidden; StatusMsg: "Registrando servicio de segundo plano WinterPos..."; Check: IsServerModeSelected
@@ -78,6 +87,33 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 function IsDebugModeSelected: Boolean;
 begin
   Result := WizardIsTaskSelected('debugmode');
+end;
+
+function IsNodeInstalled: Boolean;
+begin
+  Result := RegKeyExists(HKLM, 'SOFTWARE\Node.js') or 
+            RegKeyExists(HKLM, 'SOFTWARE\WOW6432Node\Node.js') or 
+            FileExists('C:\Program Files\nodejs\node.exe') or 
+            FileExists('C:\Program Files (x86)\nodejs\node.exe');
+end;
+
+function IsPgInstalled: Boolean;
+begin
+  Result := RegKeyExists(HKLM, 'SOFTWARE\PostgreSQL\Services') or 
+            RegKeyExists(HKLM, 'SOFTWARE\PostgreSQL\Installations') or 
+            FileExists('C:\Program Files\PostgreSQL\15\bin\postgres.exe') or
+            FileExists('C:\Program Files\PostgreSQL\16\bin\postgres.exe') or
+            FileExists('C:\Program Files\PostgreSQL\14\bin\postgres.exe');
+end;
+
+function ShouldInstallPg: Boolean;
+begin
+  Result := WizardIsTaskSelected('installpg') and FileExists(ExpandConstant('{app}\installer\postgresql-installer.exe'));
+end;
+
+function ShouldInstallNode: Boolean;
+begin
+  Result := WizardIsTaskSelected('installnode') and FileExists(ExpandConstant('{app}\installer\node-installer.msi'));
 end;
 
 var
@@ -101,6 +137,12 @@ end;
 
 procedure InitializeWizard;
 begin
+  // Detección automática: Si Node.js o PostgreSQL ya están instalados en el sistema, desmarcar casillas por defecto
+  if IsNodeInstalled then
+    WizardSelectTasks('!installnode');
+    
+  if IsPgInstalled then
+    WizardSelectTasks('!installpg');
   // Page 1: Role Selection
   RolePage := CreateCustomPage(wpWelcome, 'Modo de Instalación (Completo Offline)', 'Seleccione el rol de este equipo en el sistema de ventas.');
   

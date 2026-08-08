@@ -99,30 +99,43 @@ El sistema permite vincular un número de WhatsApp para enviar automáticamente 
    - Presione **Vincular un dispositivo** y escanee el código QR que se muestra en la pantalla de la aplicación.
    - Una vez escaneado, el estado del servicio cambiará a `🟢 Conectado` y aparecerá el botón **Enviar Mensaje de Prueba**.
 
-#### 2. Modo Simulación (Falta de Navegador Chrome/Puppeteer)
-Si el estado muestra **`Modo Simulación Activo`**, significa que el servidor no ha podido iniciar el navegador virtual (Chrome/Chromium) necesario para conectarse a WhatsApp Web.
+#### 2. Modo Simulación y Requisito de Google Chrome (Puppeteer)
+Si el estado muestra **`Modo Simulación Activo`**, significa que el servidor no ha podido iniciar el motor de navegador virtual (Chrome) necesario para conectarse a WhatsApp Web.
+* **Priorización de Google Chrome:** El servicio busca preferentemente una instalación de **Google Chrome** en el sistema (`C:\Program Files\Google\Chrome\Application\chrome.exe` o carpetas de AppData).
 * **¿Qué hacer desde la interfaz?**
-  Bajo el estado del servicio, verá un recuadro de advertencia con el botón **`🔧 Instalar/Reparar Chrome (Puppeteer)`**. Haga clic en él para que el servidor descargar e instalar automáticamente los componentes de Chrome necesarios. El proceso tomará un par de minutos y recargará la aplicación al finalizar para reconectarse.
-* **¿Qué hacer desde la terminal (si falla el botón)?**
-  Abra una consola en la carpeta `backend/` y ejecute:
-  ```bash
-  npx puppeteer install
-  ```
-  Reinicie el backend (`npm start`) para forzar la reconexión.
+  Bajo el estado del servicio, verá un recuadro de advertencia con el botón **`🔧 Instalar/Reparar Chrome (Puppeteer)`**. Haga clic en él para que el servidor busque o intente descargar e inicializar el motor de Chrome. Si la computadora no posee Google Chrome instalado y no tiene conexión a internet, el sistema mostrará una alerta detallada solicitando instalar Google Chrome en el equipo.
+* **¿Qué hacer si falta Chrome en un servidor sin internet?**
+  Instale **Google Chrome** directamente en la PC Servidora. Al reiniciar el backend o presionar el botón de reparación, el servicio detectará el ejecutable de Chrome automáticamente y pasará de Modo Simulación a Generar Código QR.
 
 ---
 
-### MÓDULO 5: SERVICIO DE WINDOWS (EJECUCIÓN EN SEGUNDO PLANO / SILENCIOSA)
+### MÓDULO 5: INSTALADOR OFFLINE, SERVICIO DE WINDOWS Y ACCESOS DIRECTOS
 
-Para garantizar una experiencia limpia en el punto de venta y evitar que el usuario u operador cierre accidentalmente la consola de comandos (ventana negra), **WinterPos** se ejecuta como un **Servicio nativo de Windows** (`WinterPosBackendService`).
+Para garantizar la mayor estabilidad en el punto de venta, **WinterPos** incluye un instalador autónomo e integraciones nativas para Windows.
 
-#### 1. Características del Servicio
+#### 1. Opciones del Asistente de Instalación Completo (Offline)
+El instalador completo (`WinterPosSetup_Completo_Offline.exe`) incluye todo el software necesario para desplegar en computadoras 100% sin internet:
+* **Selección de Componentes:** Durante la instalación, el asistente presenta casillas interactivas donde el administrador puede elegir qué instalar según las necesidades del equipo:
+  - `[x] Instalar Motor de Base de Datos PostgreSQL 15` (Recomendado para Servidor Central).
+  - `[x] Instalar Entorno de Ejecución Node.js v20 (x64)` (Recomendado en equipos que no dispongan de Node.js previamente).
+
+#### 2. Accesos Directos e Icono del Sistema
+* **Icono a Color (`app_icon.ico`):** Todos los accesos directos quedan vinculados con el icono oficial del punto de venta en alta resolución.
+* **Acceso Directo Principal (`WinterPosAL` - Modo Silencioso para Cajero):**
+  - Diseñado para el trabajo diario de la caja registradora.
+  - Se ejecuta **100% en segundo plano sin mostrar ninguna ventana de consola CMD**. El operador hace clic en el acceso directo y la ventana nativa de la aplicación se abre directamente en pantalla.
+* **Acceso Directo de Depuración (`WinterPosAL - Modo Depuración (Logs CMD)`):**
+  - Diseñado para administradores, auditores y desarrolladores.
+  - Disponible en el **Menú Inicio** (y opcionalmente en el escritorio si se selecciona la casilla en la instalación).
+  - Abre la aplicación desplegando la consola de comandos de Windows (CMD) con todos los registros HTTP y backend en vivo (`GET /api/sync/poll?...`) para auditar la comunicación de la red o diagnosticar eventos.
+
+#### 3. Características del Servicio de Windows en Segundo Plano
 * **Nombre del Servicio:** `WinterPosBackendService`
 * **Inicio Automático:** Se inicia automáticamente con el arranque del sistema operativo Windows, incluso antes de iniciar sesión.
 * **Ejecución Imperceptible:** Funciona 100% en segundo plano sin mostrar ninguna ventana de consola CMD ni interferir en la pantalla del usuario.
 * **Verificación de Columna PostgreSQL:** Al arrancar como servicio, el backend realiza la verificación y migración automática de tablas (creando automáticamente columnas faltantes como `porcentaje_impuesto` si no existen).
 
-#### 2. Comandos de Administración del Servicio (Consola de Administrador)
+#### 4. Comandos de Administración del Servicio (Consola de Administrador)
 
 * **Instalar / Registrar el Servicio:**
   ```cmd

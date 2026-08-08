@@ -807,6 +807,14 @@ export default function ConfiguracionEmpresa({
         localStorage.removeItem('pos_abonos');
         localStorage.removeItem('pos_shift_abonos');
       }
+      if (mode === 'all') {
+        localStorage.removeItem('pos_company_config');
+        localStorage.removeItem('pos_users');
+        localStorage.removeItem('pos_roles');
+        localStorage.removeItem('pos_tasa_history');
+        localStorage.removeItem('pos_accionistas');
+        localStorage.removeItem('pos_inversiones');
+      }
 
       showToast('Limpieza de base de datos ejecutada exitosamente.');
       setDbConfirmWord('');
@@ -818,12 +826,15 @@ export default function ConfiguracionEmpresa({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          mode: mode,
           wipeInventory: mode === 'inventory' || mode === 'all',
           wipeSales: mode === 'sales' || mode === 'all',
           wipeClients: mode === 'clients' || mode === 'all',
           wipeClientBalancesOnly: mode === 'client_balances',
           wipeStock: mode === 'stock',
-          wipeAccionistas: mode === 'accionistas' || mode === 'all'
+          wipeAccionistas: mode === 'accionistas' || mode === 'all',
+          wipeRatesHistory: mode === 'all',
+          wipeConfig: mode === 'all'
         })
       });
 

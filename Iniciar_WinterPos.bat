@@ -1,6 +1,7 @@
 @echo off
-title WinterPos Punto de Venta - Servidor y App
+title WinterPos Punto de Venta - Servidor y App (Modo Depuración / Logs CMD)
 cd /d "%~dp0"
+set DEBUG_MODE=true
 
 REM 1. Detect portable node.exe or system node.exe
 if exist "%~dp0node.exe" (
