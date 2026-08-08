@@ -62,9 +62,14 @@ Name: "{autodesktop}\WinterPosAL (Debug CMD)"; Filename: "{app}\Iniciar_WinterPo
 
 ; Acceso directo de diagnóstico permanente en Menú Inicio
 Name: "{group}\WinterPosAL - Modo Depuración (Logs CMD)"; Filename: "{app}\Iniciar_WinterPos.bat"; IconFilename: "{app}\app_icon.ico"; IconIndex: 0
-Name: "{group}\Desinstalar WinterPosAL"; Filename: "{uninstallexe}"
+[Dirs]
+Name: "{app}"; Permissions: users-full
+Name: "{app}\data"; Permissions: users-full
 
 [Run]
+; Otorgar permisos totales de escritura en la carpeta de instalación (licenciamiento y datos)
+Filename: "icacls"; Parameters: """{app}"" /grant Users:(OI)(CI)F /T"; Flags: runhidden; StatusMsg: "Configurando permisos de escritura para licencia y datos..."
+
 ; Install Node.js silently if selected by user and installer exists
 Filename: "msiexec.exe"; Parameters: "/i ""{app}\installer\node-installer.msi"" /qn /norestart"; Flags: runhidden; StatusMsg: "Instalando entorno Node.js v20 en segundo plano..."; Check: ShouldInstallNode
 

@@ -52,9 +52,14 @@ Name: "{autodesktop}\WinterPosAL"; Filename: "{app}\Iniciar_WinterPos.bat"; Task
 
 ; Acceso directo de diagnóstico permanente en Menú Inicio
 Name: "{group}\WinterPosAL - Modo Depuración (Logs CMD)"; Filename: "{app}\Iniciar_WinterPos.bat"; IconFilename: "{app}\app_icon.ico"
-Name: "{group}\Desinstalar WinterPosAL"; Filename: "{uninstallexe}"
+[Dirs]
+Name: "{app}"; Permissions: users-full
+Name: "{app}\data"; Permissions: users-full
 
 [Run]
+; Otorgar permisos totales de escritura en la carpeta de instalación (licenciamiento y datos)
+Filename: "icacls"; Parameters: """{app}"" /grant Users:(OI)(CI)F /T"; Flags: runhidden; StatusMsg: "Configurando permisos de escritura para licencia y datos..."
+
 ; Register Windows Service automatically (Runs silently in background)
 Filename: "cmd.exe"; Parameters: "/c node ""{app}\tools\install_service.js"""; Flags: runhidden; StatusMsg: "Registrando servicio de segundo plano WinterPos..."; Check: IsServerModeSelected
 

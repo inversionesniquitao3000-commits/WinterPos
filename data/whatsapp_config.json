@@ -1,0 +1,7 @@
+{
+  "enabled": false,
+  "groupId": "",
+  "groupName": "Grupo de Cierres POS",
+  "messageTemplate": "📊 *REPORTE DE ARQUEO Y CIERRE DE CAJA*\n\n📅 *Fecha:* {fecha}\n👤 *Cajero:* {usuario}\n🖥️ *Terminal:* {terminal}\n\n💵 *EFECTIVO ESPERADO EN GAVETA:*\n• Dólares (USD): $ {dineroEnCajaExpected}\n• Bolívares (VES): Bs {expectedVes}\n\n📥 *EFECTIVO FÍSICO RECIBIDO:*\n• Dólares (USD): $ {realUsd}\n• Bolívares (VES): Bs {realVes}\n\n⚖️ *DIFERENCIA (BALANCE):*\n• Dólares (USD): {diffUsd}\n• Bolívares (VES): {diffVes}\n\n🛍️ *VENTAS TOTALES DEL TURNO:* $ {ventaTotalUsd} USD\n📉 *DESCUENTOS APLICADOS:* $ {descuentosUsd} USD\n\n*WinterPosAL Cloud System*",
+  "utilidadesMessageTemplate": "💼 *REPORTE DE UTILIDADES Y GASTOS OPERATIVOS*\n🏬 *{empresa}*\n📅 *Fecha:* {fecha}\n💱 *Tasa BCV:* {tasaBcv} Bs/USD\n\n📊 *RESUMEN FINANCIERO:*\n📈 *Utilidad Bruta:* {utilidadBrutaUsd} USD | Bs {utilidadBrutaVes} VES\n🔻 *(-) Gastos Deducibles:* -{totalGastosUsd} USD | -Bs {totalGastosVes} VES\n💰 *(=) Utilidad Neta Distribuable:* *{utilidadNetaUsd} USD* | *Bs {utilidadNetaVes} VES*\n\n📝 *DESGLOSE DE GASTOS OPERATIVOS ({cantGastos}):*\n{desgloseGastos}\n\n👥 *MONTO A COBRAR POR ACCIONISTA:*\n{desgloseAccionistas}"
+}

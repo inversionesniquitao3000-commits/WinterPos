@@ -32,7 +32,7 @@ setTimeout(() => {
   }
   
   if (process.platform === 'win32') {
-    const cmd = `start chrome --app=${targetUrl} --window-size=1280,800`;
+    const cmd = `start "" chrome --app=${targetUrl} --start-maximized`;
     exec(cmd, { windowsHide: true }, (err) => {
       if (err) {
         exec(`start ${targetUrl}`, { windowsHide: true });

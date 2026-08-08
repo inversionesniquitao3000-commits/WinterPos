@@ -56,6 +56,8 @@ let connectionStatus = 'DISCONNECTED'; // 'DISCONNECTED' | 'QR_READY' | 'AUTHENT
 let lastQrCode = ''; // Base64 image string or raw text
 let isMockMode = false;
 let mockTimer = null;
+let lastInitError = null;
+let detectedChromePath = null;
 
 // Load config
 export function getWhatsAppConfig() {
@@ -81,6 +83,8 @@ export function getWhatsAppStatus() {
     status: connectionStatus,
     qr: connectionStatus === 'QR_READY' ? lastQrCode : '',
     isMock: isMockMode,
+    detectedChromePath: detectedChromePath || findChromeExecutable(),
+    lastError: lastInitError,
     config: getWhatsAppConfig()
   };
 }
@@ -170,9 +174,13 @@ function findChromeExecutable() {
       }
     }
 
-    // Fallback Priority: Brave / Chromium (Excluido Microsoft Edge)
+    // Fallback Priority: Brave / Microsoft Edge / Chromium
     const fallbackPaths = [
-      path.join(progFiles, 'BraveSoftware\\Brave-Browser\\Application\\brave.exe')
+      path.join(progFiles, 'BraveSoftware\\Brave-Browser\\Application\\brave.exe'),
+      'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+      'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+      path.join(progFilesX86, 'Microsoft\\Edge\\Application\\msedge.exe'),
+      path.join(progFiles, 'Microsoft\\Edge\\Application\\msedge.exe')
     ];
 
     for (const p of fallbackPaths) {
@@ -267,9 +275,12 @@ export async function initWhatsAppClient() {
 
     await client.initialize();
     isMockMode = false;
+    lastInitError = null;
 
   } catch (err) {
-    console.warn('[WhatsApp] whatsapp-web.js no está instalado o falló la carga. Iniciando en Modo Simulación.');
+    const errMsg = err?.message || String(err);
+    lastInitError = errMsg;
+    console.warn('[WhatsApp] Error al inicializar cliente real. Iniciando en Modo Simulación.');
     console.error('[WhatsApp] Error detallado al inicializar:', err);
     isMockMode = true;
     startMockFlow();

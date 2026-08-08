@@ -1257,10 +1257,14 @@ app.post('/api/whatsapp/install-chromium', async (req, res) => {
 
         if (currentStatus.isMock) {
           console.warn('[WhatsApp] La instalación o reconexión no logró iniciar un navegador Chrome real.');
+          const detailMsg = currentStatus.lastError || (error ? error.message : stderr) || 'Error desconocido';
           return res.status(400).json({
             success: false,
-            error: 'No se encontró Google Chrome en la computadora o falló la descarga automática. Por favor instale Google Chrome en esta PC (C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe) para usar el servicio real de WhatsApp.',
-            details: error ? error.message : stderr
+            error: currentStatus.detectedChromePath 
+              ? `Chrome detectado en (${currentStatus.detectedChromePath}), pero falló al iniciar: ${detailMsg}`
+              : 'No se encontró Google Chrome en la ruta predeterminada (C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe).',
+            details: detailMsg,
+            detectedPath: currentStatus.detectedChromePath
           });
         }
 
@@ -1503,7 +1507,7 @@ freePortIfOccupied(PORT).then(() => {
       import('child_process').then(({ exec }) => {
         const targetUrl = `http://localhost:${PORT}`;
         if (process.platform === 'win32') {
-          exec(`start chrome --app=${targetUrl} --window-size=1280,800`, (err) => {
+          exec(`start "" chrome --app=${targetUrl} --start-maximized`, (err) => {
             if (err) exec(`start ${targetUrl}`);
           });
         } else {
