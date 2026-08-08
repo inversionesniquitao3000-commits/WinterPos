@@ -18,15 +18,15 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
   const [clickCount, setClickCount] = useState(0);
   const [serverIP, setServerIP] = useState(() => {
     const saved = localStorage.getItem('pos_lan_ip');
-    return saved || '192.168.1.100';
+    return saved || '192.168.11.40';
   });
   const [serverPort, setServerPort] = useState(() => {
     const saved = localStorage.getItem('pos_lan_port');
-    return saved || '5432';
+    return saved || '5000';
   });
   const [dbMode, setDbMode] = useState(() => {
     const saved = localStorage.getItem('pos_db_mode');
-    return saved || 'local';
+    return saved || 'remote';
   });
   const [terminalNameState, setTerminalNameState] = useState(() => {
     const saved = localStorage.getItem('pos_terminal_name');

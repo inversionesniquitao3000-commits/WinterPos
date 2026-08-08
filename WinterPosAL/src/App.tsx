@@ -281,10 +281,13 @@ export default function App() {
   }, [shiftDevolucionesVes]);
 
   useEffect(() => {
-    const ip = localStorage.getItem('pos_lan_ip') || '192.168.1.100';
-    const mode = localStorage.getItem('pos_db_mode') || 'local';
-    setLanIP(ip);
-    setDbMode(mode);
+    const updateNetworkSettings = () => {
+      const ip = localStorage.getItem('pos_lan_ip') || '192.168.11.40';
+      const mode = localStorage.getItem('pos_db_mode') || 'remote';
+      setLanIP(ip);
+      setDbMode(mode);
+    };
+    updateNetworkSettings();
   }, [currentUser]);
 
   const getApiUrl = (path: string) => {

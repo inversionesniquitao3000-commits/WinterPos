@@ -98,13 +98,13 @@ export const mockTasaHistory: TasaHistoryItem[] = [
 ];
 
 export const mockConfig: CompanyConfig = {
-  rif: 'J-41132631',
-  nombre_comercio: 'INVERSIONES NIQUITAO 3000 C.A.',
-  direccion: 'Av. Principal 23 de Enero, Sector Libertad, Caracas',
-  telefono: '0424-2042877',
+  rif: 'J-411332631',
+  nombre_comercio: 'INVERSIONES NIQUITAO JB AL 3000 -PRUEBA',
+  direccion: 'Caracas, Venezuela',
+  telefono: '0412-5515172',
   correo: 'inversiones.niquitao3000@gmail.com',
   moneda_base: 'USD',
-  mensaje_pie_ticket: '¡Gracias por preferirnos! Conserve este ticket como comprobante de compra.',
+  mensaje_pie_ticket: '¡Gracias por su compra! Conserve su ticket.',
   metodos_pago_activos: ['efectivo_usd', 'efectivo_ves', 'tarjeta_ves', 'pago_movil', 'biopago', 'credito'],
   permitir_multisesion: true,
   compartir_apertura_caja: true

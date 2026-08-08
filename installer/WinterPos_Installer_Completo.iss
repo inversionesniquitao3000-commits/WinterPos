@@ -198,7 +198,7 @@ begin
   IpEdit.Left := ScaleX(16);
   IpEdit.Top := ScaleY(40);
   IpEdit.Width := ScaleX(250);
-  IpEdit.Text := '127.0.0.1';
+  IpEdit.Text := '192.168.11.40';
 
   HelpText := TNewStaticText.Create(IpPage);
   HelpText.Parent := IpPage.Surface;
@@ -206,7 +206,7 @@ begin
   HelpText.Top := ScaleY(80);
   HelpText.Width := ScaleX(440);
   HelpText.WordWrap := True;
-  HelpText.Caption := '💡 Ayuda: Si este equipo es la Caja Secundaria, introduzca la dirección IP local de la PC Servidor (ejemplo: 192.168.1.105). En la PC Servidor puede averiguar la IP ejecutando "cmd" y luego "ipconfig".';
+  HelpText.Caption := '💡 Ayuda: Si este equipo es la Caja Secundaria, introduzca la dirección IP local de la PC Servidor (ejemplo: 192.168.11.40). En la PC Servidor puede averiguar la IP ejecutando "cmd" y luego "ipconfig".';
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
