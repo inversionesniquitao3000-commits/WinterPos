@@ -286,11 +286,21 @@ function getJsonPath(filename) {
 
 export function readJsonFile(filename, defaultValue) {
   const filePath = getJsonPath(filename);
-  if (!fs.existsSync(filePath)) {
-    fs.writeFileSync(filePath, JSON.stringify(defaultValue, null, 2), 'utf8');
-    return defaultValue;
-  }
   try {
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    if (!fs.existsSync(filePath)) {
+      if (defaultValue !== undefined) {
+        try {
+          fs.writeFileSync(filePath, JSON.stringify(defaultValue, null, 2), 'utf8');
+        } catch (e) {
+          console.warn(`No se pudo inicializar ${filename} en disco:`, e.message);
+        }
+      }
+      return defaultValue;
+    }
     const content = fs.readFileSync(filePath, 'utf8');
     return JSON.parse(content);
   } catch (err) {
@@ -302,6 +312,10 @@ export function readJsonFile(filename, defaultValue) {
 export function writeJsonFile(filename, data) {
   const filePath = getJsonPath(filename);
   try {
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
   } catch (err) {
     console.error(`Error al escribir archivo JSON ${filename}:`, err);
@@ -673,17 +687,127 @@ export async function saveClient(c) {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
         [c.cedula_rif, c.nombre, c.telefono, c.direccion, c.limite_credito, c.credito_disponible, c.porcentaje_descuento, c.estado, !!c.aplica_precio_costo]
       );
-      return { ...c, id: res.rows[0].id, saldo_pendiente: 0, aplica_precio_costo: !!c.aplica_precio_costo };
+      return { ...c, id: res.rows[0].id, saldo_pendiente: (c.limite_credito || 0) - (c.credito_disponible || 0), aplica_precio_costo: !!c.aplica_precio_costo };
     } catch (err) {
       console.error('Error en saveClient (Postgres):', err.message);
     }
   }
   const clients = readJsonFile('clients.json', mockClients);
-  const newClient = { ...c, id: Date.now(), saldo_pendiente: 0, aplica_precio_costo: !!c.aplica_precio_costo };
+  const newClient = { ...c, id: Date.now(), saldo_pendiente: (c.limite_credito || 0) - (c.credito_disponible || 0), aplica_precio_costo: !!c.aplica_precio_costo };
   clients.push(newClient);
   writeJsonFile('clients.json', clients);
   return newClient;
 }
+
+export async function saveClientsBulk(clientsArray, mode = 'update') {
+  if (!Array.isArray(clientsArray) || clientsArray.length === 0) return [];
+  
+  if (usePostgres) {
+    let client;
+    try {
+      client = await pool.connect();
+      await client.query('BEGIN');
+      const results = [];
+      for (const c of clientsArray) {
+        const doc = c.cedula_rif?.trim() || 'V-00000000';
+        const name = c.nombre?.trim() || 'CLIENTE S/N';
+        const phone = c.telefono?.trim() || '';
+        const address = c.direccion?.trim() || '';
+        const limit = parseFloat(c.limite_credito || 0);
+        const debt = parseFloat(c.saldo_pendiente || 0);
+        const avail = Math.max(0, limit - debt);
+        const desc = parseFloat(c.porcentaje_descuento || 0);
+        const status = c.estado || 'Activo';
+        const costo = !!c.aplica_precio_costo;
+
+        const checkRes = await client.query('SELECT id FROM Clientes WHERE LOWER(cedula_rif) = LOWER($1)', [doc]);
+        if (checkRes.rowCount > 0) {
+          if (mode === 'update') {
+            const existingId = checkRes.rows[0].id;
+            await client.query(
+              `UPDATE Clientes 
+               SET nombre = $1, telefono = $2, direccion = $3, limite_credito = $4, credito_disponible = $5, porcentaje_descuento = $6, estado = $7, aplica_precio_costo = $8
+               WHERE id = $9`,
+              [name, phone, address, limit, avail, desc, status, costo, existingId]
+            );
+            results.push({ id: existingId, cedula_rif: doc, nombre: name, telefono: phone, direccion: address, limite_credito: limit, credito_disponible: avail, saldo_pendiente: debt, porcentaje_descuento: desc, estado: status, aplica_precio_costo: costo });
+          }
+        } else {
+          const insertRes = await client.query(
+            `INSERT INTO Clientes (cedula_rif, nombre, telefono, direccion, limite_credito, credito_disponible, porcentaje_descuento, estado, aplica_precio_costo)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+            [doc, name, phone, address, limit, avail, desc, status, costo]
+          );
+          results.push({ id: insertRes.rows[0].id, cedula_rif: doc, nombre: name, telefono: phone, direccion: address, limite_credito: limit, credito_disponible: avail, saldo_pendiente: debt, porcentaje_descuento: desc, estado: status, aplica_precio_costo: costo });
+        }
+      }
+      await client.query('COMMIT');
+      return results;
+    } catch (err) {
+      if (client) {
+        try { await client.query('ROLLBACK'); } catch (_) {}
+      }
+      console.error('Error en saveClientsBulk (Postgres):', err.message);
+      throw err;
+    } finally {
+      if (client) client.release();
+    }
+  }
+
+  // JSON Fallback Storage
+  const clients = readJsonFile('clients.json', mockClients);
+  const results = [];
+  for (const c of clientsArray) {
+    const doc = c.cedula_rif?.trim() || 'V-00000000';
+    const name = c.nombre?.trim() || 'CLIENTE S/N';
+    const phone = c.telefono?.trim() || '';
+    const address = c.direccion?.trim() || '';
+    const limit = parseFloat(c.limite_credito || 0);
+    const debt = parseFloat(c.saldo_pendiente || 0);
+    const avail = Math.max(0, limit - debt);
+    const desc = parseFloat(c.porcentaje_descuento || 0);
+    const status = c.estado || 'Activo';
+    const costo = !!c.aplica_precio_costo;
+
+    const idx = clients.findIndex(x => x.cedula_rif?.toLowerCase() === doc.toLowerCase());
+    if (idx !== -1) {
+      if (mode === 'update') {
+        clients[idx] = {
+          ...clients[idx],
+          nombre: name,
+          telefono: phone,
+          direccion: address,
+          limite_credito: limit,
+          credito_disponible: avail,
+          saldo_pendiente: debt,
+          porcentaje_descuento: desc,
+          estado: status,
+          aplica_precio_costo: costo
+        };
+        results.push(clients[idx]);
+      }
+    } else {
+      const newObj = {
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        cedula_rif: doc,
+        nombre: name,
+        telefono: phone,
+        direccion: address,
+        limite_credito: limit,
+        credito_disponible: avail,
+        saldo_pendiente: debt,
+        porcentaje_descuento: desc,
+        estado: status,
+        aplica_precio_costo: costo
+      };
+      clients.push(newObj);
+      results.push(newObj);
+    }
+  }
+  writeJsonFile('clients.json', clients);
+  return results;
+}
+
 
 
 export async function getAbonos() {

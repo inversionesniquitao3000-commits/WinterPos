@@ -163,6 +163,8 @@ export default function App() {
     }
     return 0;
   });
+
+
   const [montoAperturaVes, setMontoAperturaVes] = useState<number>(() => {
     const savedUser = localStorage.getItem('pos_current_user');
     if (savedUser) {
@@ -1496,6 +1498,30 @@ export default function App() {
     }
   };
 
+  const handleAddClientsBulk = async (clientsArray: any[], mode: 'update' | 'skip' = 'update') => {
+    try {
+      const res = await fetch(getApiUrl('/clientes/bulk'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clients: clientsArray, mode })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // Refresh catalog from central backend
+        const listRes = await fetch(getApiUrl('/clientes'));
+        if (listRes.ok) {
+          const freshClients = await listRes.json();
+          setClients(freshClients);
+        }
+        return data.count;
+      }
+      return null;
+    } catch (err: any) {
+      console.error('Error al realizar carga masiva de clientes:', err);
+      return null;
+    }
+  };
+
   const handleRegisterAbono = async (
     clientId: number, 
     amountUSD: number,   // total abono in USD (for client credit update)
@@ -2089,6 +2115,10 @@ export default function App() {
           setSessionNotice('');
           sessionStartRef.current = Date.now();
           setCurrentUser(user);
+          // Activate Full Screen on Login Success
+          if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(() => {});
+          }
         }} 
         systemUsers={users} 
         companyConfig={companyConfig} 
@@ -2425,7 +2455,10 @@ export default function App() {
               clients={clients}
               currentUser={currentUser}
               cajaAbierta={cajaAbierta}
+              companyConfig={companyConfig}
+              getApiUrl={getApiUrl}
               onAddClient={handleAddClient}
+              onAddClientsBulk={handleAddClientsBulk}
               onRegisterAbono={handleRegisterAbono}
               onUpdateClient={handleUpdateClient}
               onDeleteClient={handleDeleteClient}

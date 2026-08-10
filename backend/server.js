@@ -7,7 +7,7 @@ import {
   updateProductStock, updateProductPrices, updateProductPricesBulk, getClients, saveClient, registerAbono,
   getTasaHistory, saveTasa, clearTasaHistory, getMovements, saveMovement, getPriceHistory, savePriceHistory,
   getSales, saveSale, getCierres, abrirCaja, cerrarCaja, getCajaEstado, registrarCajaMovimiento, updateCierre, deleteCierre,
-  updateClient, deleteClient, getAbonos, deleteProduct, updateProduct, saveProductsBulk,
+  updateClient, deleteClient, getAbonos, deleteProduct, updateProduct, saveProductsBulk, saveClientsBulk,
   saveUser, updateUser, deleteUser, getRoles, saveRole, updateRole, deleteRole, wipeDatabase, backupDatabase, restoreDatabase,
   readJsonFile, writeJsonFile,
   getMasterPass, saveMasterPass, verifyMasterPass, getAccionistas, saveAccionista, deleteAccionista, getInversiones, saveInversion, deleteInversion,
@@ -249,6 +249,20 @@ app.get('/api/clientes', async (req, res) => {
 app.post('/api/clientes', async (req, res) => {
   const saved = await saveClient(req.body);
   res.json(saved);
+});
+
+app.post('/api/clientes/bulk', async (req, res) => {
+  try {
+    const { clients, mode } = req.body;
+    if (!Array.isArray(clients)) {
+      return res.status(400).json({ error: 'El cuerpo de la solicitud debe incluir un arreglo de clientes.' });
+    }
+    const saved = await saveClientsBulk(clients, mode || 'update');
+    res.json({ success: true, count: saved.length, clients: saved });
+  } catch (err) {
+    console.error('Error en /api/clientes/bulk:', err.message);
+    res.status(500).json({ error: 'Error interno al procesar la carga masiva de clientes.' });
+  }
 });
 
 app.post('/api/clientes/abono', async (req, res) => {
@@ -1291,16 +1305,16 @@ app.post('/api/whatsapp/config', (req, res) => {
   }
 });
 
-app.post('/api/whatsapp/send-cierre', async (req, res) => {
+app.post(['/api/whatsapp/send-cierre', '/api/whatsapp/send-report'], async (req, res) => {
   try {
     const { imageBase64, textSummary } = req.body;
-    if (!imageBase64) {
-      return res.status(400).json({ error: 'La imagen en Base64 es requerida.' });
+    if (!imageBase64 && !textSummary) {
+      return res.status(400).json({ error: 'Se requiere una imagen o un mensaje de texto para enviar por WhatsApp.' });
     }
-    const result = await sendCierreReport(imageBase64, textSummary || 'Cierre de caja');
+    const result = await sendCierreReport(imageBase64 || '', textSummary || 'Reporte de Sistema');
     res.json(result);
   } catch (err) {
-    console.error('Error en /api/whatsapp/send-cierre:', err.message);
+    console.error('Error en /api/whatsapp/send-report:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1505,9 +1519,9 @@ freePortIfOccupied(PORT).then(() => {
     // Launch Native App Window (Edge App Mode / Browser) on startup
     setTimeout(() => {
       import('child_process').then(({ exec }) => {
-        const targetUrl = `http://localhost:${PORT}`;
+        const targetUrl = `http://localhost:${PORT}?mode=desktop`;
         if (process.platform === 'win32') {
-          exec(`start "" chrome --app=${targetUrl} --start-maximized`, (err) => {
+          exec(`start "" chrome --app=${targetUrl} --window-size=1080,700`, (err) => {
             if (err) exec(`start ${targetUrl}`);
           });
         } else {

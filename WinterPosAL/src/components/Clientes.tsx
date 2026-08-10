@@ -1,17 +1,56 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Client, User, Sale, Abono } from '../types';
+import { Client, User, Sale, Abono, CompanyConfig } from '../types';
 import { 
   Users, Plus, DollarSign, Search, ChevronUp, ChevronDown, 
   ChevronsUpDown, Edit, Download, FileText, TrendingUp, 
-  Info, AlertCircle, RefreshCw, MinusCircle, Settings
+  Info, AlertCircle, RefreshCw, MinusCircle, Settings, FileSpreadsheet, Upload, CheckCircle2,
+  MessageCircle, X
 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
+
+// Dynamic loader for XLSX (SheetJS)
+const loadXlsx = (): Promise<any> => {
+  return new Promise((resolve, reject) => {
+    if ((window as any).XLSX) return resolve((window as any).XLSX);
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    script.onload = () => {
+      const lib = (window as any).XLSX;
+      lib ? resolve(lib) : reject(new Error('No se pudo inicializar XLSX'));
+    };
+    script.onerror = () => reject(new Error('Error al cargar librería XLSX desde CDN'));
+    document.head.appendChild(script);
+  });
+};
+
+// Dynamic loader for PDF.js to parse PDF files
+const loadPdfJs = (): Promise<any> => {
+  return new Promise((resolve, reject) => {
+    if ((window as any).pdfjsLib) return resolve((window as any).pdfjsLib);
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    script.onload = () => {
+      const lib = (window as any).pdfjsLib;
+      if (lib) {
+        lib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        resolve(lib);
+      } else {
+        reject(new Error('No se pudo inicializar PDF.js'));
+      }
+    };
+    script.onerror = () => reject(new Error('Error al cargar librería PDF.js desde CDN'));
+    document.head.appendChild(script);
+  });
+};
 
 interface ClientesProps {
   clients: Client[];
   currentUser: User;
   cajaAbierta?: boolean;
+  companyConfig?: CompanyConfig;
+  getApiUrl?: (path: string) => string;
   onAddClient: (newClient: Client) => void;
+  onAddClientsBulk?: (clientsArray: any[], mode: 'update' | 'skip') => Promise<number | null>;
   onRegisterAbono: (
     clientId: number, 
     amountUSD: number, 
@@ -29,7 +68,10 @@ export default function Clientes({
   clients, 
   currentUser: _currentUser, 
   cajaAbierta: _cajaAbierta = true,
+  companyConfig,
+  getApiUrl,
   onAddClient, 
+  onAddClientsBulk,
   onRegisterAbono, 
   onUpdateClient, 
   onDeleteClient,
@@ -54,10 +96,34 @@ export default function Clientes({
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedInvoice, setExpandedInvoice] = useState<string | null>(null);
 
+  // Debt & Rate Filters state
+  type DebtFilterMode = 'all' | 'with_debt' | 'no_debt' | 'debt_gt' | 'debt_lte' | 'debt_eq';
+  const [debtFilterMode, setDebtFilterMode] = useState<DebtFilterMode>('all');
+  const [debtThreshold, setDebtThreshold] = useState<string>('50');
+  const [costoFilterMode, setCostoFilterMode] = useState<'all' | 'costo' | 'detalle'>('all');
+  const [isSendingWhatsAppReport, setIsSendingWhatsAppReport] = useState(false);
+
   // Modals state
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showAbonoModal, setShowAbonoModal] = useState(false);
+  const [showBulkModal, setShowBulkModal] = useState(false);
+
+  // Bulk Import state
+  const [bulkFileLoading, setBulkFileLoading] = useState(false);
+  const [bulkImportProgress, setBulkImportProgress] = useState('');
+  const [bulkDuplicateMode, setBulkDuplicateMode] = useState<'update' | 'skip'>('update');
+  const [parsedBulkClients, setParsedBulkClients] = useState<{
+    cedula_rif: string;
+    nombre: string;
+    telefono: string;
+    direccion: string;
+    limite_credito: number;
+    saldo_pendiente: number;
+    porcentaje_descuento: number;
+    aplica_precio_costo: boolean;
+    isDuplicate: boolean;
+  }[]>([]);
 
   // Form states
   const [newName, setNewName] = useState('');
@@ -118,6 +184,7 @@ export default function Clientes({
         setShowAddModal(false);
         setShowAbonoModal(false);
         setShowEditModal(false);
+        setShowBulkModal(false);
       }
     };
     window.addEventListener('keydown', handleEsc);
@@ -132,11 +199,41 @@ export default function Clientes({
     }
   }, [clients]);
 
-  // Filters for Catálogo
-  const baseFiltered = clients.filter(c =>
-    c.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.cedula_rif.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Enhanced Filters for Catálogo
+  const baseFiltered = useMemo(() => {
+    return clients.filter(c => {
+      // 1. Text Search (name, doc, phone)
+      if (searchTerm.trim()) {
+        const term = searchTerm.toLowerCase();
+        const matchName = c.nombre?.toLowerCase().includes(term);
+        const matchDoc = c.cedula_rif?.toLowerCase().includes(term);
+        const matchPhone = c.telefono?.toLowerCase().includes(term);
+        if (!matchName && !matchDoc && !matchPhone) return false;
+      }
+
+      // 2. Debt Filter
+      const debt = parseFloat(c.saldo_pendiente as any) || 0;
+      const threshold = parseFloat(debtThreshold) || 0;
+
+      if (debtFilterMode === 'with_debt') {
+        if (debt <= 0.001) return false;
+      } else if (debtFilterMode === 'no_debt') {
+        if (debt > 0.001) return false;
+      } else if (debtFilterMode === 'debt_gt') {
+        if (debt <= threshold) return false;
+      } else if (debtFilterMode === 'debt_lte') {
+        if (debt > threshold) return false;
+      } else if (debtFilterMode === 'debt_eq') {
+        if (Math.abs(debt - threshold) > 0.01) return false;
+      }
+
+      // 3. Price Cost filter
+      if (costoFilterMode === 'costo' && !c.aplica_precio_costo) return false;
+      if (costoFilterMode === 'detalle' && c.aplica_precio_costo) return false;
+
+      return true;
+    });
+  }, [clients, searchTerm, debtFilterMode, debtThreshold, costoFilterMode]);
 
   const filteredClients = useMemo(() => {
     return [...baseFiltered].sort((a, b) => {
@@ -146,14 +243,15 @@ export default function Clientes({
         return sortDir === 'asc' ? va - vb : vb - va;
       }
       return sortDir === 'asc'
-        ? String(va).localeCompare(String(vb))
-        : String(vb).localeCompare(String(va));
+        ? String(va || '').localeCompare(String(vb || ''))
+        : String(vb || '').localeCompare(String(va || ''));
     });
   }, [baseFiltered, sortField, sortDir]);
 
   // Summary Metrics
   const totalClients = clients.length;
   const totalDeuda = clients.reduce((acc, c) => acc + (c.saldo_pendiente || 0), 0);
+  const filteredDeuda = filteredClients.reduce((acc, c) => acc + (c.saldo_pendiente || 0), 0);
 
   // Sorting Icon helper
   const SortIcon = ({ field }: { field: SortField }) => {
@@ -756,12 +854,12 @@ export default function Clientes({
         <body>
           <div class="header">
             <div class="header-left">
-              <h1>INVERSIONES NIQUITAO</h1>
-              <p>RIF: J-41132631 | Teléfono: 0424-2042877 | Dirección: Caracas</p>
+              <h1>${companyConfig?.nombre_comercio || 'INVERSIONES NIQUITAO'}</h1>
+              <p>RIF: ${companyConfig?.rif || 'J-41132631'} | Teléfono: ${companyConfig?.telefono || '0424-2042877'} | Dirección: ${companyConfig?.direccion || 'Caracas'}</p>
             </div>
             <div class="header-right">
               <p>Reporte Generado: ${dateStr}</p>
-              <p>Operador: Anderson Laguna</p>
+              <p>Operador: ${_currentUser.nombre || _currentUser.usuario}</p>
             </div>
           </div>
           
@@ -779,6 +877,166 @@ export default function Clientes({
       </html>
     `);
     printWindow.document.close();
+  };
+
+  // Export Report to Excel (.xlsx)
+  const handleExportExcel = async () => {
+    try {
+      const XLSX = await loadXlsx();
+      let exportData: any[] = [];
+      let filename = 'Reporte_Clientes_WinterPOS.xlsx';
+
+      if (activeSubTab === 'catalogo') {
+        exportData = filteredClients.map(c => ({
+          'Cédula / RIF': c.cedula_rif,
+          'Nombre / Razón Social': c.nombre,
+          'Teléfono': c.telefono || 'N/A',
+          'Dirección': c.direccion || 'N/A',
+          'Límite Crédito ($)': c.limite_credito,
+          'Crédito Disponible ($)': c.credito_disponible,
+          'Saldo Pendiente / Deuda ($)': c.saldo_pendiente,
+          '% Descuento': c.porcentaje_descuento,
+          'Tarifa Precio Costo': c.aplica_precio_costo ? 'SI' : 'NO',
+          'Estado': c.estado || 'Activo'
+        }));
+        filename = `Catalogo_Clientes_${new Date().toISOString().substring(0, 10)}.xlsx`;
+      } else if (activeSubTab === 'ranking') {
+        exportData = rankingData.map((c, i) => ({
+          'Posición': i + 1,
+          'Nombre': c.nombre,
+          'Cédula / RIF': c.cedula_rif,
+          'Total Compras ($)': c.totalSpent,
+          'Nro Facturas': c.salesCount,
+          'Compra Promedio ($)': c.avgSale
+        }));
+        filename = `Ranking_Clientes_${new Date().toISOString().substring(0, 10)}.xlsx`;
+      } else if (activeSubTab === 'creditos') {
+        exportData = filteredCreditAbonoList.map(ev => ({
+          'Tipo': ev.tipo,
+          'Fecha': ev.fecha,
+          'Referencia': ev.ref,
+          'Cliente': ev.nombre,
+          'Cédula / RIF': ev.cedula_rif,
+          'Forma de Pago': ev.metodo || 'N/A',
+          'Monto ($ USD)': ev.monto
+        }));
+        filename = `Movimientos_Creditos_Abonos_${new Date().toISOString().substring(0, 10)}.xlsx`;
+      } else if (activeSubTab === 'historial') {
+        if (!selectedRowClient) {
+          showAlert('Seleccione un cliente para exportar su historial.', 'Seleccione Cliente', 'warning');
+          return;
+        }
+        exportData = clientSalesHistory.map(s => {
+          const isCredit = s.pagos?.some(p => p.metodo === 'CreditoCliente') || false;
+          return {
+            'Fecha': s.fecha,
+            'Factura Nro': s.factura_nro,
+            'Tipo Venta': isCredit ? 'CRÉDITO' : 'CONTADO',
+            'Subtotal ($)': s.subtotal,
+            'Descuento ($)': s.descuento,
+            'Total ($ USD)': s.totalUSD,
+            'Total (Bs VES)': s.totalVES,
+            'Cajero': s.usuario || 'N/A'
+          };
+        });
+        filename = `Historial_Facturas_${selectedRowClient.cedula_rif}_${new Date().toISOString().substring(0, 10)}.xlsx`;
+      }
+
+      if (exportData.length === 0) {
+        showAlert('No hay datos para exportar bajo el filtro actual.', 'Sin Datos', 'warning');
+        return;
+      }
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
+      XLSX.writeFile(wb, filename);
+    } catch (err: any) {
+      showAlert(`Error al exportar a Excel: ${err.message}`, 'Error Exportación', 'error');
+    }
+  };
+
+  // Send WhatsApp Summary Report
+  const handleSendWhatsAppReport = async () => {
+    if (!getApiUrl) {
+      showAlert('Función de WhatsApp no disponible en este momento.', 'Error', 'error');
+      return;
+    }
+    try {
+      setIsSendingWhatsAppReport(true);
+      let summaryText = '';
+      const dateStr = new Date().toLocaleString('es-VE');
+      const companyName = companyConfig?.nombre_comercio || 'INVERSIONES';
+
+      if (activeSubTab === 'catalogo') {
+        const filterDescription = debtFilterMode === 'with_debt' ? 'Solo con Deuda (> $0)'
+          : debtFilterMode === 'no_debt' ? 'Sin Deuda ($0.00)'
+          : debtFilterMode === 'debt_gt' ? `Deuda > $${debtThreshold}`
+          : debtFilterMode === 'debt_lte' ? `Deuda ≤ $${debtThreshold}`
+          : debtFilterMode === 'debt_eq' ? `Deuda = $${debtThreshold}`
+          : 'Todos los Clientes';
+
+        const clientsWithDebt = filteredClients.filter(c => c.saldo_pendiente > 0.01);
+
+        summaryText = `👥 *REPORTE DE CARTERA DE CLIENTES*\n`;
+        summaryText += `🏬 *${companyName}*\n`;
+        summaryText += `📅 *Fecha:* ${dateStr}\n`;
+        summaryText += `🔍 *Filtro:* ${filterDescription}\n\n`;
+        summaryText += `📊 *RESUMEN GENERAL:*\n`;
+        summaryText += `• Total Clientes: ${filteredClients.length} de ${totalClients}\n`;
+        summaryText += `• Total Saldo Pendiente: $${filteredDeuda.toFixed(2)} USD\n\n`;
+
+        if (clientsWithDebt.length > 0) {
+          summaryText += `⚠️ *CLIENTES CON SALDO PENDIENTE (${clientsWithDebt.length}):*\n`;
+          clientsWithDebt.slice(0, 15).forEach((c, i) => {
+            summaryText += `${i + 1}. *${c.nombre}* (${c.cedula_rif}): *$${c.saldo_pendiente.toFixed(2)} USD*\n`;
+          });
+          if (clientsWithDebt.length > 15) {
+            summaryText += `_...y ${clientsWithDebt.length - 15} clientes más con deuda pendiente._\n`;
+          }
+        } else {
+          summaryText += `✅ *No se registran clientes con deuda pendiente bajo este filtro.*\n`;
+        }
+        summaryText += `\n*WinterPosAL Cloud System*`;
+      } else if (activeSubTab === 'ranking') {
+        summaryText = `🏆 *REPORTE DE RANKING DE CLIENTES*\n🏬 *${companyName}*\n📅 *Fecha:* ${dateStr}\n\n`;
+        summaryText += `Top 10 Clientes por Volumen de Compras:\n`;
+        rankingData.slice(0, 10).forEach((c, i) => {
+          summaryText += `${i + 1}. *${c.nombre}*: $${c.totalSpent.toFixed(2)} USD (${c.salesCount} compras)\n`;
+        });
+        summaryText += `\n*WinterPosAL Cloud System*`;
+      } else {
+        summaryText = `📋 *REPORTE DE MOVIMIENTOS Y CRÉDITOS*\n🏬 *${companyName}*\n📅 *Fecha:* ${dateStr}\n`;
+        summaryText += `Total Clientes: ${totalClients} | Deuda Total: $${totalDeuda.toFixed(2)} USD\n\n*WinterPosAL Cloud System*`;
+      }
+
+      // Use /whatsapp/send-cierre (standard route supported by all backend versions)
+      const res = await fetch(getApiUrl('/whatsapp/send-cierre'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          textSummary: summaryText,
+          imageBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+        })
+      });
+
+      let data: any = null;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      }
+
+      if (res.ok && (!data || data.success || data.simulated)) {
+        showAlert('✅ Reporte de cartera de clientes enviado exitosamente por WhatsApp al grupo configurado.', 'Reporte Enviado', 'success');
+      } else {
+        const errorMsg = data?.error || (res.status === 404 ? 'Servicio de WhatsApp no encontrado en el servidor.' : `Error del servidor (${res.status}). Verifique la conexión de WhatsApp.`);
+        showAlert(errorMsg, 'Error WhatsApp', 'error');
+      }
+    } catch (err: any) {
+      showAlert(`Error al enviar por WhatsApp: ${err.message}`, 'Error', 'error');
+    } finally {
+      setIsSendingWhatsAppReport(false);
+    }
   };
 
   return (
@@ -842,39 +1100,100 @@ export default function Clientes({
         </button>
       </div>
 
-      {/* FILTER SEARCH BAR + PDF EXPORT BAR */}
+      {/* FILTER SEARCH BAR + ADVANCED DEBT FILTERS */}
       <div className="bg-slate-100 p-3 rounded-lg border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-inner">
-        <div className="flex items-center gap-2 w-full md:w-auto">
-          <span className="text-slate-650 font-bold font-sans whitespace-nowrap">Buscar Cliente :</span>
-          <div className="relative w-full md:w-80">
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+          <span className="text-slate-650 font-bold font-sans whitespace-nowrap text-xs">Buscar:</span>
+          <div className="relative w-full md:w-56">
             <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
               <Search className="w-3.5 h-3.5" />
             </span>
             <input
               type="text"
-              placeholder="Escriba Cédula, RIF o Nombre..."
+              placeholder="Cédula, RIF, Nombre o Tel..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full bg-white border border-slate-300 rounded pl-9 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-slate-500 font-sans shadow-sm"
             />
           </div>
-        </div>
 
-        {/* Totals & PDF export button */}
-        <div className="flex items-center gap-4 self-end md:self-auto">
-          <div className="text-right text-[10px] font-sans text-slate-600">
-            <div><span className="font-semibold text-slate-500">Total Saldo Pendiente :</span> <span className="font-mono text-xs font-extrabold text-red-600">${totalDeuda.toFixed(2)}</span></div>
-            <div><span className="font-semibold text-slate-500">Total Clientes :</span> <span className="font-mono text-xs font-bold text-slate-700">{totalClients}</span></div>
+          {/* Filtro de Deuda */}
+          <div className="flex items-center gap-1">
+            <select
+              value={debtFilterMode}
+              onChange={(e) => setDebtFilterMode(e.target.value as any)}
+              className="bg-white border border-slate-300 rounded px-2 py-1.5 text-xs text-slate-800 font-sans font-bold shadow-sm outline-none focus:border-sky-500"
+            >
+              <option value="all">TODOS LOS CLIENTES</option>
+              <option value="with_debt">SOLO CON DEUDA (&gt; $0)</option>
+              <option value="no_debt">SIN DEUDA ($0.00)</option>
+              <option value="debt_gt">DEUDA MAYOR A (&gt; $)</option>
+              <option value="debt_lte">DEUDA MENOR O IGUAL (≤ $)</option>
+              <option value="debt_eq">DEUDA EXACTA (= $)</option>
+            </select>
+
+            {(debtFilterMode === 'debt_gt' || debtFilterMode === 'debt_lte' || debtFilterMode === 'debt_eq') && (
+              <div className="flex items-center gap-1 bg-white border border-slate-300 rounded px-2 py-1 shadow-sm">
+                <span className="text-xs font-bold text-slate-500">$</span>
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  value={debtThreshold}
+                  onChange={(e) => setDebtThreshold(e.target.value)}
+                  placeholder="Monto"
+                  className="w-16 bg-transparent text-xs font-mono font-bold text-slate-800 outline-none"
+                />
+              </div>
+            )}
           </div>
 
-          <button
-            onClick={handleDownloadReport}
-            className="bg-slate-700 hover:bg-slate-800 text-white p-2 rounded shadow-sm transition-all flex items-center gap-1.5 font-sans font-bold text-xs"
-            title="Generar y abrir reporte PDF de lo que ve en la tabla"
+          {/* Filtro de Tarifa Costo */}
+          <select
+            value={costoFilterMode}
+            onChange={(e) => setCostoFilterMode(e.target.value as any)}
+            className="bg-white border border-slate-300 rounded px-2 py-1.5 text-xs text-slate-700 font-sans shadow-sm outline-none font-medium"
           >
-            <Download className="w-4 h-4 text-sky-400" />
-            <span>PDF</span>
-          </button>
+            <option value="all">TODAS LAS TARIFAS</option>
+            <option value="costo">SOLO PRECIO COSTO</option>
+            <option value="detalle">PRECIO DETALLE / NORMAL</option>
+          </select>
+
+          {/* Botón Limpiar Filtros */}
+          {(searchTerm.trim() || debtFilterMode !== 'all' || costoFilterMode !== 'all') && (
+            <button
+              onClick={() => {
+                setSearchTerm('');
+                setDebtFilterMode('all');
+                setCostoFilterMode('all');
+              }}
+              className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs px-2 py-1.5 rounded font-sans font-bold flex items-center gap-1 transition-all"
+              title="Restablecer filtros a valores por defecto"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Limpiar</span>
+            </button>
+          )}
+        </div>
+
+        {/* Totals & Counters summary */}
+        <div className="flex items-center gap-4 self-end md:self-auto">
+          <div className="text-right text-[10px] font-sans text-slate-600">
+            <div>
+              <span className="font-semibold text-slate-500">Total Saldo Pendiente:</span>{' '}
+              <span className="font-mono text-xs font-extrabold text-red-600">
+                ${(debtFilterMode !== 'all' || searchTerm.trim() || costoFilterMode !== 'all' ? filteredDeuda : totalDeuda).toFixed(2)} USD
+              </span>
+            </div>
+            <div>
+              <span className="font-semibold text-slate-500">Total Clientes:</span>{' '}
+              <span className="font-mono text-xs font-bold text-slate-700">
+                {debtFilterMode !== 'all' || searchTerm.trim() || costoFilterMode !== 'all' 
+                  ? `${filteredClients.length} de ${totalClients}` 
+                  : totalClients}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1404,6 +1723,61 @@ export default function Clientes({
                 <span>Abono</span>
               </button>
 
+              {/* BUTTON 5: CARGA MASIVA (Exclusivo Administrador) */}
+              {_currentUser.rol?.toLowerCase() === 'administrador' && (
+                <button
+                  onClick={() => {
+                    setParsedBulkClients([]);
+                    setShowBulkModal(true);
+                  }}
+                  className="w-full bg-purple-700 hover:bg-purple-800 text-white border border-purple-900 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all active:scale-95 mt-1"
+                  title="Importar catálogo de clientes masivo desde Excel, CSV o PDF (Exclusivo Administrador)"
+                >
+                  <FileSpreadsheet className="w-4 h-4 bg-purple-900/60 rounded-full p-0.5 text-yellow-300" />
+                  <span>Carga Masiva</span>
+                </button>
+              )}
+
+              {/* SECCIÓN DE REPORTES Y EXPORTACIÓN */}
+              {hasPermission('ver') && (
+                <div className="border-t border-slate-300/80 pt-2.5 mt-2 space-y-1.5 font-sans">
+                  <span className="text-[9px] font-sans font-extrabold text-slate-500 uppercase tracking-wider block">
+                    Reportes y Exportación
+                  </span>
+
+                  {/* REPORT BUTTON 1: PDF */}
+                  <button
+                    onClick={handleDownloadReport}
+                    className="w-full bg-slate-700 hover:bg-slate-800 text-white border border-slate-800 py-2 px-2.5 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[10.5px] uppercase tracking-wider text-left transition-all active:scale-95"
+                    title="Imprimir o descargar reporte PDF con el filtro actual"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-sky-400 bg-slate-800/60 rounded p-0.5" />
+                    <span>Descargar PDF</span>
+                  </button>
+
+                  {/* REPORT BUTTON 2: EXCEL (.XLSX) */}
+                  <button
+                    onClick={handleExportExcel}
+                    className="w-full bg-emerald-700 hover:bg-emerald-800 text-white border border-emerald-900 py-2 px-2.5 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[10.5px] uppercase tracking-wider text-left transition-all active:scale-95"
+                    title="Exportar listado actual de clientes y saldos a Excel (.xlsx)"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-300 bg-emerald-900/60 rounded p-0.5" />
+                    <span>Exportar Excel</span>
+                  </button>
+
+                  {/* REPORT BUTTON 3: WHATSAPP */}
+                  <button
+                    onClick={handleSendWhatsAppReport}
+                    disabled={isSendingWhatsAppReport}
+                    className="w-full bg-[#128C7E] hover:bg-[#075E54] disabled:opacity-50 text-white border border-[#075E54] py-2 px-2.5 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[10.5px] uppercase tracking-wider text-left transition-all active:scale-95"
+                    title="Enviar resumen de cartera y deudores vía WhatsApp"
+                  >
+                    <MessageCircle className="w-3.5 h-3.5 text-emerald-200 bg-[#075E54]/60 rounded p-0.5" />
+                    <span>{isSendingWhatsAppReport ? 'Enviando...' : 'Enviar WhatsApp'}</span>
+                  </button>
+                </div>
+              )}
+
             </div>
 
             {selectedRowClient && (
@@ -1798,6 +2172,352 @@ export default function Clientes({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4: CARGA MASIVA / MIGRACIÓN DE CLIENTES (EXCLUSIVO ADMINISTRADOR) */}
+      {showBulkModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-300 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            
+            {/* Header */}
+            <div className="bg-purple-900 text-white p-4 flex items-center justify-between border-b border-purple-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-purple-800 rounded-lg">
+                  <FileSpreadsheet className="w-5 h-5 text-yellow-300" />
+                </div>
+                <div>
+                  <h3 className="font-sans font-bold text-sm uppercase tracking-wide">Carga Masiva y Migración de Clientes</h3>
+                  <p className="text-[11px] text-purple-200 font-sans">
+                    Importación exclusiva para Administradores desde Excel (.xlsx, .xls), CSV o PDF
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowBulkModal(false)}
+                className="text-purple-200 hover:text-white hover:bg-purple-800 p-1.5 rounded-lg transition-all"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-6 flex-grow">
+              
+              {/* Instructions & Template Download */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                
+                <div className="md:col-span-2 bg-purple-50/60 border border-purple-200/80 p-3.5 rounded-lg text-xs text-purple-950 font-sans leading-relaxed space-y-1.5">
+                  <div className="font-bold flex items-center gap-1.5 text-purple-900">
+                    <Info className="w-4 h-4 text-purple-700" />
+                    <span>Formatos Aceptados: Excel (.xlsx, .xls), CSV y PDF</span>
+                  </div>
+                  <p className="text-[11px] text-slate-600">
+                    Sube un reporte o archivo con las columnas: <strong>RIF/Cédula, Nombre, Teléfono, Límite Crédito, Saldo Pendiente (Deuda Inicial), % Descuento, Precio Costo (SI/NO)</strong>.
+                  </p>
+                </div>
+
+                <div className="flex flex-col justify-center gap-2 bg-slate-50 border border-slate-200 p-3 rounded-lg">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const XLSX = await loadXlsx();
+                        const templateData = [
+                          {
+                            "cedula_rif": "V-12345678",
+                            "nombre": "DISTRIBUIDORA EJEMPLO C.A.",
+                            "telefono": "04141234567",
+                            "direccion": "AV. PRINCIPAL LOCAL 1",
+                            "limite_credito": 500.00,
+                            "saldo_pendiente": 120.50,
+                            "porcentaje_descuento": 5,
+                            "aplica_precio_costo": "NO"
+                          },
+                          {
+                            "cedula_rif": "V-87654321",
+                            "nombre": "MARIA PEREZ (CLIENTE FRECUENTE)",
+                            "telefono": "04249876543",
+                            "direccion": "CALLE LOS FLORES #12",
+                            "limite_credito": 300.00,
+                            "saldo_pendiente": 0.00,
+                            "porcentaje_descuento": 0,
+                            "aplica_precio_costo": "SI"
+                          }
+                        ];
+                        const ws = XLSX.utils.json_to_sheet(templateData);
+                        const wb = XLSX.utils.book_new();
+                        XLSX.utils.book_append_sheet(wb, ws, "Clientes_Migracion");
+                        XLSX.writeFile(wb, "Plantilla_Migracion_Clientes_WinterPOS.xlsx");
+                      } catch (err: any) {
+                        showAlert(`Error al generar la plantilla: ${err.message}`, 'Error', 'error');
+                      }
+                    }}
+                    className="w-full bg-slate-700 hover:bg-slate-800 text-white py-2 px-3 rounded text-[11px] font-sans font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                  >
+                    <Download className="w-4 h-4 text-emerald-400" />
+                    <span>Descargar Plantilla Excel</span>
+                  </button>
+                </div>
+
+              </div>
+
+              {/* File Dropzone / Selector */}
+              <div className="border-2 border-dashed border-purple-300 hover:border-purple-500 bg-purple-50/30 rounded-xl p-6 text-center transition-all cursor-pointer relative">
+                <input
+                  type="file"
+                  accept=".xlsx, .xls, .csv, .pdf"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setBulkFileLoading(true);
+                    setBulkImportProgress('Procesando archivo...');
+                    try {
+                      const ext = file.name.split('.').pop()?.toLowerCase();
+                      let rawClients: any[] = [];
+
+                      if (ext === 'pdf') {
+                        setBulkImportProgress('Extrayendo clientes desde documento PDF...');
+                        const pdfjsLib = await loadPdfJs();
+                        const arrayBuffer = await file.arrayBuffer();
+                        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                        let fullText = '';
+                        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                          const page = await pdf.getPage(pageNum);
+                          const textContent = await page.getTextContent();
+                          const pageText = textContent.items.map((item: any) => item.str).join(' ');
+                          fullText += pageText + '\n';
+                        }
+                        
+                        // Parse PDF line by line or pattern search
+                        const lines = fullText.split('\n');
+                        const docRegex = /([VJEGvjeg][-\s]?\d{6,9})/g;
+
+                        for (const line of lines) {
+                          const matches = line.match(docRegex);
+                          if (matches && matches.length > 0) {
+                            const doc = matches[0].toUpperCase().replace(/\s+/g, '');
+                            // Extract numeric amounts if present
+                            const nums = line.match(/\$?(\d+[\d,.]*)/g) || [];
+                            const parsedNums = nums.map(n => parseFloat(n.replace('$', '').replace(',', '.'))).filter(n => !isNaN(n));
+                            
+                            const nameCandidate = line.replace(doc, '').replace(/[0-9$,.-]/g, '').trim();
+
+                            rawClients.push({
+                              cedula_rif: doc,
+                              nombre: nameCandidate.length > 2 ? nameCandidate.substring(0, 40) : `CLIENTE ${doc}`,
+                              telefono: '',
+                              direccion: '',
+                              limite_credito: parsedNums[0] || 0,
+                              saldo_pendiente: parsedNums[1] || 0,
+                              porcentaje_descuento: 0,
+                              aplica_precio_costo: false
+                            });
+                          }
+                        }
+                      } else {
+                        // Excel / CSV Parsing
+                        setBulkImportProgress('Analizando hoja de cálculo...');
+                        const XLSX = await loadXlsx();
+                        const data = await file.arrayBuffer();
+                        const workbook = XLSX.read(data);
+                        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                        const jsonData = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
+
+                        rawClients = jsonData.map((row: any) => {
+                          const keys = Object.keys(row);
+                          const findKey = (candidates: string[]) => keys.find(k => candidates.some(c => k.toLowerCase().includes(c)));
+
+                          const docKey = findKey(['cedula', 'rif', 'rfc', 'identificacion', 'id', 'documento']);
+                          const nameKey = findKey(['nombre', 'razon', 'cliente']);
+                          const phoneKey = findKey(['telefono', 'celular', 'tlf']);
+                          const dirKey = findKey(['direccion', 'domicilio', 'dir']);
+                          const limitKey = findKey(['limite', 'credito_limite', 'cupo']);
+                          const debtKey = findKey(['deuda', 'saldo', 'pendiente', 'saldo_pendiente']);
+                          const descKey = findKey(['descuento', 'desc', 'porcentaje']);
+                          const costoKey = findKey(['costo', 'precio_costo', 'aplica_costo']);
+
+                          const docVal = docKey ? String(row[docKey]).trim() : '';
+                          const nameVal = nameKey ? String(row[nameKey]).trim() : '';
+                          const limitVal = limitKey ? parseFloat(String(row[limitKey]).replace(',', '.')) || 0 : 0;
+                          const debtVal = debtKey ? parseFloat(String(row[debtKey]).replace(',', '.')) || 0 : 0;
+                          const descVal = descKey ? parseFloat(String(row[descKey]).replace(',', '.')) || 0 : 0;
+                          const costoValRaw = costoKey ? String(row[costoKey]).trim().toUpperCase() : '';
+                          const costoVal = costoValRaw === 'SI' || costoValRaw === 'TRUE' || costoValRaw === '1' || costoValRaw.includes('COSTO');
+
+                          return {
+                            cedula_rif: docVal,
+                            nombre: nameVal,
+                            telefono: phoneKey ? String(row[phoneKey]).trim() : '',
+                            direccion: dirKey ? String(row[dirKey]).trim() : '',
+                            limite_credito: limitVal,
+                            saldo_pendiente: debtVal,
+                            porcentaje_descuento: descVal,
+                            aplica_precio_costo: costoVal
+                          };
+                        });
+                      }
+
+                      // Filter valid clients & flag duplicates
+                      const validList = rawClients
+                        .filter(c => c.cedula_rif && c.cedula_rif.length >= 3 && c.nombre && c.nombre.length >= 2)
+                        .map(c => {
+                          const isDuplicate = clients.some(existing => existing.cedula_rif.toLowerCase() === c.cedula_rif.toLowerCase());
+                          return { ...c, isDuplicate };
+                        });
+
+                      setParsedBulkClients(validList);
+                      if (validList.length === 0) {
+                        showAlert('No se pudieron reconocer datos válidos de clientes en el archivo. Verifique el formato y los encabezados.', 'Atención', 'warning');
+                      }
+                    } catch (err: any) {
+                      showAlert(`Error al procesar el archivo: ${err.message}`, 'Error de Carga', 'error');
+                    } finally {
+                      setBulkFileLoading(false);
+                      setBulkImportProgress('');
+                    }
+                  }}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+                
+                {bulkFileLoading ? (
+                  <div className="flex flex-col items-center justify-center py-4 space-y-2">
+                    <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
+                    <span className="text-xs font-bold text-purple-900 font-sans">{bulkImportProgress}</span>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center space-y-2 py-2">
+                    <div className="w-12 h-12 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center shadow-inner">
+                      <Upload className="w-6 h-6" />
+                    </div>
+                    <div className="text-xs font-bold text-slate-800 font-sans">
+                      Haz clic para seleccionar o arrastra tu archivo Excel, CSV o PDF aquí
+                    </div>
+                    <div className="text-[10px] text-slate-500 font-sans">
+                      Archivos soportados: .xlsx, .xls, .csv, .pdf
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Preview Table & Duplicate Strategy Selector */}
+              {parsedBulkClients.length > 0 && (
+                <div className="space-y-4 animate-in fade-in duration-300">
+                  
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-50 p-3 rounded-lg border border-slate-200">
+                    <div className="flex items-center gap-3 text-xs font-sans">
+                      <span className="font-bold text-slate-700">Resumen Carga:</span>
+                      <span className="bg-emerald-100 text-emerald-800 font-mono font-bold px-2 py-0.5 rounded">
+                        Total: {parsedBulkClients.length}
+                      </span>
+                      <span className="bg-amber-100 text-amber-800 font-mono font-bold px-2 py-0.5 rounded">
+                        Duplicados: {parsedBulkClients.filter(c => c.isDuplicate).length}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-xs font-sans">
+                      <label className="text-slate-600 font-bold">Si el cliente ya existe:</label>
+                      <select
+                        value={bulkDuplicateMode}
+                        onChange={(e) => setBulkDuplicateMode(e.target.value as any)}
+                        className="bg-white border border-slate-300 text-slate-800 rounded px-2.5 py-1 text-xs outline-none font-bold"
+                      >
+                        <option value="update">Actualizar datos y saldos</option>
+                        <option value="skip">Ignorar cliente duplicado</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Table */}
+                  <div className="border border-slate-200 rounded-lg overflow-hidden max-h-60 overflow-y-auto">
+                    <table className="w-full text-[11px] text-left border-collapse">
+                      <thead className="bg-slate-700 text-white font-sans uppercase font-bold sticky top-0">
+                        <tr>
+                          <th className="p-2">Cédula / RIF</th>
+                          <th className="p-2">Nombre / Razón Social</th>
+                          <th className="p-2 text-center">Teléfono</th>
+                          <th className="p-2 text-right">Límite Crédito</th>
+                          <th className="p-2 text-right">Saldo Pendiente</th>
+                          <th className="p-2 text-center">% Desc.</th>
+                          <th className="p-2 text-center">P. Costo</th>
+                          <th className="p-2 text-center">Estatus</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-700 font-sans">
+                        {parsedBulkClients.map((c, idx) => (
+                          <tr key={idx} className={c.isDuplicate ? 'bg-amber-50/70' : 'hover:bg-slate-50'}>
+                            <td className="p-2 font-mono font-bold">{c.cedula_rif}</td>
+                            <td className="p-2 uppercase font-medium">{c.nombre}</td>
+                            <td className="p-2 text-center font-mono">{c.telefono || '—'}</td>
+                            <td className="p-2 text-right font-mono font-bold">${c.limite_credito.toFixed(2)}</td>
+                            <td className="p-2 text-right font-mono font-bold text-red-600">${c.saldo_pendiente.toFixed(2)}</td>
+                            <td className="p-2 text-center font-mono">{c.porcentaje_descuento}%</td>
+                            <td className="p-2 text-center">
+                              {c.aplica_precio_costo ? (
+                                <span className="bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded text-[9px]">COSTO</span>
+                              ) : '—'}
+                            </td>
+                            <td className="p-2 text-center">
+                              {c.isDuplicate ? (
+                                <span className="bg-amber-200 text-amber-900 font-bold px-1.5 py-0.5 rounded text-[9px]">Existe</span>
+                              ) : (
+                                <span className="bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded text-[9px]">Nuevo</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                </div>
+              )}
+
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="bg-slate-50 border-t border-slate-200 p-4 flex justify-between items-center">
+              <button
+                type="button"
+                onClick={() => setShowBulkModal(false)}
+                className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded text-xs font-bold font-sans transition-all"
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                disabled={parsedBulkClients.length === 0 || bulkFileLoading}
+                onClick={async () => {
+                  if (!onAddClientsBulk) {
+                    showAlert('La función de importación masiva no está disponible en este momento.', 'Error', 'error');
+                    return;
+                  }
+                  try {
+                    setBulkFileLoading(true);
+                    setBulkImportProgress('Guardando clientes en base de datos...');
+                    const count = await onAddClientsBulk(parsedBulkClients, bulkDuplicateMode);
+                    if (count !== null) {
+                      showAlert(`✅ Se han importado / actualizado ${count} clientes exitosamente en el catálogo.`, 'Carga Completada', 'success');
+                      setShowBulkModal(false);
+                    } else {
+                      showAlert('Ocurrió un inconveniente al guardar la carga masiva.', 'Error', 'error');
+                    }
+                  } catch (err: any) {
+                    showAlert(`Error al realizar importación: ${err.message}`, 'Error', 'error');
+                  } finally {
+                    setBulkFileLoading(false);
+                    setBulkImportProgress('');
+                  }
+                }}
+                className="bg-purple-700 hover:bg-purple-800 disabled:bg-slate-300 disabled:cursor-not-allowed text-white px-6 py-2 rounded text-xs font-bold font-sans tracking-wide transition-all shadow-md flex items-center gap-2"
+              >
+                <CheckCircle2 className="w-4 h-4 text-yellow-300" />
+                <span>CONFIRMAR E IMPORTAR CLIENTES ({parsedBulkClients.length})</span>
+              </button>
+            </div>
+
           </div>
         </div>
       )}

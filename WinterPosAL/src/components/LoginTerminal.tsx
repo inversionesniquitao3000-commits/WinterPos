@@ -158,260 +158,480 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
     }
   };
 
-  return (
-    <div className="flex h-screen w-screen select-none overflow-hidden font-mono text-white bg-slate-900">
-      
-      {/* LEFT SIDEBAR PANEL: 35% Width */}
-      <div className="w-full md:w-[35%] h-full bg-[#0f3562] flex flex-col justify-between p-8 relative shadow-2xl z-20">
-        
-        {/* Top Spacer or Network Settings Button */}
-        <div className="flex justify-between items-center text-[10px] text-slate-300 font-sans">
-          <span className="font-mono uppercase font-bold tracking-wider text-slate-300">
-            ESTACIÓN: {localStorage.getItem('pos_terminal_name') || 'CAJA_01'}
-          </span>
-          <div className="flex items-center gap-2">
-            {onOpenLicenseModal && (
+  // Detect if running in desktop app launcher mode or standard browser
+  const isDesktopMode = new URLSearchParams(window.location.search).get('mode') === 'desktop' || 
+    window.navigator.userAgent.includes('Electron') || 
+    window.matchMedia('(display-mode: standalone)').matches;
+
+  if (!isDesktopMode) {
+    // STANDARD BROWSER FULLSCREEN LOGIN LAYOUT (Previous Full Screen Design)
+    return (
+      <div className="flex h-screen w-screen select-none overflow-hidden font-mono text-white bg-slate-900">
+        {/* LEFT SIDEBAR PANEL: 35% Width */}
+        <div className="w-full md:w-[35%] h-full bg-[#0f3562] flex flex-col justify-between p-8 relative shadow-2xl z-20 border-r border-slate-700/40">
+          <div className="flex justify-between items-center text-[10px] text-slate-300 font-sans">
+            <span className="font-mono uppercase font-bold tracking-wider text-slate-300">
+              ESTACIÓN: {localStorage.getItem('pos_terminal_name') || 'CAJA_01'}
+            </span>
+            <div className="flex items-center gap-2">
+              {onOpenLicenseModal && (
+                <button 
+                  type="button"
+                  onClick={onOpenLicenseModal}
+                  className="text-emerald-300 hover:text-white px-2 py-0.5 rounded bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-500/30 transition-all font-mono text-[9px] flex items-center gap-1 cursor-pointer"
+                  title="Consultar o renovar información de licencia (F9)"
+                >
+                  <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                  <span>Licencia (F9)</span>
+                </button>
+              )}
               <button 
                 type="button"
-                onClick={onOpenLicenseModal}
-                className="text-emerald-300 hover:text-white px-2 py-0.5 rounded bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-500/30 transition-all font-mono text-[9px] flex items-center gap-1 cursor-pointer"
-                title="Consultar o renovar información de licencia (F9)"
+                onClick={() => setShowConfig(prev => !prev)}
+                className="text-slate-300 hover:text-white p-1 rounded hover:bg-white/10"
+                title="Ajustes de Red LAN"
               >
-                <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                <span>Licencia (F9)</span>
+                <Network className="w-4 h-4" />
               </button>
+            </div>
+          </div>
+
+          <div className="space-y-6 my-auto">
+            <div className="text-center cursor-pointer" onClick={handleLogoClick}>
+              {companyConfig?.logo_url ? (
+                <div className="w-24 h-24 mx-auto rounded-2xl bg-white/10 p-2 border border-white/20 shadow-xl flex items-center justify-center backdrop-blur-sm">
+                  <img src={companyConfig.logo_url} alt="Logo" className="w-full h-full object-contain" />
+                </div>
+              ) : (
+                <svg className="w-24 h-24 mx-auto drop-shadow-lg" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M 15,65 C 32,80 68,80 85,65" stroke="#14b8a6" strokeWidth="3" fill="none" strokeLinecap="round" />
+                  <path d="M 8,58 C 28,78 72,78 92,58" stroke="#0ea5e9" strokeWidth="2.5" fill="none" strokeLinecap="round" />
+                  <path d="M 22,71 C 37,84 63,84 78,71" stroke="#6366f1" strokeWidth="2" fill="none" strokeLinecap="round" />
+                  <polygon points="50,8 54,32 78,32 59,45 68,69 50,54 32,69 41,45 22,32 46,32" fill="#0a2a50" stroke="#ffffff" strokeWidth="2.5" strokeLinejoin="miter" />
+                  <polygon points="50,13 53,33 73,33 57,44 65,64 50,51 35,64 43,44 27,33 47,33" fill="#1c3e6a" stroke="#3b82f6" strokeWidth="1" strokeLinejoin="miter" />
+                </svg>
+              )}
+              <h1 className="text-lg font-black text-yellow-400 tracking-wider mt-3 font-sans uppercase">
+                {companyConfig.nombre_comercio?.trim() !== '' ? companyConfig.nombre_comercio : 'Sistema WinterPosAL'}
+              </h1>
+              <p className="text-[10px] text-slate-300 font-sans tracking-widest mt-1">
+                Bienvenido
+              </p>
+            </div>
+
+            {sessionNotice && (
+              <div className="bg-amber-950/80 border border-amber-500/60 text-amber-200 px-3.5 py-2.5 rounded text-xs font-sans flex items-start gap-2 animate-in fade-in duration-200">
+                <Shield className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                <span className="font-semibold">{sessionNotice}</span>
+              </div>
             )}
-            <button 
-              type="button"
-              onClick={() => setShowConfig(prev => !prev)}
-              className="text-slate-300 hover:text-white p-1 rounded hover:bg-white/10"
-              title="Ajustes de Red LAN"
-            >
-              <Network className="w-4 h-4" />
-            </button>
+
+            {errorMsg && (
+              <div className="bg-red-950/70 border border-red-800/60 text-red-200 px-3.5 py-2.5 rounded text-xs font-sans flex items-start gap-2 animate-pulse">
+                <Shield className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                <span>{errorMsg}</span>
+              </div>
+            )}
+
+            {!showConfig ? (
+              <form className="space-y-4" onSubmit={handleSubmit}>
+                <div className="space-y-1">
+                  <div className="relative">
+                    <input
+                      ref={usernameInputRef}
+                      autoFocus
+                      type="text"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ''))}
+                      placeholder="Usuario"
+                      className="w-full bg-white text-slate-800 border-none rounded px-3 py-2.5 text-xs font-sans pr-8 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-yellow-400 font-bold"
+                      disabled={isLoading}
+                    />
+                    <span className="absolute right-2.5 top-3 text-yellow-400 text-[10px]">◀</span>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value.toLowerCase())}
+                      placeholder="Contraseña"
+                      className="w-full bg-white text-slate-800 border-none rounded px-3 py-2.5 text-xs font-sans pr-12 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-yellow-400 font-bold"
+                      disabled={isLoading}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(prev => !prev)}
+                      className="absolute right-7 top-2 text-slate-400 hover:text-slate-655 outline-none z-10"
+                      disabled={isLoading}
+                    >
+                      {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                    <span className="absolute right-2.5 top-3 text-yellow-400 text-[10px]">◀</span>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-[#08284c] hover:bg-[#061f3b] text-white py-3 rounded text-xs font-black tracking-wider transition-all duration-200 border border-slate-700/30 flex items-center justify-center gap-2 font-sans shadow"
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  ) : (
+                    'Iniciar sesión'
+                  )}
+                </button>
+              </form>
+            ) : (
+              <form className="space-y-3 bg-[#0a2f58] p-4 rounded border border-yellow-500/20" onSubmit={handleSaveConfig}>
+                <div className="flex justify-between items-center border-b border-white/10 pb-2">
+                  <span className="text-[10px] text-yellow-400 font-bold flex items-center gap-1">
+                    <Network className="w-3 h-3 text-yellow-400" />
+                    AJUSTES DE RED LAN
+                  </span>
+                  <button type="button" onClick={() => setShowConfig(false)} className="text-slate-350 text-xs hover:text-white">✕</button>
+                </div>
+                
+                <div className="space-y-2 text-[10px]">
+                  <div>
+                    <label className="text-slate-300 block mb-1 font-sans font-bold">Identificador de Estación / Caja</label>
+                    <input
+                      type="text"
+                      value={terminalNameState}
+                      onChange={(e) => setTerminalNameState(e.target.value.toUpperCase())}
+                      placeholder="Ej: CAJA_01, CAJA_02, MOSTRADOR"
+                      className="w-full bg-[#08284c] border border-slate-700 rounded p-1.5 text-yellow-400 font-bold uppercase outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-slate-300 block mb-1 font-sans">Origen de Datos</label>
+                    <select
+                      value={dbMode}
+                      onChange={(e) => setDbMode(e.target.value)}
+                      className="w-full bg-[#08284c] border border-slate-700 text-white rounded p-1.5 outline-none"
+                    >
+                      <option value="local">Esta Computadora (Local)</option>
+                      <option value="remote">Otra Computadora (Red LAN)</option>
+                    </select>
+                  </div>
+                  {dbMode === 'remote' && (
+                    <div className="grid grid-cols-3 gap-1">
+                      <div className="col-span-2">
+                        <label className="text-slate-300 block mb-1 font-sans">IP Servidor</label>
+                        <input
+                          type="text"
+                          value={serverIP}
+                          onChange={(e) => setServerIP(e.target.value)}
+                          placeholder="192.168.1.100"
+                          className="w-full bg-[#08284c] border border-slate-700 rounded p-1.5 text-yellow-400 outline-none font-bold"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-slate-300 block mb-1 font-sans">Puerto</label>
+                        <input
+                          type="text"
+                          value={serverPort}
+                          onChange={(e) => setServerPort(e.target.value)}
+                          placeholder="5000"
+                          className="w-full bg-[#08284c] border border-slate-700 rounded p-1.5 text-yellow-400 outline-none font-bold"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-[#08284c] hover:bg-[#061f3b] text-white py-2 rounded text-[10px] font-bold font-sans tracking-wide transition-all border border-slate-700"
+                >
+                  GUARDAR Y RECONECTAR
+                </button>
+              </form>
+            )}
+          </div>
+
+          <div className="text-center space-y-1 border-t border-white/10 pt-4 text-[9px] text-slate-300 leading-relaxed font-sans relative">
+            <div>Módulo Punto de Venta</div>
+            <div>Pos Venta Version : 3.7</div>
+            <div>Derechos Reservados : 2027</div>
           </div>
         </div>
 
-        {/* Center Contents: Logo, Title, Inputs */}
-        <div className="space-y-6 my-auto">
-          
-          {/* Logo Star / Custom Image */}
-          <div className="text-center cursor-pointer" onClick={handleLogoClick}>
-            {companyConfig?.logo_url ? (
-              <div className="w-24 h-24 mx-auto rounded-2xl bg-white/10 p-2 border border-white/20 shadow-xl flex items-center justify-center backdrop-blur-sm">
-                <img src={companyConfig.logo_url} alt="Logo" className="w-full h-full object-contain" />
-              </div>
-            ) : (
-              <svg className="w-24 h-24 mx-auto drop-shadow-lg" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-                {/* Swooshes */}
-                <path d="M 15,65 C 32,80 68,80 85,65" stroke="#14b8a6" strokeWidth="3" fill="none" strokeLinecap="round" />
-                <path d="M 8,58 C 28,78 72,78 92,58" stroke="#0ea5e9" strokeWidth="2.5" fill="none" strokeLinecap="round" />
-                <path d="M 22,71 C 37,84 63,84 78,71" stroke="#6366f1" strokeWidth="2" fill="none" strokeLinecap="round" />
-                
-                {/* 8-pointed star */}
-                <polygon 
-                  points="50,8 54,32 78,32 59,45 68,69 50,54 32,69 41,45 22,32 46,32" 
-                  fill="#0a2a50" 
-                  stroke="#ffffff" 
-                  strokeWidth="2.5" 
-                  strokeLinejoin="miter"
-                />
-                <polygon 
-                  points="50,13 53,33 73,33 57,44 65,64 50,51 35,64 43,44 27,33 47,33" 
-                  fill="#1c3e6a" 
-                  stroke="#3b82f6" 
-                  strokeWidth="1" 
-                  strokeLinejoin="miter"
-                />
-              </svg>
-            )}
+        {/* RIGHT SIDEBAR PANEL: 65% Width cashier background */}
+        <div 
+          className="hidden md:block md:w-[65%] h-full bg-cover bg-center relative"
+          style={{ backgroundImage: `url('/cashier.png')` }}
+        >
+          <div className="absolute inset-0 bg-slate-900/10"></div>
+        </div>
+      </div>
+    );
+  }
 
-            <h1 className="text-lg font-black text-yellow-400 tracking-wider mt-3 font-sans uppercase">
-              {companyConfig.nombre_comercio?.trim() !== '' ? companyConfig.nombre_comercio : 'Sistema WinterPosAL'}
-            </h1>
-            <p className="text-[10px] text-slate-300 font-sans tracking-widest mt-1">
-              Bienvenido
-            </p>
+  // DESKTOP FLOATING CARD LOGIN LAYOUT (Slightly larger: 940px x 560px)
+  return (
+    <div className="flex h-screen w-screen select-none overflow-hidden font-mono text-white bg-slate-950/90 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black items-center justify-center p-4">
+      
+      {/* Floating Desktop Window Container */}
+      <div className="w-full max-w-[940px] h-[560px] bg-slate-900 rounded-2xl overflow-hidden shadow-[0_30px_70px_-15px_rgba(0,0,0,0.85)] border border-slate-700/40 flex flex-col md:flex-row relative z-20 animate-in fade-in zoom-in-95 duration-300">
+        
+        {/* LEFT PANEL: 45% Width */}
+        <div className="w-full md:w-[45%] h-full bg-[#184675] flex flex-col justify-between p-7 relative z-20 shadow-xl border-r border-slate-700/30">
+
+          
+          {/* Top Bar: Station & Network Button */}
+          <div className="flex justify-between items-center text-[10px] text-slate-200 font-sans">
+            <span className="font-mono uppercase font-bold tracking-wider text-slate-300">
+              ESTACIÓN: {localStorage.getItem('pos_terminal_name') || 'CAJA_01'}
+            </span>
+            <div className="flex items-center gap-2">
+              {onOpenLicenseModal && (
+                <button 
+                  type="button"
+                  onClick={onOpenLicenseModal}
+                  className="text-emerald-300 hover:text-white px-2 py-0.5 rounded bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-500/30 transition-all font-mono text-[9px] flex items-center gap-1 cursor-pointer"
+                  title="Consultar o renovar información de licencia (F9)"
+                >
+                  <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                  <span>Licencia (F9)</span>
+                </button>
+              )}
+              <button 
+                type="button"
+                onClick={() => setShowConfig(prev => !prev)}
+                className="text-slate-300 hover:text-white p-1 rounded hover:bg-white/10"
+                title="Ajustes de Red LAN"
+              >
+                <Network className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
-          {/* Session Notice Dialog */}
-          {sessionNotice && (
-            <div className="bg-amber-950/80 border border-amber-500/60 text-amber-200 px-3.5 py-2.5 rounded text-xs font-sans flex items-start gap-2 animate-in fade-in duration-200">
-              <Shield className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
-              <span className="font-semibold">{sessionNotice}</span>
-            </div>
-          )}
-
-          {/* Error Dialog */}
-          {errorMsg && (
-            <div className="bg-red-950/70 border border-red-800/60 text-red-200 px-3.5 py-2.5 rounded text-xs font-sans flex items-start gap-2 animate-pulse">
-              <Shield className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
-              <span>{errorMsg}</span>
-            </div>
-          )}
-
-          {/* Configuration mode vs standard login */}
-          {!showConfig ? (
-            <form className="space-y-4" onSubmit={handleSubmit}>
-              
-              {/* Usuario Input */}
-              <div className="space-y-1">
-                <div className="relative">
-                  <input
-                    ref={usernameInputRef}
-                    autoFocus
-                    type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ''))}
-                    placeholder="Usuario"
-                    className="w-full bg-white text-slate-800 border-none rounded px-3 py-2.5 text-xs font-sans pr-8 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-yellow-400 font-bold"
-                    disabled={isLoading}
-                  />
-                  {/* Yellow triangle pointing left */}
-                  <span className="absolute right-2.5 top-3 text-yellow-400 text-[10px]">◀</span>
+          {/* Center Contents: Logo, Title, Inputs */}
+          <div className="space-y-4 my-auto">
+            
+            {/* Logo Star / Custom Image */}
+            <div className="text-center cursor-pointer" onClick={handleLogoClick}>
+              {companyConfig?.logo_url ? (
+                <div className="w-20 h-20 mx-auto rounded-2xl bg-white/10 p-2 border border-white/20 shadow-xl flex items-center justify-center backdrop-blur-sm">
+                  <img src={companyConfig.logo_url} alt="Logo" className="w-full h-full object-contain" />
                 </div>
-              </div>
-
-              {/* Contraseña Input */}
-              <div className="space-y-1">
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value.toLowerCase())}
-                    placeholder="Contraseña"
-                    className="w-full bg-white text-slate-800 border-none rounded px-3 py-2.5 text-xs font-sans pr-12 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-yellow-400 font-bold"
-                    disabled={isLoading}
+              ) : (
+                <svg className="w-20 h-20 mx-auto drop-shadow-lg" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M 15,65 C 32,80 68,80 85,65" stroke="#14b8a6" strokeWidth="3" fill="none" strokeLinecap="round" />
+                  <path d="M 8,58 C 28,78 72,78 92,58" stroke="#0ea5e9" strokeWidth="2.5" fill="none" strokeLinecap="round" />
+                  <path d="M 22,71 C 37,84 63,84 78,71" stroke="#6366f1" strokeWidth="2" fill="none" strokeLinecap="round" />
+                  
+                  <polygon 
+                    points="50,8 54,32 78,32 59,45 68,69 50,54 32,69 41,45 22,32 46,32" 
+                    fill="#0a2a50" 
+                    stroke="#ffffff" 
+                    strokeWidth="2.5" 
+                    strokeLinejoin="miter"
                   />
-                  {/* Password toggler and yellow arrow */}
+                  <polygon 
+                    points="50,13 53,33 73,33 57,44 65,64 50,51 35,64 43,44 27,33 47,33" 
+                    fill="#1c3e6a" 
+                    stroke="#3b82f6" 
+                    strokeWidth="1" 
+                    strokeLinejoin="miter"
+                  />
+                </svg>
+              )}
+
+              <h1 className="text-base font-black text-yellow-400 tracking-wider mt-2 font-sans uppercase">
+                {companyConfig.nombre_comercio?.trim() !== '' ? companyConfig.nombre_comercio : 'WinterPOS'}
+              </h1>
+              <p className="text-[10px] text-slate-200 font-sans tracking-widest mt-0.5">
+                Bienvenido
+              </p>
+            </div>
+
+            {/* Session Notice Dialog */}
+            {sessionNotice && (
+              <div className="bg-amber-950/80 border border-amber-500/60 text-amber-200 px-3 py-1.5 rounded text-[11px] font-sans flex items-start gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 mt-0.5" />
+                <span className="font-semibold">{sessionNotice}</span>
+              </div>
+            )}
+
+            {/* Error Dialog */}
+            {errorMsg && (
+              <div className="bg-red-950/80 border border-red-800/60 text-red-200 px-3 py-1.5 rounded text-[11px] font-sans flex items-start gap-1.5 animate-pulse">
+                <Shield className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
+                <span>{errorMsg}</span>
+              </div>
+            )}
+
+            {/* Configuration mode vs standard login */}
+            {!showConfig ? (
+              <form className="space-y-3" onSubmit={handleSubmit}>
+                
+                {/* Usuario Input */}
+                <div className="space-y-1">
+                  <div className="relative">
+                    <input
+                      ref={usernameInputRef}
+                      autoFocus
+                      type="text"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ''))}
+                      placeholder="Usuario"
+                      className="w-full bg-white text-slate-900 border-none rounded px-3 py-2 text-xs font-sans pr-8 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 font-bold shadow-inner"
+                      disabled={isLoading}
+                    />
+                    <span className="absolute right-2.5 top-2.5 text-yellow-500 text-[10px]">◀</span>
+                  </div>
+                </div>
+
+                {/* Contraseña Input */}
+                <div className="space-y-1">
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value.toLowerCase())}
+                      placeholder="Contraseña"
+                      className="w-full bg-white text-slate-900 border-none rounded px-3 py-2 text-xs font-sans pr-12 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 font-bold shadow-inner"
+                      disabled={isLoading}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(prev => !prev)}
+                      className="absolute right-7 top-2 text-slate-400 hover:text-slate-650 outline-none z-10"
+                      disabled={isLoading}
+                    >
+                      {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                    <span className="absolute right-2.5 top-2.5 text-yellow-500 text-[10px]">◀</span>
+                  </div>
+                </div>
+
+                {/* Login submit button - dark navy */}
+                <button
+                  type="submit"
+                  className="w-full bg-[#0a325c] hover:bg-[#072444] active:scale-[0.99] text-white py-2.5 rounded text-xs font-black tracking-wider transition-all duration-200 border border-slate-600/40 flex items-center justify-center gap-2 font-sans shadow-md"
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  ) : (
+                    'Iniciar sesión'
+                  )}
+                </button>
+
+              </form>
+            ) : (
+              <form className="space-y-2 bg-[#0d345e] p-3 rounded border border-yellow-500/30 shadow-inner" onSubmit={handleSaveConfig}>
+                <div className="flex justify-between items-center border-b border-white/10 pb-1.5">
+                  <span className="text-[10px] text-yellow-400 font-bold flex items-center gap-1">
+                    <Network className="w-3 h-3 text-yellow-400" />
+                    AJUSTES DE RED LAN
+                  </span>
                   <button
                     type="button"
-                    onClick={() => setShowPassword(prev => !prev)}
-                    className="absolute right-7 top-2 text-slate-400 hover:text-slate-655 outline-none z-10"
-                    disabled={isLoading}
+                    onClick={() => setShowConfig(false)}
+                    className="text-slate-300 text-xs hover:text-white"
                   >
-                    {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    ✕
                   </button>
-                  <span className="absolute right-2.5 top-3 text-yellow-400 text-[10px]">◀</span>
-                </div>
-              </div>
-
-              {/* Login submit button - dark navy */}
-              <button
-                type="submit"
-                className="w-full bg-[#08284c] hover:bg-[#061f3b] text-white py-3 rounded text-xs font-black tracking-wider transition-all duration-200 border border-slate-700/30 flex items-center justify-center gap-2 font-sans shadow"
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                ) : (
-                  'Iniciar sesión'
-                )}
-              </button>
-
-            </form>
-          ) : (
-            <form className="space-y-3 bg-[#0a2f58] p-4 rounded border border-yellow-500/20" onSubmit={handleSaveConfig}>
-              <div className="flex justify-between items-center border-b border-white/10 pb-2">
-                <span className="text-[10px] text-yellow-400 font-bold flex items-center gap-1">
-                  <Network className="w-3 h-3 text-yellow-400" />
-                  AJUSTES DE RED LAN
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowConfig(false)}
-                  className="text-slate-350 text-xs hover:text-white"
-                >
-                  ✕
-                </button>
-              </div>
-              
-              <div className="space-y-2 text-[10px]">
-                <div>
-                  <label className="text-slate-300 block mb-1 font-sans font-bold">Identificador de Estación / Caja</label>
-                  <input
-                    type="text"
-                    value={terminalNameState}
-                    onChange={(e) => setTerminalNameState(e.target.value.toUpperCase())}
-                    placeholder="Ej: CAJA_01, CAJA_02, MOSTRADOR"
-                    className="w-full bg-[#08284c] border border-slate-700 rounded p-1.5 text-yellow-400 font-bold uppercase outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-slate-300 block mb-1 font-sans">Origen de Datos</label>
-                  <select
-                    value={dbMode}
-                    onChange={(e) => setDbMode(e.target.value)}
-                    className="w-full bg-[#08284c] border border-slate-700 text-white rounded p-1.5 outline-none"
-                  >
-                    <option value="local">Esta Computadora (Local)</option>
-                    <option value="remote">Otra Computadora (Red LAN)</option>
-                  </select>
                 </div>
                 
-                {dbMode === 'remote' && (
-                  <div className="grid grid-cols-3 gap-1">
-                    <div className="col-span-2">
-                      <label className="text-slate-300 block mb-1 font-sans">IP Servidor</label>
-                      <input
-                        type="text"
-                        value={serverIP}
-                        onChange={(e) => setServerIP(e.target.value)}
-                        placeholder="192.168.1.100"
-                        className="w-full bg-[#08284c] border border-slate-700 rounded p-1.5 text-yellow-400 outline-none font-bold"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-slate-300 block mb-1 font-sans">Puerto</label>
-                      <input
-                        type="text"
-                        value={serverPort}
-                        onChange={(e) => setServerPort(e.target.value)}
-                        placeholder="5432"
-                        className="w-full bg-[#08284c] border border-slate-700 rounded p-1.5 text-yellow-400 outline-none font-bold"
-                      />
-                    </div>
+                <div className="space-y-1.5 text-[10px]">
+                  <div>
+                    <label className="text-slate-200 block mb-0.5 font-sans font-bold">Identificador de Estación / Caja</label>
+                    <input
+                      type="text"
+                      value={terminalNameState}
+                      onChange={(e) => setTerminalNameState(e.target.value.toUpperCase())}
+                      placeholder="Ej: CAJA_01, CAJA_02, MOSTRADOR"
+                      className="w-full bg-[#08284c] border border-slate-600 rounded p-1 text-yellow-400 font-bold uppercase outline-none"
+                    />
                   </div>
-                )}
-              </div>
 
-              <button
-                type="submit"
-                className="w-full bg-[#08284c] hover:bg-[#061f3b] text-white py-2 rounded text-[10px] font-bold font-sans tracking-wide transition-all border border-slate-700"
-              >
-                GUARDAR Y RECONECTAR
-              </button>
-            </form>
-          )}
+                  <div>
+                    <label className="text-slate-200 block mb-0.5 font-sans">Origen de Datos</label>
+                    <select
+                      value={dbMode}
+                      onChange={(e) => setDbMode(e.target.value)}
+                      className="w-full bg-[#08284c] border border-slate-600 text-white rounded p-1 outline-none"
+                    >
+                      <option value="local">Esta Computadora (Local)</option>
+                      <option value="remote">Otra Computadora (Red LAN)</option>
+                    </select>
+                  </div>
+                  
+                  {dbMode === 'remote' && (
+                    <div className="grid grid-cols-3 gap-1">
+                      <div className="col-span-2">
+                        <label className="text-slate-200 block mb-0.5 font-sans">IP Servidor</label>
+                        <input
+                          type="text"
+                          value={serverIP}
+                          onChange={(e) => setServerIP(e.target.value)}
+                          placeholder="192.168.1.100"
+                          className="w-full bg-[#08284c] border border-slate-600 rounded p-1 text-yellow-400 outline-none font-bold"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-slate-200 block mb-0.5 font-sans">Puerto</label>
+                        <input
+                          type="text"
+                          value={serverPort}
+                          onChange={(e) => setServerPort(e.target.value)}
+                          placeholder="5000"
+                          className="w-full bg-[#08284c] border border-slate-600 rounded p-1 text-yellow-400 outline-none font-bold"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
 
-        </div>
+                <button
+                  type="submit"
+                  className="w-full bg-[#08284c] hover:bg-[#061f3b] text-white py-1.5 rounded text-[10px] font-bold font-sans tracking-wide transition-all border border-slate-600"
+                >
+                  GUARDAR Y RECONECTAR
+                </button>
+              </form>
+            )}
 
-        {/* Footer brand info */}
-        <div className="text-center space-y-1 border-t border-white/10 pt-4 text-[9px] text-slate-300 leading-relaxed font-sans relative">
-          <div>Módulo Punto de Venta</div>
-          <div>Pos Venta Version : 1.0</div>
-          <div>Derechos Reservados : 2027</div>
-          
-          {/* Circle X icon bottom right style */}
-          <div className="absolute bottom-1 right-1 text-white opacity-70 hover:opacity-100 cursor-pointer" onClick={() => window.close()}>
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
           </div>
+
+          {/* Footer brand info */}
+          <div className="text-center space-y-0.5 border-t border-white/10 pt-3 text-[9px] text-slate-300 leading-relaxed font-sans relative">
+            <div>Módulo Punto de Venta</div>
+            <div>Pos Venta Version : 3.7</div>
+            <div>Derechos Reservados : 2027</div>
+            
+            {/* Circle X icon bottom right style */}
+            <div 
+              className="absolute bottom-0 right-0 text-white/80 hover:text-white transition-all cursor-pointer p-1" 
+              onClick={() => window.close()}
+              title="Cerrar aplicación"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+          </div>
+
         </div>
 
-      </div>
+        {/* RIGHT PANEL: 55% Width cashier background */}
+        <div 
+          className="hidden md:block md:w-[55%] h-full bg-cover bg-center relative"
+          style={{ backgroundImage: `url('/cashier.png')` }}
+        >
+          <div className="absolute inset-0 bg-gradient-to-r from-[#184675]/30 to-transparent"></div>
+        </div>
 
-      {/* RIGHT SIDEBAR PANEL: 65% Width cashier background */}
-      <div 
-        className="hidden md:block md:w-[65%] h-full bg-cover bg-center relative"
-        style={{ backgroundImage: `url('/cashier.png')` }}
-      >
-        {/* Soft overlay */}
-        <div className="absolute inset-0 bg-slate-900/10"></div>
       </div>
 
     </div>
   );
 }
+

@@ -26,13 +26,13 @@ const serverProcess = spawn(process.execPath, ['setup-launcher.js'], {
 
 // Window Launcher - Opens dedicated Native App Window
 setTimeout(() => {
-  const targetUrl = 'http://localhost:5000';
+  const targetUrl = 'http://localhost:5000?mode=desktop';
   if (isDebug) {
     console.log(`[Desktop App] Lanzando ventana nativa de escritorio para: ${targetUrl}`);
   }
   
   if (process.platform === 'win32') {
-    const cmd = `start "" chrome --app=${targetUrl} --start-maximized`;
+    const cmd = `start "" chrome --app=${targetUrl} --window-size=1080,700 --window-position=center`;
     exec(cmd, { windowsHide: true }, (err) => {
       if (err) {
         exec(`start ${targetUrl}`, { windowsHide: true });

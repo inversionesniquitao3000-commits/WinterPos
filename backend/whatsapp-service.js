@@ -2,9 +2,48 @@ import { readJsonFile, writeJsonFile } from './db-store.js';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import { execSync } from 'child_process';
 
 // Configuration file path
 const CONFIG_FILE = 'whatsapp_config.json';
+
+// Helper to clean orphaned Chrome processes that lock the WhatsApp profile
+function killOrphanedChrome() {
+  if (process.platform !== 'win32') return;
+  try {
+    const out = execSync('wmic process where "name=\'chrome.exe\'" get processid,commandline /format:csv', { stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 }).toString();
+    const lines = out.split('\r\n').filter(l => l.includes('session-winterpos-session') || l.includes('wwebjs_auth'));
+    for (const line of lines) {
+      const parts = line.trim().split(',');
+      const pid = parts[parts.length - 1];
+      if (pid && !isNaN(Number(pid))) {
+        try {
+          execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore', timeout: 2000 });
+          console.log(`[WhatsApp] Proceso huérfano de Chrome terminado PID: ${pid}`);
+        } catch (e) {}
+      }
+    }
+  } catch (err) {}
+}
+
+// Helper to clean lock files in session folder
+function cleanSessionLocks() {
+  try {
+    const sessionDir = path.resolve(process.cwd(), '.wwebjs_auth', 'session-winterpos-session');
+    if (fs.existsSync(sessionDir)) {
+      const lockFiles = ['DevToolsActivePort', 'SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+      for (const file of lockFiles) {
+        const filePath = path.join(sessionDir, file);
+        if (fs.existsSync(filePath)) {
+          try {
+            fs.unlinkSync(filePath);
+            console.log(`[WhatsApp] Archivo de bloqueo limpiado: ${file}`);
+          } catch (e) {}
+        }
+      }
+    }
+  } catch (err) {}
+}
 
 // Default configuration
 const defaultConfig = {
@@ -201,7 +240,15 @@ export async function initWhatsAppClient() {
     return;
   }
 
-  if (client) return; // Already running
+  if (client) {
+    try {
+      await destroyWhatsAppClient();
+    } catch (e) {}
+  }
+
+  // Pre-cleanup locks and orphaned chrome instances
+  killOrphanedChrome();
+  cleanSessionLocks();
 
   console.log('[WhatsApp] Inicializando servicio de WhatsApp...');
   connectionStatus = 'AUTHENTICATING';
@@ -273,7 +320,21 @@ export async function initWhatsAppClient() {
       lastQrCode = '';
     });
 
-    await client.initialize();
+    try {
+      await client.initialize();
+    } catch (initErr) {
+      const initErrMsg = String(initErr?.message || initErr);
+      if (initErrMsg.includes('already running') || initErrMsg.includes('userDataDir')) {
+        console.warn('[WhatsApp] Reintentando inicialización tras limpiar bloqueo de proceso...');
+        killOrphanedChrome();
+        cleanSessionLocks();
+        await new Promise(r => setTimeout(r, 1500));
+        await client.initialize();
+      } else {
+        throw initErr;
+      }
+    }
+
     isMockMode = false;
     lastInitError = null;
 
@@ -311,14 +372,14 @@ export async function sendCierreReport(imageBase64, textSummary) {
     throw new Error('Servicio de WhatsApp deshabilitado o sin grupo de destino configurado.');
   }
 
-  console.log(`[WhatsApp] Intentando enviar reporte de cierre al grupo: ${config.groupId}`);
+  console.log(`[WhatsApp] Intentando enviar reporte al grupo: ${config.groupId}`);
 
   if (isMockMode) {
     // Simulate sending log
     console.log('[WhatsApp Mock] --- MENSAJE SIMULADO ENVIADO ---');
     console.log(`[WhatsApp Mock] Grupo ID: ${config.groupId}`);
-    console.log(`[WhatsApp Mock] Caption:\n${textSummary}`);
-    console.log('[WhatsApp Mock] Imagen base64 recibida con éxito.');
+    console.log(`[WhatsApp Mock] Mensaje:\n${textSummary}`);
+    if (imageBase64) console.log('[WhatsApp Mock] Imagen base64 adjuntada con éxito.');
     console.log('[WhatsApp Mock] ---------------------------------');
     return { success: true, simulated: true };
   }
@@ -331,14 +392,9 @@ export async function sendCierreReport(imageBase64, textSummary) {
     const { default: pkg } = await import('whatsapp-web.js');
     const { MessageMedia } = pkg;
 
-    // Convert base64 data to MessageMedia format
-    const base64Data = imageBase64.replace(/^data:image\/png;base64,/, "");
-    const media = new MessageMedia('image/png', base64Data, `cierre_${Date.now()}.png`);
-
     // Clean group ID format if it is a link
     let target = config.groupId.trim();
     if (target.includes('chat.whatsapp.com')) {
-      // It's a group invite link, we can attempt to join first or extract code
       const urlParts = target.split('/');
       const lastPart = urlParts[urlParts.length - 1];
       const inviteCode = lastPart.split('?')[0];
@@ -346,7 +402,6 @@ export async function sendCierreReport(imageBase64, textSummary) {
         console.log(`[WhatsApp] Intentando unir al grupo usando código: ${inviteCode}`);
         const groupId = await client.acceptInvite(inviteCode);
         target = groupId;
-        // Save resolved group ID back
         config.groupId = target;
         saveWhatsAppConfig(config);
       } catch (errInvite) {
@@ -355,14 +410,43 @@ export async function sendCierreReport(imageBase64, textSummary) {
     }
 
     if (!target.endsWith('@g.us') && !target.endsWith('@c.us')) {
-      target = `${target}@g.us`; // default to group
+      target = `${target}@g.us`;
     }
 
-    await client.sendMessage(target, media, { caption: textSummary });
-    console.log('[WhatsApp] Mensaje multimedia enviado con éxito.');
+    if (imageBase64 && typeof imageBase64 === 'string' && imageBase64.length > 50) {
+      const base64Data = imageBase64.replace(/^data:image\/[a-z]+;base64,/, "");
+      const media = new MessageMedia('image/png', base64Data, `reporte_${Date.now()}.png`);
+      await client.sendMessage(target, media, { caption: textSummary });
+    } else {
+      await client.sendMessage(target, textSummary);
+    }
+    console.log('[WhatsApp] Mensaje enviado con éxito a WhatsApp.');
     return { success: true };
   } catch (err) {
     console.error('[WhatsApp] Error al enviar mensaje:', err.message);
+    const errText = String(err?.message || err);
+    if (errText.includes('detached Frame') || errText.includes('Execution context was destroyed') || errText.includes('Session closed')) {
+      console.warn('[WhatsApp] Detectado marco desprendido/sesión cerrada en Puppeteer. Intentando recarga y reenvío...');
+      try {
+        if (client && client.pupPage && typeof client.pupPage.reload === 'function') {
+          await client.pupPage.reload({ waitUntil: 'domcontentloaded' });
+          await new Promise(r => setTimeout(r, 2000));
+          if (imageBase64 && typeof imageBase64 === 'string' && imageBase64.length > 50) {
+            const { default: pkg } = await import('whatsapp-web.js');
+            const { MessageMedia } = pkg;
+            const base64Data = imageBase64.replace(/^data:image\/[a-z]+;base64,/, "");
+            const media = new MessageMedia('image/png', base64Data, `reporte_${Date.now()}.png`);
+            await client.sendMessage(target, media, { caption: textSummary });
+          } else {
+            await client.sendMessage(target, textSummary);
+          }
+          console.log('[WhatsApp] Mensaje reenviado exitosamente tras recarga de marco.');
+          return { success: true };
+        }
+      } catch (retryErr) {
+        console.error('[WhatsApp] Falló el reintento tras recarga:', retryErr.message);
+      }
+    }
     throw err;
   }
 }

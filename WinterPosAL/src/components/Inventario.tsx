@@ -65,6 +65,12 @@ export default function Inventario({
     return !!_currentUser.permisos.inventario?.[action];
   };
 
+  const canViewCost = useMemo(() => {
+    if (!_currentUser || !_currentUser.rol) return true;
+    if ((_currentUser.rol || '').toLowerCase() === 'administrador') return true;
+    return !!_currentUser.permisos?.inventario?.ver_costos;
+  }, [_currentUser]);
+
   const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'movimientos' | 'precios' | 'estadisticas'>('catalogo');
   const [selectedMovementDetail, setSelectedMovementDetail] = useState<any>(null);
   const [successMsg, setSuccessMsg] = useState('');
@@ -2220,49 +2226,70 @@ export default function Inventario({
           
           {/* INVENTORY METRICS PANEL */}
           <div className="bg-white border border-slate-200 rounded-xl py-3 px-4 shadow-sm text-slate-800 font-mono text-xs space-y-2.5">
-            {/* General metrics (All products) */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-100 pb-1.5 md:pb-0 md:pr-4">
-                <span className="text-slate-500 font-sans font-bold">Precio 1 del Inventario :</span>
-                <span className="font-extrabold text-slate-900 text-sm">
-                  ${safeProducts.reduce((acc, p) => acc + (p?.precio_detalle_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
+            {/* If user is Administrator or has cost viewing permissions, display full financial valuation */}
+            {canViewCost ? (
+              <>
+                {/* General metrics (All products) */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-100 pb-1.5 md:pb-0 md:pr-4">
+                    <span className="text-slate-500 font-sans font-bold">Precio 1 del Inventario :</span>
+                    <span className="font-extrabold text-slate-900 text-sm">
+                      ${safeProducts.reduce((acc, p) => acc + (p?.precio_detalle_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-105 pb-1.5 md:pb-0 md:px-4">
+                    <span className="text-slate-500 font-sans font-bold">Costo del Inventario :</span>
+                    <span className="font-extrabold text-slate-900 text-sm">
+                      ${safeProducts.reduce((acc, p) => acc + (p?.precio_costo_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center md:pl-4">
+                    <span className="text-slate-500 font-sans font-bold">Total Productos :</span>
+                    <span className="font-extrabold text-slate-900 text-sm">
+                      {safeProducts.length} <span className="text-[10px] text-slate-400 font-normal">({safeProducts.reduce((acc, p) => acc + (!p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0)} uds + {safeProducts.reduce((acc, p) => acc + (p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0).toFixed(3)} kg)</span>
+                    </span>
+                  </div>
+                </div>
+                
+                {/* Filtered metrics */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-dashed border-slate-200">
+                  <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-100 pb-1.5 md:pb-0 md:pr-4">
+                    <span className="text-sky-700 font-sans font-bold">Precio 1 (Filtrado) :</span>
+                    <span className="font-extrabold text-sky-850 text-sm">
+                      ${filteredProducts.reduce((acc, p) => acc + (p?.precio_detalle_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-105 pb-1.5 md:pb-0 md:px-4">
+                    <span className="text-sky-700 font-sans font-bold">Costo (Filtrado) :</span>
+                    <span className="font-extrabold text-sky-850 text-sm">
+                      ${filteredProducts.reduce((acc, p) => acc + (p?.precio_costo_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center md:pl-4">
+                    <span className="text-sky-700 font-sans font-bold">Total (Filtrado) :</span>
+                    <span className="font-extrabold text-sky-850 text-sm">
+                      {filteredProducts.length} <span className="text-[10px] text-sky-500 font-normal">({filteredProducts.reduce((acc, p) => acc + (!p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0)} uds + {filteredProducts.reduce((acc, p) => acc + (p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0).toFixed(3)} kg)</span>
+                    </span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              /* Non-admin summary without confidential cost/valuation information */
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-100 pb-1.5 md:pb-0 md:pr-4">
+                  <span className="text-slate-600 font-sans font-bold">Total Productos en Catálogo:</span>
+                  <span className="font-extrabold text-slate-900 text-sm">
+                    {safeProducts.length} <span className="text-[10px] text-slate-500 font-normal">({safeProducts.reduce((acc, p) => acc + (!p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0)} uds + {safeProducts.reduce((acc, p) => acc + (p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0).toFixed(3)} kg)</span>
+                  </span>
+                </div>
+                <div className="flex justify-between items-center md:pl-4">
+                  <span className="text-sky-700 font-sans font-bold">Total Productos Filtrados:</span>
+                  <span className="font-extrabold text-sky-850 text-sm">
+                    {filteredProducts.length} <span className="text-[10px] text-sky-600 font-normal">({filteredProducts.reduce((acc, p) => acc + (!p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0)} uds + {filteredProducts.reduce((acc, p) => acc + (p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0).toFixed(3)} kg)</span>
+                  </span>
+                </div>
               </div>
-              <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-105 pb-1.5 md:pb-0 md:px-4">
-                <span className="text-slate-500 font-sans font-bold">Costo del Inventario :</span>
-                <span className="font-extrabold text-slate-900 text-sm">
-                  ${safeProducts.reduce((acc, p) => acc + (p?.precio_costo_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
-              </div>
-              <div className="flex justify-between items-center md:pl-4">
-                <span className="text-slate-500 font-sans font-bold">Total Productos :</span>
-                <span className="font-extrabold text-slate-900 text-sm">
-                  {safeProducts.length} <span className="text-[10px] text-slate-400 font-normal">({safeProducts.reduce((acc, p) => acc + (!p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0)} uds + {safeProducts.reduce((acc, p) => acc + (p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0).toFixed(3)} kg)</span>
-                </span>
-              </div>
-            </div>
-            
-            {/* Filtered metrics */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-dashed border-slate-200">
-              <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-100 pb-1.5 md:pb-0 md:pr-4">
-                <span className="text-sky-700 font-sans font-bold">Precio 1 (Filtrado) :</span>
-                <span className="font-extrabold text-sky-850 text-sm">
-                  ${filteredProducts.reduce((acc, p) => acc + (p?.precio_detalle_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
-              </div>
-              <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-105 pb-1.5 md:pb-0 md:px-4">
-                <span className="text-sky-700 font-sans font-bold">Costo (Filtrado) :</span>
-                <span className="font-extrabold text-sky-850 text-sm">
-                  ${filteredProducts.reduce((acc, p) => acc + (p?.precio_costo_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
-              </div>
-              <div className="flex justify-between items-center md:pl-4">
-                <span className="text-sky-700 font-sans font-bold">Total (Filtrado) :</span>
-                <span className="font-extrabold text-sky-850 text-sm">
-                  {filteredProducts.length} <span className="text-[10px] text-sky-500 font-normal">({filteredProducts.reduce((acc, p) => acc + (!p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0)} uds + {filteredProducts.reduce((acc, p) => acc + (p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0).toFixed(3)} kg)</span>
-                </span>
-              </div>
-            </div>
+            )}
           </div>
           <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between bg-slate-50 border border-slate-200 rounded-xl py-2 px-4 shadow-sm">
             {/* Search Input */}
@@ -2611,13 +2638,13 @@ export default function Inventario({
                 <table className="w-full border-collapse text-xs text-left table-fixed min-w-[850px]">
                   <colgroup>
                     <col className="w-[12%]" /> {/* Código */}
-                    <col className="w-[30%]" /> {/* Descripción */}
-                    <col className="w-[14%]" /> {/* Categoría */}
+                    <col className={canViewCost ? "w-[30%]" : "w-[36%]"} /> {/* Descripción */}
+                    <col className={canViewCost ? "w-[14%]" : "w-[16%]"} /> {/* Categoría */}
                     <col className="w-[8%]" />  {/* Stock Mínimo */}
                     <col className="w-[10%]" /> {/* Existencia */}
-                    <col className="w-[8%]" />  {/* P. Costo */}
-                    <col className="w-[9%]" />  {/* P. Detalle */}
-                    <col className="w-[9%]" />  {/* P. Mayor */}
+                    {canViewCost && <col className="w-[8%]" />}  {/* P. Costo */}
+                    <col className={canViewCost ? "w-[9%]" : "w-[10%]"} />  {/* P. Detalle */}
+                    <col className={canViewCost ? "w-[9%]" : "w-[10%]"} />  {/* P. Mayor */}
                   </colgroup>
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr className="text-slate-550 border-b border-slate-200">
@@ -2634,9 +2661,11 @@ export default function Inventario({
                       <th className="px-2 py-1.5 text-center text-slate-800 font-sans uppercase">
                         {renderSortHeader('Existencia', 'existencia', 'center')}
                       </th>
-                      <th className="px-2 py-1.5 text-center font-sans uppercase">
-                        {renderSortHeader('P. Costo', 'precio_costo', 'center')}
-                      </th>
+                      {canViewCost && (
+                        <th className="px-2 py-1.5 text-center font-sans uppercase">
+                          {renderSortHeader('P. Costo', 'precio_costo', 'center')}
+                        </th>
+                      )}
                       <th className="px-2 py-1.5 text-center text-emerald-600 font-sans uppercase">
                         {renderSortHeader('P. Detalle', 'precio_detalle', 'center')}
                       </th>
@@ -2648,7 +2677,7 @@ export default function Inventario({
                   <tbody className="divide-y divide-slate-100 text-slate-700 text-[11px]">
                     {sortedProducts.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="text-center py-8 text-slate-400 font-sans">
+                        <td colSpan={canViewCost ? 8 : 7} className="text-center py-8 text-slate-400 font-sans">
                           No se encontraron productos registrados.
                         </td>
                       </tr>
@@ -2686,7 +2715,9 @@ export default function Inventario({
                             <td className={`px-2 py-1 text-center font-black font-mono ${isLowStock ? 'text-red-500 animate-pulse font-bold' : 'text-slate-800'}`}>
                               {formatStockVal(p.stock_actual, p.a_granel)}
                             </td>
-                            <td className="px-2 py-1 text-center font-mono text-slate-600">${p.precio_costo_usd.toFixed(2)}</td>
+                            {canViewCost && (
+                              <td className="px-2 py-1 text-center font-mono text-slate-600">${p.precio_costo_usd.toFixed(2)}</td>
+                            )}
                             <td className="px-2 py-1 text-center font-mono text-emerald-600 font-bold">${p.precio_detalle_usd.toFixed(2)}</td>
                             <td className="px-2 py-1 text-center font-mono text-slate-600">
                               ${p.precio_mayor_usd.toFixed(2)}

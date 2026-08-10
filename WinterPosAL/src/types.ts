@@ -45,6 +45,7 @@ export interface User {
       editar: boolean;
       eliminar: boolean;
       admin?: boolean;
+      ver_costos?: boolean;
     }
   };
 }
@@ -59,6 +60,7 @@ export interface Role {
       editar: boolean;
       eliminar: boolean;
       admin?: boolean;
+      ver_costos?: boolean;
     }
   };
 }

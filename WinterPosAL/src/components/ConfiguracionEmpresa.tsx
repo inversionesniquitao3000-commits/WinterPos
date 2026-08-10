@@ -4,7 +4,7 @@ import {
   Save, CheckCircle2, Users, HardDrive, Cpu, 
   Trash2, Edit, Plus, Download, Upload, ShieldAlert,
   Settings, CheckSquare, Square, Globe, ShieldCheck, Printer, FileText,
-  LogOut, Unplug, KeyRound, Lock, Eye, EyeOff
+  LogOut, Unplug, KeyRound, Lock, Eye, EyeOff, DollarSign
 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr } from '../utils';
@@ -3094,6 +3094,53 @@ export default function ConfiguracionEmpresa({
                   </tbody>
                 </table>
               </div>
+
+              {/* PRECIO COSTO VISIBILITY PERMISSION TOGGLE FOR USER */}
+              <div className="mt-3 p-2.5 bg-amber-50/80 border border-amber-250 rounded-lg flex items-center justify-between gap-3 shadow-2xs font-sans">
+                <div className="flex items-start gap-2">
+                  <DollarSign className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-slate-800 text-[11px] block">
+                      Visualizar Precios de Costo y Valoración Financiera (F2 Inventario)
+                    </span>
+                    <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
+                      Permite ver la columna <strong className="text-amber-900">"P. Costo"</strong> en catálogo y totales de costos en barra superior.
+                    </span>
+                  </div>
+                </div>
+
+                {userForm.rol?.toUpperCase() === 'ADMINISTRADOR' ? (
+                  <span className="px-2 py-1 bg-amber-100 border border-amber-300 text-amber-800 rounded font-bold text-[9px] uppercase whitespace-nowrap">
+                    Siempre Visible (Admin)
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUserForm(prev => {
+                        const nextPerms = { ...prev.permisos };
+                        const currInv = nextPerms.inventario || { ver: false, crear: false, editar: false, eliminar: false };
+                        nextPerms.inventario = {
+                          ...currInv,
+                          ver_costos: !currInv.ver_costos
+                        };
+                        return { ...prev, permisos: nextPerms };
+                      });
+                    }}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded border transition-all cursor-pointer bg-white border-slate-300 hover:border-amber-500 text-slate-700"
+                  >
+                    {userForm.permisos?.inventario?.ver_costos ? (
+                      <span className="flex items-center gap-1 text-emerald-700 font-bold text-[10.5px]">
+                        <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> Visible
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-slate-400 font-medium text-[10.5px]">
+                        <Square className="w-3.5 h-3.5 text-slate-350" /> Oculto
+                      </span>
+                    )}
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="flex gap-2.5 pt-3">
@@ -3194,6 +3241,53 @@ export default function ConfiguracionEmpresa({
                     ))}
                   </tbody>
                 </table>
+              </div>
+
+              {/* PRECIO COSTO VISIBILITY PERMISSION TOGGLE FOR ROLE */}
+              <div className="mt-3 p-2.5 bg-amber-50/80 border border-amber-250 rounded-lg flex items-center justify-between gap-3 shadow-2xs font-sans">
+                <div className="flex items-start gap-2">
+                  <DollarSign className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-slate-800 text-[11px] block">
+                      Visualizar Precios de Costo y Valoración Financiera (F2 Inventario)
+                    </span>
+                    <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
+                      Permite ver la columna <strong className="text-amber-900">"P. Costo"</strong> en catálogo y totales de costos en barra superior.
+                    </span>
+                  </div>
+                </div>
+
+                {roleForm.nombre?.trim().toUpperCase() === 'ADMINISTRADOR' ? (
+                  <span className="px-2 py-1 bg-amber-100 border border-amber-300 text-amber-800 rounded font-bold text-[9px] uppercase whitespace-nowrap">
+                    Siempre Visible (Admin)
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRoleForm(prev => {
+                        const nextPerms = { ...prev.permisos };
+                        const currInv = nextPerms.inventario || { ver: false, crear: false, editar: false, eliminar: false };
+                        nextPerms.inventario = {
+                          ...currInv,
+                          ver_costos: !currInv.ver_costos
+                        };
+                        return { ...prev, permisos: nextPerms };
+                      });
+                    }}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded border transition-all cursor-pointer bg-white border-slate-300 hover:border-amber-500 text-slate-700"
+                  >
+                    {roleForm.permisos?.inventario?.ver_costos ? (
+                      <span className="flex items-center gap-1 text-emerald-700 font-bold text-[10.5px]">
+                        <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> Visible
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-slate-400 font-medium text-[10.5px]">
+                        <Square className="w-3.5 h-3.5 text-slate-350" /> Oculto
+                      </span>
+                    )}
+                  </button>
+                )}
               </div>
 
               {/* Guía interactiva de permisos por Módulo */}
