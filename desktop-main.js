@@ -24,6 +24,26 @@ const serverProcess = spawn(process.execPath, ['setup-launcher.js'], {
   windowsHide: !isDebug
 });
 
+function findBrowserExe() {
+  if (process.platform !== 'win32') return null;
+  const progFiles = process.env.PROGRAMFILES || 'C:\\Program Files';
+  const progFilesX86 = process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)';
+  const paths = [
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    path.join(progFiles, 'Google\\Chrome\\Application\\chrome.exe'),
+    path.join(progFilesX86, 'Google\\Chrome\\Application\\chrome.exe'),
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    path.join(progFilesX86, 'Microsoft\\Edge\\Application\\msedge.exe'),
+    path.join(progFiles, 'Microsoft\\Edge\\Application\\msedge.exe')
+  ];
+  for (const p of paths) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
 // Window Launcher - Opens dedicated Native App Window
 setTimeout(() => {
   const targetUrl = 'http://localhost:5000?mode=desktop';
@@ -32,7 +52,11 @@ setTimeout(() => {
   }
   
   if (process.platform === 'win32') {
-    const cmd = `start "" chrome --app=${targetUrl} --window-size=1080,700 --window-position=center`;
+    const browserExe = findBrowserExe();
+    const cmd = browserExe
+      ? `start "" "${browserExe}" --app=${targetUrl} --window-size=920,540 --window-position=center`
+      : `start "" chrome --app=${targetUrl} --window-size=920,540 --window-position=center`;
+
     exec(cmd, { windowsHide: true }, (err) => {
       if (err) {
         exec(`start ${targetUrl}`, { windowsHide: true });
