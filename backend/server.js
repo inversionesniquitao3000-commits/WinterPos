@@ -157,11 +157,19 @@ app.get('/api/make-ico', (req, res) => {
   return res.status(500).json({ error: 'Source PNG not found' });
 });
 
-// Serve static frontend build if dist directory exists
+// Serve static frontend build if dist directory exists with no-cache headers for instant updates
 const distPath = path.resolve(__dirname, '../WinterPosAL/dist');
 if (fs.existsSync(distPath)) {
   console.log(`Serving static frontend build from: ${distPath}`);
-  app.use(express.static(distPath));
+  app.use(express.static(distPath, {
+    etag: false,
+    maxAge: 0,
+    setHeaders: (res, filePath) => {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+  }));
 }
 
 // Endpoints
