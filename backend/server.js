@@ -15,7 +15,8 @@ import {
 } from './db-store.js';
 
 import { 
-  initWhatsAppClient, getWhatsAppStatus, saveWhatsAppConfig, sendCierreReport 
+  initWhatsAppClient, getWhatsAppStatus, saveWhatsAppConfig, sendCierreReport,
+  unlockWhatsAppSession, resetWhatsAppSession, logoutWhatsAppSession
 } from './whatsapp-service.js';
 
 import { verifyLicense, activateLicense, registerTerminalActivity } from './license-manager.js';
@@ -54,6 +55,15 @@ if (!fs.existsSync(icoTargetPath)) {
 }
 
 dotenv.config();
+
+// Global crash guards for asynchronous library errors (e.g. WhatsApp LocalAuth EBUSY)
+process.on('uncaughtException', (err) => {
+  console.warn('⚠️ [Server] Excepción no capturada controlada:', err?.message || err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.warn('⚠️ [Server] Rechazo de promesa no capturado controlado:', reason?.message || reason);
+});
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -237,8 +247,21 @@ app.post('/api/price-history', async (req, res) => {
 });
 
 app.put('/api/productos/:id', async (req, res) => {
-  const updated = await updateProduct(req.body);
-  res.json(updated);
+  try {
+    const prodData = { ...req.body, id: req.params.id || req.body.id };
+    const updated = await updateProduct(prodData);
+    if (updated) {
+      res.json(updated);
+    } else {
+      res.status(404).json({ error: 'Producto no encontrado' });
+    }
+  } catch (err) {
+    console.error('Error en PUT /api/productos/:id:', err.message);
+    if (err.code === '23505') {
+      return res.status(400).json({ error: 'Ya existe un producto con esa clave o código de barras.' });
+    }
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/clientes', async (req, res) => {
@@ -1302,6 +1325,46 @@ app.post('/api/whatsapp/config', (req, res) => {
     res.json(saved);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/whatsapp/unlock-session', async (req, res) => {
+  try {
+    const result = await unlockWhatsAppSession();
+    res.json(result);
+  } catch (err) {
+    console.error('Error al desbloquear sesión de WhatsApp:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/whatsapp/reset-session', async (req, res) => {
+  try {
+    const result = await resetWhatsAppSession();
+    res.json(result);
+  } catch (err) {
+    console.error('Error al resetear sesión de WhatsApp:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/whatsapp/logout', async (req, res) => {
+  try {
+    const result = await logoutWhatsAppSession();
+    res.json(result);
+  } catch (err) {
+    console.error('Error al cerrar sesión de WhatsApp:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/whatsapp/restart', async (req, res) => {
+  try {
+    const result = await unlockWhatsAppSession();
+    res.json(result);
+  } catch (err) {
+    console.error('Error al reiniciar WhatsApp:', err.message);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

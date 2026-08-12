@@ -524,7 +524,7 @@ export async function updateProduct(p) {
       const res = await pool.query(
         `UPDATE Productos 
          SET codigo_barras_clave = $1, descripcion = $2, categoria = $3, stock_minimo = $4, precio_costo_usd = $5, precio_detalle_usd = $6, precio_mayor_usd = $7, cantidad_mayorista = $8, exento_impuesto = $9, imagen_url = $10, estado = $11, a_granel = $12, fecha_vencimiento = $13, porcentaje_impuesto = $14, stock_actual = $15
-         WHERE id = $16 OR (codigo_barras_clave = $1 AND $1 != '') RETURNING *`,
+         WHERE id = $16 RETURNING *`,
         [barcode, description, category, stockMinimo, parseFloat(p.precio_costo_usd) || 0, parseFloat(p.precio_detalle_usd) || 0, parseFloat(p.precio_mayor_usd) || 0, parseInt(p.cantidad_mayorista) || 12, !!p.exento_impuesto, p.imagen_url || '', p.estado || 'Activo', isGranel, p.fecha_vencimiento || null, parseFloat(p.porcentaje_impuesto || 0), stockActual, prodId]
       );
       if (res.rowCount > 0) {
@@ -539,7 +539,14 @@ export async function updateProduct(p) {
           stock_minimo: parseFloat(r.stock_minimo),
           precio_costo_usd: parseFloat(r.precio_costo_usd),
           precio_detalle_usd: parseFloat(r.precio_detalle_usd),
-          precio_mayor_usd: parseFloat(r.precio_mayor_usd)
+          precio_mayor_usd: parseFloat(r.precio_mayor_usd),
+          cantidad_mayorista: parseInt(r.cantidad_mayorista) || 12,
+          exento_impuesto: !!r.exento_impuesto,
+          porcentaje_impuesto: parseFloat(r.porcentaje_impuesto || 0),
+          a_granel: !!r.a_granel,
+          fecha_vencimiento: r.fecha_vencimiento || undefined,
+          imagen_url: r.imagen_url || '',
+          estado: r.estado || 'Activo'
         };
       }
     } catch (err) {
@@ -548,7 +555,13 @@ export async function updateProduct(p) {
     }
   }
   const products = readJsonFile('products.json', mockProducts);
-  const idx = products.findIndex(item => item.id === prodId || item.id == p.id || (item.barcode && item.barcode === barcode && barcode !== ''));
+  const duplicate = products.find(item => item.id !== prodId && (item.barcode || '').trim().toUpperCase() === barcode.toUpperCase());
+  if (duplicate) {
+    const err = new Error(`Ya existe otro producto registrado con la clave o código '${barcode}'`);
+    err.code = '23505';
+    throw err;
+  }
+  const idx = products.findIndex(item => item.id === prodId || item.id == p.id);
   if (idx !== -1) {
     products[idx] = { ...products[idx], ...p, category, barcode, description, stock_minimo: stockMinimo, stock_actual: stockActual };
     writeJsonFile('products.json', products);

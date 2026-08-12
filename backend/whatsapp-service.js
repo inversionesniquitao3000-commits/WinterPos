@@ -3,46 +3,145 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { execSync } from 'child_process';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Configuration file path
 const CONFIG_FILE = 'whatsapp_config.json';
 
 // Helper to clean orphaned Chrome processes that lock the WhatsApp profile
-function killOrphanedChrome() {
+export function killOrphanedChrome() {
   if (process.platform !== 'win32') return;
   try {
-    const out = execSync('wmic process where "name=\'chrome.exe\'" get processid,commandline /format:csv', { stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 }).toString();
-    const lines = out.split('\r\n').filter(l => l.includes('session-winterpos-session') || l.includes('wwebjs_auth'));
-    for (const line of lines) {
-      const parts = line.trim().split(',');
-      const pid = parts[parts.length - 1];
-      if (pid && !isNaN(Number(pid))) {
-        try {
-          execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore', timeout: 2000 });
-          console.log(`[WhatsApp] Proceso huérfano de Chrome terminado PID: ${pid}`);
-        } catch (e) {}
-      }
-    }
-  } catch (err) {}
-}
-
-// Helper to clean lock files in session folder
-function cleanSessionLocks() {
-  try {
-    const sessionDir = path.resolve(process.cwd(), '.wwebjs_auth', 'session-winterpos-session');
-    if (fs.existsSync(sessionDir)) {
-      const lockFiles = ['DevToolsActivePort', 'SingletonLock', 'SingletonCookie', 'SingletonSocket'];
-      for (const file of lockFiles) {
-        const filePath = path.join(sessionDir, file);
-        if (fs.existsSync(filePath)) {
+    const psScript = `Get-CimInstance Win32_Process | Where-Object { $_.Name -like '*chrome*' -and ($_.CommandLine -like '*winterpos-session*' -or $_.CommandLine -like '*wwebjs*' -or $_.CommandLine -like '*puppeteer*') } | Stop-Process -Force`;
+    execSync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${psScript}"`, { stdio: 'ignore', timeout: 5000 });
+  } catch (err) {
+    try {
+      const out = execSync('wmic process where "name=\'chrome.exe\'" get processid,commandline /format:csv', { stdio: ['ignore', 'pipe', 'ignore'], timeout: 4000 }).toString();
+      const lines = out.split('\r\n').filter(l => l.includes('session-winterpos-session') || l.includes('wwebjs_auth') || l.includes('puppeteer'));
+      for (const line of lines) {
+        const parts = line.trim().split(',');
+        const pid = parts[parts.length - 1];
+        if (pid && !isNaN(Number(pid))) {
           try {
-            fs.unlinkSync(filePath);
-            console.log(`[WhatsApp] Archivo de bloqueo limpiado: ${file}`);
+            execSync(`taskkill /F /T /PID ${pid}`, { stdio: 'ignore', timeout: 3000 });
           } catch (e) {}
         }
       }
+    } catch (e) {}
+  }
+}
+
+// Helper to clean lock files in session folder
+export function cleanSessionLocks() {
+  const dirsToClean = [
+    path.resolve(process.cwd(), '.wwebjs_auth', 'session-winterpos-session'),
+    path.resolve(process.cwd(), '.wwebjs_auth'),
+    path.join(__dirname, '.wwebjs_auth', 'session-winterpos-session'),
+    path.join(__dirname, '.wwebjs_auth'),
+    'C:\\Program Files (x86)\\WinterPosAL\\backend\\.wwebjs_auth\\session-winterpos-session',
+    'C:\\Program Files (x86)\\WinterPosAL\\backend\\.wwebjs_auth'
+  ];
+  const lockFiles = ['DevToolsActivePort', 'SingletonLock', 'SingletonCookie', 'SingletonSocket', 'CrashpadMetrics-active.pma', 'lockfile'];
+
+  for (const sessionDir of dirsToClean) {
+    try {
+      if (fs.existsSync(sessionDir)) {
+        for (const file of lockFiles) {
+          const filePath = path.join(sessionDir, file);
+          if (fs.existsSync(filePath)) {
+            try {
+              fs.unlinkSync(filePath);
+              console.log(`[WhatsApp] Archivo de bloqueo limpiado: ${filePath}`);
+            } catch (e) {}
+          }
+        }
+      }
+    } catch (err) {}
+  }
+}
+
+// Helper to completely delete session and cache folders
+export function deleteFullSessionFolder() {
+  const dirsToDelete = [
+    path.resolve(process.cwd(), '.wwebjs_auth'),
+    path.resolve(process.cwd(), '.wwebjs_cache'),
+    path.join(__dirname, '.wwebjs_auth'),
+    path.join(__dirname, '.wwebjs_cache'),
+    'C:\\Program Files (x86)\\WinterPosAL\\backend\\.wwebjs_auth',
+    'C:\\Program Files (x86)\\WinterPosAL\\backend\\.wwebjs_cache'
+  ];
+
+  for (const dir of dirsToDelete) {
+    try {
+      if (fs.existsSync(dir)) {
+        try {
+          fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 500 });
+        } catch (rmErr) {
+          if (process.platform === 'win32') {
+            try {
+              execSync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "Remove-Item -LiteralPath '${dir}' -Recurse -Force"`, { stdio: 'ignore', timeout: 4000 });
+            } catch (e) {
+              try {
+                execSync(`rmdir /s /q "${dir}"`, { stdio: 'ignore', timeout: 4000 });
+              } catch (e2) {}
+            }
+          }
+        }
+        console.log(`[WhatsApp] Carpeta de sesión eliminada por completo: ${dir}`);
+      }
+    } catch (err) {
+      console.warn(`[WhatsApp] Advertencia al eliminar directorio ${dir}:`, err.message);
     }
-  } catch (err) {}
+  }
+}
+
+// Desbloquear sesiones atrapadas sin borrar credenciales válidas
+export async function unlockWhatsAppSession() {
+  console.log('[WhatsApp] Desbloqueando sesiones atrapadas de WhatsApp...');
+  await destroyWhatsAppClient();
+  killOrphanedChrome();
+  cleanSessionLocks();
+  setTimeout(() => {
+    initWhatsAppClient().catch(err => console.warn('[WhatsApp] Error en inicio tras desbloqueo:', err?.message || err));
+  }, 1000);
+  return {
+    success: true,
+    message: 'Procesos huérfanos cerrados y archivos de bloqueo liberados con éxito.'
+  };
+}
+
+// Resetear sesión completa (para cuando auth timeout o sesión corrupta)
+export async function resetWhatsAppSession() {
+  console.log('[WhatsApp] Reseteando sesión de WhatsApp y limpiando datos...');
+  await destroyWhatsAppClient();
+  killOrphanedChrome();
+  cleanSessionLocks();
+  deleteFullSessionFolder();
+  setTimeout(() => {
+    initWhatsAppClient().catch(err => console.warn('[WhatsApp] Error en inicio tras reseteo:', err?.message || err));
+  }, 1500);
+  return {
+    success: true,
+    message: 'Sesión eliminada completamente. Generando nuevo código QR de vinculación...'
+  };
+}
+
+// Cerrar sesión activa (Logout)
+export async function logoutWhatsAppSession() {
+  console.log('[WhatsApp] Cerrando sesión activa de WhatsApp (Logout)...');
+  if (client) {
+    try {
+      if (typeof client.logout === 'function') {
+        await client.logout();
+      }
+    } catch (e) {
+      console.warn('[WhatsApp] Error durante client.logout():', e?.message || e);
+    }
+  }
+  return await resetWhatsAppSession();
 }
 
 // Default configuration
@@ -262,6 +361,7 @@ export async function initWhatsAppClient() {
     console.log('[WhatsApp] Librería whatsapp-web.js cargada. Iniciando cliente...');
 
     const chromePath = findChromeExecutable();
+    const userAgentStr = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
     const puppeteerConfig = {
       headless: true,
       args: [
@@ -271,7 +371,19 @@ export async function initWhatsAppClient() {
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
         '--no-zygote',
-        '--disable-gpu'
+        '--disable-gpu',
+        '--disable-extensions',
+        '--disable-component-update',
+        '--disable-default-apps',
+        '--disable-background-networking',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-sync',
+        '--metrics-recording-only',
+        '--disable-blink-features=AutomationControlled',
+        '--disable-features=site-per-process,IsolateOrigins',
+        `--user-agent=${userAgentStr}`
       ]
     };
     if (chromePath) {
@@ -279,7 +391,16 @@ export async function initWhatsAppClient() {
     }
 
     client = new Client({
-      authStrategy: new LocalAuth({ clientId: "winterpos-session" }),
+      authStrategy: new LocalAuth({ 
+        clientId: "winterpos-session",
+        dataPath: path.join(__dirname, '.wwebjs_auth')
+      }),
+      userAgent: userAgentStr,
+      authTimeoutMs: 180000, // 3 minutes timeout for reliable loading
+      qrMaxRetries: 15,
+      takeoverOnConflict: true,
+      takeoverTimeoutMs: 0,
+      bypassCSP: true,
       webVersionCache: {
         type: 'none'
       },
@@ -297,6 +418,11 @@ export async function initWhatsAppClient() {
       }
     });
 
+    client.on('loading_screen', (percent, message) => {
+      console.log(`[WhatsApp] Sincronizando chats del teléfono (${percent}%): ${message}`);
+      connectionStatus = 'AUTHENTICATING';
+    });
+
     client.on('ready', () => {
       console.log('[WhatsApp] ¡Cliente Conectado y Listo!');
       connectionStatus = 'CONNECTED';
@@ -304,12 +430,12 @@ export async function initWhatsAppClient() {
     });
 
     client.on('authenticated', () => {
-      console.log('[WhatsApp] Sesión autenticada.');
+      console.log('[WhatsApp] Sesión autenticada exitosamente en el servidor.');
       connectionStatus = 'AUTHENTICATING';
     });
 
-    client.on('auth_failure', () => {
-      console.error('[WhatsApp] Falla en la autenticación.');
+    client.on('auth_failure', (msg) => {
+      console.error('[WhatsApp] Falla en la autenticación:', msg);
       connectionStatus = 'DISCONNECTED';
       lastQrCode = '';
     });
@@ -365,6 +491,26 @@ function startMockFlow() {
   }, 15000);
 }
 
+// Helper to ensure WWebJS is injected and ready in pupPage
+async function ensureWWebJSInjected(c) {
+  if (!c || !c.pupPage) return;
+  try {
+    const isReady = await c.pupPage.evaluate(() => {
+      return typeof window.WWebJS !== 'undefined' && typeof window.WWebJS.getChat === 'function';
+    });
+    if (!isReady) {
+      console.log('[WhatsApp] Reinyectando funciones WWebJS en la página de Chrome...');
+      const { createRequire } = await import('module');
+      const require = createRequire(import.meta.url);
+      const { LoadUtils } = require('whatsapp-web.js/src/util/Injected/Utils.js');
+      await c.pupPage.evaluate(LoadUtils);
+      await new Promise(r => setTimeout(r, 500));
+    }
+  } catch (err) {
+    console.warn('[WhatsApp] Advertencia al inyectar WWebJS:', err?.message || err);
+  }
+}
+
 // Send Report Endpoint handler
 export async function sendCierreReport(imageBase64, textSummary) {
   const config = getWhatsAppConfig();
@@ -409,17 +555,45 @@ export async function sendCierreReport(imageBase64, textSummary) {
       }
     }
 
-    if (!target.endsWith('@g.us') && !target.endsWith('@c.us')) {
-      target = `${target}@g.us`;
+    if (!target.includes('@')) {
+      if (target.includes('-') || target.length > 15) {
+        target = `${target}@g.us`;
+      } else {
+        let cleanNum = target.replace(/[^0-9]/g, '');
+        if (cleanNum.startsWith('0')) cleanNum = '58' + cleanNum.substring(1);
+        target = `${cleanNum}@c.us`;
+      }
     }
 
-    if (imageBase64 && typeof imageBase64 === 'string' && imageBase64.length > 50) {
-      const base64Data = imageBase64.replace(/^data:image\/[a-z]+;base64,/, "");
-      const media = new MessageMedia('image/png', base64Data, `reporte_${Date.now()}.png`);
-      await client.sendMessage(target, media, { caption: textSummary });
-    } else {
-      await client.sendMessage(target, textSummary);
+    // Ensure WWebJS injected before evaluate
+    await ensureWWebJSInjected(client);
+
+    try {
+      if (imageBase64 && typeof imageBase64 === 'string' && imageBase64.length > 50) {
+        const base64Data = imageBase64.replace(/^data:image\/[a-z]+;base64,/, "");
+        const media = new MessageMedia('image/png', base64Data, `reporte_${Date.now()}.png`);
+        await client.sendMessage(target, media, { caption: textSummary });
+      } else {
+        await client.sendMessage(target, textSummary);
+      }
+    } catch (sendErr) {
+      const sendErrMsg = String(sendErr?.message || sendErr);
+      if (sendErrMsg.includes('getChat') || sendErrMsg.includes('WWebJS') || sendErrMsg.includes('undefined')) {
+        console.warn('[WhatsApp] Reinyectando scripts tras fallo getChat y reintentando envío...');
+        await ensureWWebJSInjected(client);
+        await new Promise(r => setTimeout(r, 800));
+        if (imageBase64 && typeof imageBase64 === 'string' && imageBase64.length > 50) {
+          const base64Data = imageBase64.replace(/^data:image\/[a-z]+;base64,/, "");
+          const media = new MessageMedia('image/png', base64Data, `reporte_${Date.now()}.png`);
+          await client.sendMessage(target, media, { caption: textSummary });
+        } else {
+          await client.sendMessage(target, textSummary);
+        }
+      } else {
+        throw sendErr;
+      }
     }
+
     console.log('[WhatsApp] Mensaje enviado con éxito a WhatsApp.');
     return { success: true };
   } catch (err) {
@@ -431,6 +605,7 @@ export async function sendCierreReport(imageBase64, textSummary) {
         if (client && client.pupPage && typeof client.pupPage.reload === 'function') {
           await client.pupPage.reload({ waitUntil: 'domcontentloaded' });
           await new Promise(r => setTimeout(r, 2000));
+          await ensureWWebJSInjected(client);
           if (imageBase64 && typeof imageBase64 === 'string' && imageBase64.length > 50) {
             const { default: pkg } = await import('whatsapp-web.js');
             const { MessageMedia } = pkg;

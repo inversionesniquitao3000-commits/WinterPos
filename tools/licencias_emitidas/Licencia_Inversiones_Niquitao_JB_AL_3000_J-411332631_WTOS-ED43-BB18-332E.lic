@@ -1,0 +1,12 @@
+{
+  "payload": {
+    "cliente": "Inversiones Niquitao JB AL 3000",
+    "rif": "J-411332631",
+    "hwid": "WTOS-ED43-BB18-332E",
+    "terminales": "ILIMITADO",
+    "fechaEmision": "2026-08-12",
+    "fechaExpiracion": "VITALICIA",
+    "tipo": "VITALICIA"
+  },
+  "signature": "b0f57fa03561a4a0b0860c61598a56c8876ad2d68540dc3f66c1239b5c45c3789e86166bb708913d007c6f08ce541baa0c41a8e141aa7f7c69a44c3885714b71253b94a6eff4b84aeb4809c45ceb6fa4337b4929f96d6db8a1d99e9d8c2030a3c0247d0a306f4c425030333620022c1bb06971770ccd18969506b09099629f47e20ef1d66c275ac1979883aa122e3b9dbb2cd1b927e404dfb6387e5ee89591160ef7d8adf03f81afbde08d1a20486aac0a7724a63aed7e7d2a7db8feac4ca32c8a2d3d416ce16b7ade86fd2f7ccc43d718f6609ba9dd728743230cbb842e173516873fad0366c215ebadc48b17ffe4dcd5570341985ae8481277c481e3c192e7"
+}

@@ -1,0 +1,24 @@
+[
+  {
+    "cliente": "INVERSIONES NIQUITAO JB AL 3000 CAJA",
+    "rif": "J-4113326312",
+    "hwid": "WPOS-8F18-BE43-09BF, WPOS-3425-A6DB-4466, WPOS-A892-26AE-DF6F",
+    "terminales": "ILIMITADO",
+    "fechaEmision": "2026-08-12",
+    "fechaExpiracion": "VITALICIA",
+    "tipo": "VITALICIA",
+    "archivo": "Licencia_INVERSIONES_NIQUITAO_JB_AL_3000_CAJA_J-4113326312_WPOS-8F18-BE43-09BF__WPOS-3425-A6DB-4466__WPOS-A892-26AE-DF6F.lic",
+    "fechaRegistro": "2026-08-12T16:06:16.560Z"
+  },
+  {
+    "cliente": "Inversiones Niquitao JB AL 3000",
+    "rif": "J-411332631",
+    "hwid": "WTOS-ED43-BB18-332E",
+    "terminales": "ILIMITADO",
+    "fechaEmision": "2026-08-12",
+    "fechaExpiracion": "VITALICIA",
+    "tipo": "VITALICIA",
+    "archivo": "Licencia_Inversiones_Niquitao_JB_AL_3000_J-411332631_WTOS-ED43-BB18-332E.lic",
+    "fechaRegistro": "2026-08-12T14:44:39.721Z"
+  }
+]

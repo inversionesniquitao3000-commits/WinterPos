@@ -120,11 +120,23 @@ export default function Inventario({
   const [bulkStockReason, setBulkStockReason] = useState('Toma de inventario físico de stock');
   const [bulkStockCounts, setBulkStockCounts] = useState<{ [prodId: number]: string }>({});
   const [showCatalogAuditModal, setShowCatalogAuditModal] = useState(false);
-  const [auditFilterTab, setAuditFilterTab] = useState<'todos' | 'sin_categoria' | 'sin_codigo' | 'sin_descripcion' | 'sin_stock_min'>('todos');
+  const [auditFilterTab, setAuditFilterTab] = useState<'todos' | 'sin_precios' | 'sin_categoria' | 'sin_codigo' | 'sin_descripcion' | 'sin_stock_min'>('todos');
   const [auditDefaultCategory, setAuditDefaultCategory] = useState('ALIMENTOS');
   const [auditDefaultStockMin, setAuditDefaultStockMin] = useState('5');
+  const [auditDefaultDetailMargin, setAuditDefaultDetailMargin] = useState('30');
+  const [auditDefaultMayorMargin, setAuditDefaultMayorMargin] = useState('15');
+  const [auditDefaultCost, setAuditDefaultCost] = useState('1.00');
+  const [auditAuxProduct, setAuditAuxProduct] = useState<Product | null>(null);
   const [editedAuditProducts, setEditedAuditProducts] = useState<{
-    [id: number]: { barcode?: string; description?: string; category?: string; stock_minimo?: number }
+    [id: number]: {
+      barcode?: string;
+      description?: string;
+      category?: string;
+      stock_minimo?: number;
+      precio_costo_usd?: number;
+      precio_detalle_usd?: number;
+      precio_mayor_usd?: number;
+    }
   }>({});
   const [isSavingAuditCorrections, setIsSavingAuditCorrections] = useState(false);
   const [auditSaveProgress, setAuditSaveProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
@@ -136,18 +148,31 @@ export default function Inventario({
       const code = edit.barcode !== undefined ? edit.barcode : p.barcode;
       const desc = edit.description !== undefined ? edit.description : p.description;
       const minStk = edit.stock_minimo !== undefined ? edit.stock_minimo : p.stock_minimo;
+      const cost = edit.precio_costo_usd !== undefined ? edit.precio_costo_usd : (parseFloat(p.precio_costo_usd as any) || 0);
+      const detail = edit.precio_detalle_usd !== undefined ? edit.precio_detalle_usd : (parseFloat(p.precio_detalle_usd as any) || 0);
+      const mayor = edit.precio_mayor_usd !== undefined ? edit.precio_mayor_usd : (parseFloat(p.precio_mayor_usd as any) || 0);
 
       const missingCategory = !cat || !cat.trim() || cat.trim().toUpperCase() === 'SIN CATEGORIA';
       const missingBarcode = !code || !code.trim();
       const missingDescription = !desc || !desc.trim();
       const missingStockMin = minStk === undefined || minStk === null || minStk <= 0;
 
+      // Price issues: 0 cost, 0 detail, 0 mayor, or detail <= cost, or mayor <= cost, or mayor >= detail
+      const zeroCost = cost <= 0;
+      const zeroDetail = detail <= 0;
+      const zeroMayor = mayor <= 0;
+      const zeroOrInvalidPrices = zeroCost || zeroDetail || zeroMayor || detail <= cost || mayor <= cost || mayor >= detail;
+
+      const origCost = parseFloat(p.precio_costo_usd as any) || 0;
+      const origDetail = parseFloat(p.precio_detalle_usd as any) || 0;
+      const origMayor = parseFloat(p.precio_mayor_usd as any) || 0;
       const origCat = !p.category || !p.category.trim() || p.category.trim().toUpperCase() === 'SIN CATEGORIA';
       const origCode = !p.barcode || !p.barcode.trim();
       const origDesc = !p.description || !p.description.trim();
       const origMin = !p.stock_minimo || p.stock_minimo <= 0;
+      const origPriceIssue = origCost <= 0 || origDetail <= 0 || origMayor <= 0 || origDetail <= origCost || origMayor <= origCost || origMayor >= origDetail;
 
-      const hasOriginalIssue = origCat || origCode || origDesc || origMin;
+      const hasOriginalIssue = origCat || origCode || origDesc || origMin || origPriceIssue;
       const isEdited = editedAuditProducts[p.id] !== undefined;
 
       const hasIssue = hasOriginalIssue || isEdited;
@@ -158,10 +183,17 @@ export default function Inventario({
         currentBarcode: code || '',
         currentDescription: desc || '',
         currentStockMin: minStk || 0,
+        currentCost: cost,
+        currentDetail: detail,
+        currentMayor: mayor,
         missingCategory,
         missingBarcode,
         missingDescription,
         missingStockMin,
+        zeroCost,
+        zeroDetail,
+        zeroMayor,
+        zeroOrInvalidPrices,
         hasIssue
       };
     }).filter(item => item.hasIssue);
@@ -1463,15 +1495,16 @@ export default function Inventario({
   const [editVencimiento, setEditVencimiento] = useState('');
 
   const handleOpenEditProduct = (p: Product) => {
-    setEditClave(p.barcode);
-    setEditBarcode(p.barcode);
-    setEditDesc(p.description);
-    setEditCat(p.category);
-    setEditCost(p.precio_costo_usd.toString());
-    setEditDetail(p.precio_detalle_usd.toString());
-    setEditMayor(p.precio_mayor_usd.toString());
-    setEditMinStock(p.stock_minimo.toString());
-    setEditWholesaleQty(p.cantidad_mayorista.toString());
+    setSelectedProduct(p);
+    setEditClave(p.barcode || '');
+    setEditBarcode(p.barcode || '');
+    setEditDesc(p.description || '');
+    setEditCat(p.category || 'ALIMENTOS');
+    setEditCost((p.precio_costo_usd ?? 0).toString());
+    setEditDetail((p.precio_detalle_usd ?? 0).toString());
+    setEditMayor((p.precio_mayor_usd ?? 0).toString());
+    setEditMinStock((p.stock_minimo ?? 5).toString());
+    setEditWholesaleQty((p.cantidad_mayorista ?? 12).toString());
     setEditTaxActive(!p.exento_impuesto);
     setEditTaxName('IVA');
     setEditTaxPct((p.porcentaje_impuesto && p.porcentaje_impuesto > 0 ? p.porcentaje_impuesto : 16).toString());
@@ -1483,6 +1516,22 @@ export default function Inventario({
   const handleUpdateProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProduct) return;
+
+    const finalBarcode = (editBarcode.trim() !== '' ? editBarcode.trim() : editClave.trim()).toUpperCase();
+    if (!finalBarcode) {
+      showAlert('La clave o código de barras del producto es obligatorio.', 'Campo Requerido', 'warning');
+      return;
+    }
+    if (!editDesc.trim()) {
+      showAlert('La descripción del artículo es obligatoria.', 'Campo Requerido', 'warning');
+      return;
+    }
+
+    const existingDuplicate = products.find(p => p.id !== selectedProduct.id && p.barcode.trim().toUpperCase() === finalBarcode);
+    if (existingDuplicate) {
+      showAlert(`Ya existe otro producto registrado con la clave o código "${finalBarcode}" (${existingDuplicate.description}). Cada producto debe tener una clave única para evitar conflictos.`, 'Código o Clave Duplicada', 'error');
+      return;
+    }
 
     const cost = parseFloat(editCost) || 0;
     const detail = parseFloat(editDetail) || 0;
@@ -1503,16 +1552,16 @@ export default function Inventario({
 
     const updatedProd: Product = {
       ...selectedProduct,
-      barcode: editBarcode.trim() || editClave.trim(),
+      barcode: finalBarcode,
       description: editDesc.trim().toUpperCase(),
-      category: editCat,
+      category: editCat.trim().toUpperCase(),
       stock_actual: editAGranel ? selectedProduct.stock_actual : Math.round(selectedProduct.stock_actual),
       stock_minimo: editAGranel ? (parseFloat(editMinStock) || 0) : (parseInt(editMinStock) || 0),
       cantidad_mayorista: parseInt(editWholesaleQty) || 12,
       exento_impuesto: !editTaxActive,
       porcentaje_impuesto: editTaxActive ? (parseFloat(editTaxPct) || 0) : 0,
       a_granel: editAGranel,
-      fecha_vencimiento: editVencimiento || undefined,
+      fecha_vencimiento: editVencimiento.trim() !== '' ? editVencimiento.trim() : undefined,
       precio_costo_usd: cost,
       precio_detalle_usd: detail,
       precio_mayor_usd: mayor,
@@ -1521,7 +1570,7 @@ export default function Inventario({
     const success = await onUpdateProduct(updatedProd);
     if (success) {
       setShowEditProdModal(false);
-      setSelectedProduct(null);
+      setSelectedProduct(updatedProd);
       showToast('Producto actualizado con éxito.');
     }
   };
@@ -1763,8 +1812,9 @@ export default function Inventario({
     // Generate barcode if not provided
     const barcodeVal = newBarcode.trim() !== '' ? newBarcode.trim() : newClave.trim();
 
-    if (products.some(p => p.barcode === barcodeVal.toUpperCase())) {
-      showAlert('Ya existe un producto registrado con ese código de barras o clave.', 'Código Duplicado', 'error');
+    const existingDuplicate = products.find(p => p.barcode.trim().toUpperCase() === barcodeVal.trim().toUpperCase());
+    if (existingDuplicate) {
+      showAlert(`Ya existe un producto registrado con la clave o código "${barcodeVal.toUpperCase()}" (${existingDuplicate.description}). Cada producto debe tener una clave única para evitar conflictos.`, 'Código o Clave Duplicada', 'error');
       return;
     }
 
@@ -2869,20 +2919,30 @@ export default function Inventario({
                     </button>
                   )}
 
-                  {/* BUTTON: AUDITORÍA DE CATÁLOGO (SI EXISTEN INCONSISTENCIAS) */}
-                  {hasPermission('editar') && catalogAuditIssuesCount > 0 && (
+                  {/* BUTTON: AUDITORÍA DE CATÁLOGO Y PRECIOS */}
+                  {hasPermission('editar') && (
                     <button
                       onClick={() => setShowCatalogAuditModal(true)}
-                      className="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 border border-amber-600 py-2 px-3 rounded shadow flex items-center justify-between font-sans font-black text-[11px] uppercase tracking-wider text-left transition-all active:scale-95 animate-pulse"
-                      title="Existen productos con inconsistencias de datos en el catálogo (categoría, código, descripción o stock mínimo)"
+                      className={`w-full py-2 px-3 rounded shadow flex items-center justify-between font-sans text-[11px] uppercase tracking-wider text-left transition-all active:scale-95 ${
+                        catalogAuditIssuesCount > 0
+                          ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 border border-amber-600 font-black animate-pulse'
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 font-bold'
+                      }`}
+                      title={catalogAuditIssuesCount > 0 ? "Existen productos con inconsistencias de datos o precios en $0.00" : "Auditoría de Integridad del Catálogo y Precios"}
                     >
                       <div className="flex items-center gap-2">
-                        <Sparkles className="w-4 h-4 text-slate-950 fill-current" />
+                        <Sparkles className={`w-4 h-4 ${catalogAuditIssuesCount > 0 ? 'text-slate-950 fill-current' : 'text-amber-500'}`} />
                         <span>Auditoría Catálogo</span>
                       </div>
-                      <span className="bg-slate-950 text-amber-400 px-1.5 py-0.5 rounded-full text-[10px] font-mono font-black">
-                        {catalogAuditIssuesCount}
-                      </span>
+                      {catalogAuditIssuesCount > 0 ? (
+                        <span className="bg-slate-950 text-amber-400 px-1.5 py-0.5 rounded-full text-[10px] font-mono font-black">
+                          {catalogAuditIssuesCount}
+                        </span>
+                      ) : (
+                        <span className="text-emerald-700 text-[10px] font-mono font-bold">
+                          ✓ OK
+                        </span>
+                      )}
                     </button>
                   )}
 
@@ -4463,7 +4523,13 @@ export default function Inventario({
                     required
                     placeholder="Ej. HARINA-PAN-1K"
                     value={editClave.toUpperCase()}
-                    onChange={(e) => setEditClave(e.target.value.toUpperCase())}
+                    onChange={(e) => {
+                      const val = e.target.value.toUpperCase();
+                      if (editBarcode === editClave || editBarcode === '') {
+                        setEditBarcode(val);
+                      }
+                      setEditClave(val);
+                    }}
                     className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-855 focus:bg-white focus:border-winter-inventarioStart focus:outline-none uppercase font-bold"
                   />
                 </div>
@@ -5869,6 +5935,7 @@ export default function Inventario({
       {/* MODAL ASISTENTE INTELIGENTE DE AUDITORÍA Y CALIDAD DE CATÁLOGO */}
       {showCatalogAuditModal && (() => {
         const filteredIssues = catalogAuditIssues.filter(item => {
+          if (auditFilterTab === 'sin_precios') return item.zeroOrInvalidPrices;
           if (auditFilterTab === 'sin_categoria') return item.missingCategory;
           if (auditFilterTab === 'sin_codigo') return item.missingBarcode;
           if (auditFilterTab === 'sin_descripcion') return item.missingDescription;
@@ -5876,10 +5943,58 @@ export default function Inventario({
           return true;
         });
 
+        const countSinPrecios = catalogAuditIssues.filter(i => i.zeroOrInvalidPrices).length;
+        const countZeroCost = catalogAuditIssues.filter(i => i.zeroCost).length;
         const countSinCat = catalogAuditIssues.filter(i => i.missingCategory).length;
         const countSinCod = catalogAuditIssues.filter(i => i.missingBarcode).length;
         const countSinDesc = catalogAuditIssues.filter(i => i.missingDescription).length;
         const countSinMin = catalogAuditIssues.filter(i => i.missingStockMin).length;
+
+        const countPricelessWithCost = catalogAuditIssues.filter(i => i.currentCost > 0 && (i.zeroDetail || i.zeroMayor || i.currentDetail <= i.currentCost)).length;
+
+        const handleApplyAutoMarginToPriceless = (detailMargin = 30, mayorMargin = 15) => {
+          const newEdits = { ...editedAuditProducts };
+          let count = 0;
+          catalogAuditIssues.forEach(({ product, currentCost, zeroDetail, zeroMayor, currentDetail }) => {
+            if (currentCost > 0 && (zeroDetail || zeroMayor || currentDetail <= currentCost)) {
+              const newDetail = Number((currentCost * (1 + detailMargin / 100)).toFixed(2));
+              const newMayor = Number((currentCost * (1 + mayorMargin / 100)).toFixed(2));
+              newEdits[product.id] = {
+                ...(newEdits[product.id] || {}),
+                precio_costo_usd: currentCost,
+                precio_detalle_usd: newDetail,
+                precio_mayor_usd: newMayor
+              };
+              count++;
+            }
+          });
+          setEditedAuditProducts(newEdits);
+          showToast(`⚡ Se calcularon precios (+${detailMargin}% Detalle / +${mayorMargin}% Mayor) para ${count} productos con costo existente.`);
+        };
+
+        const handleApplyDefaultCostAndMargins = () => {
+          const baseCost = parseFloat(auditDefaultCost) || 1.0;
+          const dMargin = parseFloat(auditDefaultDetailMargin) || 30;
+          const mMargin = parseFloat(auditDefaultMayorMargin) || 15;
+          const newDetail = Number((baseCost * (1 + dMargin / 100)).toFixed(2));
+          const newMayor = Number((baseCost * (1 + mMargin / 100)).toFixed(2));
+
+          const newEdits = { ...editedAuditProducts };
+          let count = 0;
+          catalogAuditIssues.forEach(({ product, currentCost }) => {
+            if (currentCost <= 0) {
+              newEdits[product.id] = {
+                ...(newEdits[product.id] || {}),
+                precio_costo_usd: baseCost,
+                precio_detalle_usd: newDetail,
+                precio_mayor_usd: newMayor
+              };
+              count++;
+            }
+          });
+          setEditedAuditProducts(newEdits);
+          showToast(`⚡ Se asignó Costo $${baseCost.toFixed(2)}, Detalle $${newDetail.toFixed(2)} y Mayor $${newMayor.toFixed(2)} a ${count} productos.`);
+        };
 
         const handleApplyBulkDefaultCategory = () => {
           if (!auditDefaultCategory.trim()) return;
@@ -5933,6 +6048,26 @@ export default function Inventario({
             return;
           }
 
+          // Validate price integrity before saving
+          const invalidPriceProducts: string[] = [];
+          for (const keyStr of editedKeys) {
+            const product = products.find(p => String(p.id) === String(keyStr));
+            const edit = editedAuditProducts[keyStr as any];
+            if (product && edit) {
+              const finalCost = edit.precio_costo_usd !== undefined ? edit.precio_costo_usd : product.precio_costo_usd;
+              const finalDetail = edit.precio_detalle_usd !== undefined ? edit.precio_detalle_usd : product.precio_detalle_usd;
+              const finalMayor = edit.precio_mayor_usd !== undefined ? edit.precio_mayor_usd : product.precio_mayor_usd;
+              if (finalDetail <= finalCost || finalMayor <= finalCost || finalMayor >= finalDetail) {
+                invalidPriceProducts.push(edit.description || product.description);
+              }
+            }
+          }
+
+          if (invalidPriceProducts.length > 0) {
+            showAlert(`Hay ${invalidPriceProducts.length} producto(s) con precios inválidos (El Detalle debe ser mayor al costo, y el Mayor debe ser menor al detalle). Corríjalos antes de guardar.`, 'Precios Inválidos', 'warning');
+            return;
+          }
+
           setIsSavingAuditCorrections(true);
           setAuditSaveProgress({ current: 0, total: editedKeys.length });
 
@@ -5947,9 +6082,12 @@ export default function Inventario({
                 const updatedProd: Product = {
                   ...product,
                   barcode: edit.barcode !== undefined ? edit.barcode.trim() : product.barcode,
-                  description: edit.description !== undefined ? edit.description.trim() : product.description,
+                  description: edit.description !== undefined ? edit.description.trim().toUpperCase() : product.description,
                   category: edit.category !== undefined ? edit.category.trim().toUpperCase() : product.category,
-                  stock_minimo: edit.stock_minimo !== undefined ? edit.stock_minimo : product.stock_minimo
+                  stock_minimo: edit.stock_minimo !== undefined ? edit.stock_minimo : product.stock_minimo,
+                  precio_costo_usd: edit.precio_costo_usd !== undefined ? edit.precio_costo_usd : product.precio_costo_usd,
+                  precio_detalle_usd: edit.precio_detalle_usd !== undefined ? edit.precio_detalle_usd : product.precio_detalle_usd,
+                  precio_mayor_usd: edit.precio_mayor_usd !== undefined ? edit.precio_mayor_usd : product.precio_mayor_usd,
                 };
                 const ok = await onUpdateProduct(updatedProd);
                 if (ok) updatedCount++;
@@ -5968,7 +6106,7 @@ export default function Inventario({
 
         return (
           <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-[92] flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-5xl w-full h-[88vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200 font-sans relative">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-6xl w-full h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200 font-sans relative">
               {/* Overlay de procesamiento cuando se guardan correcciones masivas */}
               {isSavingAuditCorrections && (
                 <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex flex-col items-center justify-center p-6 text-white text-center animate-in fade-in duration-200">
@@ -6015,11 +6153,11 @@ export default function Inventario({
                     <Sparkles className="w-5 h-5 text-slate-950 fill-current" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-black uppercase tracking-wider font-mono text-slate-950">
-                      Asistente de Auditoría e Integridad de Catálogo
+                    <h3 className="text-sm font-black uppercase tracking-wider font-mono text-slate-950 flex items-center gap-2">
+                      Asistente de Auditoría e Integridad de Catálogo y Precios
                     </h3>
                     <p className="text-[11px] text-slate-900 font-medium">
-                      Ayudante interactivo para corregir productos sin categoría, sin código, sin descripción o sin stock mínimo.
+                      Ayudante interactivo para corregir productos con precios $0, sin categoría, sin código o sin stock mínimo.
                     </p>
                   </div>
                 </div>
@@ -6044,6 +6182,17 @@ export default function Inventario({
                   >
                     <span>Todos</span>
                     <span className="bg-amber-400 text-slate-950 px-1.5 py-0.2 rounded-full text-[10px] font-mono font-black">{catalogAuditIssuesCount}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setAuditFilterTab('sin_precios')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-extrabold font-sans transition-all flex items-center gap-1.5 ${
+                      auditFilterTab === 'sin_precios' ? 'bg-amber-600 text-white shadow' : 'bg-white text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    <span>Precios $0 / Inválidos</span>
+                    {countSinPrecios > 0 && <span className="bg-red-100 text-red-800 px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold">{countSinPrecios}</span>}
                   </button>
 
                   <button
@@ -6108,6 +6257,75 @@ export default function Inventario({
                 {/* Left Panel: Bulk Actions */}
                 <div className="w-1/3 p-5 border-r border-slate-200 overflow-y-auto space-y-4 bg-slate-50/50">
                   <label className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold font-mono block">Correcciones Masivas Rápidas</label>
+
+                  {/* Bulk Precios 1: Auto Margen a productos con Costo > 0 */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3 shadow-xs hover:border-amber-400 transition-all">
+                    <span className="font-extrabold text-xs text-slate-800 block flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 text-emerald-600" />
+                      Margen a Productos con Costo
+                    </span>
+                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                      Calcula Detalle (+{auditDefaultDetailMargin}%) y Mayor (+{auditDefaultMayorMargin}%) para productos que tienen costo pero precio $0 ({countPricelessWithCost}).
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[9px] text-slate-500 font-bold block mb-0.5">Margen Detalle %</label>
+                        <input
+                          type="number"
+                          value={auditDefaultDetailMargin}
+                          onChange={(e) => setAuditDefaultDetailMargin(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1 text-xs font-mono font-bold text-slate-800 focus:bg-white focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] text-slate-500 font-bold block mb-0.5">Margen Mayor %</label>
+                        <input
+                          type="number"
+                          value={auditDefaultMayorMargin}
+                          onChange={(e) => setAuditDefaultMayorMargin(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1 text-xs font-mono font-bold text-slate-800 focus:bg-white focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={countPricelessWithCost === 0}
+                      onClick={() => handleApplyAutoMarginToPriceless(parseFloat(auditDefaultDetailMargin) || 30, parseFloat(auditDefaultMayorMargin) || 15)}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold py-2 rounded-lg text-xs font-sans transition-all shadow-xs"
+                    >
+                      ⚡ Calcular Precios ({countPricelessWithCost})
+                    </button>
+                  </div>
+
+                  {/* Bulk Precios 2: Asignar Costo Base a Costo $0 */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3 shadow-xs hover:border-amber-400 transition-all">
+                    <span className="font-extrabold text-xs text-slate-800 block flex items-center gap-1.5">
+                      <Calculator className="w-4 h-4 text-amber-600" />
+                      Asignar Costo Base a Costo $0
+                    </span>
+                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                      Asigna un costo inicial y calcula sus precios a todos los productos con costo $0 ({countZeroCost}).
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-slate-600 font-bold whitespace-nowrap">Costo Base ($):</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        value={auditDefaultCost}
+                        onChange={(e) => setAuditDefaultCost(e.target.value)}
+                        className="w-24 bg-slate-50 border border-slate-300 rounded px-2 py-1 text-xs font-mono font-bold text-slate-800 focus:bg-white focus:outline-none"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={countZeroCost === 0}
+                      onClick={handleApplyDefaultCostAndMargins}
+                      className="w-full bg-amber-500 hover:bg-amber-600 disabled:bg-slate-200 disabled:text-slate-400 text-slate-950 font-extrabold py-2 rounded-lg text-xs font-sans transition-all shadow-xs"
+                    >
+                      ⚡ Asignar Precios Base ({countZeroCost})
+                    </button>
+                  </div>
 
                   {/* Bulk 1: Asignar Categoría */}
                   <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3 shadow-xs hover:border-amber-400 transition-all">
@@ -6202,54 +6420,29 @@ export default function Inventario({
                       <table className="w-full text-left border-collapse text-xs">
                         <thead className="bg-slate-100 text-[10px] uppercase text-slate-500 font-mono sticky top-0 z-10 border-b border-slate-200">
                           <tr>
-                            <th className="px-3 py-2 w-[22%]">Código</th>
-                            <th className="px-3 py-2 w-[32%]">Descripción</th>
-                            <th className="px-2 py-2 w-[26%]">Categoría</th>
-                            <th className="px-2 py-2 w-[20%] text-center">Stk Mínimo</th>
+                            <th className="px-3 py-2 w-[24%]">Producto</th>
+                            <th className="px-2 py-2 w-[18%]">Categoría</th>
+                            <th className="px-2 py-2 w-[18%] text-right">Costo $</th>
+                            <th className="px-2 py-2 w-[16%] text-right">Detalle $</th>
+                            <th className="px-2 py-2 w-[16%] text-right">Mayor $</th>
+                            <th className="px-2 py-2 w-[8%] text-center">Stk Mín</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 font-sans">
                           {filteredIssues.length === 0 ? (
                             <tr>
-                              <td colSpan={4} className="py-12 text-center text-slate-400 italic">
+                              <td colSpan={6} className="py-12 text-center text-slate-400 italic">
                                 🎉 No se encontraron inconsistencias en este filtro.
                               </td>
                             </tr>
                           ) : (
-                            filteredIssues.map(({ product: p, currentBarcode, currentDescription, currentCategory, currentStockMin, missingCategory, missingBarcode, missingDescription, missingStockMin }) => {
+                            filteredIssues.map(({ product: p, currentBarcode, currentDescription, currentCategory, currentStockMin, currentCost, currentDetail, currentMayor, missingCategory, missingBarcode, missingDescription, missingStockMin, zeroCost, zeroDetail, zeroMayor, zeroOrInvalidPrices }) => {
                               const edit = editedAuditProducts[p.id];
                               const isEdited = edit !== undefined;
 
                               return (
-                                <tr key={p.id} className={`hover:bg-slate-50 ${isEdited ? 'bg-emerald-50/40' : 'bg-white'}`}>
-                                  {/* Code */}
-                                  <td className="px-2 py-2">
-                                    <div className="space-y-1">
-                                      <input
-                                        type="text"
-                                        value={currentBarcode}
-                                        onChange={(e) => {
-                                          const val = e.target.value;
-                                          setEditedAuditProducts(prev => ({
-                                            ...prev,
-                                            [p.id]: {
-                                              ...(prev[p.id] || {}),
-                                              barcode: val
-                                            }
-                                          }));
-                                        }}
-                                        placeholder="Ingrese código..."
-                                        className={`w-full text-xs font-mono font-bold border rounded px-1.5 py-1 focus:bg-white focus:outline-none ${
-                                          missingBarcode ? 'border-red-400 bg-red-50 text-red-800' : 'border-slate-300 text-slate-800'
-                                        }`}
-                                      />
-                                      {missingBarcode && (
-                                        <span className="text-[9px] text-red-600 font-extrabold block">⚠️ Sin Código</span>
-                                      )}
-                                    </div>
-                                  </td>
-
-                                  {/* Description */}
+                                <tr key={p.id} className={`hover:bg-slate-50 ${isEdited ? 'bg-emerald-50/40' : zeroOrInvalidPrices ? 'bg-amber-50/30' : 'bg-white'}`}>
+                                  {/* Code and Description */}
                                   <td className="px-2 py-2">
                                     <div className="space-y-1">
                                       <input
@@ -6265,72 +6458,158 @@ export default function Inventario({
                                             }
                                           }));
                                         }}
-                                        placeholder="Descripción del producto..."
-                                        className={`w-full text-xs font-bold border rounded px-1.5 py-1 focus:bg-white focus:outline-none ${
+                                        placeholder="Descripción..."
+                                        className={`w-full text-xs font-bold border rounded px-1.5 py-0.5 focus:bg-white focus:outline-none ${
                                           missingDescription ? 'border-red-400 bg-red-50 text-red-800' : 'border-slate-300 text-slate-800'
                                         }`}
                                       />
-                                      {missingDescription && (
-                                        <span className="text-[9px] text-red-600 font-extrabold block">⚠️ Sin Descripción</span>
-                                      )}
+                                      <div className="flex items-center gap-1">
+                                        <input
+                                          type="text"
+                                          value={currentBarcode}
+                                          onChange={(e) => {
+                                            const val = e.target.value;
+                                            setEditedAuditProducts(prev => ({
+                                              ...prev,
+                                              [p.id]: {
+                                                ...(prev[p.id] || {}),
+                                                barcode: val
+                                              }
+                                            }));
+                                          }}
+                                          placeholder="Código..."
+                                          className={`w-full text-[10px] font-mono border rounded px-1 py-0.5 focus:bg-white focus:outline-none ${
+                                            missingBarcode ? 'border-red-400 bg-red-50 text-red-800' : 'border-slate-250 text-slate-500'
+                                          }`}
+                                        />
+                                      </div>
                                     </div>
                                   </td>
 
                                   {/* Category */}
                                   <td className="px-2 py-2">
-                                    <div className="space-y-1">
-                                      <select
-                                        value={currentCategory}
-                                        onChange={(e) => {
-                                          const val = e.target.value;
-                                          setEditedAuditProducts(prev => ({
-                                            ...prev,
-                                            [p.id]: {
-                                              ...(prev[p.id] || {}),
-                                              category: val
-                                            }
-                                          }));
-                                        }}
-                                        className={`w-full text-xs font-bold border rounded px-1.5 py-1 focus:bg-white focus:outline-none ${
-                                          missingCategory ? 'border-red-400 bg-red-50 text-red-800' : 'border-slate-300 text-slate-800'
-                                        }`}
-                                      >
-                                        <option value="">-- Sin Categoría --</option>
-                                        {allCategories.map(cat => (
-                                          <option key={cat} value={cat}>{cat}</option>
-                                        ))}
-                                      </select>
-                                      {missingCategory && (
-                                        <span className="text-[9px] text-red-600 font-extrabold block">⚠️ Sin Categoría</span>
-                                      )}
-                                    </div>
+                                    <select
+                                      value={currentCategory}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        setEditedAuditProducts(prev => ({
+                                          ...prev,
+                                          [p.id]: {
+                                            ...(prev[p.id] || {}),
+                                            category: val
+                                          }
+                                        }));
+                                      }}
+                                      className={`w-full text-xs font-bold border rounded px-1.5 py-1 focus:bg-white focus:outline-none ${
+                                        missingCategory ? 'border-red-400 bg-red-50 text-red-800' : 'border-slate-300 text-slate-800'
+                                      }`}
+                                    >
+                                      <option value="">-- Sin Categoría --</option>
+                                      {allCategories.map(cat => (
+                                        <option key={cat} value={cat}>{cat}</option>
+                                      ))}
+                                    </select>
                                   </td>
 
-                                  {/* Stock Minimum */}
-                                  <td className="px-2 py-2 text-center">
-                                    <div className="space-y-1 flex flex-col items-center">
+                                  {/* Cost ($) + Calc Button */}
+                                  <td className="px-2 py-2 text-right">
+                                    <div className="flex items-center justify-end gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => setAuditAuxProduct(p)}
+                                        className="bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-900 p-1 rounded transition-all flex-shrink-0 active:scale-95"
+                                        title="Abrir Auxiliar de Cálculo de Precios para calcular costo y margen"
+                                      >
+                                        <Calculator className="w-3.5 h-3.5 text-amber-700" />
+                                      </button>
                                       <input
                                         type="number"
+                                        step="0.01"
                                         min="0"
-                                        value={currentStockMin}
+                                        value={currentCost}
                                         onChange={(e) => {
                                           const val = parseFloat(e.target.value) || 0;
                                           setEditedAuditProducts(prev => ({
                                             ...prev,
                                             [p.id]: {
                                               ...(prev[p.id] || {}),
-                                              stock_minimo: val
+                                              precio_costo_usd: val
                                             }
                                           }));
                                         }}
-                                        className={`w-16 text-center text-xs font-mono font-bold border rounded px-1.5 py-1 focus:bg-white focus:outline-none ${
-                                          missingStockMin ? 'border-red-400 bg-red-50 text-red-800' : 'border-slate-300 text-slate-800'
+                                        className={`w-16 text-right text-xs font-mono font-bold border rounded px-1.5 py-1 focus:bg-white focus:outline-none ${
+                                          zeroCost ? 'border-red-400 bg-red-50 text-red-800' : 'border-slate-300 text-slate-800'
                                         }`}
                                       />
-                                      {missingStockMin && (
-                                        <span className="text-[9px] text-red-600 font-extrabold block">⚠️ Stk Mín = 0</span>
-                                      )}
                                     </div>
+                                  </td>
+
+                                  {/* Detail ($) */}
+                                  <td className="px-2 py-2 text-right">
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      min="0"
+                                      value={currentDetail}
+                                      onChange={(e) => {
+                                        const val = parseFloat(e.target.value) || 0;
+                                        setEditedAuditProducts(prev => ({
+                                          ...prev,
+                                          [p.id]: {
+                                            ...(prev[p.id] || {}),
+                                            precio_detalle_usd: val
+                                          }
+                                        }));
+                                      }}
+                                      className={`w-16 text-right text-xs font-mono font-bold border rounded px-1.5 py-1 focus:bg-white focus:outline-none ${
+                                        zeroDetail || currentDetail <= currentCost ? 'border-red-400 bg-red-50 text-red-800' : 'border-emerald-400 bg-emerald-50 text-emerald-900'
+                                      }`}
+                                    />
+                                  </td>
+
+                                  {/* Mayor ($) */}
+                                  <td className="px-2 py-2 text-right">
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      min="0"
+                                      value={currentMayor}
+                                      onChange={(e) => {
+                                        const val = parseFloat(e.target.value) || 0;
+                                        setEditedAuditProducts(prev => ({
+                                          ...prev,
+                                          [p.id]: {
+                                            ...(prev[p.id] || {}),
+                                            precio_mayor_usd: val
+                                          }
+                                        }));
+                                      }}
+                                      className={`w-16 text-right text-xs font-mono font-bold border rounded px-1.5 py-1 focus:bg-white focus:outline-none ${
+                                        zeroMayor || currentMayor <= currentCost || currentMayor >= currentDetail ? 'border-red-400 bg-red-50 text-red-800' : 'border-emerald-400 bg-emerald-50 text-emerald-900'
+                                      }`}
+                                    />
+                                  </td>
+
+                                  {/* Stock Minimum */}
+                                  <td className="px-2 py-2 text-center">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={currentStockMin}
+                                      onChange={(e) => {
+                                        const val = parseFloat(e.target.value) || 0;
+                                        setEditedAuditProducts(prev => ({
+                                          ...prev,
+                                          [p.id]: {
+                                            ...(prev[p.id] || {}),
+                                            stock_minimo: val
+                                          }
+                                        }));
+                                      }}
+                                      className={`w-12 text-center text-xs font-mono font-bold border rounded px-1 py-1 focus:bg-white focus:outline-none ${
+                                        missingStockMin ? 'border-red-400 bg-red-50 text-red-800' : 'border-slate-300 text-slate-800'
+                                      }`}
+                                    />
                                   </td>
                                 </tr>
                               );
@@ -6384,6 +6663,81 @@ export default function Inventario({
           </div>
         );
       })()}
+
+      {/* AUXILIAR DE CÁLCULO DE PRECIOS DESDE LA AUDITORÍA DE CATÁLOGO */}
+      {auditAuxProduct && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[105] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-4xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto font-sans">
+            <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+              <div>
+                <h4 className="text-sm font-black uppercase text-slate-800 font-mono flex items-center gap-2">
+                  <Calculator className="w-4 h-4 text-amber-600" />
+                  Auxiliar de Cálculo de Precios — {auditAuxProduct.description}
+                </h4>
+                <span className="text-[11px] text-slate-400 font-mono">Código / Clave: {auditAuxProduct.barcode}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAuditAuxProduct(null)}
+                className="text-slate-400 hover:text-slate-700 text-base font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <AuxiliarCalculoPrecios
+              tasaBCV={bcvRateUSD || parseFloat(localStorage.getItem('pos_bcv_usd') || '0') || 0}
+              tasaFallback={tasaDia || parseFloat(localStorage.getItem('pos_tasa_activa') || '0') || 0}
+              initialCost={
+                (editedAuditProducts[auditAuxProduct.id]?.precio_costo_usd !== undefined
+                  ? editedAuditProducts[auditAuxProduct.id]?.precio_costo_usd ?? 0
+                  : auditAuxProduct.precio_costo_usd
+                ).toString()
+              }
+              initialDetail={
+                (editedAuditProducts[auditAuxProduct.id]?.precio_detalle_usd !== undefined
+                  ? editedAuditProducts[auditAuxProduct.id]?.precio_detalle_usd ?? 0
+                  : auditAuxProduct.precio_detalle_usd
+                ).toString()
+              }
+              initialMayor={
+                (editedAuditProducts[auditAuxProduct.id]?.precio_mayor_usd !== undefined
+                  ? editedAuditProducts[auditAuxProduct.id]?.precio_mayor_usd ?? 0
+                  : auditAuxProduct.precio_mayor_usd
+                ).toString()
+              }
+              onApplyPrices={(prices) => {
+                const costVal = parseFloat(prices.cost) || 0;
+                const detailVal = parseFloat(prices.detail) || 0;
+                const mayorVal = parseFloat(prices.mayor) || 0;
+
+                setEditedAuditProducts(prev => ({
+                  ...prev,
+                  [auditAuxProduct.id]: {
+                    ...(prev[auditAuxProduct.id] || {}),
+                    precio_costo_usd: costVal,
+                    precio_detalle_usd: detailVal,
+                    precio_mayor_usd: mayorVal
+                  }
+                }));
+
+                setAuditAuxProduct(null);
+                showToast(`✅ Precios calculados para "${auditAuxProduct.description}".`);
+              }}
+            />
+
+            <div className="flex justify-end pt-2 border-t border-slate-200">
+              <button
+                type="button"
+                onClick={() => setAuditAuxProduct(null)}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2 rounded-lg text-xs font-sans"
+              >
+                Cancelar / Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* GENERAL ADJUSTMENT MODAL */}
       {showGeneralAdjustModal && (() => {
@@ -6821,10 +7175,17 @@ export default function Inventario({
                 {/* Filter products */}
                 <div className="flex-grow overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-lg bg-white min-h-0">
                   {(() => {
-                    const filtered = products.filter(p =>
-                      p.description.toLowerCase().includes(invoiceSearchTerm.toLowerCase()) ||
-                      p.barcode.toLowerCase().includes(invoiceSearchTerm.toLowerCase())
-                    );
+                    const filtered = products
+                      .filter(p =>
+                        p.description.toLowerCase().includes(invoiceSearchTerm.toLowerCase()) ||
+                        p.barcode.toLowerCase().includes(invoiceSearchTerm.toLowerCase())
+                      )
+                      .sort((a, b) => {
+                        const aStock = (parseFloat(a.stock_actual as any) || 0) > 0 ? 1 : 0;
+                        const bStock = (parseFloat(b.stock_actual as any) || 0) > 0 ? 1 : 0;
+                        if (aStock !== bStock) return bStock - aStock;
+                        return (a.description || '').localeCompare(b.description || '', 'es', { sensitivity: 'base' });
+                      });
 
                     if (filtered.length === 0) {
                       return (

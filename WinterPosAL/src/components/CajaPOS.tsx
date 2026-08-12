@@ -745,6 +745,8 @@ export default function CajaPOS({
         return { ...item, priceUSD: normalPrice, priceType: normalType, totalUSD: item.qty * normalPrice };
       }));
     }
+
+    focusSearchInput();
   };
   
   const [selectedSeller, setSelectedSeller] = useState<string>(currentUser.nombre);
@@ -756,10 +758,39 @@ export default function CajaPOS({
   const searchSuggestions = useMemo(() => {
     const term = searchProdTerm.trim().toLowerCase();
     if (!term) return [];
-    return products.filter(p =>
+    const filtered = products.filter(p =>
       p.description.toLowerCase().includes(term) ||
       p.barcode.toLowerCase().includes(term)
     );
+
+    return filtered.sort((a, b) => {
+      const aStock = typeof a.stock_actual === 'number' ? a.stock_actual : (parseFloat(a.stock_actual as any) || 0);
+      const bStock = typeof b.stock_actual === 'number' ? b.stock_actual : (parseFloat(b.stock_actual as any) || 0);
+      const aHasStock = aStock > 0 ? 1 : 0;
+      const bHasStock = bStock > 0 ? 1 : 0;
+
+      // 1. Productos con stock primero, sin stock de último
+      if (aHasStock !== bHasStock) {
+        return bHasStock - aHasStock;
+      }
+
+      // 2. Coincidencia al inicio por código/clave
+      const aCodeStarts = (a.barcode || '').toLowerCase().startsWith(term) ? 1 : 0;
+      const bCodeStarts = (b.barcode || '').toLowerCase().startsWith(term) ? 1 : 0;
+      if (aCodeStarts !== bCodeStarts) {
+        return bCodeStarts - aCodeStarts;
+      }
+
+      // 3. Coincidencia al inicio por descripción
+      const aDescStarts = (a.description || '').toLowerCase().startsWith(term) ? 1 : 0;
+      const bDescStarts = (b.description || '').toLowerCase().startsWith(term) ? 1 : 0;
+      if (aDescStarts !== bDescStarts) {
+        return bDescStarts - aDescStarts;
+      }
+
+      // 4. Orden alfabético por descripción
+      return (a.description || '').localeCompare(b.description || '', 'es', { sensitivity: 'base' });
+    });
   }, [products, searchProdTerm]);
 
   useEffect(() => {
@@ -1051,6 +1082,15 @@ export default function CajaPOS({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const checkoutModalRef = useRef<HTMLDivElement>(null);
 
+  // Helper to re-focus the search / barcode input reliably
+  const focusSearchInput = useCallback(() => {
+    setTimeout(() => {
+      if (searchInputRef.current) {
+        searchInputRef.current.focus();
+      }
+    }, 50);
+  }, []);
+
   const [showHoldModal, setShowHoldModal] = useState(false);
   const [holdTag, setHoldTag] = useState('');
   const holdModalRef = useRef<HTMLDivElement>(null);
@@ -1084,12 +1124,44 @@ export default function CajaPOS({
   // Auto-focus on state changes or mounting
   useEffect(() => {
     if (cajaAbierta && !showAperturaModal && !showCheckoutModal && !showCierreModal && !showMovementsModal && !showTicketModal) {
-      const timer = setTimeout(() => {
-        searchInputRef.current?.focus();
-      }, 100);
-      return () => clearTimeout(timer);
+      focusSearchInput();
     }
-  }, [cajaAbierta, showAperturaModal, showCheckoutModal, showCierreModal, showMovementsModal, showTicketModal]);
+  }, [cajaAbierta, showAperturaModal, showCheckoutModal, showCierreModal, showMovementsModal, showTicketModal, focusSearchInput]);
+
+  // Click on blank / whitespace areas of Caja POS to refocus search bar
+  const handlePosContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const isModalOpen =
+      showCheckoutModal ||
+      showMovementsModal ||
+      showCierreModal ||
+      showTicketModal ||
+      showEntradaRapidaModal ||
+      showHoldModal ||
+      showCajaAbonoModal ||
+      showBulkModal ||
+      showQtyEditModal ||
+      showOnHoldModal ||
+      showDevolucionModal ||
+      showQuickClientModal ||
+      showCambioDivisasModal ||
+      showAperturaModal;
+
+    if (isModalOpen) return;
+
+    const target = e.target as HTMLElement;
+    if (!target) return;
+
+    // Check if clicked element is interactive (buttons, inputs, quantity edits, selectors)
+    const isInteractive = target.closest(
+      'input, textarea, select, button, a, [role="button"], [contenteditable="true"], .select-text, .cursor-pointer'
+    );
+
+    if (!isInteractive) {
+      const sel = window.getSelection();
+      if (sel && sel.toString().length > 0) return;
+      focusSearchInput();
+    }
+  };
 
   // Listener for F6 and Escape (modals closing)
   useEffect(() => {
@@ -1195,6 +1267,56 @@ export default function CajaPOS({
     window.addEventListener('keydown', handleF12Key);
     return () => window.removeEventListener('keydown', handleF12Key);
   }, [cajaAbierta, saleItems, showCheckoutModal]);
+
+  // End keydown handler (Limpiar Pantalla / Cancelar Venta)
+  useEffect(() => {
+    const handleEndKey = (e: KeyboardEvent) => {
+      if (e.key === 'End' || e.code === 'End') {
+        const isModalOpen =
+          showCheckoutModal ||
+          showMovementsModal ||
+          showCierreModal ||
+          showTicketModal ||
+          showEntradaRapidaModal ||
+          showHoldModal ||
+          showCajaAbonoModal ||
+          showBulkModal ||
+          showQtyEditModal ||
+          showOnHoldModal ||
+          showDevolucionModal ||
+          showQuickClientModal ||
+          showCambioDivisasModal;
+
+        if (!isModalOpen) {
+          e.preventDefault();
+          if (saleItems.length > 0) {
+            handleClearSale();
+          } else {
+            focusSearchInput();
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleEndKey);
+    return () => window.removeEventListener('keydown', handleEndKey);
+  }, [
+    saleItems,
+    showCheckoutModal,
+    showMovementsModal,
+    showCierreModal,
+    showTicketModal,
+    showEntradaRapidaModal,
+    showHoldModal,
+    showCajaAbonoModal,
+    showBulkModal,
+    showQtyEditModal,
+    showOnHoldModal,
+    showDevolucionModal,
+    showQuickClientModal,
+    showCambioDivisasModal,
+    focusSearchInput
+  ]);
 
   // Focus Trap for Quantity Edit Modal
   useEffect(() => {
@@ -1326,6 +1448,7 @@ export default function CajaPOS({
         }];
       }
     });
+    focusSearchInput();
   };
 
   const handleAddProduct = (prod: Product, qty: number = 1) => {
@@ -1369,6 +1492,7 @@ export default function CajaPOS({
     executeAddProduct(bulkProduct, parsed);
     setShowBulkModal(false);
     setBulkProduct(null);
+    focusSearchInput();
   };
 
   const handleConfirmQtyEdit = () => {
@@ -1393,6 +1517,7 @@ export default function CajaPOS({
     handleUpdateItemQty(qtyEditItem.product.id, parsed);
     setShowQtyEditModal(false);
     setQtyEditItem(null);
+    focusSearchInput();
   };
 
   const handleUpdateItemQty = (prodId: number, nextQty: number) => {
@@ -1432,25 +1557,21 @@ export default function CajaPOS({
 
   const handleRemoveItem = (prodId: number) => {
     setSaleItems(prev => prev.filter(item => item.product.id !== prodId));
+    focusSearchInput();
   };
 
-  const handleClearSale = async () => {
-    const ok = await showConfirm(
-      '¿Está seguro de cancelar la venta en curso? Se limpiarán todos los ítems del carrito.',
-      'Cancelar Venta',
-      { confirmLabel: 'Sí, Cancelar', isDanger: true }
-    );
-    if (ok) {
-      setSaleItems([]);
-      setDiscountPct(0);
-      const defaultClient = clients.find(c => c.cedula_rif === 'V-00000000') || clients[0];
-      if (defaultClient) {
-        setSelectedClient(defaultClient);
-      }
-      localStorage.removeItem('pos_current_cart');
-      localStorage.removeItem('pos_current_discount');
-      localStorage.removeItem('pos_current_client_doc');
+  const handleClearSale = () => {
+    setSaleItems([]);
+    setDiscountPct(0);
+    const defaultClient = clients.find(c => c.cedula_rif === 'V-00000000') || clients[0];
+    if (defaultClient) {
+      setSelectedClient(defaultClient);
     }
+    localStorage.removeItem('pos_current_cart');
+    localStorage.removeItem('pos_current_discount');
+    localStorage.removeItem('pos_current_client_doc');
+    showToast('🗑️ Pantalla de venta limpiada.');
+    focusSearchInput();
   };
 
   const resetPaymentFields = useCallback(() => {
@@ -2560,7 +2681,10 @@ export default function CajaPOS({
   ];
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 font-mono text-xs text-slate-800">
+    <div 
+      onClick={handlePosContainerClick}
+      className="grid grid-cols-1 xl:grid-cols-4 gap-6 font-mono text-xs text-slate-800 select-none"
+    >
       
       {/* WARNING BANNER: MODO CONSULTA */}
       {!cajaAbierta && (
@@ -2642,10 +2766,12 @@ export default function CajaPOS({
                       handleAddProduct(matched);
                       setSearchProdTerm('');
                       setSearchSelectedIndex(-1);
+                      focusSearchInput();
                     } else {
                       showToast(`Código "${term}" no registrado o inexistente en el inventario.`, 'error');
                       setSearchProdTerm('');
                       setSearchSelectedIndex(-1);
+                      focusSearchInput();
                     }
                   }
                 }}
@@ -2674,6 +2800,7 @@ export default function CajaPOS({
                           handleAddProduct(p);
                           setSearchProdTerm('');
                           setSearchSelectedIndex(-1);
+                          focusSearchInput();
                         }}
                         className={`w-full text-left p-2.5 text-[11px] font-sans block transition-all ${
                           isSelected
@@ -2875,7 +3002,18 @@ export default function CajaPOS({
                   <th className="px-4 py-2.5 text-center w-28">CANTIDAD</th>
                   <th className="px-4 py-2.5 text-right whitespace-nowrap min-w-[110px] font-extrabold text-xs">PRECIO U.</th>
                   <th className="px-4 py-2.5 text-right whitespace-nowrap min-w-[110px] font-extrabold text-xs">TOTAL</th>
-                  <th className="px-4 py-2.5 w-12 text-center"></th>
+                  <th className="px-4 py-2.5 w-12 text-center">
+                    {saleItems.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleClearSale}
+                        className="text-red-400 hover:text-red-600 transition-all p-1 rounded hover:bg-red-50"
+                        title="Limpiar Pantalla / Cancelar Venta (End)"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -3173,15 +3311,21 @@ export default function CajaPOS({
             </button>
           )}
 
-          {saleItems.length > 0 && (
-            <button
-              onClick={handleClearSale}
-              className="w-full bg-white border border-slate-200 text-red-500 hover:text-red-750 hover:bg-red-50 py-1.5 rounded-lg text-xs font-sans transition-all flex items-center justify-center gap-1.5 shadow-sm"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              Cancelar Venta
-            </button>
-          )}
+          {/* BOTÓN LIMPIAR PANTALLA (TECLA END / FIN) */}
+          <button
+            type="button"
+            onClick={handleClearSale}
+            disabled={saleItems.length === 0}
+            className={`w-full py-2 rounded-xl text-xs font-sans font-black transition-all flex items-center justify-center gap-2 shadow-sm ${
+              saleItems.length > 0
+                ? 'bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 active:scale-95 cursor-pointer'
+                : 'bg-slate-100 text-slate-400 border border-slate-200 opacity-60 cursor-not-allowed'
+            }`}
+            title="Limpiar todos los productos de la pantalla y cancelar venta actual (Tecla End / Fin)"
+          >
+            <Trash2 className="w-4 h-4 text-rose-500" />
+            <span>LIMPIAR PANTALLA (End)</span>
+          </button>
         </div>
 
       </div>
@@ -5615,8 +5759,14 @@ export default function CajaPOS({
                             {devExchangeSearch.trim() !== '' && (
                               <div className="absolute top-full left-0 right-0 z-20 bg-white border border-slate-200 rounded-lg shadow-xl max-h-48 overflow-y-auto mt-1 divide-y divide-slate-100">
                                 {products
-                                  .filter(p => p.description.toLowerCase().includes(devExchangeSearch.toLowerCase()) || p.barcode.includes(devExchangeSearch))
-                                  .slice(0, 6)
+                                  .filter(p => p.description.toLowerCase().includes(devExchangeSearch.toLowerCase()) || p.barcode.toLowerCase().includes(devExchangeSearch.toLowerCase()))
+                                  .sort((a, b) => {
+                                    const aStock = (parseFloat(a.stock_actual as any) || 0) > 0 ? 1 : 0;
+                                    const bStock = (parseFloat(b.stock_actual as any) || 0) > 0 ? 1 : 0;
+                                    if (aStock !== bStock) return bStock - aStock;
+                                    return a.description.localeCompare(b.description, 'es', { sensitivity: 'base' });
+                                  })
+                                  .slice(0, 8)
                                   .map(p => (
                                     <button
                                       key={p.id}

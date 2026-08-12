@@ -99,6 +99,62 @@ fs.writeFileSync(outputPath, licenseContent, 'utf8');
 const backendLicensePath = path.join(__dirname, '..', 'backend', 'license.lic');
 fs.writeFileSync(backendLicensePath, licenseContent, 'utf8');
 
+// -------------------------------------------------------------
+// Step 3: Vault / Repositorio Automático de Licencias Emitidas
+// -------------------------------------------------------------
+const vaultDir = path.join(__dirname, 'licencias_emitidas');
+if (!fs.existsSync(vaultDir)) fs.mkdirSync(vaultDir, { recursive: true });
+
+// Sanitize filename
+const cleanClient = payload.cliente.replace(/[^a-zA-Z0-9_-]/g, '_');
+const cleanRif = payload.rif.replace(/[^a-zA-Z0-9_-]/g, '_');
+const cleanHwid = payload.hwid.replace(/[^a-zA-Z0-9_-]/g, '_');
+const vaultFileName = `Licencia_${cleanClient}_${cleanRif}_${cleanHwid}.lic`;
+const vaultFilePath = path.join(vaultDir, vaultFileName);
+
+// Save individual client license file in vault
+fs.writeFileSync(vaultFilePath, licenseContent, 'utf8');
+
+// Update JSON Registry
+const registryJsonPath = path.join(vaultDir, 'registro_licencias.json');
+let registry = [];
+if (fs.existsSync(registryJsonPath)) {
+  try {
+    registry = JSON.parse(fs.readFileSync(registryJsonPath, 'utf8'));
+    if (!Array.isArray(registry)) registry = [];
+  } catch (e) {
+    registry = [];
+  }
+}
+
+// Check if HWID already in registry, update or prepend
+const existingIndex = registry.findIndex(r => r.hwid === payload.hwid);
+const record = {
+  ...payload,
+  archivo: vaultFileName,
+  fechaRegistro: new Date().toISOString()
+};
+
+if (existingIndex >= 0) {
+  registry[existingIndex] = record;
+} else {
+  registry.unshift(record);
+}
+fs.writeFileSync(registryJsonPath, JSON.stringify(registry, null, 2), 'utf8');
+
+// Update Markdown History Table for easy viewing
+const historyMdPath = path.join(vaultDir, 'HISTORIAL_LICENCIAS.md');
+let mdContent = `# 🏛️ HISTORIAL Y REPOSITORIO DE LICENCIAS EMITIDAS - WINTERPOS\n\n`;
+mdContent += `> Este repositorio almacena el historial seguro de todas las licencias generadas para clientes.\n\n`;
+mdContent += `| # | Cliente | RIF / Cédula | HWID Equipo | Terminales | Tipo | Emisión | Expiración | Archivo Backup |\n`;
+mdContent += `| :---: | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- |\n`;
+
+registry.forEach((item, idx) => {
+  mdContent += `| ${idx + 1} | **${item.cliente}** | \`${item.rif}\` | \`${item.hwid}\` | ${item.terminales} | \`${item.tipo}\` | ${item.fechaEmision} | ${item.fechaExpiracion} | [\`${item.archivo}\`](./${item.archivo}) |\n`;
+});
+
+fs.writeFileSync(historyMdPath, mdContent, 'utf8');
+
 console.log('\n===============================================================');
 console.log('  ✨ LICENCIA GENERADA Y FIRMADA CRIPTOGRÁFICAMENTE CON ÉXITO   ');
 console.log('===============================================================');
@@ -110,6 +166,7 @@ console.log('Emisión:         ', payload.fechaEmision);
 console.log('Expiración:      ', payload.fechaExpiracion);
 console.log('Firma RSA:       ', signature.substring(0, 32) + '...');
 console.log('---------------------------------------------------------------');
-console.log('📄 Archivo creado:', outputPath);
-console.log('📄 Archivo auto-copiado en backend:', backendLicensePath);
+console.log('📄 Archivo actual:           ', outputPath);
+console.log('📂 Guardado en Repositorio:  ', vaultFilePath);
+console.log('📖 Historial actualizado:    ', historyMdPath);
 console.log('===============================================================\n');

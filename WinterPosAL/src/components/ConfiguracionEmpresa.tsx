@@ -4,7 +4,8 @@ import {
   Save, CheckCircle2, Users, HardDrive, Cpu, 
   Trash2, Edit, Plus, Download, Upload, ShieldAlert,
   Settings, CheckSquare, Square, Globe, ShieldCheck, Printer, FileText,
-  LogOut, Unplug, KeyRound, Lock, Eye, EyeOff, DollarSign
+  LogOut, Unplug, KeyRound, Lock, Eye, EyeOff, DollarSign,
+  RefreshCw, Unlock, RotateCcw, AlertTriangle
 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr } from '../utils';
@@ -213,10 +214,16 @@ export default function ConfiguracionEmpresa({
   const [waStatus, setWaStatus] = useState<any>({
     status: 'DISCONNECTED',
     qr: '',
-    isMock: false
+    isMock: false,
+    detectedChromePath: '',
+    lastError: null
   });
   const [isWaLoading, setIsWaLoading] = useState(false);
   const [isInstallingChrome, setIsInstallingChrome] = useState(false);
+  const [isUnlockingSession, setIsUnlockingSession] = useState(false);
+  const [isResettingSession, setIsResettingSession] = useState(false);
+  const [isRestartingWa, setIsRestartingWa] = useState(false);
+  const [isLoggingOutWa, setIsLoggingOutWa] = useState(false);
   
   // Success states
   const [successMsg, setSuccessMsg] = useState('');
@@ -449,6 +456,140 @@ export default function ConfiguracionEmpresa({
       }
     } catch (err: any) {
       showAlert(`Error de red: ${err.message}`, 'Error de Conexión', 'error');
+    }
+  };
+
+  const handleUnlockSession = async () => {
+    try {
+      setIsUnlockingSession(true);
+      showToast('Desbloqueando procesos y liberando bloqueos de WhatsApp...');
+      const res = await fetch(getApiUrl('/whatsapp/unlock-session'), { method: 'POST' });
+      if (res.ok) {
+        showAlert('Se cerraron los procesos huérfanos de Chrome en segundo plano y se liberaron los archivos de bloqueo. El servicio de WhatsApp se reinició limpiamente.', 'Sesión Desbloqueada', 'success');
+        fetchWaStatus();
+      } else {
+        let errMsg = 'Desconocido';
+        try {
+          const text = await res.text();
+          try {
+            const json = JSON.parse(text);
+            errMsg = json.error || json.message || text;
+          } catch {
+            errMsg = text || `Error HTTP ${res.status}`;
+          }
+        } catch {
+          errMsg = `Error HTTP ${res.status}`;
+        }
+        showAlert(`Error al desbloquear: ${errMsg}`, 'Error de Desbloqueo', 'error');
+      }
+    } catch (err: any) {
+      showAlert(`Error de red: ${err.message}`, 'Error de Conexión', 'error');
+    } finally {
+      setIsUnlockingSession(false);
+    }
+  };
+
+  const handleResetSession = async () => {
+    const ok = await showConfirm(
+      '¿Está seguro de restablecer por completo la sesión de WhatsApp?\n\nEsta acción cerrará todos los procesos de fondo, eliminará archivos de sesión temporales y generará un nuevo código QR limpio en pantalla para vincular con su teléfono.',
+      'Restablecer Sesión y Nuevo QR',
+      { confirmLabel: 'Sí, Restablecer y Generar QR', isDanger: true }
+    );
+    if (!ok) return;
+
+    try {
+      setIsResettingSession(true);
+      showToast('Limpiando sesión anterior y generando código QR fresco...');
+      const res = await fetch(getApiUrl('/whatsapp/reset-session'), { method: 'POST' });
+      if (res.ok) {
+        showAlert('Sesión eliminada completamente. El sistema está generando un nuevo código QR limpio para vincular con su teléfono.', 'Sesión Restablecida', 'success');
+        fetchWaStatus();
+      } else {
+        let errMsg = 'Desconocido';
+        try {
+          const text = await res.text();
+          try {
+            const json = JSON.parse(text);
+            errMsg = json.error || json.message || text;
+          } catch {
+            errMsg = text || `Error HTTP ${res.status}`;
+          }
+        } catch {
+          errMsg = `Error HTTP ${res.status}`;
+        }
+        showAlert(`Error al restablecer: ${errMsg}`, 'Error', 'error');
+      }
+    } catch (err: any) {
+      showAlert(`Error de red: ${err.message}`, 'Error de Conexión', 'error');
+    } finally {
+      setIsResettingSession(false);
+    }
+  };
+
+  const handleLogoutWa = async () => {
+    const ok = await showConfirm(
+      '¿Desea cerrar la sesión de WhatsApp vinculada en este sistema?\n\nEl bot se desconectará y dejará de enviar reportes hasta que vuelva a escanear el código QR.',
+      'Cerrar Sesión de WhatsApp',
+      { confirmLabel: 'Cerrar Sesión (Logout)', isDanger: true }
+    );
+    if (!ok) return;
+
+    try {
+      setIsLoggingOutWa(true);
+      showToast('Cerrando sesión de WhatsApp...');
+      const res = await fetch(getApiUrl('/whatsapp/logout'), { method: 'POST' });
+      if (res.ok) {
+        showAlert('Sesión de WhatsApp cerrada exitosamente. Ahora puede volver a vincular un teléfono escaneando el código QR.', 'Desvinculado', 'success');
+        fetchWaStatus();
+      } else {
+        let errMsg = 'Desconocido';
+        try {
+          const text = await res.text();
+          try {
+            const json = JSON.parse(text);
+            errMsg = json.error || json.message || text;
+          } catch {
+            errMsg = text || `Error HTTP ${res.status}`;
+          }
+        } catch {
+          errMsg = `Error HTTP ${res.status}`;
+        }
+        showAlert(`Error al cerrar sesión: ${errMsg}`, 'Error', 'error');
+      }
+    } catch (err: any) {
+      showAlert(`Error de red: ${err.message}`, 'Error de Conexión', 'error');
+    } finally {
+      setIsLoggingOutWa(false);
+    }
+  };
+
+  const handleRestartWa = async () => {
+    try {
+      setIsRestartingWa(true);
+      showToast('Reiniciando servicio de WhatsApp...');
+      const res = await fetch(getApiUrl('/whatsapp/restart'), { method: 'POST' });
+      if (res.ok) {
+        showToast('Motor de WhatsApp reiniciado con éxito.');
+        fetchWaStatus();
+      } else {
+        let errMsg = 'Desconocido';
+        try {
+          const text = await res.text();
+          try {
+            const json = JSON.parse(text);
+            errMsg = json.error || json.message || text;
+          } catch {
+            errMsg = text || `Error HTTP ${res.status}`;
+          }
+        } catch {
+          errMsg = `Error HTTP ${res.status}`;
+        }
+        showAlert(`Error al reiniciar: ${errMsg}`, 'Error', 'error');
+      }
+    } catch (err: any) {
+      showAlert(`Error de red: ${err.message}`, 'Error de Conexión', 'error');
+    } finally {
+      setIsRestartingWa(false);
     }
   };
 
@@ -2608,120 +2749,273 @@ export default function ConfiguracionEmpresa({
                 
                 {/* Side-by-side Grid: Status & QR/Connection Card */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
-                  {/* WhatsApp Connection status */}
+                  {/* WhatsApp Connection status & Self-Management */}
                   <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4 flex flex-col justify-between h-full">
-                    <div className="space-y-4">
-                      <h3 className="text-xs font-bold text-slate-700 uppercase flex items-center gap-1.5 font-sans">
-                        <Globe className="w-4 h-4 text-indigo-650" />
-                        Estado del Servicio
-                      </h3>
+                    <div className="space-y-3.5">
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                        <h3 className="text-xs font-bold text-slate-700 uppercase flex items-center gap-1.5 font-sans">
+                          <Globe className="w-4 h-4 text-indigo-650" />
+                          Estado del Servicio
+                        </h3>
+                        <button
+                          type="button"
+                          onClick={() => fetchWaStatus()}
+                          className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 p-1 rounded hover:bg-indigo-50 transition-all"
+                          title="Actualizar estado ahora"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          <span>Actualizar</span>
+                        </button>
+                      </div>
                       
-                      <div className="p-4 rounded-lg bg-slate-50 border border-slate-150 space-y-3">
-                        <div className="flex items-center gap-2">
-                          <span className={`w-3 h-3 rounded-full animate-pulse ${
-                            waStatus.status === 'CONNECTED' ? 'bg-emerald-500' :
-                            waStatus.status === 'QR_READY' ? 'bg-amber-500' :
-                            waStatus.status === 'AUTHENTICATING' ? 'bg-sky-500' : 'bg-red-500'
-                          }`} />
-                          <span className="text-xs font-extrabold uppercase font-sans text-slate-700">
-                            {waStatus.status === 'CONNECTED' ? '🟢 Conectado' :
-                             waStatus.status === 'QR_READY' ? '🟡 Esperando Escaneo' :
-                             waStatus.status === 'AUTHENTICATING' ? '🔵 Autenticando...' : '🔴 Desconectado'}
+                      <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-3 h-3 rounded-full animate-pulse ${
+                              waStatus.status === 'CONNECTED' ? 'bg-emerald-500' :
+                              waStatus.status === 'QR_READY' ? 'bg-amber-500' :
+                              waStatus.status === 'AUTHENTICATING' ? 'bg-sky-500' : 'bg-rose-500'
+                            }`} />
+                            <span className="text-xs font-black uppercase font-sans text-slate-800">
+                              {waStatus.status === 'CONNECTED' ? '🟢 Conectado' :
+                               waStatus.status === 'QR_READY' ? '🟡 Esperando Escaneo' :
+                               waStatus.status === 'AUTHENTICATING' ? '🔵 Conectando / Iniciando...' : '🔴 Desconectado'}
+                            </span>
+                          </div>
+
+                          <span className={`text-[9px] font-bold px-2 py-0.5 rounded uppercase ${
+                            waStatus.isMock ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                          }`}>
+                            {waStatus.isMock ? 'Simulación' : 'Motor Real Chrome'}
                           </span>
                         </div>
                         
-                        <p className="text-[10px] text-slate-500 leading-normal font-sans">
-                          {waStatus.status === 'CONNECTED' ? 'El servidor central tiene una sesión activa vinculada. Los reportes se enviarán de forma automática.' :
+                        <p className="text-[10.5px] text-slate-600 leading-normal font-sans">
+                          {waStatus.status === 'CONNECTED' ? 'El servidor central tiene una sesión activa vinculada. Los reportes y cierres se enviarán de forma automática.' :
                            waStatus.status === 'QR_READY' ? 'Requiere vincular una cuenta. Escanee el código QR de la derecha con la cámara de su WhatsApp.' :
-                           waStatus.status === 'AUTHENTICATING' ? 'Conectando con los servidores de WhatsApp. Por favor espere...' : 
+                           waStatus.status === 'AUTHENTICATING' ? 'Iniciando navegador y sincronizando con WhatsApp. Por favor espere unos segundos...' : 
                            'La integración está inactiva o requiere habilitarse en el panel.'}
                         </p>
 
-                        {waStatus.isMock && (
-                          <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg space-y-2">
-                            <p className="text-[10px] text-amber-800 leading-normal font-sans">
-                              ⚠️ <strong>Modo Simulación Activo:</strong> El motor de WhatsApp real (Chrome/Puppeteer) no está listo o falta instalarlo en el servidor.
+                        {/* DETECTED CHROME PATH */}
+                        {waStatus.detectedChromePath && (
+                          <div className="pt-2 border-t border-slate-200/70 text-[9.5px] font-sans text-slate-500 flex items-center gap-1 overflow-hidden text-ellipsis whitespace-nowrap">
+                            <span className="font-bold text-slate-700">Ruta Navegador:</span>
+                            <span className="font-mono text-slate-600 truncate" title={waStatus.detectedChromePath}>
+                              {waStatus.detectedChromePath}
+                            </span>
+                          </div>
+                        )}
+
+                        {/* LAST ERROR BANNER */}
+                        {waStatus.lastError && (
+                          <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 text-[10px] space-y-1 font-sans">
+                            <div className="font-bold flex items-center gap-1 text-rose-900">
+                              <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+                              <span>Última advertencia registrada:</span>
+                            </div>
+                            <p className="font-mono text-[9px] bg-white/80 p-1.5 rounded border border-rose-200 break-all">
+                              {waStatus.lastError}
                             </p>
-                            <button
-                              type="button"
-                              disabled={isInstallingChrome}
-                              onClick={async () => {
-                                try {
-                                  setIsInstallingChrome(true);
-                                  showToast('Iniciando instalación de Chrome/Puppeteer en el servidor. Esto puede tomar unos minutos...');
-                                  const res = await fetch(getApiUrl('/whatsapp/install-chromium'), { method: 'POST' });
-                                  if (res.ok) {
-                                    showAlert('Chrome/Puppeteer se instaló correctamente en el servidor. El servicio de WhatsApp se reiniciará.', 'Instalación Exitosa', 'success');
-                                    fetchWaStatus();
-                                  } else {
-                                    const errData = await res.json();
-                                    showAlert(`Error al instalar: ${errData.error || 'Desconocido'}`, 'Fallo de Instalación', 'error');
-                                  }
-                                } catch (err: any) {
-                                  showAlert(`Error de red: ${err.message}`, 'Error', 'error');
-                                } finally {
-                                  setIsInstallingChrome(false);
-                                }
-                              }}
-                              className={`w-full text-[10px] font-bold py-1.5 px-3 rounded font-sans transition-all text-white ${
-                                isInstallingChrome ? 'bg-amber-400 cursor-not-allowed' : 'bg-amber-600 hover:bg-amber-700'
-                              }`}
-                            >
-                              {isInstallingChrome ? '⏳ Instalando Chrome...' : '🔧 Instalar/Reparar Chrome (Puppeteer)'}
-                            </button>
                           </div>
                         )}
                       </div>
                     </div>
 
-                    {waStatus.status === 'CONNECTED' && (
-                      <button
-                        type="button"
-                        onClick={handleSendTestMessage}
-                        className="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 py-2.5 rounded-lg text-xs font-bold font-sans transition-all active:scale-95 flex items-center justify-center gap-1.5 mt-4"
-                      >
-                        <span>🧪 Enviar Mensaje de Prueba</span>
-                      </button>
-                    )}
+                    {/* BOTONES DE ACCION DIRECTA */}
+                    <div className="space-y-2 pt-2 border-t border-slate-100">
+                      {waStatus.status === 'CONNECTED' && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={handleSendTestMessage}
+                            className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 py-2 px-3 rounded-lg text-xs font-bold font-sans transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                          >
+                            <span>🧪 Mensaje Prueba</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isLoggingOutWa}
+                            onClick={handleLogoutWa}
+                            className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 py-2 px-3 rounded-lg text-xs font-bold font-sans transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                          >
+                            <LogOut className="w-3.5 h-3.5" />
+                            <span>{isLoggingOutWa ? 'Cerrando...' : 'Cerrar Sesión'}</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {waStatus.isMock && (
+                        <button
+                          type="button"
+                          disabled={isInstallingChrome}
+                          onClick={async () => {
+                            try {
+                              setIsInstallingChrome(true);
+                              showToast('Iniciando instalación de Chrome/Puppeteer en el servidor. Esto puede tomar unos minutos...');
+                              const res = await fetch(getApiUrl('/whatsapp/install-chromium'), { method: 'POST' });
+                              if (res.ok) {
+                                showAlert('Chrome/Puppeteer se instaló correctamente en el servidor. El servicio de WhatsApp se reiniciará.', 'Instalación Exitosa', 'success');
+                                fetchWaStatus();
+                              } else {
+                                const errData = await res.json().catch(() => ({}));
+                                showAlert(`Error al instalar: ${errData.error || 'Desconocido'}`, 'Fallo de Instalación', 'error');
+                              }
+                            } catch (err: any) {
+                              showAlert(`Error de red: ${err.message}`, 'Error', 'error');
+                            } finally {
+                              setIsInstallingChrome(false);
+                            }
+                          }}
+                          className={`w-full text-xs font-bold py-2 px-3 rounded-lg font-sans transition-all text-white flex items-center justify-center gap-1.5 shadow-sm ${
+                            isInstallingChrome ? 'bg-amber-400 cursor-not-allowed' : 'bg-amber-600 hover:bg-amber-700 active:scale-95'
+                          }`}
+                        >
+                          <Settings className="w-3.5 h-3.5" />
+                          <span>{isInstallingChrome ? '⏳ Instalando Chrome...' : '🔧 Instalar / Reparar Chrome'}</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {/* QR Code display or Connected state info */}
                   <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4 flex flex-col items-center justify-center text-center h-full min-h-[300px]">
                     {waStatus.status === 'QR_READY' && waStatus.qr ? (
                       <div className="space-y-4 flex flex-col items-center">
-                        <span className="text-[11px] font-bold font-sans text-slate-600 uppercase tracking-wide">Código QR de Vinculación</span>
-                        <div className="p-3 bg-white border-2 border-slate-100 rounded-xl shadow-inner">
-                          <img src={waStatus.qr} alt="Código QR de WhatsApp" className="w-48 h-48" />
+                        <div className="flex items-center justify-between w-full border-b border-slate-100 pb-1">
+                          <span className="text-[11px] font-bold font-sans text-slate-700 uppercase tracking-wide">Código QR de Vinculación</span>
+                          <button
+                            type="button"
+                            onClick={handleResetSession}
+                            disabled={isResettingSession}
+                            className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1"
+                            title="Generar otro código QR"
+                          >
+                            <RefreshCw className="w-3 h-3" />
+                            <span>Regenerar</span>
+                          </button>
                         </div>
-                        <div className="max-w-md space-y-1">
+                        <div className="p-3 bg-white border-2 border-slate-200 rounded-xl shadow-md">
+                          <img src={waStatus.qr} alt="Código QR de WhatsApp" className="w-48 h-48 rounded" />
+                        </div>
+                        <div className="max-w-xs space-y-1 text-slate-600">
                           <p className="text-[11px] font-sans font-bold text-indigo-900 uppercase">¿Cómo escanear?</p>
                           <p className="text-[10px] text-slate-500 font-sans leading-relaxed">
-                            Abra WhatsApp en su teléfono &gt; Dispositivos vinculados &gt; Vincular un dispositivo &gt; Escanee el código QR.
+                            Abra WhatsApp en su teléfono &gt; <strong>Dispositivos vinculados</strong> &gt; <strong>Vincular un dispositivo</strong> &gt; Escanee el código QR.
                           </p>
                         </div>
                       </div>
                     ) : waStatus.status === 'CONNECTED' ? (
-                      <div className="space-y-3">
-                        <div className="w-16 h-16 bg-emerald-50 border border-emerald-200 rounded-full flex items-center justify-center mx-auto text-emerald-500 text-2xl">
+                      <div className="space-y-3 p-4">
+                        <div className="w-16 h-16 bg-emerald-50 border-2 border-emerald-300 rounded-full flex items-center justify-center mx-auto text-emerald-600 text-2xl shadow-sm">
                           ✓
                         </div>
                         <h4 className="text-sm font-black text-slate-800 uppercase font-sans tracking-wide">¡Sesión Activa y Vinculada!</h4>
-                        <p className="text-xs text-slate-500 max-w-md mx-auto font-sans leading-relaxed">
-                          El bot de WhatsApp está conectado. Los arqueos de caja se notificarán de forma automatizada al grupo especificado en la configuración.
+                        <p className="text-xs text-slate-500 max-w-xs mx-auto font-sans leading-relaxed">
+                          El bot de WhatsApp está conectado y listo para despachar reportes y comprobantes automáticamente.
                         </p>
                       </div>
                     ) : waStatus.status === 'AUTHENTICATING' ? (
-                      <div className="space-y-3">
-                        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-650 mx-auto" />
-                        <p className="text-xs text-slate-500 font-sans">Estableciendo conexión y generando código QR. Un momento...</p>
+                      <div className="space-y-3 p-4">
+                        <div className="animate-spin rounded-full h-10 w-10 border-4 border-indigo-200 border-t-indigo-600 mx-auto" />
+                        <h4 className="text-xs font-bold text-slate-700 font-sans">Iniciando motor de WhatsApp...</h4>
+                        <p className="text-[10.5px] text-slate-500 font-sans max-w-xs">
+                          Cargando entorno seguro de Chrome y sincronizando con WhatsApp. Si tarda mucho, use el botón de <strong>Desbloquear Sesión</strong>.
+                        </p>
                       </div>
                     ) : (
-                      <div className="space-y-2 text-slate-400">
+                      <div className="space-y-2.5 text-slate-400 p-4">
                         <span className="text-4xl block">🔌</span>
-                        <p className="text-xs font-sans font-bold">Servicio deshabilitado</p>
-                        <p className="text-[10px] max-w-xs font-sans">Active la casilla "Habilitar Integración de WhatsApp" en la sección de la derecha para iniciar el servicio.</p>
+                        <p className="text-xs font-sans font-bold text-slate-600">Servicio deshabilitado o inactivo</p>
+                        <p className="text-[10.5px] max-w-xs font-sans text-slate-400">
+                          Active la casilla "Habilitar Integración de WhatsApp" en el panel derecho para activar el motor.
+                        </p>
                       </div>
                     )}
+                  </div>
+                </div>
+
+                {/* NUEVO PANEL DE AUTOGESTION Y DESBLOQUEO DE SESIONES */}
+                <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-900/60 rounded-xl p-5 shadow-lg text-white space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-indigo-800/60 pb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-indigo-600/40 border border-indigo-500/50 flex items-center justify-center text-indigo-300">
+                        <Unlock className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h3 className="text-xs font-black uppercase tracking-wider text-white font-sans">
+                          Centro de Autogestión y Desbloqueo de Sesiones
+                        </h3>
+                        <p className="text-[10px] text-indigo-200/80 font-sans">
+                          Resuelva fallos de sesión, procesos atrapados de Chrome o errores de timeout con un solo clic.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {/* BOTÓN 1: DESBLOQUEAR SESIONES ATRAPADAS */}
+                    <button
+                      type="button"
+                      disabled={isUnlockingSession}
+                      onClick={handleUnlockSession}
+                      className="bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 p-3 rounded-xl text-left transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed group flex flex-col justify-between"
+                      title="Cierra procesos colgados de Chrome y elimina archivos de bloqueo sin borrar credenciales"
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-6 h-6 rounded-md bg-amber-500/30 flex items-center justify-center text-amber-300 group-hover:scale-110 transition-transform">
+                          <Unlock className="w-3.5 h-3.5" />
+                        </div>
+                        <span className="text-xs font-bold text-amber-200 font-sans">
+                          {isUnlockingSession ? 'Desbloqueando...' : 'Desbloquear Sesión'}
+                        </span>
+                      </div>
+                      <p className="text-[9.5px] text-slate-300/90 font-sans leading-tight">
+                        Cierra procesos huérfanos de Chrome en segundo plano y libera bloqueos de archivo.
+                      </p>
+                    </button>
+
+                    {/* BOTÓN 2: RESTABLECER Y FORZAR NUEVO QR */}
+                    <button
+                      type="button"
+                      disabled={isResettingSession}
+                      onClick={handleResetSession}
+                      className="bg-rose-500/20 hover:bg-rose-500/30 border border-rose-400/40 p-3 rounded-xl text-left transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed group flex flex-col justify-between"
+                      title="Limpia por completo sesiones corruptas y genera un nuevo código QR limpio"
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-6 h-6 rounded-md bg-rose-500/30 flex items-center justify-center text-rose-300 group-hover:scale-110 transition-transform">
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        </div>
+                        <span className="text-xs font-bold text-rose-200 font-sans">
+                          {isResettingSession ? 'Restableciendo...' : 'Restablecer y Nuevo QR'}
+                        </span>
+                      </div>
+                      <p className="text-[9.5px] text-slate-300/90 font-sans leading-tight">
+                        Elimina datos temporales corruptos y genera un código QR fresco para vincular.
+                      </p>
+                    </button>
+
+                    {/* BOTÓN 3: REINICIAR MOTOR */}
+                    <button
+                      type="button"
+                      disabled={isRestartingWa}
+                      onClick={handleRestartWa}
+                      className="bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/40 p-3 rounded-xl text-left transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed group flex flex-col justify-between"
+                      title="Reinicia el servicio de WhatsApp en el backend"
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-6 h-6 rounded-md bg-sky-500/30 flex items-center justify-center text-sky-300 group-hover:scale-110 transition-transform">
+                          <RefreshCw className={`w-3.5 h-3.5 ${isRestartingWa ? 'animate-spin' : ''}`} />
+                        </div>
+                        <span className="text-xs font-bold text-sky-200 font-sans">
+                          {isRestartingWa ? 'Reiniciando...' : 'Reiniciar Motor'}
+                        </span>
+                      </div>
+                      <p className="text-[9.5px] text-slate-300/90 font-sans leading-tight">
+                        Reinicia el cliente en segundo plano y comprueba el estado de conexión.
+                      </p>
+                    </button>
                   </div>
                 </div>
 
@@ -2734,23 +3028,23 @@ export default function ConfiguracionEmpresa({
                   
                   <div className="space-y-4 text-[11px] leading-relaxed text-slate-600">
                     <div className="space-y-1.5">
-                      <h4 className="font-extrabold text-slate-800 uppercase tracking-wide text-[10.5px]">⚠️ El Bot no genera el código QR</h4>
+                      <h4 className="font-extrabold text-slate-800 uppercase tracking-wide text-[10.5px]">⚠️ El Bot no genera el código QR o dice "auth timeout"</h4>
                       <ul className="list-disc pl-4 space-y-1">
-                        <li><strong>Primer inicio lento:</strong> La primera inicialización puede tardar hasta 1-2 minutos mientras carga.</li>
-                        <li><strong>Bloqueo de Sesiones:</strong> Si la vinculación está colgada, intenta limpiar las credenciales eliminando la carpeta <code className="bg-slate-100 text-indigo-700 px-1 rounded font-mono">.wwebjs_auth</code> en el servidor.</li>
+                        <li>Haga clic en el botón <strong>"🔓 Desbloquear Sesión"</strong> para cerrar cualquier proceso oculto de Chrome y liberar los archivos de perfil.</li>
+                        <li>Si el problema persiste, presione <strong>"🔄 Restablecer y Nuevo QR"</strong> para crear una sesión totalmente limpia.</li>
                       </ul>
                     </div>
 
                     <div className="space-y-1.5">
                       <h4 className="font-extrabold text-slate-800 uppercase tracking-wide text-[10.5px]">🔌 Desconexiones o Falla de Envío</h4>
                       <ul className="list-disc pl-4 space-y-1">
-                        <li><strong>Sin Conexión:</strong> Si el servidor pierde acceso a internet, la vinculación fallará.</li>
-                        <li><strong>Enlace de Grupo:</strong> Asegúrese de escribir el enlace de invitación de grupo de WhatsApp completo (<code className="bg-slate-100 text-indigo-700 px-1 rounded font-mono">https://chat.whatsapp.com/...</code>).</li>
+                        <li><strong>Conexión a Internet:</strong> El servidor local requiere acceso a internet para comunicarse con los servidores de WhatsApp.</li>
+                        <li><strong>Enlace de Grupo:</strong> Asegúrese de escribir el enlace de invitación de grupo de WhatsApp completo (<code className="bg-slate-100 text-indigo-700 px-1 rounded font-mono">https://chat.whatsapp.com/...</code>) o el ID correspondiente.</li>
                       </ul>
                     </div>
 
                     <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-[10px] text-slate-500 font-sans">
-                      <strong>💡 Tip:</strong> Si el estado sigue en desconectado, desmarca la casilla, guarda, espera 5 segundos y vuelve a marcarla para reiniciar el servicio.
+                      <strong>💡 Autogestión 100% desde la Interfaz:</strong> Ya no necesita abrir terminales de Node.js ni la consola de comandos CMD. Todas las operaciones de mantenimiento se realizan pulsando los botones del panel superior.
                     </div>
                   </div>
                 </div>
