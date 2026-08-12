@@ -3404,9 +3404,9 @@ export default function CajaPOS({
       {/* MODAL: CHECKOUT - Light Styled */}
       {showCheckoutModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-mono text-slate-800">
-          <div ref={checkoutModalRef} className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-3xl shadow-2xl flex flex-col max-h-[90vh]">
+          <div ref={checkoutModalRef} className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-3xl shadow-2xl flex flex-col my-auto max-h-[92vh]">
             
-            <div className="bg-slate-100 border-b border-slate-250 px-6 py-4 flex justify-between items-center flex-shrink-0">
+            <div className="bg-slate-100 border-b border-slate-250 px-6 py-3.5 flex justify-between items-center flex-shrink-0">
               <span className="text-xs font-black text-slate-700 tracking-widest uppercase flex items-center gap-1.5">
                 <Calculator className="w-4 h-4 text-winter-blueBtn" />
                 Interfaz de Liquidación (Checkout)
@@ -3414,11 +3414,11 @@ export default function CajaPOS({
               <button onClick={() => setShowCheckoutModal(false)} className="text-slate-400 hover:text-slate-700 focus:ring-2 focus:ring-winter-blueBtn focus:outline-none p-1 rounded">✕</button>
             </div>
 
-            <div className="flex-grow overflow-y-auto p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="overflow-y-auto p-5 grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
               
               {/* Payments Form */}
-              <div className="space-y-4">
-                <div className="flex justify-between items-center border-b border-slate-200 pb-1.5 mb-1.5 font-sans">
+              <div className="space-y-3.5">
+                <div className="flex justify-between items-center border-b border-slate-200 pb-1.5 mb-1 font-sans">
                   <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
                     Distribución de Métodos de Cobro
                   </h3>
@@ -3719,10 +3719,10 @@ export default function CajaPOS({
 
               </div>
 
-              {/* Receipt Summary & Status Card */}
-              <div className="flex flex-col justify-between space-y-6">
+              {/* Receipt Summary & Action Buttons Stack (Compact & Aligned) */}
+              <div className="flex flex-col space-y-3.5">
                 
-                <div className="bg-slate-50 border border-slate-200 p-5 rounded-xl space-y-4">
+                <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3">
                   
                   {/* CLIENT INFO BANNER FOR OPERATOR CHECK */}
                   <div className="bg-sky-50 border border-sky-100 py-1.5 px-3 rounded-lg flex flex-col font-sans text-xs leading-tight">
@@ -3731,11 +3731,11 @@ export default function CajaPOS({
                     <span className="font-mono font-bold text-slate-550 text-[10px] mt-0.5">{selectedClient.cedula_rif}</span>
                   </div>
 
-                  <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-200 pb-2 font-sans">
+                  <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-200 pb-1.5 font-sans">
                     Resumen de Liquidación
                   </h3>
                   
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     <div className="flex justify-between text-xs">
                       <span className="text-slate-550 font-sans">Subtotal USD:</span>
                       <span className="font-bold text-slate-600 font-mono">${subtotalUSD.toFixed(2)}</span>
@@ -3765,25 +3765,25 @@ export default function CajaPOS({
                       </div>
                     )}
 
-                    {/* HIGHLIGHTED TOTALS BOX - Enhanced Font Sizes */}
-                    <div className="bg-slate-100 border border-slate-250 p-3 rounded-xl my-2 space-y-2 shadow-2xs">
+                    {/* HIGHLIGHTED TOTALS BOX */}
+                    <div className="bg-slate-100 border border-slate-250 p-2.5 rounded-xl my-1.5 space-y-1 shadow-2xs">
                       <div className="flex justify-between items-baseline text-slate-900">
-                        <span className="font-sans font-black text-sm uppercase tracking-wide">TOTAL USD:</span>
-                        <span className="font-mono text-2xl font-black text-emerald-600">${totalUSD.toFixed(2)}</span>
+                        <span className="font-sans font-black text-xs uppercase tracking-wide">TOTAL USD:</span>
+                        <span className="font-mono text-xl font-black text-emerald-600">${totalUSD.toFixed(2)}</span>
                       </div>
-                      <div className="flex justify-between items-baseline text-slate-700 border-t border-slate-200/80 pt-1.5">
-                        <span className="font-sans font-bold text-xs uppercase tracking-wide">TOTAL VES:</span>
-                        <span className="font-mono text-base font-extrabold text-slate-900">Bs {totalVES.toFixed(2)}</span>
+                      <div className="flex justify-between items-baseline text-slate-700 border-t border-slate-200/80 pt-1">
+                        <span className="font-sans font-bold text-[11px] uppercase tracking-wide">TOTAL VES:</span>
+                        <span className="font-mono text-sm font-extrabold text-slate-900">Bs {totalVES.toFixed(2)}</span>
                       </div>
                     </div>
                     
-                    <div className="border-t border-slate-200 pt-2 flex justify-between text-emerald-700 font-bold text-xs">
+                    <div className="border-t border-slate-200 pt-1.5 flex justify-between text-emerald-700 font-bold text-xs">
                       <span className="font-sans">Total Pagado USD:</span>
                       <span className="font-mono font-black text-sm">${totalPaidUSD.toFixed(2)}</span>
                     </div>
 
-                    {/* MONTO POR LIQUIDAR - Highlighted in Vibrant Yellow when pending */}
-                    <div className={`p-3 rounded-xl transition-all ${
+                    {/* MONTO POR LIQUIDAR */}
+                    <div className={`p-2.5 rounded-xl transition-all ${
                       remainingUSD > 0 
                         ? 'bg-amber-200/90 border-2 border-amber-400 shadow-sm animate-pulse' 
                         : 'bg-emerald-50 border border-emerald-200'
@@ -3793,11 +3793,11 @@ export default function CajaPOS({
                           {remainingUSD > 0 ? '⚠️ Monto por Liquidar:' : '✅ Total Cancelado:'}
                         </span>
                         <div className="text-right font-mono flex flex-col items-end">
-                          <span className={`font-black ${remainingUSD > 0 ? 'text-red-700 text-lg' : 'text-emerald-700 text-sm'}`}>
+                          <span className={`font-black ${remainingUSD > 0 ? 'text-red-700 text-base' : 'text-emerald-700 text-sm'}`}>
                             ${remainingUSD.toFixed(2)} USD
                           </span>
                           {remainingUSD > 0 && (
-                            <span className="text-xs text-red-800 font-black font-mono mt-0.5">
+                            <span className="text-[11px] text-red-800 font-black font-mono">
                               Bs {(remainingUSD * tasaDia).toFixed(2)} VES
                             </span>
                           )}
@@ -3806,63 +3806,63 @@ export default function CajaPOS({
                     </div>
 
                     {/* HIGHLIGHTED CHANGE / VUELTO BOX */}
-                    <div className="border-t border-dashed border-slate-250 pt-3">
-                      <span className="text-[10px] text-slate-500 block font-sans uppercase tracking-wider font-bold">Diferencia / Cambio (Vuelto):</span>
-                      <div className="flex justify-between items-center mt-1.5 bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-lg font-mono">
-                        <span className="text-purple-700 font-black text-lg">
+                    <div className="border-t border-dashed border-slate-250 pt-2">
+                      <span className="text-[9.5px] text-slate-500 block font-sans uppercase tracking-wider font-bold">Diferencia / Cambio (Vuelto):</span>
+                      <div className="flex justify-between items-center mt-1 bg-purple-50 border border-purple-200 px-2.5 py-1.5 rounded-lg font-mono">
+                        <span className="text-purple-700 font-black text-base">
                           Bs {changeVES.toFixed(2)}
                         </span>
-                        <span className="text-purple-800 font-extrabold text-xs">
+                        <span className="text-purple-800 font-extrabold text-[11px]">
                           (${changeUSD.toFixed(2)} USD)
                         </span>
                       </div>
                     </div>
 
-                      {/* MIXED CHANGE HELPER CALCULATOR */}
-                      {changeUSD > 0 && (
-                        <div className="bg-purple-50/60 border border-purple-100 p-3 rounded-lg mt-3 space-y-2 text-[10px] font-sans text-purple-955">
-                          <div className="font-bold border-b border-purple-100 pb-1 uppercase tracking-wider text-[9px] text-purple-800">
-                            🧮 Auxiliar Vuelto Mixto
+                    {/* MIXED CHANGE HELPER CALCULATOR */}
+                    {changeUSD > 0 && (
+                      <div className="bg-purple-50/60 border border-purple-100 p-2.5 rounded-lg mt-2 space-y-1.5 text-[10px] font-sans text-purple-955">
+                        <div className="font-bold border-b border-purple-100 pb-0.5 uppercase tracking-wider text-[8.5px] text-purple-800">
+                          🧮 Auxiliar Vuelto Mixto
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[9px] text-slate-500 block mb-0.5">Entregar en USD ($)</label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              max={changeUSD}
+                              min="0"
+                              placeholder="Monto en $"
+                              value={mixedChangeUSDVal}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value) || 0;
+                                if (val > changeUSD) {
+                                  setMixedChangeUSDVal(changeUSD.toString());
+                                } else {
+                                  setMixedChangeUSDVal(e.target.value);
+                                }
+                              }}
+                              className="w-full bg-white border border-purple-200 rounded p-1 font-bold font-mono text-slate-800 outline-none text-[11px]"
+                            />
                           </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <label className="text-[9px] text-slate-500 block mb-0.5">Entregar en USD ($)</label>
-                              <input
-                                type="number"
-                                step="0.01"
-                                max={changeUSD}
-                                min="0"
-                                placeholder="Monto en $"
-                                value={mixedChangeUSDVal}
-                                onChange={(e) => {
-                                  const val = parseFloat(e.target.value) || 0;
-                                  if (val > changeUSD) {
-                                    setMixedChangeUSDVal(changeUSD.toString());
-                                  } else {
-                                    setMixedChangeUSDVal(e.target.value);
-                                  }
-                                }}
-                                className="w-full bg-white border border-purple-200 rounded p-1 font-bold font-mono text-slate-800 outline-none text-[11px]"
-                              />
+                          <div>
+                            <label className="text-[9px] text-slate-500 block mb-0.5">Restante en VES (Bs)</label>
+                            <div className="w-full bg-purple-100/50 border border-purple-200 rounded p-1 font-bold font-mono text-purple-900 text-xs">
+                              Bs {((changeUSD - (Math.min(changeUSD, Math.max(0, parseFloat(mixedChangeUSDVal) || 0)))) * tasaVuelto).toFixed(2)}
                             </div>
-                            <div>
-                              <label className="text-[9px] text-slate-500 block mb-0.5">Restante en VES (Bs)</label>
-                              <div className="w-full bg-purple-100/50 border border-purple-200 rounded p-1 font-bold font-mono text-purple-900 text-sm">
-                                Bs {((changeUSD - (Math.min(changeUSD, Math.max(0, parseFloat(mixedChangeUSDVal) || 0)))) * tasaVuelto).toFixed(2)}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="text-[8.5px] text-slate-500 italic mt-1 leading-tight">
-                            * Ingrese el monto en USD que devolverá en billetes. El sistema calcula la diferencia a devolver en Bolívares usando la tasa de vuelto ({tasaVuelto.toFixed(2)} Bs).
                           </div>
                         </div>
-                      )}
-                    </div>
+                        <div className="text-[8px] text-slate-500 italic mt-0.5 leading-tight">
+                          * Ingrese el monto en USD que devolverá en billetes. El sistema calcula la diferencia a devolver en Bolívares usando la tasa de vuelto ({tasaVuelto.toFixed(2)} Bs).
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                <div className="space-y-2.5">
-                  <div className={`p-3.5 rounded-lg border text-center font-bold tracking-wider font-sans text-xs ${
+                {/* BOTONES DE ACCIÓN COMPACTOS PEGADOS DIRECTAMENTE DEBAJO */}
+                <div className="space-y-2">
+                  <div className={`p-2.5 rounded-lg border text-center font-bold tracking-wider font-sans text-xs ${
                     canConfirmCheckout
                       ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
                       : 'bg-red-50 border-red-200 text-red-700'
@@ -3876,11 +3876,11 @@ export default function CajaPOS({
                               : 'CRÉDITO EXCEDIDO'))}
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <button
                       onClick={() => handleConfirmCheckout(true)}
                       disabled={!canConfirmCheckout}
-                      className="bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 disabled:text-slate-450 text-white py-3.5 px-4 rounded-xl font-extrabold text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 font-sans focus:ring-2 focus:ring-sky-500 focus:ring-offset-1 focus:outline-none"
+                      className="bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 disabled:text-slate-450 text-white py-2.5 px-3 rounded-xl font-extrabold text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 font-sans focus:ring-2 focus:ring-sky-500 focus:ring-offset-1 focus:outline-none"
                     >
                       <Ticket className="w-4 h-4" />
                       Cobrar con Ticket
@@ -3889,7 +3889,7 @@ export default function CajaPOS({
                     <button
                       onClick={() => handleConfirmCheckout(false)}
                       disabled={!canConfirmCheckout}
-                      className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-455 text-white py-3.5 px-4 rounded-xl font-extrabold text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 font-sans focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 focus:outline-none ring-2 ring-emerald-500/20"
+                      className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-455 text-white py-2.5 px-3 rounded-xl font-extrabold text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 font-sans focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 focus:outline-none ring-2 ring-emerald-500/20"
                       title="Presione Enter para confirmar"
                     >
                       <CheckCircle2 className="w-4 h-4" />
@@ -3903,6 +3903,7 @@ export default function CajaPOS({
             </div>
 
           </div>
+        </div>
       )}
 
       {/* MODAL: EDITAR CANTIDAD DE ITEM */}
