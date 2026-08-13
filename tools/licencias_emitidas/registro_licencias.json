@@ -1,5 +1,16 @@
 [
   {
+    "cliente": "Inversiones Familia Angel",
+    "rif": "J-411",
+    "hwid": "WPOS-6515-A299-1AD6",
+    "terminales": "ILIMITADO",
+    "fechaEmision": "2026-08-13",
+    "fechaExpiracion": "VITALICIA",
+    "tipo": "VITALICIA",
+    "archivo": "Licencia_Inversiones_Familia_Angel_J-411_WPOS-6515-A299-1AD6.lic",
+    "fechaRegistro": "2026-08-13T01:59:42.509Z"
+  },
+  {
     "cliente": "INVERSIONES NIQUITAO JB AL 3000 CAJA",
     "rif": "J-4113326312",
     "hwid": "WPOS-8F18-BE43-09BF, WPOS-3425-A6DB-4466, WPOS-A892-26AE-DF6F",

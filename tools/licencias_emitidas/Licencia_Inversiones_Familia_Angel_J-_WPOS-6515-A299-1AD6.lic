@@ -1,0 +1,12 @@
+{
+  "payload": {
+    "cliente": "Inversiones Familia Angel",
+    "rif": "J-",
+    "hwid": "WPOS-6515-A299-1AD6",
+    "terminales": "ILIMITADO",
+    "fechaEmision": "2026-08-13",
+    "fechaExpiracion": "VITALICIA",
+    "tipo": "VITALICIA"
+  },
+  "signature": "c4fb2db1a817e8bb8bcea87739f09a88b6dc3a036f976c589a4fd14b88e9e74891de5a658793404281ab60a2372bb0a84c39b90c0e880263e47789e8efbfc364c2974c67b1f3c9d80ff3dcdd46e9bee2b826ab0f412497340f2ddd4e80b019f6ee1614402761d26cf85845ab14960d7a1803d3559490f054576e349a9a9c9b3f9d246683686c1294481ba0a4c319f21529d60d5d8561bacb5c8b3a3d4fd7ee027a8ef5fe8a4650eedf990e5db616ad8be4ff458312c8c17cffb0fb202ad0b827d0bd7b09d9c7ac39de3abcb1a6ff9f5458f40825655c6a44712cf701e66c248f029494b601b744d2121e891572a57064a9b2bfc0baf107a24d45b5ec2c2250b9"
+}
