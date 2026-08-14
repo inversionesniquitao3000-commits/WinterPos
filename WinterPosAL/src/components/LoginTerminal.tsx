@@ -108,10 +108,14 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
     }
 
     setIsLoading(true);
-    
+
     try {
-      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-      const checkUrl = isLocalhost ? 'http://localhost:5000/api/users/login-check' : `http://${window.location.hostname}:5000/api/users/login-check`;
+      const savedIp = localStorage.getItem('pos_lan_ip') || '192.168.11.40';
+      const savedMode = localStorage.getItem('pos_db_mode') || 'remote';
+      const browserHost = window.location.hostname;
+      const isRemoteAccess = browserHost !== 'localhost' && browserHost !== '127.0.0.1';
+      const host = isRemoteAccess ? browserHost : (savedMode === 'local' ? 'localhost' : savedIp);
+      const checkUrl = `http://${host}:5000/api/users/login-check`;
       const terminalSaved = localStorage.getItem('pos_terminal_name') || 'LOCAL';
 
       const checkRes = await fetch(checkUrl, {

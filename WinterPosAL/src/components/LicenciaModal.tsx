@@ -58,13 +58,31 @@ export default function LicenciaModal({ licenseStatus, onLicenseActivated, getAp
       if (content) {
         setLicenseText(content);
         setShowUpdater(true);
+        // Automatically activate when file is selected
+        handleActivate(content);
       }
     };
     reader.readAsText(file);
   };
 
-  const handleActivate = async () => {
-    if (!licenseText.trim()) {
+  const handlePasteClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text && text.trim()) {
+        setLicenseText(text.trim());
+        setShowUpdater(true);
+        handleActivate(text.trim());
+      } else {
+        setErrorMsg('El portapapeles está vacío. Copie el texto de la licencia primero.');
+      }
+    } catch (e) {
+      setErrorMsg('No se pudo acceder al portapapeles. Pegue el código manualmente en el recuadro.');
+    }
+  };
+
+  const handleActivate = async (customContent?: any) => {
+    const textToUse = (typeof customContent === 'string' ? customContent : licenseText).trim();
+    if (!textToUse) {
       setErrorMsg('Por favor pegue el código de licencia o seleccione el archivo license.lic');
       return;
     }
@@ -73,25 +91,56 @@ export default function LicenciaModal({ licenseStatus, onLicenseActivated, getAp
     setErrorMsg('');
 
     try {
-      const res = await fetch(getApiUrl('/license/activate'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ licenseContent: licenseText.trim() })
-      });
+      const primaryUrl = getApiUrl('/license/activate');
+      let isSuccess = false;
+      let responseMsg = '';
 
-      const data = await res.json();
-      if (res.ok && data.success) {
-        showAlert('¡Excelente! La licencia ha sido verificada y guardada con éxito.', 'Licencia Actualizada', 'success');
+      // 1. Primary activate request (to configured server URL)
+      try {
+        const res = await fetch(primaryUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ licenseContent: textToUse })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          isSuccess = true;
+          responseMsg = data.message || '¡Licencia guardada y activada con éxito!';
+        } else {
+          responseMsg = data.message || data.status?.message || 'Error validando la licencia.';
+        }
+      } catch (primaryErr) {
+        console.warn('Fallo al conectar con la URL primaria:', primaryUrl, primaryErr);
+      }
+
+      // 2. Also update localhost:5000 if running in LAN/Remote mode so local files are also synchronized
+      if (!primaryUrl.includes('localhost:5000') && !primaryUrl.includes('127.0.0.1:5000')) {
+        try {
+          const localRes = await fetch('http://localhost:5000/api/license/activate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ licenseContent: textToUse })
+          });
+          const localData = await localRes.json();
+          if (localRes.ok && localData.success) {
+            isSuccess = true;
+            if (!responseMsg) responseMsg = '¡Licencia activada localmente con éxito!';
+          }
+        } catch (_) {}
+      }
+
+      if (isSuccess) {
+        showAlert('¡Excelente! La licencia ha sido verificada y guardada con éxito en todos los directorios del sistema.', 'Licencia Actualizada', 'success');
         setShowUpdater(false);
         setLicenseText('');
         onLicenseActivated();
         if (onClose && isValid) onClose();
       } else {
-        setErrorMsg(data.message || data.status?.message || 'Error: La licencia cargada no es válida para este equipo.');
+        setErrorMsg(responseMsg || 'Error: La licencia cargada no es válida para este equipo o el servidor no respondió.');
       }
     } catch (err) {
       console.error('Error al activar licencia:', err);
-      setErrorMsg('No se pudo conectar con el servidor central para verificar la licencia.');
+      setErrorMsg('No se pudo conectar con el servidor para guardar y verificar la licencia.');
     } finally {
       setLoading(false);
     }
@@ -233,16 +282,27 @@ export default function LicenciaModal({ licenseStatus, onLicenseActivated, getAp
                   <FileUp className="w-4 h-4 text-winter-blueBtn" />
                   Cargar o Pegar Archivo de Licencia (license.lic)
                 </span>
-                <label className="text-[11px] text-winter-blueBtn font-bold hover:underline cursor-pointer flex items-center gap-1">
-                  <FileUp className="w-3.5 h-3.5" />
-                  Examinar Archivo
-                  <input
-                    type="file"
-                    accept=".lic,.json,.txt"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
-                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handlePasteClipboard}
+                    className="text-[11px] text-emerald-700 hover:text-emerald-800 font-bold hover:underline cursor-pointer flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-300"
+                    title="Pegar código copiado del portapapeles y activar inmediatamente"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    Pegar Portapapeles
+                  </button>
+                  <label className="text-[11px] text-winter-blueBtn font-bold hover:underline cursor-pointer flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                    <FileUp className="w-3.5 h-3.5" />
+                    Examinar Archivo
+                    <input
+                      type="file"
+                      accept=".lic,.json,.txt"
+                      onChange={handleFileUpload}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
               </label>
 
               <textarea
@@ -261,7 +321,7 @@ export default function LicenciaModal({ licenseStatus, onLicenseActivated, getAp
               )}
 
               <button
-                onClick={handleActivate}
+                onClick={() => handleActivate()}
                 disabled={loading}
                 className="w-full bg-gradient-to-r from-winter-header via-slate-900 to-winter-header hover:from-slate-900 hover:to-slate-950 text-white font-extrabold py-3 rounded-2xl transition-all shadow-md flex items-center justify-center gap-2 text-xs uppercase tracking-wider cursor-pointer disabled:opacity-50"
               >

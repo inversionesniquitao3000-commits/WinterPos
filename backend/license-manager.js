@@ -182,30 +182,61 @@ function getOrCreateTrialInfo(hwid, db = null) {
   };
 }
 
-// -------------------------------------------------------------
-// 3. LICENSE VERIFIER & STATUS CHECKER
-// -------------------------------------------------------------
+// Helper to discover all possible directory roots where license files may reside
+export function getLicenseTargetDirs() {
+  const dirs = new Set();
+  
+  // 1. Current backend directory and its parent root
+  dirs.add(__dirname);
+  dirs.add(path.resolve(__dirname, '..'));
+
+  // 2. Process current working directory and subdirectories
+  dirs.add(process.cwd());
+  dirs.add(path.resolve(process.cwd(), 'backend'));
+  dirs.add(path.resolve(process.cwd(), 'WinterPosAL'));
+  dirs.add(path.resolve(process.cwd(), 'WinterPosAL', 'backend'));
+
+  // 3. Sibling and nested WinterPosAL / backend structures
+  dirs.add(path.resolve(__dirname, '..', 'WinterPosAL'));
+  dirs.add(path.resolve(__dirname, '..', 'WinterPosAL', 'backend'));
+  dirs.add(path.resolve(__dirname, 'WinterPosAL'));
+  dirs.add(path.resolve(__dirname, '..', '..', 'WinterPosAL'));
+  dirs.add(path.resolve(__dirname, '..', '..', 'WinterPosAL', 'backend'));
+
+  return Array.from(dirs).filter(d => {
+    try {
+      return fs.existsSync(d) && fs.statSync(d).isDirectory();
+    } catch (_) {
+      return false;
+    }
+  });
+}
+
 // -------------------------------------------------------------
 // 3. LICENSE VERIFIER & STATUS CHECKER
 // -------------------------------------------------------------
 export function verifyLicense(db = null) {
   const currentHWID = generateMachineHWID();
+  const targetDirs = getLicenseTargetDirs();
 
-  // Find all potential license files (*.lic in backend and root)
+  // Find all potential license files (*.lic in backend, root, and WinterPosAL folders)
   const candidateFilePaths = new Set();
-  if (fs.existsSync(licensePathPrimary)) candidateFilePaths.add(licensePathPrimary);
-  if (fs.existsSync(licensePathRoot)) candidateFilePaths.add(licensePathRoot);
 
-  try {
-    const backendFiles = fs.readdirSync(__dirname);
-    backendFiles.filter(f => f.endsWith('.lic')).forEach(f => candidateFilePaths.add(path.join(__dirname, f)));
-  } catch (e) {}
+  // Step 1: Prioritize standard 'license.lic' in all candidate directories
+  for (const dir of targetDirs) {
+    const primaryLic = path.join(dir, 'license.lic');
+    if (fs.existsSync(primaryLic)) {
+      candidateFilePaths.add(primaryLic);
+    }
+  }
 
-  try {
-    const rootDir = path.join(__dirname, '..');
-    const rootFiles = fs.readdirSync(rootDir);
-    rootFiles.filter(f => f.endsWith('.lic')).forEach(f => candidateFilePaths.add(path.join(rootDir, f)));
-  } catch (e) {}
+  // Step 2: Also include any other *.lic files found in candidate directories
+  for (const dir of targetDirs) {
+    try {
+      const files = fs.readdirSync(dir);
+      files.filter(f => f.endsWith('.lic')).forEach(f => candidateFilePaths.add(path.join(dir, f)));
+    } catch (e) {}
+  }
 
   if (candidateFilePaths.size === 0) {
     // No license file => Enter 3-Day Secure Auto-Trial Mode
@@ -400,13 +431,22 @@ export function activateLicense(licenseInput, db = null) {
     return { success: false, message: 'Formato de licencia no válido. Debe ser un código JSON o archivo .lic oficial.' };
   }
 
-  // Write to primary license file
-  try {
-    fs.writeFileSync(licensePathPrimary, content, 'utf8');
-    if (fs.existsSync(path.dirname(licensePathRoot))) {
-      fs.writeFileSync(licensePathRoot, content, 'utf8');
+  // Write to all target directories (backend, root, WinterPosAL, WinterPosAL/backend, cwd, etc.)
+  const targetDirs = getLicenseTargetDirs();
+  let writeSuccessCount = 0;
+
+  for (const dir of targetDirs) {
+    try {
+      const targetFile = path.join(dir, 'license.lic');
+      fs.writeFileSync(targetFile, content, 'utf8');
+      writeSuccessCount++;
+      console.log(`[License Manager] ✅ Licencia escrita en: ${targetFile}`);
+    } catch (err) {
+      console.warn(`[License Manager] No se pudo escribir en ${dir}:`, err.message);
     }
-  } catch (err) {
+  }
+
+  if (writeSuccessCount === 0) {
     return { success: false, message: 'Error escribiendo el archivo de licencia en el disco del servidor.' };
   }
 

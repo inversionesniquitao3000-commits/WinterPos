@@ -91,13 +91,24 @@ const licenseObject = {
 
 const licenseContent = JSON.stringify(licenseObject, null, 2);
 
-// Write output file
+// Write output file to all common targets
 const outputPath = path.isAbsolute(outputArg) ? outputArg : path.join(__dirname, '..', outputArg);
 fs.writeFileSync(outputPath, licenseContent, 'utf8');
 
-// Also write to backend/license.lic for local dev test
-const backendLicensePath = path.join(__dirname, '..', 'backend', 'license.lic');
-fs.writeFileSync(backendLicensePath, licenseContent, 'utf8');
+const targetDirs = [
+  path.join(__dirname, '..'),
+  path.join(__dirname, '..', 'backend'),
+  path.join(__dirname, '..', 'WinterPosAL'),
+  path.join(__dirname, '..', 'WinterPosAL', 'backend')
+];
+
+for (const dir of targetDirs) {
+  try {
+    if (fs.existsSync(dir)) {
+      fs.writeFileSync(path.join(dir, 'license.lic'), licenseContent, 'utf8');
+    }
+  } catch (_) {}
+}
 
 // -------------------------------------------------------------
 // Step 3: Vault / Repositorio Automático de Licencias Emitidas
