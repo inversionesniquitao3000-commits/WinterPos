@@ -196,6 +196,9 @@ let isMockMode = false;
 let mockTimer = null;
 let lastInitError = null;
 let detectedChromePath = null;
+let heartbeatTimer = null;
+let authWatchdogTimer = null;
+let isReconnecting = false;
 
 // Load config
 export function getWhatsAppConfig() {
@@ -217,11 +220,14 @@ export function saveWhatsAppConfig(config) {
 }
 
 export function getWhatsAppStatus() {
+  if (!detectedChromePath) {
+    detectedChromePath = findChromeExecutable();
+  }
   return {
     status: connectionStatus,
     qr: connectionStatus === 'QR_READY' ? lastQrCode : '',
     isMock: isMockMode,
-    detectedChromePath: detectedChromePath || findChromeExecutable(),
+    detectedChromePath: detectedChromePath,
     lastError: lastInitError,
     config: getWhatsAppConfig()
   };
@@ -229,6 +235,18 @@ export function getWhatsAppStatus() {
 
 // Destroy client session
 async function destroyWhatsAppClient() {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+  if (authWatchdogTimer) {
+    clearInterval(authWatchdogTimer);
+    authWatchdogTimer = null;
+  }
+  if (mockTimer) {
+    clearTimeout(mockTimer);
+    mockTimer = null;
+  }
   if (client) {
     try {
       console.log('[WhatsApp] Destruyendo sesión de WhatsApp...');
@@ -239,10 +257,6 @@ async function destroyWhatsAppClient() {
       console.error('[WhatsApp] Error al destruir cliente:', e.message);
     }
     client = null;
-  }
-  if (mockTimer) {
-    clearTimeout(mockTimer);
-    mockTimer = null;
   }
   connectionStatus = 'DISCONNECTED';
   lastQrCode = '';
@@ -272,7 +286,6 @@ function findChromeExecutable() {
 
     for (const p of chromePaths) {
       if (fs.existsSync(p)) {
-        console.log('[WhatsApp] Encontrado Google Chrome nativo en:', p);
         return p;
       }
     }
@@ -303,12 +316,9 @@ function findChromeExecutable() {
           };
           const foundChrome = findExeRecursively(cacheDir);
           if (foundChrome) {
-            console.log('[WhatsApp] Encontrado Chromium de Puppeteer en caché:', foundChrome);
             return foundChrome;
           }
-        } catch (errCache) {
-          // ignore cache read errors
-        }
+        } catch (errCache) {}
       }
     }
 
@@ -316,19 +326,100 @@ function findChromeExecutable() {
     const fallbackPaths = [
       path.join(progFiles, 'BraveSoftware\\Brave-Browser\\Application\\brave.exe'),
       'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-      'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
       path.join(progFilesX86, 'Microsoft\\Edge\\Application\\msedge.exe'),
       path.join(progFiles, 'Microsoft\\Edge\\Application\\msedge.exe')
     ];
 
     for (const p of fallbackPaths) {
       if (fs.existsSync(p)) {
-        console.log('[WhatsApp] Encontrado navegador alternativo en:', p);
         return p;
       }
     }
   }
   return null;
+}
+
+// Keep-Alive Heartbeat to prevent background sleep & detect silent drops
+function startHeartbeat() {
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  heartbeatTimer = setInterval(async () => {
+    const config = getWhatsAppConfig();
+    if (!config.enabled || !client || isMockMode) return;
+
+    try {
+      if (client.pupPage && !client.pupPage.isClosed()) {
+        const pageState = await client.pupPage.evaluate(() => {
+          const hasChatList = !!document.querySelector('#pane-side') || 
+                              !!document.querySelector('[data-testid="chat-list"]') ||
+                              !!document.querySelector('[aria-label="Lista de chats"]') ||
+                              !!document.querySelector('[aria-label="Chat list"]');
+          const isConnectedStore = window.Store && window.Store.AppState && window.Store.AppState.state === 'CONNECTED';
+          const hasQrCanvas = !!document.querySelector('canvas');
+          return { hasChatList, isConnectedStore, hasQrCanvas };
+        }).catch(() => null);
+
+        if (pageState) {
+          if ((pageState.hasChatList || pageState.isConnectedStore) && connectionStatus !== 'CONNECTED') {
+            console.log('[WhatsApp Heartbeat] Sincronización activa verificada. Estableciendo estado CONNECTED.');
+            connectionStatus = 'CONNECTED';
+            lastQrCode = '';
+            ensureWWebJSInjected(client);
+          } else if (pageState.hasQrCanvas && connectionStatus === 'CONNECTED') {
+            console.warn('[WhatsApp Heartbeat] La sesión fue desvinculada desde el teléfono.');
+            connectionStatus = 'QR_READY';
+          }
+        }
+      }
+    } catch (err) {
+      // Ignorar errores transitorios de evaluación
+    }
+  }, 25000);
+}
+
+// Watchdog to prevent getting stuck in AUTHENTICATING
+function startAuthWatchdog() {
+  if (authWatchdogTimer) clearInterval(authWatchdogTimer);
+  let checksCount = 0;
+
+  authWatchdogTimer = setInterval(async () => {
+    checksCount++;
+    if (connectionStatus !== 'AUTHENTICATING' || !client) {
+      clearInterval(authWatchdogTimer);
+      authWatchdogTimer = null;
+      return;
+    }
+
+    try {
+      if (client.pupPage && !client.pupPage.isClosed()) {
+        const check = await client.pupPage.evaluate(() => {
+          const hasChatList = !!document.querySelector('#pane-side') || 
+                              !!document.querySelector('[data-testid="chat-list"]') ||
+                              !!document.querySelector('[aria-label="Lista de chats"]') ||
+                              !!document.querySelector('[aria-label="Chat list"]') ||
+                              !!document.querySelector('div[contenteditable="true"]');
+          const isConnectedStore = window.Store && window.Store.AppState && window.Store.AppState.state === 'CONNECTED';
+          return { hasChatList, isConnectedStore };
+        }).catch(() => null);
+
+        if (check && (check.hasChatList || check.isConnectedStore)) {
+          console.log('[WhatsApp Watchdog] ¡Interfaz principal de WhatsApp detectada lista en el navegador! Forzando estado CONNECTED.');
+          connectionStatus = 'CONNECTED';
+          lastQrCode = '';
+          clearInterval(authWatchdogTimer);
+          authWatchdogTimer = null;
+          ensureWWebJSInjected(client);
+          return;
+        }
+
+        // Si pasan 50 segundos (~17 chequeos) y sigue colgado, recargar el marco para destrabarlo
+        if (checksCount >= 17) {
+          console.warn('[WhatsApp Watchdog] Sincronización demorada (>50s). Recargando página para desbloquear...');
+          checksCount = 0;
+          await client.pupPage.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+        }
+      }
+    } catch (e) {}
+  }, 3000);
 }
 
 // Initialize WhatsApp client
@@ -349,18 +440,18 @@ export async function initWhatsAppClient() {
   killOrphanedChrome();
   cleanSessionLocks();
 
-  console.log('[WhatsApp] Inicializando servicio de WhatsApp...');
+  console.log('[WhatsApp] Inicializando servicio de WhatsApp con protección anti-bloqueo...');
   connectionStatus = 'AUTHENTICATING';
+  startAuthWatchdog();
 
   try {
-    // Try to dynamically load libraries to support headless environment
     const { default: pkg } = await import('whatsapp-web.js');
     const { Client, LocalAuth, MessageMedia } = pkg;
     const qrcode = await import('qrcode');
 
-    console.log('[WhatsApp] Librería whatsapp-web.js cargada. Iniciando cliente...');
+    detectedChromePath = findChromeExecutable();
+    console.log('[WhatsApp] Motor Chrome detectado en:', detectedChromePath || 'Chromium interno');
 
-    const chromePath = findChromeExecutable();
     const userAgentStr = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
     const puppeteerConfig = {
       headless: true,
@@ -375,19 +466,18 @@ export async function initWhatsAppClient() {
         '--disable-extensions',
         '--disable-component-update',
         '--disable-default-apps',
-        '--disable-background-networking',
         '--disable-background-timer-throttling',
         '--disable-backgrounding-occluded-windows',
         '--disable-renderer-backgrounding',
-        '--disable-sync',
-        '--metrics-recording-only',
+        '--disable-features=IsolateOrigins,site-per-process,AudioServiceOutOfProcess,CalculateNativeWinOcclusion',
         '--disable-blink-features=AutomationControlled',
-        '--disable-features=site-per-process,IsolateOrigins',
+        '--window-size=1280,800',
+        '--disable-web-security',
         `--user-agent=${userAgentStr}`
       ]
     };
-    if (chromePath) {
-      puppeteerConfig.executablePath = chromePath;
+    if (detectedChromePath) {
+      puppeteerConfig.executablePath = detectedChromePath;
     }
 
     client = new Client({
@@ -396,7 +486,7 @@ export async function initWhatsAppClient() {
         dataPath: path.join(__dirname, '.wwebjs_auth')
       }),
       userAgent: userAgentStr,
-      authTimeoutMs: 180000, // 3 minutes timeout for reliable loading
+      authTimeoutMs: 180000,
       qrMaxRetries: 15,
       takeoverOnConflict: true,
       takeoverTimeoutMs: 0,
@@ -411,27 +501,31 @@ export async function initWhatsAppClient() {
       console.log('[WhatsApp] Código QR generado. Listo para escanear en F10 Config.');
       connectionStatus = 'QR_READY';
       try {
-        // Convert raw QR string to base64 image QR
         lastQrCode = await qrcode.toDataURL(qr);
       } catch (err) {
-        lastQrCode = qr; // fallback to string
+        lastQrCode = qr;
       }
     });
 
     client.on('loading_screen', (percent, message) => {
       console.log(`[WhatsApp] Sincronizando chats del teléfono (${percent}%): ${message}`);
-      connectionStatus = 'AUTHENTICATING';
+      if (connectionStatus !== 'CONNECTED') {
+        connectionStatus = 'AUTHENTICATING';
+      }
     });
 
     client.on('ready', () => {
       console.log('[WhatsApp] ¡Cliente Conectado y Listo!');
       connectionStatus = 'CONNECTED';
       lastQrCode = '';
+      ensureWWebJSInjected(client);
     });
 
     client.on('authenticated', () => {
       console.log('[WhatsApp] Sesión autenticada exitosamente en el servidor.');
-      connectionStatus = 'AUTHENTICATING';
+      if (connectionStatus !== 'CONNECTED') {
+        connectionStatus = 'AUTHENTICATING';
+      }
     });
 
     client.on('auth_failure', (msg) => {
@@ -440,10 +534,24 @@ export async function initWhatsAppClient() {
       lastQrCode = '';
     });
 
-    client.on('disconnected', (reason) => {
+    client.on('disconnected', async (reason) => {
       console.log('[WhatsApp] Cliente desconectado:', reason);
       connectionStatus = 'DISCONNECTED';
       lastQrCode = '';
+
+      // Auto-reconectar automáticamente si no fue logout manual
+      const conf = getWhatsAppConfig();
+      if (conf.enabled && reason !== 'LOGOUT' && !isReconnecting) {
+        isReconnecting = true;
+        console.log('[WhatsApp] Programando reconexión automática en 4 segundos...');
+        setTimeout(async () => {
+          try {
+            await unlockWhatsAppSession();
+          } finally {
+            isReconnecting = false;
+          }
+        }, 4000);
+      }
     });
 
     try {
@@ -463,6 +571,7 @@ export async function initWhatsAppClient() {
 
     isMockMode = false;
     lastInitError = null;
+    startHeartbeat();
 
   } catch (err) {
     const errMsg = err?.message || String(err);
@@ -477,10 +586,8 @@ export async function initWhatsAppClient() {
 // Simulated WhatsApp flow for development/offline modes
 function startMockFlow() {
   connectionStatus = 'QR_READY';
-  // Generamos un QR mock de texto
   lastQrCode = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 100 100"><rect width="100" height="100" fill="%23f3f4f6"/><text x="50" y="45" font-size="6" font-family="sans-serif" font-weight="bold" fill="%234f46e5" text-anchor="middle">ESCANEE QR MOCK</text><text x="50" y="55" font-size="4" font-family="sans-serif" fill="%236b7280" text-anchor="middle">Modo Simulación Activo</text><rect x="20" y="20" width="10" height="10" fill="%23000"/><rect x="70" y="20" width="10" height="10" fill="%23000"/><rect x="20" y="70" width="10" height="10" fill="%23000"/></svg>';
 
-  // Simular escaneo automático tras 15 segundos para testing rápido
   mockTimer = setTimeout(() => {
     if (connectionStatus === 'QR_READY') {
       console.log('[WhatsApp Mock] Vinculando sesión de prueba simulada...');

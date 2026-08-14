@@ -391,4 +391,110 @@ export interface GastoOperativo {
   created_at?: string;
 }
 
+export interface Proveedor {
+  id: number;
+  rif: string;
+  razon_social: string;
+  contacto_nombre?: string;
+  telefono: string;
+  correo?: string;
+  direccion?: string;
+  dias_credito: number;
+  limite_credito_usd: number;
+  saldo_pendiente_usd: number;
+  estado: 'Activo' | 'Inactivo';
+  created_at?: string;
+}
+
+export interface CompraDetalleItem {
+  id?: number;
+  compra_id?: number;
+  producto_id: number;
+  descripcion?: string;
+  codigo_barras_clave?: string;
+  cantidad: number;
+  costo_unitario_usd: number;
+  total_usd: number;
+  // helper fields for UI
+  margen_detalle_pct?: number;
+  precio_detalle_sugerido_usd?: number;
+  margen_mayor_pct?: number;
+  precio_mayor_sugerido_usd?: number;
+}
+
+export interface Compra {
+  id?: number;
+  numero_factura: string;
+  proveedor_id: number;
+  proveedor_nombre?: string;
+  proveedor_rif?: string;
+  usuario_id?: number;
+  usuario_nombre?: string;
+  fecha_emision: string;
+  fecha_vencimiento?: string;
+  condicion_pago: 'Contado' | 'Credito';
+  subtotal_usd: number;
+  impuesto_usd: number;
+  descuento_usd: number;
+  total_usd: number;
+  total_ves: number;
+  saldo_pendiente_usd: number;
+  estatus: 'Pendiente' | 'Parcial' | 'Pagada' | 'Anulada';
+  observaciones?: string;
+  tasa_cambio?: number;
+  items: CompraDetalleItem[];
+  created_at?: string;
+}
+
+export interface PagoProveedor {
+  id?: number;
+  compra_id?: number | null;
+  compra_factura?: string;
+  proveedor_id: number;
+  proveedor_nombre?: string;
+  proveedor_rif?: string;
+  usuario_id?: number;
+  usuario_nombre?: string;
+  caja_id?: number | null;
+  monto_usd: number;
+  monto_ves: number;
+  tasa_cambio: number;
+  metodo_pago: 'Efectivo$' | 'EfectivoBs' | 'TransferenciaVES' | 'PagoMovil' | 'Punto' | 'Zelle' | 'Binance' | 'PayPal';
+  banco_origen?: string;
+  numero_referencia?: string;
+  afecto_caja_efectivo?: boolean;
+  observacion?: string;
+  fecha: string;
+}
+
+export interface CotizacionProveedorItem {
+  producto_id?: number;
+  codigo_barras_clave?: string;
+  descripcion: string;
+  cantidad: number;
+  costo_unitario_usd: number;
+  total_usd: number;
+}
+
+export interface CotizacionProveedor {
+  id?: number;
+  numero_cotizacion: string;
+  proveedor_id: number;
+  proveedor_nombre?: string;
+  proveedor_rif?: string;
+  usuario_id?: number;
+  usuario_nombre?: string;
+  fecha: string;
+  fecha_vigencia?: string;
+  total_usd: number;
+  total_ves: number;
+  estatus: 'Pendiente' | 'Aprobada' | 'Rechazada' | 'Convertida';
+  detalles_json: {
+    items: CotizacionProveedorItem[];
+    notas?: string;
+    dias_validez?: number;
+  };
+}
+
+
 

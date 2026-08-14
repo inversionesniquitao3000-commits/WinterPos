@@ -11,7 +11,11 @@ import {
   saveUser, updateUser, deleteUser, getRoles, saveRole, updateRole, deleteRole, wipeDatabase, backupDatabase, restoreDatabase,
   readJsonFile, writeJsonFile,
   getMasterPass, saveMasterPass, verifyMasterPass, getAccionistas, saveAccionista, deleteAccionista, getInversiones, saveInversion, deleteInversion,
-  getGastosOperativos, saveGastoOperativo, deleteGastoOperativo
+  getGastosOperativos, saveGastoOperativo, deleteGastoOperativo,
+  getProveedores, saveProveedor, deleteProveedor,
+  getCompras, saveCompra,
+  getPagosProveedores, savePagoProveedor,
+  getCotizacionesProveedores, saveCotizacionProveedor, deleteCotizacionProveedor
 } from './db-store.js';
 
 import { 
@@ -1526,6 +1530,146 @@ app.delete('/api/gastos/:id', async (req, res) => {
   try {
     const { id } = req.params;
     await deleteGastoOperativo(id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// PROVEEDORES & COMPRAS & CXP REST API ENDPOINTS
+// -------------------------------------------------------------
+app.get('/api/proveedores', async (req, res) => {
+  try {
+    const proveedores = await getProveedores();
+    res.json(proveedores);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/proveedores', async (req, res) => {
+  try {
+    const data = req.body;
+    if (!data.rif || !data.razon_social) {
+      return res.status(400).json({ error: 'RIF y Razón Social son requeridos para registrar el proveedor.' });
+    }
+    const saved = await saveProveedor(data);
+    res.json(saved);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/proveedores/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = { ...req.body, id };
+    const saved = await saveProveedor(data);
+    res.json(saved);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/proveedores/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await deleteProveedor(id);
+    res.json({ success: true, message: 'Proveedor eliminado exitosamente.' });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// COMPRAS REST API
+app.get('/api/compras', async (req, res) => {
+  try {
+    const compras = await getCompras();
+    res.json(compras);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/compras', async (req, res) => {
+  try {
+    const data = req.body;
+    if (!data.proveedor_id || !data.numero_factura) {
+      return res.status(400).json({ error: 'Proveedor y Número de Factura son requeridos.' });
+    }
+    if (!Array.isArray(data.items) || data.items.length === 0) {
+      return res.status(400).json({ error: 'Debe ingresar al menos un producto a la recepción de compra.' });
+    }
+    const saved = await saveCompra(data);
+    res.json(saved);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PAGOS / ABONOS A PROVEEDORES (CXP) REST API
+app.get(['/api/cxp/pagos', '/api/proveedores/pagos'], async (req, res) => {
+  try {
+    const proveedorId = req.query.proveedor_id || null;
+    const pagos = await getPagosProveedores(proveedorId);
+    res.json(pagos);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post(['/api/cxp/abonos', '/api/cxp/pagos', '/api/proveedores/abonos'], async (req, res) => {
+  try {
+    const data = req.body;
+    if (!data.proveedor_id || (!data.monto_usd && !data.monto_ves)) {
+      return res.status(400).json({ error: 'Proveedor y monto de pago/abono son requeridos.' });
+    }
+    const saved = await savePagoProveedor(data);
+    res.json(saved);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// COTIZACIONES DE PROVEEDORES REST API
+app.get('/api/cotizaciones-proveedores', async (req, res) => {
+  try {
+    const cotizaciones = await getCotizacionesProveedores();
+    res.json(cotizaciones);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/cotizaciones-proveedores', async (req, res) => {
+  try {
+    const data = req.body;
+    if (!data.proveedor_id) {
+      return res.status(400).json({ error: 'Proveedor es requerido para registrar la cotización.' });
+    }
+    const saved = await saveCotizacionProveedor(data);
+    res.json(saved);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/cotizaciones-proveedores/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = { ...req.body, id };
+    const saved = await saveCotizacionProveedor(data);
+    res.json(saved);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/cotizaciones-proveedores/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await deleteCotizacionProveedor(id);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

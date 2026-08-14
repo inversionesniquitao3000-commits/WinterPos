@@ -25,6 +25,7 @@ const MODULOS_PERMISOS = [
   { id: 'inventario', label: 'F2 Inventario' },
   { id: 'ventas', label: 'F3 Historial Ventas' },
   { id: 'clientes', label: 'F4 Clientes' },
+  { id: 'proveedores', label: 'F5 Proveedores & Compras' },
   { id: 'tasa', label: 'F9 Tasa de Cambio' },
   { id: 'config', label: 'F10 Configuración' }
 ];
@@ -64,6 +65,13 @@ const MODULE_GUIDES_MAP: Record<string, { title: string; ver: string; crear: str
     crear: 'Registrar nuevo cliente',
     editar: 'Modificar datos del cliente, límite de crédito y registrar Abonos',
     eliminar: 'Eliminar cliente de la base de datos (requiere saldo 0)'
+  },
+  proveedores: {
+    title: 'F5 PROVEEDORES & COMPRAS',
+    ver: 'Ver catálogo de proveedores, compras, Cuentas por Pagar y cotizaciones',
+    crear: 'Registrar proveedor, recibir compras y solicitar cotizaciones',
+    editar: 'Modificar datos, abonar/pagar a cuentas por pagar y convertir cotizaciones a compra',
+    eliminar: 'Eliminar proveedores (sin saldo deudor), cancelar cotizaciones'
   },
   tasa: {
     title: 'F9 TASA DE CAMBIO',

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Briefcase, Plus, Users, Calculator, History, Table, DollarSign, 
   Trash2, Edit, X, RefreshCw, Check, ShieldCheck, ShieldAlert, Copy,
-  Camera, Send, Receipt
+  Camera, Send, Receipt, Filter, ChevronDown
 } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import { Accionista, InversionAccionista, GastoOperativo } from '../types';
@@ -125,6 +125,9 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
         } else if (showAddAccionistaModal) {
           setShowAddAccionistaModal(false);
           setEditingAccionista(null);
+        } else if (showAddGastoModal) {
+          setShowAddGastoModal(false);
+          setEditingGasto(null);
         } else if (deleteConfirm) {
           setDeleteConfirm(null);
         } else if (!inline && onClose) {
@@ -134,7 +137,7 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, showWipeModal, showAddInversionModal, showAddAccionistaModal, deleteConfirm, inline, onClose]);
+  }, [isOpen, showWipeModal, showAddInversionModal, showAddAccionistaModal, showAddGastoModal, deleteConfirm, inline, onClose]);
 
   if (!isOpen) return null;
 
@@ -148,39 +151,164 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
 
   (inversiones || []).forEach(inv => {
     if (inv && accionistasTotales[inv.accionista_id] !== undefined) {
-      accionistasTotales[inv.accionista_id] += Number(inv.monto_usd || 0);
+      accionistasTotales[inv.accionista_id] += Number(inv.monto_usd) || 0;
     }
   });
 
+  // Calculate global total capital
   const capitalGlobalTotal = Object.values(accionistasTotales).reduce((acc, curr) => acc + curr, 0);
 
-  // Handle Create / Edit Aporte
+  // Total Gastos Operativos Deducibles
+  const totalGastosUSD = (gastos || []).reduce((acc, curr) => acc + (Number(curr.monto_usd) || 0), 0);
+
+  // Effective Exchange Rate
+  const effectiveTasa = tasaDia && tasaDia > 0 ? tasaDia : 1;
+  const totalGastosVES = totalGastosUSD * effectiveTasa;
+
+  // Calculations for Net Profit Distribution
+  const utilidadBrutaNum = parseFloat(montoUtilidadInput) || 0;
+  const utilidadBrutaVES = utilidadBrutaNum * effectiveTasa;
+  const utilidadNetaUSD = Math.max(0, utilidadBrutaNum - totalGastosUSD);
+  const utilidadNetaVES = utilidadNetaUSD * effectiveTasa;
+
+  // Unique sorted dates for matrix table
+  const fechasUnicas = useMemo(() => {
+    const rawFechas = (inversiones || []).map(i => i.fecha).filter(Boolean);
+    const setF = new Set(rawFechas);
+    return Array.from(setF).sort();
+  }, [inversiones]);
+
+  // Filters for Historial de Movimientos (Año, Múltiples Meses, Accionista, Búsqueda)
+  const [filtroAccionista, setFiltroAccionista] = useState<string>('');
+  const [filtroAnio, setFiltroAnio] = useState<string>('');
+  const [filtrosMeses, setFiltrosMeses] = useState<string[]>([]);
+  const [isMesDropdownOpen, setIsMesDropdownOpen] = useState<boolean>(false);
+  const [filtroBusqueda, setFiltroBusqueda] = useState<string>('');
+  const mesDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Click outside to close month multi-select dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (mesDropdownRef.current && !mesDropdownRef.current.contains(event.target as Node)) {
+        setIsMesDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const toggleMes = (mesVal: string) => {
+    setFiltrosMeses(prev => 
+      prev.includes(mesVal) ? prev.filter(m => m !== mesVal) : [...prev, mesVal]
+    );
+  };
+
+  // Extract unique available years from inversiones
+  const aniosDisponibles = useMemo(() => {
+    const years = new Set<string>();
+    const currentYear = String(new Date().getFullYear());
+    years.add(currentYear);
+    (inversiones || []).forEach(inv => {
+      if (inv.fecha) {
+        const y = inv.fecha.split('-')[0];
+        if (y && y.length === 4) years.add(y);
+      }
+    });
+    return Array.from(years).sort().reverse();
+  }, [inversiones]);
+
+  const meses = [
+    { value: '01', label: 'Enero' },
+    { value: '02', label: 'Febrero' },
+    { value: '03', label: 'Marzo' },
+    { value: '04', label: 'Abril' },
+    { value: '05', label: 'Mayo' },
+    { value: '06', label: 'Junio' },
+    { value: '07', label: 'Julio' },
+    { value: '08', label: 'Agosto' },
+    { value: '09', label: 'Septiembre' },
+    { value: '10', label: 'Octubre' },
+    { value: '11', label: 'Noviembre' },
+    { value: '12', label: 'Diciembre' }
+  ];
+
+  const filteredInversiones = useMemo(() => {
+    return (inversiones || []).filter(inv => {
+      // Filter by Accionista
+      if (filtroAccionista && String(inv.accionista_id) !== String(filtroAccionista)) {
+        return false;
+      }
+      // Filter by Año
+      if (filtroAnio) {
+        const y = inv.fecha ? inv.fecha.split('-')[0] : '';
+        if (y !== filtroAnio) return false;
+      }
+      // Filter by Multiple Meses
+      if (filtrosMeses.length > 0) {
+        const m = inv.fecha ? inv.fecha.split('-')[1] : '';
+        if (!filtrosMeses.includes(m)) return false;
+      }
+      // Filter by Text Search
+      if (filtroBusqueda.trim()) {
+        const q = filtroBusqueda.trim().toLowerCase();
+        const obs = (inv.observacion || '').toLowerCase();
+        const acc = (accionistas.find(a => a.id === inv.accionista_id)?.nombre || '').toLowerCase();
+        const idStr = String(inv.id);
+        if (!obs.includes(q) && !acc.includes(q) && !idStr.includes(q)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [inversiones, filtroAccionista, filtroAnio, filtrosMeses, filtroBusqueda, accionistas]);
+
+  const totalFilteredUsd = useMemo(() => {
+    return filteredInversiones.reduce((acc, curr) => acc + (Number(curr.monto_usd) || 0), 0);
+  }, [filteredInversiones]);
+
+  const hasActiveFilters = Boolean(filtroAccionista || filtroAnio || filtrosMeses.length > 0 || filtroBusqueda.trim());
+
+  const handleClearFilters = () => {
+    setFiltroAccionista('');
+    setFiltroAnio('');
+    setFiltrosMeses([]);
+    setFiltroBusqueda('');
+  };
+
+  // Handlers for Inversiones
   const handleSaveInversion = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formAccionistaId || !formFecha || !formMontoUsd) {
-      alert('Por favor complete los campos requeridos (Accionista, Fecha y Monto).');
+    if (!formAccionistaId) {
+      alert('Seleccione un accionista');
+      return;
+    }
+    const monto = parseFloat(formMontoUsd);
+    if (isNaN(monto) || monto === 0) {
+      alert('Ingrese un monto válido diferente de 0');
       return;
     }
 
     try {
       const payload = {
-        id: editingInversion?.id,
         accionista_id: Number(formAccionistaId),
         fecha: formFecha,
-        monto_usd: parseFloat(formMontoUsd),
-        observacion: formObservacion
+        monto_usd: monto,
+        observacion: formObservacion.trim()
       };
 
-      const res = await postApiData('/inversiones', payload);
-      if (res) {
-        await loadData();
-        setShowAddInversionModal(false);
-        setEditingInversion(null);
-        setFormMontoUsd('');
-        setFormObservacion('');
+      if (editingInversion) {
+        await postApiData(`/inversiones/${editingInversion.id}`, payload);
+      } else {
+        await postApiData('/inversiones', payload);
       }
+
+      setShowAddInversionModal(false);
+      setEditingInversion(null);
+      setFormMontoUsd('');
+      setFormObservacion('');
+      loadData();
     } catch (err: any) {
-      alert('Error al guardar inversión: ' + (err.message || 'Intente nuevamente'));
+      alert('Error al guardar aporte: ' + err.message);
     }
   };
 
@@ -188,51 +316,51 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
     setEditingInversion(inv);
     setFormAccionistaId(inv.accionista_id);
     setFormFecha(inv.fecha);
-    setFormMontoUsd(inv.monto_usd.toString());
+    setFormMontoUsd(String(inv.monto_usd));
     setFormObservacion(inv.observacion || '');
     setShowAddInversionModal(true);
   };
 
   const handleDeleteInversionClick = async (id: number) => {
-    if (!window.confirm('¿Está seguro de eliminar este registro de inversión?')) return;
-    try {
-      await deleteApiData(`/inversiones/${id}`);
-      await loadData();
-    } catch (err: any) {
-      alert('Error al eliminar inversión: ' + err.message);
+    if (confirm('¿Está seguro de eliminar este movimiento de inversión?')) {
+      try {
+        await deleteApiData(`/inversiones/${id}`);
+        loadData();
+      } catch (err: any) {
+        alert('Error al eliminar movimiento: ' + err.message);
+      }
     }
   };
 
-  // Handle Save Accionista (create or edit)
+  // Handlers for Accionistas
   const handleSaveAccionista = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formNombreAccionista.trim()) {
-      alert('El nombre del accionista es requerido.');
+      alert('Ingrese el nombre del accionista');
       return;
     }
 
     try {
-      const payload: any = {
+      const payload = {
         nombre: formNombreAccionista.trim(),
         cedula_rif: formCedulaAccionista.trim(),
-        telefono: formTelefonoAccionista.trim(),
-        estado: 'Activo'
+        telefono: formTelefonoAccionista.trim()
       };
+
       if (editingAccionista) {
-        payload.id = editingAccionista.id;
+        await postApiData(`/inversiones/accionistas/${editingAccionista.id}`, payload);
+      } else {
+        await postApiData('/inversiones/accionistas', payload);
       }
 
-      const res = await postApiData('/inversiones/accionistas', payload);
-      if (res) {
-        await loadData();
-        setShowAddAccionistaModal(false);
-        setEditingAccionista(null);
-        setFormNombreAccionista('');
-        setFormCedulaAccionista('');
-        setFormTelefonoAccionista('');
-      }
+      setShowAddAccionistaModal(false);
+      setEditingAccionista(null);
+      setFormNombreAccionista('');
+      setFormCedulaAccionista('');
+      setFormTelefonoAccionista('');
+      loadData();
     } catch (err: any) {
-      alert((editingAccionista ? 'Error al actualizar accionista: ' : 'Error al crear accionista: ') + err.message);
+      alert('Error al guardar accionista: ' + err.message);
     }
   };
 
@@ -253,178 +381,132 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
     if (!deleteConfirm) return;
     try {
       await deleteApiData(`/inversiones/accionistas/${deleteConfirm.accionista.id}`);
-      await loadData();
       setDeleteConfirm(null);
+      loadData();
     } catch (err: any) {
       alert('Error al eliminar accionista: ' + err.message);
-      setDeleteConfirm(null);
     }
   };
 
-  // Gastos Operativos Handlers
+  // Handlers for Gastos Operativos
   const handleSaveGasto = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formGastoConcepto || !formGastoMontoUsd) {
-      alert('Por favor complete los campos requeridos (Concepto y Monto).');
+    if (!formGastoConcepto.trim()) {
+      alert('Ingrese el concepto del gasto');
+      return;
+    }
+    const monto = parseFloat(formGastoMontoUsd);
+    if (isNaN(monto) || monto <= 0) {
+      alert('Ingrese un monto válido mayor a 0');
       return;
     }
 
     try {
       const payload = {
-        id: editingGasto?.id,
-        concepto: formGastoConcepto,
-        monto_usd: parseFloat(formGastoMontoUsd),
-        fecha: formGastoFecha || getLocalISODateString().split(' ')[0],
-        observacion: formGastoObservacion
+        concepto: formGastoConcepto.trim(),
+        monto_usd: monto,
+        fecha: formGastoFecha,
+        observacion: formGastoObservacion.trim()
       };
 
-      const res = await postApiData('/gastos', payload);
-      if (res && !res.error) {
-        setShowAddGastoModal(false);
-        setEditingGasto(null);
-        setFormGastoConcepto('⚡ Luz / Electricidad');
-        setFormGastoMontoUsd('');
-        setFormGastoObservacion('');
-        loadData();
+      if (editingGasto) {
+        await postApiData(`/gastos/${editingGasto.id}`, payload);
+      } else {
+        await postApiData('/gastos', payload);
       }
-    } catch (err) {
-      console.error('Error al guardar gasto:', err);
-      alert('Error al guardar el gasto operativo.');
+
+      setShowAddGastoModal(false);
+      setEditingGasto(null);
+      setFormGastoMontoUsd('');
+      setFormGastoObservacion('');
+      loadData();
+    } catch (err: any) {
+      alert('Error al guardar gasto: ' + err.message);
     }
   };
 
-  const handleEditGastoClick = (gasto: GastoOperativo) => {
-    setEditingGasto(gasto);
-    setFormGastoConcepto(gasto.concepto);
-    setFormGastoMontoUsd(gasto.monto_usd.toString());
-    setFormGastoFecha(gasto.fecha || getLocalISODateString().split(' ')[0]);
-    setFormGastoObservacion(gasto.observacion || '');
+  const handleEditGastoClick = (g: GastoOperativo) => {
+    setEditingGasto(g);
+    setFormGastoConcepto(g.concepto);
+    setFormGastoMontoUsd(String(g.monto_usd));
+    setFormGastoFecha(g.fecha);
+    setFormGastoObservacion(g.observacion || '');
     setShowAddGastoModal(true);
   };
 
-  const handleDeleteGastoClick = async (gasto: GastoOperativo) => {
-    if (!confirm(`¿Desea eliminar el gasto "${gasto.concepto}" por $${gasto.monto_usd.toFixed(2)} USD?`)) return;
-    try {
-      await deleteApiData(`/gastos/${gasto.id}`);
-      loadData();
-    } catch (err) {
-      console.error('Error al eliminar gasto:', err);
+  const handleDeleteGastoClick = async (g: GastoOperativo) => {
+    if (confirm(`¿Está seguro de eliminar el gasto "${g.concepto}" de $${g.monto_usd.toFixed(2)}?`)) {
+      try {
+        await deleteApiData(`/gastos/${g.id}`);
+        loadData();
+      } catch (err: any) {
+        alert('Error al eliminar gasto: ' + err.message);
+      }
     }
   };
-
-  const totalGastosUSD = useMemo(() => {
-    if (!Array.isArray(gastos)) return 0;
-    return gastos.reduce((acc, g) => acc + (g?.monto_usd || 0), 0);
-  }, [gastos]);
-
-  // Unique dates list for Matrix view
-  const fechasUnicas = useMemo(() => {
-    return Array.from(new Set((inversiones || []).map(i => i?.fecha))).filter(Boolean).sort();
-  }, [inversiones]);
-
-  const effectiveTasa = tasaDia && tasaDia > 0 ? tasaDia : 1;
-  const utilidadBrutaNum = parseFloat(montoUtilidadInput) || 0;
-  const totalGastosVES = totalGastosUSD * effectiveTasa;
-  const utilidadBrutaVES = utilidadBrutaNum * effectiveTasa;
-  const utilidadNetaUSD = Math.max(0, utilidadBrutaNum - totalGastosUSD);
-  const utilidadNetaVES = utilidadNetaUSD * effectiveTasa;
 
   const handleDownloadReportImage = async () => {
     if (!reportContainerRef.current) return;
     try {
-      const dataUrl = await toPng(reportContainerRef.current, { quality: 0.95, cacheBust: true });
+      const dataUrl = await toPng(reportContainerRef.current, { backgroundColor: '#ffffff', quality: 0.98 });
       const link = document.createElement('a');
-      link.download = `reporte_utilidades_y_gastos_${getLocalISODateString().split(' ')[0]}.png`;
+      link.download = `Reporte_Utilidades_Gastos_${getLocalISODateString().split(' ')[0]}.png`;
       link.href = dataUrl;
       link.click();
     } catch (err) {
-      console.error('Error al generar la imagen:', err);
-      alert('Error al capturar la imagen del reporte.');
+      console.error('Error al generar imagen PNG del reporte:', err);
+      alert('No se pudo generar la imagen del reporte.');
     }
   };
 
   const handleSendWhatsAppReport = async () => {
-    const dateStr = getLocalISODateString().split(' ')[0];
     const companyName = companyConfig?.nombre_comercio || 'INVERSIONES NIQUITAO 3000 C.A.';
+    const dateStr = getLocalISODateString();
 
-    // Obtener desglose de gastos en string
     let desgloseGastosStr = '';
     if (gastos.length > 0) {
       desgloseGastosStr = gastos.map(g => {
-        const mBs = g.monto_usd * effectiveTasa;
-        let line = `• *${g.concepto}:* $${g.monto_usd.toFixed(2)} USD (Bs ${mBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
-        if (g.observacion) line += ` - _${g.observacion}_`;
-        return line;
+        const montoVES = g.monto_usd * effectiveTasa;
+        return `  • ${g.concepto}: $${g.monto_usd.toFixed(2)} USD (Bs ${montoVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
       }).join('\n');
-    } else {
-      desgloseGastosStr = '_Sin gastos deducibles registrados_';
     }
 
-    // Obtener desglose de accionistas en string
-    const desgloseAccionistasStr = accionistas.map((a, idx) => {
-      const mtoInv = accionistasTotales[a.id] || 0;
-      const pctInv = capitalGlobalTotal > 0 ? (mtoInv / capitalGlobalTotal) * 100 : 0;
-      const mtoCobrarUsd = (mtoInv / (capitalGlobalTotal || 1)) * utilidadNetaUSD;
-      const mtoCobrarVes = mtoCobrarUsd * effectiveTasa;
-      
-      let item = `${idx + 1}. *${a.nombre}* (${pctInv.toFixed(2)}% Inv)\n`;
-      item += `   - Capital Invertido: $${mtoInv.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD\n`;
-      item += `   - 💵 *Monto a Cobrar:* *$${mtoCobrarUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD* | *Bs ${mtoCobrarVes.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} VES*`;
-      return item;
+    const desgloseAccionistasStr = accionistas.map(a => {
+      const totalInv = accionistasTotales[a.id] || 0;
+      const pct = capitalGlobalTotal > 0 ? (totalInv / capitalGlobalTotal) * 100 : 0;
+      const aCobrarUsd = (totalInv / (capitalGlobalTotal || 1)) * utilidadNetaUSD;
+      const aCobrarVes = aCobrarUsd * effectiveTasa;
+      return `🔹 *${a.nombre}* (${pct.toFixed(2)}% de inv.)\n   👉 *A Cobrar:* $${aCobrarUsd.toFixed(2)} USD | Bs ${aCobrarVes.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }).join('\n\n');
 
-    let text = '';
-    try {
-      const statusRes = await fetchApiData('/whatsapp/status');
-      if (statusRes && statusRes.config && statusRes.config.utilidadesMessageTemplate) {
-        text = statusRes.config.utilidadesMessageTemplate
-          .replace(/{empresa}/g, companyName)
-          .replace(/{fecha}/g, dateStr)
-          .replace(/{tasaBcv}/g, effectiveTasa.toFixed(2))
-          .replace(/{utilidadBrutaUsd}/g, utilidadBrutaNum.toFixed(2))
-          .replace(/{utilidadBrutaVes}/g, utilidadBrutaVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
-          .replace(/{totalGastosUsd}/g, totalGastosUSD.toFixed(2))
-          .replace(/{totalGastosVes}/g, totalGastosVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
-          .replace(/{utilidadNetaUsd}/g, utilidadNetaUSD.toFixed(2))
-          .replace(/{utilidadNetaVes}/g, utilidadNetaVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }))
-          .replace(/{cantGastos}/g, gastos.length.toString())
-          .replace(/{desgloseGastos}/g, desgloseGastosStr)
-          .replace(/{desgloseAccionistas}/g, desgloseAccionistasStr);
-      }
-    } catch (e) {
-      console.warn('No se pudo obtener plantilla personalizada de utilidades, usando plantilla predeterminada:', e);
+    let text = `💼 *REPORTE DE DISTRIBUCIÓN DE UTILIDADES Y GASTOS*\n`;
+    text += `🏬 *${companyName}*\n`;
+    text += `📅 *Fecha:* ${dateStr}\n`;
+    if (effectiveTasa > 1) {
+      text += `💱 *Tasa BCV:* ${effectiveTasa.toFixed(2)} Bs/USD\n`;
+    }
+    text += `----------------------------------\n`;
+    text += `📊 *RESUMEN FINANCIERO:*\n`;
+    text += `📈 *Utilidad Bruta:* $${utilidadBrutaNum.toFixed(2)} USD | Bs ${utilidadBrutaVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} VES\n`;
+    text += `🔻 *(-) Gastos Deducibles:* -$${totalGastosUSD.toFixed(2)} USD | -Bs ${totalGastosVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} VES\n`;
+    text += `💰 *(=) Utilidad Neta Distribuable:* *$${utilidadNetaUSD.toFixed(2)} USD* | *Bs ${utilidadNetaVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} VES*\n`;
+    
+    if (gastos.length > 0) {
+      text += `----------------------------------\n`;
+      text += `📝 *DESGLOSE DE GASTOS OPERATIVOS (${gastos.length}):*\n`;
+      text += desgloseGastosStr + `\n`;
     }
 
-    if (!text) {
-      text = `💼 *REPORTE DE UTILIDADES Y GASTOS OPERATIVOS*\n`;
-      text += `🏬 *${companyName}*\n`;
-      text += `📅 *Fecha:* ${dateStr}\n`;
-      if (effectiveTasa > 1) {
-        text += `💱 *Tasa BCV:* ${effectiveTasa.toFixed(2)} Bs/USD\n`;
-      }
-      text += `----------------------------------\n`;
-      text += `📊 *RESUMEN FINANCIERO:*\n`;
-      text += `📈 *Utilidad Bruta:* $${utilidadBrutaNum.toFixed(2)} USD | Bs ${utilidadBrutaVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} VES\n`;
-      text += `🔻 *(-) Gastos Deducibles:* -$${totalGastosUSD.toFixed(2)} USD | -Bs ${totalGastosVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} VES\n`;
-      text += `💰 *(=) Utilidad Neta Distribuable:* *$${utilidadNetaUSD.toFixed(2)} USD* | *Bs ${utilidadNetaVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} VES*\n`;
-      
-      if (gastos.length > 0) {
-        text += `----------------------------------\n`;
-        text += `📝 *DESGLOSE DE GASTOS OPERATIVOS (${gastos.length}):*\n`;
-        text += desgloseGastosStr + `\n`;
-      }
-
-      text += `----------------------------------\n`;
-      text += `👥 *MONTO A COBRAR POR ACCIONISTA:*\n`;
-      text += desgloseAccionistasStr + `\n`;
-    }
+    text += `----------------------------------\n`;
+    text += `👥 *MONTO A COBRAR POR ACCIONISTA:*\n`;
+    text += desgloseAccionistasStr + `\n`;
 
     let waSuccess = false;
     let imageBase64 = '';
 
     try {
       if (reportContainerRef.current) {
-        imageBase64 = await toPng(reportContainerRef.current, { backgroundColor: '#0f172a', quality: 0.95 });
+        imageBase64 = await toPng(reportContainerRef.current, { backgroundColor: '#ffffff', quality: 0.95 });
       }
 
       const res = await postApiData('/whatsapp/send-cierre', {
@@ -505,30 +587,30 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
 
   return (
     <div className={inline
-      ? 'flex flex-col bg-slate-900 rounded-xl border border-slate-800 shadow-xl overflow-hidden text-slate-100 font-sans'
-      : 'fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-3 sm:p-6 animate-fadeIn'
+      ? 'flex flex-col bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden text-slate-800 font-sans'
+      : 'fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-3 sm:p-6 animate-fade-in'
     } style={inline ? { minHeight: 'calc(100vh - 180px)' } : undefined}>
       <div className={inline
         ? 'flex flex-col w-full h-full'
-        : 'bg-slate-900 border border-slate-750 rounded-2xl shadow-2xl w-full max-w-6xl h-[92vh] flex flex-col overflow-hidden text-slate-100 font-sans'
+        : 'bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-6xl h-[92vh] flex flex-col overflow-hidden text-slate-800 font-sans'
       }>
         
         {/* TOP HEADER BAR */}
-        <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-teal-950 px-6 py-4 border-b border-slate-800 flex justify-between items-center flex-shrink-0">
+        <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center flex-shrink-0">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-emerald-500/20 border border-emerald-500/40 rounded-xl text-emerald-400">
-              <Briefcase className="w-6 h-6 animate-pulse" />
+            <div className="p-2.5 bg-indigo-50 border border-indigo-200 rounded-xl text-indigo-700">
+              <Briefcase className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base sm:text-lg font-black text-white uppercase tracking-wider font-sans">
+                <h2 className="text-base sm:text-lg font-black text-slate-900 uppercase tracking-wide font-sans">
                   Módulo de Control de Inversiones y Accionistas
                 </h2>
-                <span className="bg-emerald-950 border border-emerald-500/50 text-emerald-400 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                <span className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
                   <ShieldCheck className="w-3 h-3" /> SOLO ADMINISTRADOR
                 </span>
               </div>
-              <p className="text-xs text-slate-400 font-sans">
+              <p className="text-xs text-slate-500 font-sans mt-0.5">
                 Gestión de capitales, historial de aportes y distribución de utilidades
               </p>
             </div>
@@ -537,7 +619,7 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
           <div className="flex items-center gap-2">
             <button
               onClick={loadData}
-              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-all"
+              className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-all shadow-2xs"
               title="Recargar Datos"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -545,7 +627,7 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
             {!inline && (
               <button
                 onClick={onClose}
-                className="p-2 bg-red-950/40 border border-red-900/40 text-red-400 hover:bg-red-900/50 hover:text-white rounded-lg transition-all"
+                className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 rounded-lg transition-all"
                 title="Cerrar Módulo"
               >
                 <X className="w-5 h-5" />
@@ -555,42 +637,53 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
         </div>
 
         {/* METRICS & QUICK ACTIONS HEADER */}
-        <div className="bg-slate-950/60 border-b border-slate-800/80 px-6 py-3 flex flex-wrap justify-between items-center gap-4 flex-shrink-0">
-          <div className="flex flex-wrap items-center gap-6 text-xs font-sans">
-            <div className="flex items-center gap-2.5 bg-slate-900 border border-emerald-500/30 px-3.5 py-1.5 rounded-xl shadow-inner">
-              <DollarSign className="w-4 h-4 text-emerald-400" />
+        <div className="bg-white border-b border-slate-200 px-6 py-3 flex flex-wrap justify-between items-center gap-4 flex-shrink-0">
+          <div className="flex flex-wrap items-center gap-4 text-xs font-sans">
+            
+            {/* Metric 1: Capital Global */}
+            <div className="flex items-center gap-3 bg-emerald-50/60 border border-emerald-200 px-3.5 py-2 rounded-xl">
+              <div className="w-8 h-8 rounded-lg bg-emerald-100 border border-emerald-300 flex items-center justify-center text-emerald-700">
+                <DollarSign className="w-4 h-4" />
+              </div>
               <div>
-                <span className="text-slate-400 text-[10px] uppercase font-bold block leading-none">Capital Global Total:</span>
-                <span className="text-emerald-400 font-mono font-black text-sm">
+                <span className="text-slate-500 text-[10px] uppercase font-bold block leading-none">Capital Global Total:</span>
+                <span className="text-emerald-700 font-mono font-black text-sm">
                   ${capitalGlobalTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
             </div>
 
-            <div className="flex items-center gap-2.5 bg-slate-900 border border-slate-750 px-3.5 py-1.5 rounded-xl">
-              <Users className="w-4 h-4 text-cyan-400" />
+            {/* Metric 2: Accionistas */}
+            <div className="flex items-center gap-3 bg-sky-50/60 border border-sky-200 px-3.5 py-2 rounded-xl">
+              <div className="w-8 h-8 rounded-lg bg-sky-100 border border-sky-300 flex items-center justify-center text-sky-700">
+                <Users className="w-4 h-4" />
+              </div>
               <div>
-                <span className="text-slate-400 text-[10px] uppercase font-bold block leading-none">Accionistas Registrados:</span>
-                <span className="text-white font-mono font-bold text-sm">{accionistas.length}</span>
+                <span className="text-slate-500 text-[10px] uppercase font-bold block leading-none">Accionistas Registrados:</span>
+                <span className="text-slate-900 font-mono font-bold text-sm">{accionistas.length}</span>
               </div>
             </div>
 
-            <div className="flex items-center gap-2.5 bg-slate-900 border border-slate-750 px-3.5 py-1.5 rounded-xl">
-              <History className="w-4 h-4 text-amber-400" />
+            {/* Metric 3: Total Aportes */}
+            <div className="flex items-center gap-3 bg-amber-50/60 border border-amber-200 px-3.5 py-2 rounded-xl">
+              <div className="w-8 h-8 rounded-lg bg-amber-100 border border-amber-300 flex items-center justify-center text-amber-700">
+                <History className="w-4 h-4" />
+              </div>
               <div>
-                <span className="text-slate-400 text-[10px] uppercase font-bold block leading-none">Total Aportes:</span>
-                <span className="text-amber-300 font-mono font-bold text-sm">{inversiones.length} movimientos</span>
+                <span className="text-slate-500 text-[10px] uppercase font-bold block leading-none">Total Aportes:</span>
+                <span className="text-amber-800 font-mono font-bold text-sm">{inversiones.length} movimientos</span>
               </div>
             </div>
           </div>
 
+          {/* Action buttons */}
           <div className="flex items-center gap-2">
             <button
               onClick={handleOpenWipeModal}
-              className="flex items-center gap-1.5 bg-red-950/60 hover:bg-red-900 border border-red-800/60 text-red-300 hover:text-white px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-sm"
+              className="flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-600 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-xs"
               title="Vaciar módulo de accionistas e inversiones (poner a cero)"
             >
-              <Trash2 className="w-3.5 h-3.5 text-red-400" />
+              <Trash2 className="w-3.5 h-3.5" />
               <span>Vaciar Módulo (A Cero)</span>
             </button>
 
@@ -603,7 +696,7 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
                 setFormObservacion('');
                 setShowAddInversionModal(true);
               }}
-              className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-md"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-xs"
             >
               <Plus className="w-4 h-4" />
               <span>Registrar Aporte</span>
@@ -611,98 +704,98 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
 
             <button
               onClick={() => setShowAddAccionistaModal(true)}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 transition-all"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-xs"
             >
-              <Users className="w-3.5 h-3.5 text-cyan-400" />
+              <Users className="w-3.5 h-3.5" />
               <span>Nuevo Accionista</span>
             </button>
           </div>
         </div>
 
         {/* TABS NAVIGATION */}
-        <div className="bg-slate-900 px-6 pt-3 border-b border-slate-800 flex gap-2 flex-shrink-0 select-none">
+        <div className="bg-slate-100 px-6 pt-2.5 border-b border-slate-200 flex gap-2 flex-shrink-0 select-none overflow-x-auto">
           <button
             onClick={() => setActiveTab('matriz')}
-            className={`px-4 py-2.5 rounded-t-xl font-bold text-xs uppercase font-sans transition-all flex items-center gap-2 border-t border-x ${
+            className={`px-4 py-2 rounded-t-xl font-bold text-xs uppercase font-sans transition-all flex items-center gap-2 border-t border-x ${
               activeTab === 'matriz'
-                ? 'bg-slate-950 border-slate-700 text-emerald-400 font-extrabold border-b-2 border-b-emerald-400'
-                : 'bg-slate-900/60 border-transparent text-slate-400 hover:text-slate-200'
+                ? 'bg-white border-slate-300 text-indigo-700 font-extrabold shadow-2xs border-b-2 border-b-indigo-600'
+                : 'bg-slate-200/60 border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-200'
             }`}
           >
-            <Table className="w-4 h-4" />
+            <Table className="w-4 h-4 text-indigo-600" />
             Matriz de Inversiones (General)
           </button>
 
           <button
             onClick={() => setActiveTab('historial')}
-            className={`px-4 py-2.5 rounded-t-xl font-bold text-xs uppercase font-sans transition-all flex items-center gap-2 border-t border-x ${
+            className={`px-4 py-2 rounded-t-xl font-bold text-xs uppercase font-sans transition-all flex items-center gap-2 border-t border-x ${
               activeTab === 'historial'
-                ? 'bg-slate-950 border-slate-700 text-emerald-400 font-extrabold border-b-2 border-b-emerald-400'
-                : 'bg-slate-900/60 border-transparent text-slate-400 hover:text-slate-200'
+                ? 'bg-white border-slate-300 text-indigo-700 font-extrabold shadow-2xs border-b-2 border-b-indigo-600'
+                : 'bg-slate-200/60 border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-200'
             }`}
           >
-            <History className="w-4 h-4" />
+            <History className="w-4 h-4 text-sky-600" />
             Historial de Movimientos
           </button>
 
           <button
             onClick={() => setActiveTab('utilidades')}
-            className={`px-4 py-2.5 rounded-t-xl font-bold text-xs uppercase font-sans transition-all flex items-center gap-2 border-t border-x ${
+            className={`px-4 py-2 rounded-t-xl font-bold text-xs uppercase font-sans transition-all flex items-center gap-2 border-t border-x ${
               activeTab === 'utilidades'
-                ? 'bg-slate-950 border-slate-700 text-teal-300 font-extrabold border-b-2 border-b-teal-400'
-                : 'bg-slate-900/60 border-transparent text-slate-400 hover:text-slate-200'
+                ? 'bg-white border-slate-300 text-indigo-700 font-extrabold shadow-2xs border-b-2 border-b-indigo-600'
+                : 'bg-slate-200/60 border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-200'
             }`}
           >
-            <Calculator className="w-4 h-4 text-teal-400" />
+            <Calculator className="w-4 h-4 text-emerald-600" />
             Calculadora de Utilidad
           </button>
 
           <button
             onClick={() => setActiveTab('accionistas')}
-            className={`px-4 py-2.5 rounded-t-xl font-bold text-xs uppercase font-sans transition-all flex items-center gap-2 border-t border-x ${
+            className={`px-4 py-2 rounded-t-xl font-bold text-xs uppercase font-sans transition-all flex items-center gap-2 border-t border-x ${
               activeTab === 'accionistas'
-                ? 'bg-slate-950 border-slate-700 text-cyan-300 font-extrabold border-b-2 border-b-cyan-400'
-                : 'bg-slate-900/60 border-transparent text-slate-400 hover:text-slate-200'
+                ? 'bg-white border-slate-300 text-indigo-700 font-extrabold shadow-2xs border-b-2 border-b-indigo-600'
+                : 'bg-slate-200/60 border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-200'
             }`}
           >
-            <Users className="w-4 h-4 text-cyan-400" />
+            <Users className="w-4 h-4 text-amber-600" />
             Directorio de Accionistas
           </button>
         </div>
 
         {/* MAIN BODY AREA */}
-        <div className="flex-grow p-6 overflow-y-auto min-h-0 bg-slate-950">
+        <div className="flex-grow p-6 overflow-y-auto min-h-0 bg-slate-50/50">
           
           {/* TAB 1: MATRIZ DE INVERSIONES (EXCEL LIKE) */}
           {activeTab === 'matriz' && (
             <div className="space-y-4">
               <div className="flex justify-between items-center">
                 <div>
-                  <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wide">
+                  <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
                     Matriz Global de Aportes de Capital
                   </h3>
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-slate-500 font-sans mt-0.5">
                     Vista consolidada por fecha y accionista con porcentaje de participación sobre capital global
                   </p>
                 </div>
               </div>
 
-              <div className="overflow-x-auto rounded-xl border border-slate-800 shadow-xl bg-slate-900">
-                <table className="w-full text-left font-sans border-collapse">
+              <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-xs bg-white">
+                <table className="w-full text-left font-sans border-collapse text-xs">
                   <thead>
-                    <tr className="bg-slate-950 border-b border-slate-800 text-slate-300 text-xs font-bold uppercase">
-                      <th className="py-3 px-4 w-32 border-r border-slate-800">AÑO / FECHA</th>
+                    <tr className="bg-slate-100 border-b border-slate-250 text-slate-700 text-[11px] font-extrabold uppercase tracking-wider">
+                      <th className="py-3 px-4 w-36 border-r border-slate-200 text-center">AÑO / FECHA</th>
                       {(accionistas || []).map(a => (
-                        <th key={a.id} className="py-3 px-4 border-r border-slate-800 text-center min-w-[140px] text-emerald-400 font-black">
+                        <th key={a.id} className="py-3 px-4 border-r border-slate-200 text-center min-w-[140px] text-emerald-800 font-black">
                           # {a.nombre.toUpperCase()}
                         </th>
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800/60 text-xs font-mono">
+                  <tbody className="divide-y divide-slate-200 font-mono text-xs">
                     {fechasUnicas.length === 0 || (accionistas || []).length === 0 ? (
                       <tr>
-                        <td colSpan={Math.max(1, (accionistas || []).length + 1)} className="text-center py-8 text-slate-500 font-sans">
+                        <td colSpan={Math.max(1, (accionistas || []).length + 1)} className="text-center py-12 text-slate-400 font-sans">
                           No hay registros de inversión almacenados o accionistas registrados.
                         </td>
                       </tr>
@@ -710,21 +803,21 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
                       fechasUnicas.map(f => {
                         const invsEnFecha = (inversiones || []).filter(i => i.fecha === f);
                         return (
-                          <tr key={f} className="hover:bg-slate-800/40 transition-all">
-                            <td className="py-2.5 px-4 font-bold text-slate-300 border-r border-slate-800 font-sans">
+                          <tr key={f} className="hover:bg-slate-50/80 transition-colors bg-white">
+                            <td className="py-2.5 px-4 font-bold text-slate-700 border-r border-slate-200 font-sans bg-slate-50/40 text-center">
                               {f}
                             </td>
                             {(accionistas || []).map(a => {
                               const invAccion = invsEnFecha.filter(i => i.accionista_id === a.id);
                               const totalF = invAccion.reduce((acc, curr) => acc + curr.monto_usd, 0);
                               return (
-                                <td key={a.id} className="py-2.5 px-4 border-r border-slate-800 text-right">
+                                <td key={a.id} className="py-2.5 px-4 border-r border-slate-200 text-center">
                                   {totalF !== 0 ? (
-                                    <span className={totalF < 0 ? 'text-red-400 font-bold' : 'text-slate-100 font-bold'}>
+                                    <span className={totalF < 0 ? 'text-rose-600 font-bold' : 'text-slate-900 font-bold'}>
                                       $ {totalF.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                     </span>
                                   ) : (
-                                    <span className="text-slate-750">-</span>
+                                    <span className="text-slate-300">-</span>
                                   )}
                                 </td>
                               );
@@ -736,16 +829,16 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
                   </tbody>
                   
                   {/* FOOTER TOTALS */}
-                  <tfoot className="bg-slate-950 font-mono border-t-2 border-slate-700">
+                  <tfoot className="bg-slate-50 font-mono border-t-2 border-slate-300">
                     {/* Row Totales */}
-                    <tr className="border-b border-slate-800 font-bold text-xs text-white">
-                      <td className="py-3 px-4 uppercase font-sans text-slate-300 font-extrabold border-r border-slate-800">
-                        Totales
+                    <tr className="border-b border-slate-200 font-bold text-xs text-slate-900 bg-slate-100/80">
+                      <td className="py-3 px-4 uppercase font-sans text-slate-700 font-extrabold border-r border-slate-200 text-center">
+                        TOTALES
                       </td>
                       {(accionistas || []).map(a => {
                         const totalA = accionistasTotales[a.id] || 0;
                         return (
-                          <td key={a.id} className="py-3 px-4 text-right border-r border-slate-800 font-black text-emerald-400">
+                          <td key={a.id} className="py-3 px-4 text-center border-r border-slate-200 font-black text-emerald-700">
                             $ {totalA.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </td>
                         );
@@ -753,15 +846,15 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
                     </tr>
 
                     {/* Row % de Inversion */}
-                    <tr className="bg-emerald-950/60 text-sm font-black">
-                      <td className="py-3.5 px-4 uppercase font-sans text-emerald-300 font-black border-r border-slate-800">
-                        % de Inv.
+                    <tr className="bg-emerald-50 text-xs font-black border-b border-emerald-200">
+                      <td className="py-3.5 px-4 uppercase font-sans text-emerald-900 font-black border-r border-emerald-200 text-center">
+                        % DE INV.
                       </td>
                       {(accionistas || []).map(a => {
                         const totalA = accionistasTotales[a.id] || 0;
                         const pct = capitalGlobalTotal > 0 ? (totalA / capitalGlobalTotal) * 100 : 0;
                         return (
-                          <td key={a.id} className="py-3.5 px-4 text-right border-r border-slate-800 font-black text-teal-300 text-sm font-mono">
+                          <td key={a.id} className="py-3.5 px-4 text-center border-r border-emerald-200 font-black text-emerald-800 text-xs font-mono">
                             {pct.toFixed(2)} %
                           </td>
                         );
@@ -769,11 +862,11 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
                     </tr>
 
                     {/* Row Global Total */}
-                    <tr className="bg-slate-900 font-black text-sm">
-                      <td className="py-3.5 px-4 uppercase font-sans text-red-400 font-black border-r border-slate-800">
-                        Total Capital Global
+                    <tr className="bg-emerald-700 text-white font-black text-sm">
+                      <td className="py-3.5 px-4 uppercase font-sans text-white font-black border-r border-emerald-800 text-center">
+                        TOTAL CAPITAL GLOBAL
                       </td>
-                      <td colSpan={Math.max(1, (accionistas || []).length)} className="py-3.5 px-6 text-right text-red-400 text-base font-black">
+                      <td colSpan={Math.max(1, (accionistas || []).length)} className="py-3.5 px-6 text-center text-white text-base font-black font-mono">
                         $ {capitalGlobalTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                     </tr>
@@ -788,61 +881,238 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
             <div className="space-y-4">
               <div className="flex justify-between items-center">
                 <div>
-                  <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wide">
+                  <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
                     Historial Detallado de Movimientos de Inversión
                   </h3>
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-slate-500 font-sans mt-0.5">
                     Listado cronológico individual con opción para modificar o eliminar aportes
                   </p>
                 </div>
               </div>
 
-              <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
-                <table className="w-full text-left font-sans">
+              {/* BARRA DE FILTROS (POR ACCIONISTA, AÑO, MES Y OBSERVACIÓN) */}
+              <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-700 uppercase">
+                    <Filter className="w-4 h-4 text-indigo-600" />
+                    <span>Filtros de Búsqueda</span>
+                  </div>
+
+                  {hasActiveFilters && (
+                    <button
+                      onClick={handleClearFilters}
+                      className="text-xs text-rose-600 hover:text-rose-800 font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      Limpiar Filtros
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5">
+                  {/* Filtro por Accionista */}
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Accionista:</label>
+                    <select
+                      value={filtroAccionista}
+                      onChange={e => setFiltroAccionista(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 text-slate-800 text-xs px-2.5 py-1.5 rounded-lg focus:bg-white focus:border-indigo-500 focus:outline-none"
+                    >
+                      <option value="">-- Todos los Accionistas --</option>
+                      {accionistas.map(a => (
+                        <option key={a.id} value={a.id}>
+                          {a.nombre}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Filtro por Año */}
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Año:</label>
+                    <select
+                      value={filtroAnio}
+                      onChange={e => setFiltroAnio(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 text-slate-800 text-xs px-2.5 py-1.5 rounded-lg focus:bg-white focus:border-indigo-500 focus:outline-none font-mono"
+                    >
+                      <option value="">-- Todos los Años --</option>
+                      {aniosDisponibles.map(y => (
+                        <option key={y} value={y}>
+                          Año {y}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Filtro por Múltiples Meses */}
+                  <div className="relative" ref={mesDropdownRef}>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
+                      Mes(es) {filtrosMeses.length > 0 && <span className="text-indigo-600 font-bold">({filtrosMeses.length})</span>}:
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setIsMesDropdownOpen(!isMesDropdownOpen)}
+                      className="w-full bg-slate-50 border border-slate-300 text-slate-800 text-xs px-2.5 py-1.5 rounded-lg flex items-center justify-between focus:bg-white focus:border-indigo-500 focus:outline-none cursor-pointer"
+                    >
+                      <span className="truncate">
+                        {filtrosMeses.length === 0 
+                          ? '-- Todos los Meses --' 
+                          : filtrosMeses.length === 1
+                            ? meses.find(m => m.value === filtrosMeses[0])?.label
+                            : `${filtrosMeses.length} meses seleccionados`}
+                      </span>
+                      <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                    </button>
+
+                    {isMesDropdownOpen && (
+                      <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 p-2.5 space-y-2 text-xs">
+                        <div className="flex justify-between items-center pb-1.5 border-b border-slate-100 text-[11px]">
+                          <button
+                            type="button"
+                            onClick={() => setFiltrosMeses([])}
+                            className="text-indigo-600 hover:text-indigo-800 font-bold cursor-pointer"
+                          >
+                            Todos los Meses
+                          </button>
+                          {filtrosMeses.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setFiltrosMeses([])}
+                              className="text-slate-400 hover:text-slate-600 cursor-pointer"
+                            >
+                              Limpiar
+                            </button>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto">
+                          {meses.map(m => {
+                            const isChecked = filtrosMeses.includes(m.value);
+                            return (
+                              <label
+                                key={m.value}
+                                className={`flex items-center gap-1.5 p-1.5 rounded-lg cursor-pointer transition-colors text-xs select-none ${
+                                  isChecked ? 'bg-indigo-50 text-indigo-900 font-bold' : 'hover:bg-slate-50 text-slate-700'
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => toggleMes(m.value)}
+                                  className="w-3.5 h-3.5 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
+                                />
+                                <span>{m.label}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Buscador de Observación / Concepto */}
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Buscar Detalle / ID:</label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Observación o #ID..."
+                        value={filtroBusqueda}
+                        onChange={e => setFiltroBusqueda(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-300 text-slate-800 text-xs pl-2.5 pr-7 py-1.5 rounded-lg focus:bg-white focus:border-indigo-500 focus:outline-none"
+                      />
+                      {filtroBusqueda && (
+                        <button
+                          onClick={() => setFiltroBusqueda('')}
+                          className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Etiquetas de Meses Seleccionados */}
+                {filtrosMeses.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold mr-1">Meses activos:</span>
+                    {filtrosMeses.map(mv => {
+                      const mObj = meses.find(m => m.value === mv);
+                      return (
+                        <span key={mv} className="bg-indigo-50 text-indigo-700 border border-indigo-200 text-[11px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1">
+                          {mObj?.label}
+                          <button type="button" onClick={() => toggleMes(mv)} className="hover:text-indigo-900 cursor-pointer">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Resumen de Resultados Filtrados */}
+                <div className="flex flex-wrap items-center justify-between pt-2 border-t border-slate-100 text-xs">
+                  <span className="text-slate-500 font-sans">
+                    Mostrando <strong className="text-slate-800 font-mono font-bold">{filteredInversiones.length}</strong> de <strong className="text-slate-800 font-mono font-bold">{inversiones.length}</strong> movimientos
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10.5px] text-slate-500 uppercase font-bold">Total Filtrado:</span>
+                    <span className="bg-emerald-50 border border-emerald-200 text-emerald-700 font-mono font-black px-2.5 py-0.5 rounded-md text-xs">
+                      ${totalFilteredUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* TABLA DE MOVIMIENTOS */}
+              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+                <table className="w-full text-left font-sans text-xs">
                   <thead>
-                    <tr className="bg-slate-950 text-slate-400 text-[11px] font-bold uppercase border-b border-slate-800">
+                    <tr className="bg-slate-100 text-slate-700 text-[11px] font-extrabold uppercase tracking-wider border-b border-slate-250">
                       <th className="py-3 px-4">ID</th>
                       <th className="py-3 px-4">Fecha</th>
                       <th className="py-3 px-4">Accionista</th>
-                      <th className="py-3 px-4">Monto ($ USD)</th>
+                      <th className="py-3 px-4 text-right">Monto ($ USD)</th>
                       <th className="py-3 px-4">Observación / Concepto</th>
-                      <th className="py-3 px-4 text-right">Acciones</th>
+                      <th className="py-3 px-4 text-center">Acciones</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800 text-xs">
-                    {inversiones.length === 0 ? (
+                  <tbody className="divide-y divide-slate-200 text-xs bg-white">
+                    {filteredInversiones.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="text-center py-8 text-slate-500">
-                          No hay movimientos registrados.
+                        <td colSpan={6} className="text-center py-12 text-slate-400 font-sans">
+                          {hasActiveFilters 
+                            ? 'No se encontraron movimientos que coincidan con los filtros seleccionados.' 
+                            : 'No hay movimientos registrados.'}
                         </td>
                       </tr>
                     ) : (
-                      inversiones.map(inv => {
+                      filteredInversiones.map(inv => {
                         const accionistaObj = accionistas.find(a => a.id === inv.accionista_id);
                         return (
-                          <tr key={inv.id} className="hover:bg-slate-800/50 transition-all">
+                          <tr key={inv.id} className="hover:bg-slate-50/80 transition-colors">
                             <td className="py-3 px-4 font-mono text-slate-500">#{inv.id}</td>
-                            <td className="py-3 px-4 font-mono font-bold text-slate-300">{inv.fecha}</td>
-                            <td className="py-3 px-4 font-bold text-emerald-400">
+                            <td className="py-3 px-4 font-mono font-bold text-slate-700">{inv.fecha}</td>
+                            <td className="py-3 px-4 font-bold text-indigo-700">
                               {accionistaObj ? accionistaObj.nombre : `Accionista #${inv.accionista_id}`}
                             </td>
-                            <td className="py-3 px-4 font-mono font-bold text-slate-100">
-                              <span className={inv.monto_usd < 0 ? 'text-red-400' : 'text-emerald-400'}>
+                            <td className="py-3 px-4 font-mono font-bold text-right">
+                              <span className={inv.monto_usd < 0 ? 'text-rose-600 font-bold' : 'text-emerald-700 font-black'}>
                                 ${inv.monto_usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </span>
                             </td>
-                            <td className="py-3 px-4 text-slate-300 italic">{inv.observacion || '-'}</td>
-                            <td className="py-3 px-4 text-right space-x-1">
+                            <td className="py-3 px-4 text-slate-600 italic">{inv.observacion || '-'}</td>
+                            <td className="py-3 px-4 text-center space-x-1.5">
                               <button
                                 onClick={() => handleEditInversionClick(inv)}
-                                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-400 rounded-md transition-all"
+                                className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-all shadow-2xs cursor-pointer"
                                 title="Editar Aporte"
                               >
                                 <Edit className="w-3.5 h-3.5" />
                               </button>
                               <button
                                 onClick={() => handleDeleteInversionClick(inv.id)}
-                                className="p-1.5 bg-red-950/40 hover:bg-red-900/60 text-red-400 rounded-md transition-all"
+                                className="p-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-600 rounded-lg transition-all cursor-pointer"
                                 title="Eliminar Aporte"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -853,6 +1123,19 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
                       })
                     )}
                   </tbody>
+                  {filteredInversiones.length > 0 && (
+                    <tfoot className="bg-slate-50 font-mono font-bold text-xs border-t-2 border-slate-200">
+                      <tr>
+                        <td colSpan={3} className="py-3 px-4 uppercase text-slate-700 font-sans font-extrabold">
+                          Total Filtrado ({filteredInversiones.length} movimientos)
+                        </td>
+                        <td className="py-3 px-4 text-right font-black text-emerald-700">
+                          ${totalFilteredUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td colSpan={2} />
+                      </tr>
+                    </tfoot>
+                  )}
                 </table>
               </div>
             </div>
@@ -860,272 +1143,273 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
 
           {/* TAB 3: CALCULADORA DE UTILIDAD Y GASTOS OPERATIVOS */}
           {activeTab === 'utilidades' && (
-            <div className="space-y-6 max-w-5xl mx-auto py-2">
-              <div ref={reportContainerRef} className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+            <div className="space-y-4 w-full py-1">
+              <div ref={reportContainerRef} className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-xs space-y-5 text-slate-800">
                 
                 {/* HEADER ACTIONS BAR */}
-                <div className="flex flex-wrap justify-between items-center border-b border-slate-800 pb-4 gap-4">
+                <div className="flex flex-wrap justify-between items-center border-b border-slate-200 pb-3 gap-3">
                   <div>
-                    <h3 className="text-base font-extrabold text-white uppercase tracking-wider flex items-center gap-2">
-                      <Calculator className="w-5 h-5 text-teal-400" />
+                    <h3 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                      <Calculator className="w-4 h-4 text-emerald-600" />
                       Cálculo de Distribución de Utilidades y Gastos Operativos
                     </h3>
-                    <p className="text-xs text-slate-400 font-sans mt-0.5">
-                      Deducción automática de gastos (Luz, Agua, Alquiler, etc.) y reparto proporcional a accionistas en <strong className="text-emerald-400 font-mono">$ USD</strong> y <strong className="text-cyan-400 font-mono">Bs VES</strong>
+                    <p className="text-xs text-slate-500 font-sans mt-0.5">
+                      Deducción automática de gastos operativos y distribución proporcional para accionistas
                     </p>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       onClick={handleSendWhatsAppReport}
-                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-md cursor-pointer"
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
                       title="Enviar reporte completo con detalle por WhatsApp"
                     >
-                      <Send className="w-4 h-4" />
+                      <Send className="w-3.5 h-3.5" />
                       <span>📲 WhatsApp</span>
                     </button>
 
                     <button
                       onClick={handleDownloadReportImage}
-                      className="bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-md cursor-pointer"
+                      className="bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
                       title="Descargar imagen visual en alta calidad (PNG) para adjuntar"
                     >
-                      <Camera className="w-4 h-4" />
+                      <Camera className="w-3.5 h-3.5" />
                       <span>📷 Descargar Imagen</span>
                     </button>
 
                     <button
                       onClick={handleCopyUtilidades}
-                      className="bg-slate-800 hover:bg-slate-700 text-teal-300 border border-slate-700 font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 font-bold text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
                     >
-                      {copiedNotification ? <Check className="w-4 h-4 text-emerald-300" /> : <Copy className="w-4 h-4" />}
+                      {copiedNotification ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
                       <span>{copiedNotification ? '¡Copiado!' : '📋 Copiar'}</span>
                     </button>
                   </div>
                 </div>
 
-                {/* RESUMEN FINANCIERO EN KPI CARDS */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 font-sans">
-                  {/* Utilidad Bruta */}
-                  <div className="bg-slate-950/80 border border-slate-800 p-4 rounded-2xl space-y-1">
-                    <span className="text-[10px] font-extrabold uppercase text-slate-400 tracking-wider block">📈 Utilidad Bruta (Ingresos)</span>
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-xl font-black font-mono text-emerald-400">${utilidadBrutaNum.toFixed(2)} USD</span>
-                      {effectiveTasa > 1 && (
-                        <span className="text-xs font-mono font-bold text-slate-400">Bs {utilidadBrutaVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                {/* TWO-COLUMN GRID: LEFT (Cálculos & Gastos) | RIGHT (Distribución Accionistas) */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+                  
+                  {/* LEFT COLUMN: Cálculos, Utilidad y Gastos */}
+                  <div className="lg:col-span-6 space-y-4">
+                    
+                    {/* RESUMEN FINANCIERO EN KPI CARDS */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 font-sans">
+                      {/* Utilidad Bruta */}
+                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-1">
+                        <span className="text-[9.5px] font-extrabold uppercase text-slate-500 tracking-wider block">📈 Utilidad Bruta</span>
+                        <div className="flex flex-col">
+                          <span className="text-base font-black font-mono text-emerald-700">${utilidadBrutaNum.toFixed(2)} USD</span>
+                          {effectiveTasa > 1 && (
+                            <span className="text-[10px] font-mono font-bold text-slate-400">Bs {utilidadBrutaVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Total Gastos Operativos */}
+                      <div className="bg-rose-50/50 border border-rose-200 p-3 rounded-xl space-y-1">
+                        <span className="text-[9.5px] font-extrabold uppercase text-rose-700 tracking-wider block">🔻 (-) Gastos</span>
+                        <div className="flex flex-col">
+                          <span className="text-base font-black font-mono text-rose-600">-${totalGastosUSD.toFixed(2)} USD</span>
+                          {effectiveTasa > 1 && (
+                            <span className="text-[10px] font-mono font-bold text-rose-500/90">-Bs {totalGastosVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Utilidad Neta Distribuable */}
+                      <div className="bg-emerald-50 border border-emerald-300 p-3 rounded-xl space-y-1 shadow-xs">
+                        <span className="text-[9.5px] font-extrabold uppercase text-emerald-800 tracking-wider block">💰 (=) Neta Distrib.</span>
+                        <div className="flex flex-col">
+                          <span className="text-base font-black font-mono text-emerald-800">${utilidadNetaUSD.toFixed(2)} USD</span>
+                          {effectiveTasa > 1 && (
+                            <span className="text-[10px] font-mono font-bold text-emerald-700">Bs {utilidadNetaVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* CAMPO INGRESO UTILIDAD BRUTA */}
+                    <div className="bg-slate-50 border border-emerald-200 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <label className="text-xs font-black uppercase text-emerald-900 tracking-wider block font-sans">
+                          Ingresar / Modificar Utilidad Bruta ($):
+                        </label>
+                        <p className="text-[10.5px] text-slate-500 mt-0.5">Monto base antes de deducir gastos</p>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-emerald-700 font-black text-lg">$</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={montoUtilidadInput}
+                          onChange={(e) => setMontoUtilidadInput(e.target.value)}
+                          placeholder="0.00"
+                          className="bg-white border-2 border-emerald-500 focus:border-emerald-600 text-emerald-900 font-mono font-black text-lg px-3 py-1.5 rounded-xl text-right w-36 outline-none transition-all shadow-xs"
+                        />
+                      </div>
+                    </div>
+
+                    {/* MÓDULO DE GASTOS OPERATIVOS DEDUCIBLES */}
+                    <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3 shadow-xs">
+                      <div className="flex flex-wrap justify-between items-center border-b border-slate-200 pb-2.5 gap-2">
+                        <div>
+                          <h4 className="text-xs font-extrabold uppercase text-slate-800 tracking-wider flex items-center gap-1.5">
+                            <Receipt className="w-4 h-4 text-rose-500" />
+                            Gastos Operativos Deducibles
+                          </h4>
+                          <p className="text-[10.5px] text-slate-500">
+                            Restan a la utilidad antes de la repartición
+                          </p>
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            setEditingGasto(null);
+                            setFormGastoConcepto('⚡ Luz / Electricidad');
+                            setFormGastoMontoUsd('');
+                            setFormGastoObservacion('');
+                            setShowAddGastoModal(true);
+                          }}
+                          className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all shadow-xs cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>+ Agregar Gasto</span>
+                        </button>
+                      </div>
+
+                      {gastos.length === 0 ? (
+                        <div className="text-center py-5 text-slate-400 text-xs font-sans italic border border-dashed border-slate-200 rounded-xl bg-slate-50/50">
+                          No hay gastos deducibles registrados.
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto rounded-xl border border-slate-200">
+                          <table className="w-full text-left font-sans text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-slate-100 border-b border-slate-200 text-slate-700 uppercase text-[10px] font-extrabold">
+                                <th className="py-2 px-3">Concepto / Servicio</th>
+                                <th className="py-2 px-3">Fecha</th>
+                                <th className="py-2 px-3 text-right">Monto ($ USD)</th>
+                                <th className="py-2 px-3 text-center">Acciones</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-200 font-mono text-xs text-slate-700 bg-white">
+                              {gastos.map(g => (
+                                <tr key={g.id} className="hover:bg-slate-50 transition-colors">
+                                  <td className="py-2 px-3 font-sans font-bold text-slate-900">{g.concepto}</td>
+                                  <td className="py-2 px-3 text-slate-500 text-[11px]">{g.fecha}</td>
+                                  <td className="py-2 px-3 text-right font-black text-rose-600">${g.monto_usd.toFixed(2)}</td>
+                                  <td className="py-2 px-3 text-center space-x-1 font-sans">
+                                    <button
+                                      onClick={() => handleEditGastoClick(g)}
+                                      className="p-1 text-slate-600 hover:text-slate-900 cursor-pointer"
+                                      title="Editar Gasto"
+                                    >
+                                      <Edit className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteGastoClick(g)}
+                                      className="p-1 text-rose-600 hover:text-rose-700 cursor-pointer"
+                                      title="Eliminar Gasto"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot className="bg-slate-100 font-mono font-bold text-xs border-t border-slate-200">
+                              <tr>
+                                <td colSpan={2} className="py-2 px-3 uppercase text-slate-700 font-sans font-bold">Total Gastos Deducibles</td>
+                                <td className="py-2 px-3 text-right font-black text-rose-600">-${totalGastosUSD.toFixed(2)} USD</td>
+                                <td />
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
                       )}
                     </div>
                   </div>
 
-                  {/* Total Gastos Operativos */}
-                  <div className="bg-slate-950/80 border border-rose-900/40 p-4 rounded-2xl space-y-1">
-                    <span className="text-[10px] font-extrabold uppercase text-rose-400 tracking-wider block">🔻 (-) Gastos Operativos Deducibles</span>
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-xl font-black font-mono text-rose-500">-${totalGastosUSD.toFixed(2)} USD</span>
-                      {effectiveTasa > 1 && (
-                        <span className="text-xs font-mono font-bold text-rose-400/80">-Bs {totalGastosVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Utilidad Neta Distribuable */}
-                  <div className="bg-gradient-to-br from-teal-950/90 to-emerald-950/90 border border-teal-500/50 p-4 rounded-2xl space-y-1 shadow-lg">
-                    <span className="text-[10px] font-extrabold uppercase text-teal-300 tracking-wider block">💰 (=) Utilidad Neta Distribuable</span>
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-2xl font-black font-mono text-teal-200">${utilidadNetaUSD.toFixed(2)} USD</span>
-                      {effectiveTasa > 1 && (
-                        <span className="text-xs font-mono font-bold text-teal-300">Bs {utilidadNetaVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* CAMPO INGRESO UTILIDAD BRUTA */}
-                <div className="bg-slate-950 border border-teal-500/30 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
-                  <div>
-                    <label className="text-xs font-black uppercase text-teal-300 tracking-wider block font-sans">
-                      Ingresar / Modificar Utilidad Bruta ($):
-                    </label>
-                    <p className="text-[11px] text-slate-400">Modifique libremente este monto manual antes o después de deducir gastos</p>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-teal-400 font-black text-2xl">$</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={montoUtilidadInput}
-                      onChange={(e) => setMontoUtilidadInput(e.target.value)}
-                      placeholder="0.00"
-                      className="bg-slate-900 border-2 border-teal-500/60 focus:border-teal-400 text-teal-300 font-mono font-black text-xl px-4 py-2 rounded-xl text-right w-48 outline-none transition-all shadow-inner"
-                    />
-                  </div>
-                </div>
-
-                {/* MÓDULO DE GASTOS OPERATIVOS DEDUCIBLES */}
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 space-y-4">
-                  <div className="flex flex-wrap justify-between items-center border-b border-slate-800 pb-3 gap-2">
-                    <div>
-                      <h4 className="text-xs font-extrabold uppercase text-slate-200 tracking-wider flex items-center gap-2">
-                        <Receipt className="w-4 h-4 text-rose-400" />
-                        Gastos Operativos Deducibles (Luz, Agua, Internet, Alquiler, Sueldos, etc.)
+                  {/* RIGHT COLUMN: Distribución Proporcional por Accionista */}
+                  <div className="lg:col-span-6 space-y-3">
+                    <div className="flex flex-wrap justify-between items-center border-b border-slate-200 pb-2 gap-2">
+                      <h4 className="text-xs font-extrabold uppercase text-slate-800 tracking-wider font-sans flex items-center gap-1.5">
+                        <Users className="w-4 h-4 text-emerald-700" />
+                        Distribución Proporcional por Accionista
                       </h4>
-                      <p className="text-[11px] text-slate-400">
-                        Los gastos registrados aquí restan automáticamente a la utilidad bruta antes de la repartición
-                      </p>
+                      <span className="text-[11px] bg-emerald-50 border border-emerald-200 text-emerald-800 font-mono font-bold px-2 py-0.5 rounded-md">
+                        Base Neta: ${utilidadNetaUSD.toFixed(2)} USD
+                      </span>
                     </div>
 
-                    <button
-                      onClick={() => {
-                        setEditingGasto(null);
-                        setFormGastoConcepto('⚡ Luz / Electricidad');
-                        setFormGastoMontoUsd('');
-                        setFormGastoObservacion('');
-                        setShowAddGastoModal(true);
-                      }}
-                      className="bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
-                    >
-                      <Plus className="w-4 h-4" />
-                      <span>Agregar Gasto</span>
-                    </button>
-                  </div>
-
-                  {gastos.length === 0 ? (
-                    <div className="text-center py-6 text-slate-500 text-xs font-sans italic border border-dashed border-slate-800 rounded-xl">
-                      No hay gastos operativos deducibles registrados. Haga clic en "+ Agregar Gasto" para incluir servicios, alquiler o nómina.
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto rounded-xl border border-slate-800/80">
-                      <table className="w-full text-left font-sans text-xs border-collapse">
+                    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-xs">
+                      <table className="w-full text-left font-sans border-collapse text-xs">
                         <thead>
-                          <tr className="bg-slate-900 border-b border-slate-800 text-slate-400 uppercase text-[10px] font-extrabold">
-                            <th className="py-2.5 px-4">Concepto / Servicio</th>
-                            <th className="py-2.5 px-4">Fecha</th>
-                            <th className="py-2.5 px-4">Observación / Detalle</th>
-                            <th className="py-2.5 px-4 text-right">Monto ($ USD)</th>
-                            {effectiveTasa > 1 && <th className="py-2.5 px-4 text-right">Monto (Bs VES)</th>}
-                            <th className="py-2.5 px-4 text-center">Acciones</th>
+                          <tr className="bg-emerald-700 border-b border-emerald-800 text-white text-[10.5px] font-extrabold uppercase tracking-wider">
+                            <th className="py-2.5 px-3 border-r border-emerald-800">Accionistas</th>
+                            <th className="py-2.5 px-3 border-r border-emerald-800 text-right">Mto Inv ($)</th>
+                            <th className="py-2.5 px-3 border-r border-emerald-800 text-right">% Inv</th>
+                            <th className="py-2.5 px-3 text-right border-r border-emerald-800">A Cobrar ($)</th>
+                            {effectiveTasa > 1 && <th className="py-2.5 px-3 text-right">A Cobrar (Bs)</th>}
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-800/60 font-mono text-[11px] text-slate-300">
-                          {gastos.map(g => (
-                            <tr key={g.id} className="hover:bg-slate-900/60 transition-all">
-                              <td className="py-2.5 px-4 font-sans font-bold text-slate-200">{g.concepto}</td>
-                              <td className="py-2.5 px-4 text-slate-400">{g.fecha}</td>
-                              <td className="py-2.5 px-4 font-sans italic text-slate-400">{g.observacion || '-'}</td>
-                              <td className="py-2.5 px-4 text-right font-black text-rose-400">${g.monto_usd.toFixed(2)}</td>
-                              {effectiveTasa > 1 && (
-                                <td className="py-2.5 px-4 text-right font-bold text-slate-400">Bs {(g.monto_usd * effectiveTasa).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                              )}
-                              <td className="py-2.5 px-4 text-center space-x-1 font-sans">
-                                <button
-                                  onClick={() => handleEditGastoClick(g)}
-                                  className="p-1 text-cyan-400 hover:text-cyan-300"
-                                  title="Editar Gasto"
-                                >
-                                  <Edit className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteGastoClick(g)}
-                                  className="p-1 text-rose-500 hover:text-rose-400"
-                                  title="Eliminar Gasto"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
+                        <tbody className="divide-y divide-slate-200 text-xs font-mono font-bold bg-white">
+                          {accionistas.map(a => {
+                            const mtoInv = accionistasTotales[a.id] || 0;
+                            const pctInv = capitalGlobalTotal > 0 ? (mtoInv / capitalGlobalTotal) * 100 : 0;
+                            const mtoCobrarUsd = (mtoInv / (capitalGlobalTotal || 1)) * utilidadNetaUSD;
+                            const mtoCobrarVes = mtoCobrarUsd * effectiveTasa;
+
+                            return (
+                              <tr key={a.id} className="hover:bg-slate-50 transition-colors text-slate-800">
+                                <td className="py-2.5 px-3 font-sans font-bold border-r border-slate-200 text-xs text-slate-900">
+                                  {a.nombre}
+                                </td>
+                                <td className="py-2.5 px-3 text-right border-r border-slate-200 text-slate-700">
+                                  ${mtoInv.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                                <td className="py-2.5 px-3 text-right border-r border-slate-200 text-indigo-700 font-black text-xs">
+                                  {pctInv.toFixed(2).replace('.', ',')}%
+                                </td>
+                                <td className="py-2.5 px-3 text-right font-black text-emerald-700 text-xs border-r border-slate-200">
+                                  ${mtoCobrarUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                                {effectiveTasa > 1 && (
+                                  <td className="py-2.5 px-3 text-right font-black text-sky-700 text-xs">
+                                    Bs {mtoCobrarVes.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </td>
+                                )}
+                              </tr>
+                            );
+                          })}
                         </tbody>
-                        <tfoot className="bg-slate-900 font-mono font-bold text-xs border-t border-slate-800">
+                        <tfoot className="bg-slate-100 font-mono font-black border-t-2 border-slate-300 text-xs">
                           <tr>
-                            <td colSpan={3} className="py-2.5 px-4 uppercase text-slate-400 font-sans font-bold">Total Gastos Deducibles</td>
-                            <td className="py-2.5 px-4 text-right font-black text-rose-400">-${totalGastosUSD.toFixed(2)} USD</td>
+                            <td className="py-3 px-3 font-sans uppercase text-slate-900 border-r border-slate-200 font-extrabold">
+                              TOTAL NETOS
+                            </td>
+                            <td className="py-3 px-3 text-right border-r border-slate-200 text-slate-900">
+                              ${capitalGlobalTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                            <td className="py-3 px-3 text-right border-r border-slate-200 text-indigo-700">
+                              100,00%
+                            </td>
+                            <td className="py-3 px-3 text-right text-emerald-700 font-black text-sm border-r border-slate-200">
+                              ${utilidadNetaUSD.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
                             {effectiveTasa > 1 && (
-                              <td className="py-2.5 px-4 text-right font-black text-rose-400/80">-Bs {totalGastosVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                              <td className="py-3 px-3 text-right text-sky-700 font-black text-sm">
+                                Bs {utilidadNetaVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
                             )}
-                            <td />
                           </tr>
                         </tfoot>
                       </table>
                     </div>
-                  )}
-                </div>
-
-                {/* TABLA DETALLADA DE REPARTO DE UTILIDAD NETA A ACCIONISTAS */}
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <h4 className="text-xs font-extrabold uppercase text-slate-300 tracking-wider font-sans">
-                      👥 Distribución Proporcional por Accionista
-                    </h4>
-                    <span className="text-[10px] text-teal-300 font-mono font-bold">
-                      Calculado sobre Utilidad Neta: ${utilidadNetaUSD.toFixed(2)} USD
-                    </span>
                   </div>
 
-                  <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950">
-                    <table className="w-full text-left font-sans border-collapse">
-                      <thead>
-                        <tr className="bg-emerald-950/70 border-b border-emerald-500/40 text-white text-xs font-extrabold uppercase">
-                          <th className="py-3 px-4 border-r border-slate-800">Accionistas</th>
-                          <th className="py-3 px-4 border-r border-slate-800 text-right">Mto de Inv</th>
-                          <th className="py-3 px-4 border-r border-slate-800 text-right">% de Inv</th>
-                          <th className="py-3 px-4 text-right text-teal-300 border-r border-slate-800">Mto a cobrar ($)</th>
-                          {effectiveTasa > 1 && <th className="py-3 px-4 text-right text-cyan-300">Mto a cobrar (Bs)</th>}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/80 text-xs font-mono font-bold">
-                        {accionistas.map(a => {
-                          const mtoInv = accionistasTotales[a.id] || 0;
-                          const pctInv = capitalGlobalTotal > 0 ? (mtoInv / capitalGlobalTotal) * 100 : 0;
-                          const mtoCobrarUsd = (mtoInv / (capitalGlobalTotal || 1)) * utilidadNetaUSD;
-                          const mtoCobrarVes = mtoCobrarUsd * effectiveTasa;
-
-                          return (
-                            <tr key={a.id} className="hover:bg-slate-900 transition-all text-slate-200">
-                              <td className="py-3 px-4 font-sans font-bold border-r border-slate-800 text-sm">
-                                {a.nombre}
-                              </td>
-                              <td className="py-3 px-4 text-right border-r border-slate-800 text-slate-100">
-                                $ {mtoInv.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </td>
-                              <td className="py-3 px-4 text-right border-r border-slate-800 text-teal-300 font-black text-sm">
-                                {pctInv.toFixed(2).replace('.', ',')} %
-                              </td>
-                              <td className="py-3 px-4 text-right font-black text-emerald-400 text-sm border-r border-slate-800">
-                                $ {mtoCobrarUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </td>
-                              {effectiveTasa > 1 && (
-                                <td className="py-3 px-4 text-right font-black text-cyan-300 text-sm">
-                                  Bs {mtoCobrarVes.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </td>
-                              )}
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                      <tfoot className="bg-slate-900 font-mono font-black border-t-2 border-slate-700 text-sm">
-                        <tr>
-                          <td className="py-4 px-4 font-sans uppercase text-white border-r border-slate-800">
-                            Total Netos
-                          </td>
-                          <td className="py-4 px-4 text-right border-r border-slate-800 text-white">
-                            $ {capitalGlobalTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                          <td className="py-4 px-4 text-right border-r border-slate-800 text-teal-300">
-                            100,00 %
-                          </td>
-                          <td className="py-4 px-4 text-right text-emerald-400 font-extrabold text-base border-r border-slate-800">
-                            $ {utilidadNetaUSD.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                          {effectiveTasa > 1 && (
-                            <td className="py-4 px-4 text-right text-cyan-300 font-extrabold text-base">
-                              Bs {utilidadNetaVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </td>
-                          )}
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
                 </div>
 
               </div>
@@ -1137,16 +1421,16 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
             <div className="space-y-4">
               <div className="flex justify-between items-center">
                 <div>
-                  <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wide">
+                  <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
                     Directorio de Accionistas Registrados
                   </h3>
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-slate-500 font-sans mt-0.5">
                     Administre la información de los socios e integrantes del grupo accionario
                   </p>
                 </div>
                 <button
                   onClick={() => setShowAddAccionistaModal(true)}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-xs"
                 >
                   <Plus className="w-4 h-4" />
                   <span>Nuevo Accionista</span>
@@ -1154,15 +1438,15 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
               </div>
 
               {(accionistas || []).length === 0 ? (
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center space-y-3 font-sans">
-                  <Users className="w-10 h-10 text-slate-600 mx-auto" />
-                  <h4 className="text-sm font-bold text-slate-300 uppercase">No hay accionistas registrados en la base de datos</h4>
+                <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center space-y-3 font-sans shadow-xs">
+                  <Users className="w-10 h-10 text-slate-400 mx-auto" />
+                  <h4 className="text-sm font-bold text-slate-700 uppercase">No hay accionistas registrados en la base de datos</h4>
                   <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                    Haga clic en <strong className="text-emerald-400">"Nuevo Accionista"</strong> para comenzar a registrar a los integrantes del grupo accionario.
+                    Haga clic en <strong className="text-indigo-600">"Nuevo Accionista"</strong> para comenzar a registrar a los integrantes del grupo accionario.
                   </p>
                   <button
                     onClick={() => setShowAddAccionistaModal(true)}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2 rounded-xl inline-flex items-center gap-1.5 transition-all shadow-md mt-2 cursor-pointer"
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2 rounded-xl inline-flex items-center gap-1.5 transition-all shadow-xs mt-2 cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
                     <span>Registrar Primer Accionista</span>
@@ -1175,25 +1459,22 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
                     const pct = capitalGlobalTotal > 0 ? (totalInv / capitalGlobalTotal) * 100 : 0;
                     const canDelete = totalInv === 0;
                     return (
-                      <div key={a.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-3 relative overflow-hidden group">
-                        {/* Glow accent */}
-                        <div className="absolute top-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-500/40 to-transparent" />
-
+                      <div key={a.id} className="bg-white border border-slate-200 hover:border-indigo-300 rounded-2xl p-5 shadow-xs space-y-3 relative overflow-hidden group transition-all">
                         <div className="flex justify-between items-start">
                           <div className="flex-1 min-w-0">
-                            <span className="text-[10px] font-mono font-bold text-slate-500 uppercase">ID Accionista #{a.id}</span>
-                            <h4 className="text-base font-extrabold text-white truncate">{a.nombre}</h4>
-                            <p className="text-xs text-slate-400">{a.cedula_rif || 'Sin Cédula/RIF'}</p>
-                            {a.telefono && <p className="text-xs text-slate-500 font-mono">{a.telefono}</p>}
+                            <span className="text-[10px] font-mono font-bold text-slate-400 uppercase">ID Accionista #{a.id}</span>
+                            <h4 className="text-sm font-extrabold text-slate-900 truncate">{a.nombre}</h4>
+                            <p className="text-xs text-slate-500">{a.cedula_rif || 'Sin Cédula/RIF'}</p>
+                            {a.telefono && <p className="text-xs text-slate-500 font-mono mt-0.5">{a.telefono}</p>}
                           </div>
-                          <span className="bg-emerald-950/95 text-emerald-300 border-2 border-emerald-500/80 text-sm sm:text-base font-mono font-black px-3.5 py-1 rounded-xl ml-2 flex-shrink-0 shadow-md tracking-wide">
+                          <span className="bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-mono font-black px-2.5 py-1 rounded-xl ml-2 flex-shrink-0 shadow-2xs tracking-wide">
                             {pct.toFixed(2)} % Inv
                           </span>
                         </div>
 
-                        <div className="pt-2 border-t border-slate-800/80 flex justify-between items-center">
-                          <span className="text-xs text-slate-400 uppercase font-bold">Capital Total:</span>
-                          <span className={`text-base font-mono font-black ${ totalInv === 0 ? 'text-slate-500' : 'text-emerald-400' }`}>
+                        <div className="pt-2 border-t border-slate-100 flex justify-between items-center">
+                          <span className="text-[11px] text-slate-500 uppercase font-bold">Capital Total:</span>
+                          <span className={`text-base font-mono font-black ${ totalInv === 0 ? 'text-slate-400' : 'text-emerald-700' }`}>
                             ${totalInv.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </span>
                         </div>
@@ -1202,7 +1483,7 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
                         <div className="flex gap-2 pt-1">
                           <button
                             onClick={() => handleEditAccionistaClick(a)}
-                            className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-slate-800 hover:bg-cyan-900/60 border border-slate-700 hover:border-cyan-600 text-cyan-400 rounded-xl text-xs font-bold transition-all"
+                            className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all shadow-2xs"
                           >
                             <Edit className="w-3.5 h-3.5" />
                             Editar
@@ -1211,8 +1492,8 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
                             onClick={() => handleDeleteAccionistaClick(a)}
                             className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all border ${
                               canDelete
-                                ? 'bg-red-950/40 hover:bg-red-900/60 border-red-900/40 hover:border-red-600 text-red-400'
-                                : 'bg-slate-800/50 border-slate-700/50 text-slate-600 cursor-not-allowed opacity-50'
+                                ? 'bg-rose-50 hover:bg-rose-100 border-rose-200 text-rose-600'
+                                : 'bg-slate-50 border-slate-200 text-slate-400 cursor-not-allowed opacity-60'
                             }`}
                             title={canDelete ? 'Eliminar accionista' : 'No se puede eliminar: tiene capital invertido > $0'}
                           >
@@ -1234,24 +1515,25 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
 
       {/* MODAL REGISTRAR / EDITAR APORTE */}
       {showAddInversionModal && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-fadeIn">
-          <div className="bg-slate-900 border border-slate-750 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden text-slate-100">
-            <div className="bg-slate-950 px-6 py-4 border-b border-slate-800 flex justify-between items-center">
-              <h3 className="font-extrabold text-sm uppercase text-emerald-400 font-sans">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4 animate-fade-in font-sans">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden text-slate-800">
+            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+              <h3 className="font-extrabold text-sm uppercase text-slate-800 font-sans flex items-center gap-2">
+                <DollarSign className="w-4 h-4 text-emerald-600" />
                 {editingInversion ? 'Editar Aporte de Inversión' : 'Registrar Nuevo Aporte de Inversión'}
               </h3>
-              <button onClick={() => setShowAddInversionModal(false)} className="text-slate-400 hover:text-white">
+              <button onClick={() => setShowAddInversionModal(false)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleSaveInversion} className="p-6 space-y-4 font-sans text-xs">
               <div className="space-y-1">
-                <label className="font-bold text-slate-300 uppercase">Accionista:</label>
+                <label className="font-bold text-slate-700 uppercase block">Accionista:</label>
                 <select
                   value={formAccionistaId}
                   onChange={(e) => setFormAccionistaId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-emerald-500"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 outline-none focus:bg-white focus:border-indigo-500"
                 >
                   {accionistas.map(a => (
                     <option key={a.id} value={a.id}>
@@ -1262,35 +1544,35 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
               </div>
 
               <div className="space-y-1">
-                <label className="font-bold text-slate-300 uppercase">Fecha del Aporte (Actual o Pasada):</label>
+                <label className="font-bold text-slate-700 uppercase block">Fecha del Aporte (Actual o Pasada):</label>
                 <input
                   type="date"
                   value={formFecha}
                   onChange={(e) => setFormFecha(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-emerald-500 font-mono"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 outline-none focus:bg-white focus:border-indigo-500 font-mono"
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="font-bold text-slate-300 uppercase">Monto ($ USD):</label>
+                <label className="font-bold text-slate-700 uppercase block">Monto ($ USD):</label>
                 <input
                   type="number"
                   step="0.01"
                   value={formMontoUsd}
                   onChange={(e) => setFormMontoUsd(e.target.value)}
                   placeholder="0.00"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-emerald-500 font-mono font-bold text-sm"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 outline-none focus:bg-white focus:border-emerald-500 font-mono font-bold text-sm"
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="font-bold text-slate-300 uppercase">Observación / Concepto:</label>
+                <label className="font-bold text-slate-700 uppercase block">Observación / Concepto:</label>
                 <textarea
                   rows={3}
                   value={formObservacion}
                   onChange={(e) => setFormObservacion(e.target.value)}
                   placeholder="Ej: Aporte inicial de capital, inyección proyecto..."
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white outline-none focus:border-emerald-500 resize-none"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 outline-none focus:bg-white focus:border-indigo-500 resize-none"
                 />
               </div>
 
@@ -1298,13 +1580,13 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowAddInversionModal(false)}
-                  className="w-1/2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-2.5 rounded-xl uppercase text-xs transition-all"
+                  className="w-1/2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl uppercase text-xs transition-all"
                 >
                   Cancelar [ESC]
                 </button>
                 <button
                   type="submit"
-                  className="w-1/2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl uppercase text-xs transition-all"
+                  className="w-1/2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl uppercase text-xs transition-all shadow-xs"
                 >
                   Guardar Aporte
                 </button>
@@ -1316,48 +1598,49 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
 
       {/* MODAL CREAR / EDITAR ACCIONISTA */}
       {showAddAccionistaModal && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-fadeIn">
-          <div className="bg-slate-900 border border-slate-750 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden text-slate-100">
-            <div className="bg-slate-950 px-6 py-4 border-b border-slate-800 flex justify-between items-center">
-              <h3 className="font-extrabold text-sm uppercase text-cyan-400 font-sans">
-                {editingAccionista ? '✏️ Editar Accionista' : 'Registrar Nuevo Accionista'}
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4 animate-fade-in font-sans">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden text-slate-800">
+            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+              <h3 className="font-extrabold text-sm uppercase text-slate-800 font-sans flex items-center gap-2">
+                <Users className="w-4 h-4 text-indigo-600" />
+                {editingAccionista ? 'Editar Accionista' : 'Registrar Nuevo Accionista'}
               </h3>
-              <button onClick={() => { setShowAddAccionistaModal(false); setEditingAccionista(null); }} className="text-slate-400 hover:text-white">
+              <button onClick={() => { setShowAddAccionistaModal(false); setEditingAccionista(null); }} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleSaveAccionista} className="p-6 space-y-4 font-sans text-xs">
               <div className="space-y-1">
-                <label className="font-bold text-slate-300 uppercase">Nombre Completo:</label>
+                <label className="font-bold text-slate-700 uppercase block">Nombre Completo:</label>
                 <input
                   type="text"
                   value={formNombreAccionista}
                   onChange={(e) => setFormNombreAccionista(e.target.value)}
                   placeholder="Ej: Carlos Mendoza"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-cyan-500 font-bold"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 outline-none focus:bg-white focus:border-indigo-500 font-bold"
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="font-bold text-slate-300 uppercase">Cédula o RIF:</label>
+                <label className="font-bold text-slate-700 uppercase block">Cédula o RIF:</label>
                 <input
                   type="text"
                   value={formCedulaAccionista}
                   onChange={(e) => setFormCedulaAccionista(e.target.value)}
                   placeholder="V-12345678 / J-123456789"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-cyan-500 font-mono"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 outline-none focus:bg-white focus:border-indigo-500 font-mono"
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="font-bold text-slate-300 uppercase">Teléfono:</label>
+                <label className="font-bold text-slate-700 uppercase block">Teléfono:</label>
                 <input
                   type="text"
                   value={formTelefonoAccionista}
                   onChange={(e) => setFormTelefonoAccionista(e.target.value)}
                   placeholder="0424-0000000"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-cyan-500 font-mono"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 outline-none focus:bg-white focus:border-indigo-500 font-mono"
                 />
               </div>
 
@@ -1365,13 +1648,13 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
                 <button
                   type="button"
                   onClick={() => { setShowAddAccionistaModal(false); setEditingAccionista(null); setFormNombreAccionista(''); setFormCedulaAccionista(''); setFormTelefonoAccionista(''); }}
-                  className="w-1/2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-2.5 rounded-xl uppercase text-xs transition-all"
+                  className="w-1/2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl uppercase text-xs transition-all"
                 >
                   Cancelar [ESC]
                 </button>
                 <button
                   type="submit"
-                  className="w-1/2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2.5 rounded-xl uppercase text-xs transition-all"
+                  className="w-1/2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl uppercase text-xs transition-all shadow-xs"
                 >
                   {editingAccionista ? 'Guardar Cambios' : 'Guardar Accionista'}
                 </button>
@@ -1383,39 +1666,39 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
 
       {/* MODAL CONFIRMAR ELIMINACIÓN DE ACCIONISTA */}
       {deleteConfirm && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 animate-fadeIn">
-          <div className="bg-slate-900 border border-red-900/60 rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden text-slate-100">
-            <div className="bg-gradient-to-r from-red-950 to-slate-900 px-6 py-4 border-b border-red-900/50 flex items-center gap-3">
-              <div className="p-2 bg-red-950/80 border border-red-700/50 rounded-xl">
-                <Trash2 className="w-5 h-5 text-red-400" />
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4 animate-fade-in font-sans">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden text-slate-800">
+            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center gap-3">
+              <div className="p-2 bg-rose-50 border border-rose-200 rounded-xl text-rose-600">
+                <Trash2 className="w-5 h-5" />
               </div>
-              <h3 className="font-extrabold text-sm uppercase text-red-400 font-sans">
+              <h3 className="font-extrabold text-sm uppercase text-slate-800 font-sans">
                 Confirmar Eliminación
               </h3>
             </div>
 
-            <div className="p-6 space-y-4 font-sans">
+            <div className="p-6 space-y-4 font-sans text-xs">
               {deleteConfirm.capital > 0 ? (
                 // BLOCKED: has capital
                 <div className="space-y-3">
-                  <div className="bg-red-950/40 border border-red-700/50 rounded-xl p-4 text-center space-y-2">
+                  <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 text-center space-y-2">
                     <div className="text-3xl">⛔</div>
-                    <p className="text-sm font-bold text-red-300">
-                      No se puede eliminar a <span className="text-white">{deleteConfirm.accionista.nombre}</span>
+                    <p className="text-xs font-bold text-rose-900">
+                      No se puede eliminar a <span className="underline">{deleteConfirm.accionista.nombre}</span>
                     </p>
-                    <p className="text-xs text-red-400">
+                    <p className="text-[11px] text-rose-700">
                       Este accionista tiene un capital invertido de{' '}
-                      <strong className="text-white font-mono">
+                      <strong className="font-mono">
                         ${deleteConfirm.capital.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </strong>.
                     </p>
-                    <p className="text-xs text-slate-400">
+                    <p className="text-[11px] text-slate-500">
                       Para eliminar el accionista, primero debe llevar su capital total a <strong>$0.00</strong> registrando los retiros o ajustes correspondientes en el Historial de Movimientos.
                     </p>
                   </div>
                   <button
                     onClick={() => setDeleteConfirm(null)}
-                    className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold py-2.5 rounded-xl text-xs uppercase tracking-wide transition-all"
+                    className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-xs uppercase tracking-wide transition-all"
                   >
                     Entendido
                   </button>
@@ -1423,25 +1706,25 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
               ) : (
                 // ALLOWED: capital is zero
                 <div className="space-y-4">
-                  <div className="bg-slate-950 border border-slate-700 rounded-xl p-4 text-center space-y-2">
+                  <div className="bg-slate-50 border border-slate-250 rounded-xl p-4 text-center space-y-2">
                     <div className="text-3xl">⚠️</div>
-                    <p className="text-sm font-bold text-slate-200">
-                      ¿Eliminar a <span className="text-red-300">{deleteConfirm.accionista.nombre}</span>?
+                    <p className="text-sm font-bold text-slate-800">
+                      ¿Eliminar a <span className="text-rose-600">{deleteConfirm.accionista.nombre}</span>?
                     </p>
-                    <p className="text-xs text-slate-400">
-                      Capital actual: <strong className="text-slate-300 font-mono">$0.00</strong>. Esta acción eliminará al accionista y todos sus registros históricos. Esta acción <strong className="text-red-400">no se puede deshacer</strong>.
+                    <p className="text-xs text-slate-500">
+                      Capital actual: <strong className="text-slate-700 font-mono">$0.00</strong>. Esta acción eliminará al accionista y todos sus registros históricos. Esta acción <strong className="text-rose-600">no se puede deshacer</strong>.
                     </p>
                   </div>
                   <div className="flex gap-3">
                     <button
                       onClick={() => setDeleteConfirm(null)}
-                      className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-2.5 rounded-xl text-xs uppercase transition-all"
+                      className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-xs uppercase transition-all"
                     >
                       Cancelar
                     </button>
                     <button
                       onClick={handleConfirmDeleteAccionista}
-                      className="flex-1 bg-red-700 hover:bg-red-600 text-white font-bold py-2.5 rounded-xl text-xs uppercase tracking-wide transition-all flex items-center justify-center gap-1.5"
+                      className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-bold py-2.5 rounded-xl text-xs uppercase tracking-wide transition-all flex items-center justify-center gap-1.5 shadow-xs"
                     >
                       <Trash2 className="w-4 h-4" />
                       Sí, Eliminar
@@ -1456,21 +1739,21 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
 
       {/* MODAL VACIAR MÓDULO ACCIONISTAS */}
       {showWipeModal && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-fadeIn">
-          <div className="bg-slate-900 border border-red-900/60 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden text-slate-100 font-sans">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4 animate-fade-in font-sans">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden text-slate-800 font-sans">
             {/* Header */}
-            <div className="bg-gradient-to-r from-red-950 via-slate-900 to-slate-950 px-6 py-4 border-b border-red-900/50 flex justify-between items-center">
+            <div className="bg-rose-50 px-6 py-4 border-b border-rose-200 flex justify-between items-center">
               <div className="flex items-center gap-2.5">
-                <div className="p-2 bg-red-950 border border-red-700/60 rounded-xl text-red-400">
-                  <ShieldAlert className="w-5 h-5 animate-pulse" />
+                <div className="p-2 bg-rose-100 border border-rose-300 rounded-xl text-rose-700">
+                  <ShieldAlert className="w-5 h-5" />
                 </div>
-                <h3 className="font-extrabold text-sm uppercase text-red-400 tracking-wide">
+                <h3 className="font-extrabold text-sm uppercase text-rose-800 tracking-wide">
                   Vaciar Módulo de Accionistas
                 </h3>
               </div>
               <button
                 onClick={() => { setShowWipeModal(false); setWipeConfirmWord(''); }}
-                className="text-slate-400 hover:text-white transition-colors"
+                className="text-slate-400 hover:text-slate-600 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1478,26 +1761,26 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
 
             {/* Body */}
             <div className="p-6 space-y-4">
-              <div className="bg-red-950/40 border border-red-900/60 rounded-xl p-4 space-y-2 text-center">
+              <div className="bg-rose-50/70 border border-rose-200 rounded-xl p-4 space-y-2 text-center">
                 <div className="text-3xl">⚠️</div>
-                <p className="text-xs font-bold text-red-300 uppercase tracking-wide">
+                <p className="text-xs font-bold text-rose-800 uppercase tracking-wide">
                   Advertencia de Acción Destructiva
                 </p>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  Esta acción borrará <strong className="text-red-400">TODOS</strong> los accionistas registrados y sus aportes de capital, dejando el módulo de inversiones en <strong>cero (0)</strong>.
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Esta acción borrará <strong className="text-rose-600">TODOS</strong> los accionistas registrados y sus aportes de capital, dejando el módulo de inversiones en <strong>cero (0)</strong>.
                 </p>
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs font-bold uppercase text-slate-300 block text-center">
-                  Escriba <span className="text-red-400 font-mono font-black">"CONFIRMAR"</span> para autorizar:
+                <label className="text-xs font-bold uppercase text-slate-700 block text-center">
+                  Escriba <span className="text-rose-600 font-mono font-black">"CONFIRMAR"</span> para autorizar:
                 </label>
                 <input
                   type="text"
                   placeholder="Escriba CONFIRMAR..."
                   value={wipeConfirmWord}
                   onChange={(e) => setWipeConfirmWord(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 focus:border-red-500 text-center font-mono font-bold text-sm text-white px-4 py-2.5 rounded-xl outline-none transition-all placeholder-slate-600"
+                  className="w-full bg-slate-50 border border-slate-300 focus:bg-white focus:border-rose-500 text-center font-mono font-bold text-sm text-slate-900 px-4 py-2.5 rounded-xl outline-none transition-all placeholder-slate-400 shadow-2xs"
                   autoFocus
                 />
               </div>
@@ -1507,7 +1790,7 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
                 <button
                   type="button"
                   onClick={() => { setShowWipeModal(false); setWipeConfirmWord(''); }}
-                  className="w-1/2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-2.5 rounded-xl uppercase text-xs transition-all"
+                  className="w-1/2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl uppercase text-xs transition-all"
                 >
                   Cancelar [ESC]
                 </button>
@@ -1515,10 +1798,10 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
                   type="button"
                   disabled={!wipeConfirmWord.trim().toUpperCase().includes('CONFIRMAR') || wipeLoading}
                   onClick={handleExecuteWipeAccionistas}
-                  className={`w-1/2 font-bold py-2.5 rounded-xl uppercase text-xs transition-all flex items-center justify-center gap-2 shadow-lg ${
+                  className={`w-1/2 font-bold py-2.5 rounded-xl uppercase text-xs transition-all flex items-center justify-center gap-2 shadow-xs ${
                     wipeConfirmWord.trim().toUpperCase().includes('CONFIRMAR')
-                      ? 'bg-red-600 hover:bg-red-500 text-white shadow-red-950/50 cursor-pointer'
-                      : 'bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-700/50'
+                      ? 'bg-rose-600 hover:bg-rose-700 text-white cursor-pointer'
+                      : 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
                   }`}
                 >
                   <Trash2 className="w-4 h-4" />
@@ -1532,14 +1815,14 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
 
       {/* MODAL REGISTRAR / EDITAR GASTO OPERATIVO */}
       {showAddGastoModal && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-fadeIn">
-          <div className="bg-slate-900 border border-slate-750 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden text-slate-100 font-sans">
-            <div className="bg-slate-950 px-6 py-4 border-b border-slate-800 flex justify-between items-center">
-              <h3 className="font-extrabold text-sm uppercase text-rose-400 font-sans flex items-center gap-2">
-                <Receipt className="w-4 h-4" />
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4 animate-fade-in font-sans">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden text-slate-800 font-sans">
+            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+              <h3 className="font-extrabold text-sm uppercase text-slate-800 font-sans flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-rose-600" />
                 {editingGasto ? 'Editar Gasto Operativo' : 'Registrar Gasto Deducible'}
               </h3>
-              <button onClick={() => { setShowAddGastoModal(false); setEditingGasto(null); }} className="text-slate-400 hover:text-white">
+              <button onClick={() => { setShowAddGastoModal(false); setEditingGasto(null); }} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1547,7 +1830,7 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
             <form onSubmit={handleSaveGasto} className="p-6 space-y-4 text-xs">
               {/* Preset concept buttons */}
               <div className="space-y-1">
-                <label className="font-bold text-slate-300 uppercase">Presets Rápidos:</label>
+                <label className="font-bold text-slate-700 uppercase block">Presets Rápidos:</label>
                 <div className="flex flex-wrap gap-1.5 pt-1">
                   {[
                     '⚡ Luz / Electricidad',
@@ -1565,8 +1848,8 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
                       onClick={() => setFormGastoConcepto(preset)}
                       className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all ${
                         formGastoConcepto === preset
-                          ? 'bg-rose-600 text-white border-rose-500 shadow-xs'
-                          : 'bg-slate-950 hover:bg-slate-800 text-slate-300 border-slate-800'
+                          ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
                       }`}
                     >
                       {preset}
@@ -1576,56 +1859,56 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
               </div>
 
               <div className="space-y-1">
-                <label className="font-bold text-slate-300 uppercase">Concepto / Nombre del Servicio:</label>
+                <label className="font-bold text-slate-700 uppercase block">Concepto / Nombre del Servicio:</label>
                 <input
                   type="text"
                   value={formGastoConcepto}
                   onChange={(e) => setFormGastoConcepto(e.target.value)}
                   placeholder="Ej: Factura Corpoelec, Cantv, Alquiler..."
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-rose-500 font-bold"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 outline-none focus:bg-white focus:border-rose-500 font-bold"
                   required
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="font-bold text-slate-300 uppercase">Monto ($ USD):</label>
+                <label className="font-bold text-slate-700 uppercase block">Monto ($ USD):</label>
                 <div className="relative">
-                  <span className="absolute left-3 top-2.5 text-rose-400 font-bold">$</span>
+                  <span className="absolute left-3 top-2.5 text-rose-600 font-bold">$</span>
                   <input
                     type="number"
                     step="0.01"
                     value={formGastoMontoUsd}
                     onChange={(e) => setFormGastoMontoUsd(e.target.value)}
                     placeholder="0.00"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-7 pr-3 py-2.5 text-rose-400 font-mono font-black text-sm outline-none focus:border-rose-500"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-7 pr-3 py-2.5 text-rose-600 font-mono font-black text-sm outline-none focus:bg-white focus:border-rose-500"
                     required
                   />
                 </div>
                 {effectiveTasa > 1 && parseFloat(formGastoMontoUsd || '0') > 0 && (
-                  <p className="text-[10px] text-slate-400 font-mono text-right">
-                    Equivalente en Bs: <strong className="text-slate-200">Bs {(parseFloat(formGastoMontoUsd) * effectiveTasa).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                  <p className="text-[10px] text-slate-500 font-mono text-right mt-1">
+                    Equivalente en Bs: <strong className="text-slate-800">Bs {(parseFloat(formGastoMontoUsd) * effectiveTasa).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
                   </p>
                 )}
               </div>
 
               <div className="space-y-1">
-                <label className="font-bold text-slate-300 uppercase">Fecha:</label>
+                <label className="font-bold text-slate-700 uppercase block">Fecha:</label>
                 <input
                   type="date"
                   value={formGastoFecha}
                   onChange={(e) => setFormGastoFecha(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white outline-none focus:border-rose-500 font-mono"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-900 outline-none focus:bg-white focus:border-rose-500 font-mono"
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="font-bold text-slate-300 uppercase">Observación / Detalle (Opcional):</label>
+                <label className="font-bold text-slate-700 uppercase block">Observación / Detalle (Opcional):</label>
                 <textarea
                   rows={2}
                   value={formGastoObservacion}
                   onChange={(e) => setFormGastoObservacion(e.target.value)}
                   placeholder="Ej: Pago de recibo Nro. #12345..."
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white outline-none focus:border-rose-500 resize-none"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-slate-900 outline-none focus:bg-white focus:border-rose-500 resize-none"
                 />
               </div>
 
@@ -1633,13 +1916,13 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
                 <button
                   type="button"
                   onClick={() => { setShowAddGastoModal(false); setEditingGasto(null); }}
-                  className="w-1/2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-2.5 rounded-xl uppercase text-xs transition-all"
+                  className="w-1/2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl uppercase text-xs transition-all"
                 >
                   Cancelar [ESC]
                 </button>
                 <button
                   type="submit"
-                  className="w-1/2 bg-rose-600 hover:bg-rose-500 text-white font-bold py-2.5 rounded-xl uppercase text-xs transition-all shadow-lg shadow-rose-950/50 flex items-center justify-center gap-1.5 cursor-pointer"
+                  className="w-1/2 bg-rose-600 hover:bg-rose-700 text-white font-bold py-2.5 rounded-xl uppercase text-xs transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <Check className="w-4 h-4" />
                   <span>{editingGasto ? 'Guardar Cambios' : 'Guardar Gasto'}</span>

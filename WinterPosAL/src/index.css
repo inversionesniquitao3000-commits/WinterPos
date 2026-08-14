@@ -37,6 +37,10 @@
   background: linear-gradient(180deg, #78350f 0%, #b45309 100%);
 }
 
+.tab-grad-proveedores {
+  background: linear-gradient(180deg, #581c87 0%, #7e22ce 100%);
+}
+
 /* Custom terminal animations and scanline styling */
 .scanline {
   background: linear-gradient(

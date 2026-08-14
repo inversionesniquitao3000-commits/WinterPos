@@ -235,3 +235,92 @@ CREATE TABLE IF NOT EXISTS Abonos (
     observacion TEXT,
     fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ==========================================
+-- 14. PROVEEDORES (DIRECTORIO MAESTRO)
+-- ==========================================
+CREATE TABLE IF NOT EXISTS Proveedores (
+    id BIGSERIAL PRIMARY KEY,
+    rif VARCHAR(30) NOT NULL UNIQUE,
+    razon_social VARCHAR(150) NOT NULL,
+    contacto_nombre VARCHAR(100),
+    telefono VARCHAR(50) NOT NULL,
+    correo VARCHAR(100),
+    direccion TEXT,
+    dias_credito INT DEFAULT 0 CHECK (dias_credito >= 0),
+    limite_credito_usd NUMERIC(12, 2) DEFAULT 0.00 CHECK (limite_credito_usd >= 0),
+    saldo_pendiente_usd NUMERIC(12, 2) DEFAULT 0.00 CHECK (saldo_pendiente_usd >= 0),
+    estado VARCHAR(10) DEFAULT 'Activo' CHECK (estado IN ('Activo', 'Inactivo')),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ==========================================
+-- 15. COMPRAS Y RECEPCIÓN DE MERCANCÍA
+-- ==========================================
+CREATE TABLE IF NOT EXISTS Compras (
+    id BIGSERIAL PRIMARY KEY,
+    numero_factura VARCHAR(50) NOT NULL,
+    proveedor_id BIGINT NOT NULL REFERENCES Proveedores(id) ON DELETE RESTRICT,
+    usuario_id BIGINT NOT NULL REFERENCES Usuarios(id),
+    fecha_emision TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    fecha_vencimiento TIMESTAMP,
+    condicion_pago VARCHAR(20) DEFAULT 'Contado' CHECK (condicion_pago IN ('Contado', 'Credito')),
+    subtotal_usd NUMERIC(12, 2) NOT NULL,
+    impuesto_usd NUMERIC(12, 2) DEFAULT 0.00,
+    descuento_usd NUMERIC(12, 2) DEFAULT 0.00,
+    total_usd NUMERIC(12, 2) NOT NULL,
+    total_ves NUMERIC(12, 2) NOT NULL,
+    saldo_pendiente_usd NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    estatus VARCHAR(20) DEFAULT 'Pendiente' CHECK (estatus IN ('Pendiente', 'Parcial', 'Pagada', 'Anulada')),
+    observaciones TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ==========================================
+-- 16. DETALLE DE COMPRAS
+-- ==========================================
+CREATE TABLE IF NOT EXISTS Compras_Detalle (
+    id BIGSERIAL PRIMARY KEY,
+    compra_id BIGINT NOT NULL REFERENCES Compras(id) ON DELETE CASCADE,
+    producto_id BIGINT NOT NULL REFERENCES Productos(id),
+    cantidad NUMERIC(12, 3) NOT NULL CHECK (cantidad > 0),
+    costo_unitario_usd NUMERIC(12, 2) NOT NULL CHECK (costo_unitario_usd >= 0),
+    total_usd NUMERIC(12, 2) NOT NULL
+);
+
+-- ==========================================
+-- 17. PAGOS Y ABONOS A PROVEEDORES (CXP)
+-- ==========================================
+CREATE TABLE IF NOT EXISTS Pagos_Proveedores (
+    id BIGSERIAL PRIMARY KEY,
+    compra_id BIGINT REFERENCES Compras(id) ON DELETE SET NULL,
+    proveedor_id BIGINT NOT NULL REFERENCES Proveedores(id) ON DELETE CASCADE,
+    usuario_id BIGINT NOT NULL REFERENCES Usuarios(id),
+    caja_id BIGINT REFERENCES Cajas_Apertura_Cierre(id) ON DELETE SET NULL,
+    monto_usd NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    monto_ves NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    tasa_cambio NUMERIC(12, 4) NOT NULL,
+    metodo_pago VARCHAR(50) NOT NULL,
+    banco_origen VARCHAR(100),
+    numero_referencia VARCHAR(50),
+    afecto_caja_efectivo BOOLEAN DEFAULT FALSE,
+    observacion TEXT,
+    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ==========================================
+-- 18. COTIZACIONES DE PROVEEDORES
+-- ==========================================
+CREATE TABLE IF NOT EXISTS Cotizaciones_Proveedores (
+    id BIGSERIAL PRIMARY KEY,
+    numero_cotizacion VARCHAR(50),
+    proveedor_id BIGINT NOT NULL REFERENCES Proveedores(id) ON DELETE CASCADE,
+    usuario_id BIGINT NOT NULL REFERENCES Usuarios(id),
+    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    fecha_vigencia TIMESTAMP,
+    total_usd NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    total_ves NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    detalles_json JSONB NOT NULL,
+    estatus VARCHAR(20) DEFAULT 'Pendiente' CHECK (estatus IN ('Pendiente', 'Aprobada', 'Rechazada', 'Convertida'))
+);
+

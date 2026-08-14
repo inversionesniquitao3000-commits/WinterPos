@@ -6,7 +6,8 @@ import {
 import { 
   User, Product, Client, TasaHistoryItem, CompanyConfig, 
   InventoryMovement, PriceAdjustmentHistory, SaleItem, Payment,
-  Sale, CierreCaja, Abono, CierreDetails
+  Sale, CierreCaja, Abono, CierreDetails,
+  Proveedor, Compra, PagoProveedor, CotizacionProveedor
 } from './types';
 
 // Helper to get local date and time string in YYYY-MM-DD HH:MM format
@@ -19,6 +20,7 @@ import LoginTerminal from './components/LoginTerminal';
 import CajaPOS from './components/CajaPOS';
 import Inventario from './components/Inventario';
 import Clientes from './components/Clientes';
+import Proveedores from './components/Proveedores';
 import TasaCambio from './components/TasaCambio';
 import ConfiguracionEmpresa from './components/ConfiguracionEmpresa';
 import VentasHistorico from './components/VentasHistorico';
@@ -27,7 +29,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { MasterPassModal } from './components/MasterPassModal';
 import { InversionesModulo } from './components/InversionesModulo';
 import { 
-  ShoppingBag, Package, Users, 
+  ShoppingBag, Package, Users, Truck,
   TrendingUp, Settings, LogOut, Globe, Cpu, History, Printer, CheckCircle2, ShieldCheck, Briefcase
 } from 'lucide-react';
 import { printTicketReceipt } from './utils';
@@ -129,6 +131,46 @@ export default function App() {
     }
   });
 
+  const [proveedores, setProveedores] = useState<Proveedor[]>(() => {
+    try {
+      const saved = localStorage.getItem('pos_proveedores');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+      return [];
+    }
+  });
+
+  const [compras, setCompras] = useState<Compra[]>(() => {
+    try {
+      const saved = localStorage.getItem('pos_compras');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+      return [];
+    }
+  });
+
+  const [pagosProveedores, setPagosProveedores] = useState<PagoProveedor[]>(() => {
+    try {
+      const saved = localStorage.getItem('pos_pagos_proveedores');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+      return [];
+    }
+  });
+
+  const [cotizacionesProveedores, setCotizacionesProveedores] = useState<CotizacionProveedor[]>(() => {
+    try {
+      const saved = localStorage.getItem('pos_cotizaciones_proveedores');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+      return [];
+    }
+  });
+
   const [cierres, setCierres] = useState<CierreCaja[]>(() => {
     try {
       const saved = localStorage.getItem('pos_cierres_log');
@@ -201,8 +243,8 @@ export default function App() {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [sessionNotice, setSessionNotice] = useState<string>('');
 
-  // Active Pestaña Tab F1-F10 + Inversiones
-  const [activeTab, setActiveTab] = useState<'caja' | 'inventario' | 'ventas' | 'clientes' | 'tasa' | 'config' | 'inversiones'>('caja');
+  // Active Pestaña Tab F1-F10 + Inversiones + Proveedores
+  const [activeTab, setActiveTab] = useState<'caja' | 'inventario' | 'ventas' | 'clientes' | 'proveedores' | 'tasa' | 'config' | 'inversiones'>('caja');
   const [users, setUsers] = useState<User[]>(mockUsers);
   // Inversiones module: Master Pass modal guard + persistent sub-tab
   const [showMasterPassModal, setShowMasterPassModal] = useState(false);
@@ -217,6 +259,22 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('pos_clients', JSON.stringify(clients));
   }, [clients]);
+
+  useEffect(() => {
+    localStorage.setItem('pos_proveedores', JSON.stringify(proveedores));
+  }, [proveedores]);
+
+  useEffect(() => {
+    localStorage.setItem('pos_compras', JSON.stringify(compras));
+  }, [compras]);
+
+  useEffect(() => {
+    localStorage.setItem('pos_pagos_proveedores', JSON.stringify(pagosProveedores));
+  }, [pagosProveedores]);
+
+  useEffect(() => {
+    localStorage.setItem('pos_cotizaciones_proveedores', JSON.stringify(cotizacionesProveedores));
+  }, [cotizacionesProveedores]);
 
   useEffect(() => {
     localStorage.setItem('pos_biz_info', JSON.stringify(companyConfig));
@@ -818,7 +876,11 @@ export default function App() {
           salesRes,
           abonosRes,
           cajaRes,
-          cierresRes
+          cierresRes,
+          proveedoresRes,
+          comprasRes,
+          pagosRes,
+          cotizacionesRes
         ] = await Promise.all([
           fetch(getApiUrl('/config')),
           fetch(getApiUrl('/productos')),
@@ -829,7 +891,11 @@ export default function App() {
           fetch(getApiUrl('/sales')),
           fetch(getApiUrl('/abonos')),
           fetch(getApiUrl(`/cajas/estado?terminal=${encodeURIComponent(terminalName)}&usuarioId=${currentUser.id}&usuarioNombre=${encodeURIComponent(currentUser.nombre)}`)),
-          fetch(getApiUrl('/cajas/cierres'))
+          fetch(getApiUrl('/cajas/cierres')),
+          fetch(getApiUrl('/proveedores')),
+          fetch(getApiUrl('/compras')),
+          fetch(getApiUrl('/cxp/pagos')),
+          fetch(getApiUrl('/cotizaciones-proveedores'))
         ]);
 
         if (configRes.ok) {
@@ -849,6 +915,26 @@ export default function App() {
         if (clientsRes.ok) {
           const clientsData = await clientsRes.json();
           setClients(clientsData);
+        }
+
+        if (proveedoresRes && proveedoresRes.ok) {
+          const provData = await proveedoresRes.json();
+          setProveedores(provData);
+        }
+
+        if (comprasRes && comprasRes.ok) {
+          const comprasData = await comprasRes.json();
+          setCompras(comprasData);
+        }
+
+        if (pagosRes && pagosRes.ok) {
+          const pagosData = await pagosRes.json();
+          setPagosProveedores(pagosData);
+        }
+
+        if (cotizacionesRes && cotizacionesRes.ok) {
+          const cotData = await cotizacionesRes.json();
+          setCotizacionesProveedores(cotData);
         }
 
         if (tasasRes.ok) {
@@ -964,7 +1050,10 @@ export default function App() {
       } else if (e.key === 'F4' && hasModulePermission('clientes', 'ver')) {
         e.preventDefault();
         setActiveTab('clientes');
-      } else if ((e.key === 'F5' || e.key === 'F9') && hasModulePermission('tasa', 'ver')) {
+      } else if (e.key === 'F5' && hasModulePermission('proveedores', 'ver')) {
+        e.preventDefault();
+        setActiveTab('proveedores');
+      } else if (e.key === 'F9' && hasModulePermission('tasa', 'ver')) {
         e.preventDefault();
         setActiveTab('tasa');
       } else if (e.key === 'F10' && hasModulePermission('config', 'ver')) {
@@ -2071,6 +2160,190 @@ export default function App() {
     return () => clearInterval(interval);
   }, [currentUser, terminalName, lanIP, dbMode]);
 
+  // --- PROVEEDORES & COMPRAS & CXP HANDLERS ---
+  const handleAddProveedor = async (newProv: Proveedor) => {
+    try {
+      const res = await fetch(getApiUrl('/proveedores'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newProv)
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        setProveedores(prev => [saved, ...prev.filter(p => p.id !== saved.id)]);
+        return saved;
+      }
+    } catch (e) {
+      console.error('Error al agregar proveedor:', e);
+    }
+    return null;
+  };
+
+  const handleUpdateProveedor = async (updatedProv: Proveedor) => {
+    try {
+      const res = await fetch(getApiUrl(`/proveedores/${updatedProv.id}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedProv)
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        setProveedores(prev => prev.map(p => p.id === saved.id ? saved : p));
+        return true;
+      }
+    } catch (e) {
+      console.error('Error al actualizar proveedor:', e);
+    }
+    return false;
+  };
+
+  const handleDeleteProveedor = async (id: number) => {
+    try {
+      const res = await fetch(getApiUrl(`/proveedores/${id}`), {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        setProveedores(prev => prev.filter(p => p.id !== id));
+        return true;
+      }
+    } catch (e) {
+      console.error('Error al eliminar proveedor:', e);
+    }
+    return false;
+  };
+
+  const handleAddCompra = async (newCompra: any) => {
+    try {
+      const res = await fetch(getApiUrl('/compras'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newCompra)
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        setCompras(prev => [saved, ...prev]);
+        
+        // Refresh products to get updated stock and costs
+        try {
+          const pRes = await fetch(getApiUrl('/productos'));
+          if (pRes.ok) {
+            const pData = await pRes.json();
+            setProducts(pData.map((p: any) => ({
+              ...p,
+              stock_actual: parseFloat(p.stock_actual) || 0,
+              stock_minimo: parseFloat(p.stock_minimo) || 0,
+            })));
+          }
+        } catch (_) {}
+
+        // Refresh movements
+        try {
+          const mRes = await fetch(getApiUrl('/movements'));
+          if (mRes.ok) setMovements(await mRes.json());
+        } catch (_) {}
+
+        // Refresh proveedores to update debt
+        try {
+          const provRes = await fetch(getApiUrl('/proveedores'));
+          if (provRes.ok) setProveedores(await provRes.json());
+        } catch (_) {}
+
+        return saved;
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Error ${res.status} al guardar compra en el servidor.`);
+      }
+    } catch (e: any) {
+      console.error('Error al registrar compra:', e);
+      throw e;
+    }
+  };
+
+  const handleAddPagoProveedor = async (newPago: any) => {
+    try {
+      const res = await fetch(getApiUrl('/cxp/abonos'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newPago)
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        setPagosProveedores(prev => [saved, ...prev]);
+
+        // Refresh proveedores and compras
+        try {
+          const [provRes, compRes] = await Promise.all([
+            fetch(getApiUrl('/proveedores')),
+            fetch(getApiUrl('/compras'))
+          ]);
+          if (provRes.ok) setProveedores(await provRes.json());
+          if (compRes.ok) setCompras(await compRes.json());
+        } catch (_) {}
+
+        return true;
+      }
+    } catch (e) {
+      console.error('Error al registrar pago a proveedor:', e);
+    }
+    return false;
+  };
+
+  const handleAddCotizacion = async (newCot: any) => {
+    try {
+      const res = await fetch(getApiUrl('/cotizaciones-proveedores'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newCot)
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        // Refresh full list from server to guarantee proper joins
+        try {
+          const cRes = await fetch(getApiUrl('/cotizaciones-proveedores'));
+          if (cRes.ok) {
+            setCotizacionesProveedores(await cRes.json());
+            return true;
+          }
+        } catch (_) {}
+        setCotizacionesProveedores(prev => [saved, ...prev]);
+        return true;
+      }
+    } catch (e) {
+      console.error('Error al registrar cotización:', e);
+    }
+    return false;
+  };
+
+  const handleDeleteCotizacion = async (id: number) => {
+    try {
+      const res = await fetch(getApiUrl(`/cotizaciones-proveedores/${id}`), {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        setCotizacionesProveedores(prev => prev.filter(c => c.id !== id));
+        return true;
+      }
+    } catch (e) {
+      console.error('Error al eliminar cotización:', e);
+    }
+    return false;
+  };
+
+  const handleRefreshProveedoresData = async () => {
+    try {
+      const [provRes, compRes, pagosRes, cotRes] = await Promise.all([
+        fetch(getApiUrl('/proveedores')),
+        fetch(getApiUrl('/compras')),
+        fetch(getApiUrl('/cxp/pagos')),
+        fetch(getApiUrl('/cotizaciones-proveedores'))
+      ]);
+      if (provRes.ok) setProveedores(await provRes.json());
+      if (compRes.ok) setCompras(await compRes.json());
+      if (pagosRes.ok) setPagosProveedores(await pagosRes.json());
+      if (cotRes.ok) setCotizacionesProveedores(await cotRes.json());
+    } catch (_) {}
+  };
+
   const hasModulePermission = (modulo: string, accion: 'ver' | 'crear' | 'editar' | 'eliminar' = 'ver') => {
     if (!currentUser) return false;
     if (currentUser.rol.toLowerCase() === 'administrador') return true;
@@ -2293,6 +2566,20 @@ export default function App() {
           </button>
         )}
 
+        {hasModulePermission('proveedores', 'ver') && (
+          <button
+            onClick={() => setActiveTab('proveedores')}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
+              activeTab === 'proveedores'
+                ? 'tab-grad-proveedores text-white shadow'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+            }`}
+          >
+            <Truck className="w-4 h-4" />
+            F5 Proveedores
+          </button>
+        )}
+
         {hasModulePermission('tasa', 'ver') && (
           <button
             onClick={() => setActiveTab('tasa')}
@@ -2468,6 +2755,29 @@ export default function App() {
             />
           )}
 
+          {activeTab === 'proveedores' && (
+            <Proveedores
+              proveedores={proveedores}
+              compras={compras}
+              pagosProveedores={pagosProveedores}
+              cotizacionesProveedores={cotizacionesProveedores}
+              products={products}
+              currentUser={currentUser}
+              cajaAbierta={cajaAbierta}
+              tasaDia={tasaDia}
+              companyConfig={companyConfig}
+              getApiUrl={getApiUrl}
+              onAddProveedor={handleAddProveedor}
+              onUpdateProveedor={handleUpdateProveedor}
+              onDeleteProveedor={handleDeleteProveedor}
+              onAddCompra={handleAddCompra}
+              onAddPagoProveedor={handleAddPagoProveedor}
+              onAddCotizacion={handleAddCotizacion}
+              onDeleteCotizacion={handleDeleteCotizacion}
+              onRefreshData={handleRefreshProveedoresData}
+            />
+          )}
+
           {activeTab === 'tasa' && (
             <TasaCambio
               tasaDia={tasaDia}
@@ -2583,7 +2893,7 @@ export default function App() {
       <footer className="bg-slate-900 border-t border-slate-800 py-3 px-6 select-none flex justify-between items-center text-[9px] text-slate-450 text-white flex-shrink-0">
         <span>Licencia activa para {companyConfig.nombre_comercio || 'su empresa'}</span>
         <span>Operador: {currentUser.nombre} (Turno Activo)</span>
-        <span>SISTEMA WINTERPOS-AL v4.0.0</span>
+        <span>SISTEMA WINTERPOS-AL v4.1.0</span>
       </footer>
 
       {/* REPRINT TICKET MODAL */}

@@ -189,6 +189,79 @@ try {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS Proveedores (
+      id BIGSERIAL PRIMARY KEY,
+      rif VARCHAR(30) NOT NULL UNIQUE,
+      razon_social VARCHAR(150) NOT NULL,
+      contacto_nombre VARCHAR(100),
+      telefono VARCHAR(50) NOT NULL,
+      correo VARCHAR(100),
+      direccion TEXT,
+      dias_credito INT DEFAULT 0,
+      limite_credito_usd NUMERIC(12, 2) DEFAULT 0.00,
+      saldo_pendiente_usd NUMERIC(12, 2) DEFAULT 0.00,
+      estado VARCHAR(10) DEFAULT 'Activo',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS Compras (
+      id BIGSERIAL PRIMARY KEY,
+      numero_factura VARCHAR(50) NOT NULL,
+      proveedor_id BIGINT REFERENCES Proveedores(id) ON DELETE RESTRICT,
+      usuario_id BIGINT REFERENCES Usuarios(id),
+      fecha_emision TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      fecha_vencimiento TIMESTAMP,
+      condicion_pago VARCHAR(20) DEFAULT 'Contado',
+      subtotal_usd NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+      impuesto_usd NUMERIC(12, 2) DEFAULT 0.00,
+      descuento_usd NUMERIC(12, 2) DEFAULT 0.00,
+      total_usd NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+      total_ves NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+      saldo_pendiente_usd NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+      estatus VARCHAR(20) DEFAULT 'Pendiente',
+      observaciones TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS Compras_Detalle (
+      id BIGSERIAL PRIMARY KEY,
+      compra_id BIGINT REFERENCES Compras(id) ON DELETE CASCADE,
+      producto_id BIGINT REFERENCES Productos(id),
+      cantidad NUMERIC(12, 3) NOT NULL,
+      costo_unitario_usd NUMERIC(12, 2) NOT NULL,
+      total_usd NUMERIC(12, 2) NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS Pagos_Proveedores (
+      id BIGSERIAL PRIMARY KEY,
+      compra_id BIGINT REFERENCES Compras(id) ON DELETE SET NULL,
+      proveedor_id BIGINT REFERENCES Proveedores(id) ON DELETE CASCADE,
+      usuario_id BIGINT REFERENCES Usuarios(id),
+      caja_id BIGINT REFERENCES Cajas_Apertura_Cierre(id) ON DELETE SET NULL,
+      monto_usd NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+      monto_ves NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+      tasa_cambio NUMERIC(12, 4) NOT NULL DEFAULT 1.0000,
+      metodo_pago VARCHAR(50) NOT NULL,
+      banco_origen VARCHAR(100),
+      numero_referencia VARCHAR(50),
+      afecto_caja_efectivo BOOLEAN DEFAULT FALSE,
+      observacion TEXT,
+      fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS Cotizaciones_Proveedores (
+      id BIGSERIAL PRIMARY KEY,
+      numero_cotizacion VARCHAR(50),
+      proveedor_id BIGINT REFERENCES Proveedores(id) ON DELETE CASCADE,
+      usuario_id BIGINT REFERENCES Usuarios(id),
+      fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      fecha_vigencia TIMESTAMP,
+      total_usd NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+      total_ves NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+      detalles_json JSONB NOT NULL,
+      estatus VARCHAR(20) DEFAULT 'Pendiente'
+    );
+
     CREATE SEQUENCE IF NOT EXISTS seq_factura START WITH 1;
     UPDATE Cajas_Apertura_Cierre 
     SET estatus = 'Cerrada', fecha_cierre = CURRENT_TIMESTAMP 
@@ -1379,6 +1452,10 @@ export async function wipeDatabase(options) {
       } catch (errR) { console.warn('[DB Wipe Postgres Warning] Roles:', errR.message); }
 
       try {
+        await pool.query('TRUNCATE TABLE Proveedores, Compras, Compras_Detalle, Pagos_Proveedores, Cotizaciones_Proveedores RESTART IDENTITY CASCADE');
+      } catch (errProv) { console.warn('[DB Wipe Postgres Warning] Proveedores:', errProv.message); }
+
+      try {
         await pool.query(`UPDATE Configuracion_Empresa SET 
           rif = '', nombre_comercio = '', direccion = '', telefono = '', 
           correo = '', mensaje_pie_ticket = '', logo_url = '', metodos_pago_activos = '[]'::jsonb`);
@@ -1398,6 +1475,10 @@ export async function wipeDatabase(options) {
       writeJsonFile('tasas.json', []);
       writeJsonFile('accionistas.json', []);
       writeJsonFile('inversiones.json', []);
+      writeJsonFile('proveedores.json', []);
+      writeJsonFile('compras.json', []);
+      writeJsonFile('pagos_proveedores.json', []);
+      writeJsonFile('cotizaciones_proveedores.json', []);
       return true;
     }
 
@@ -1561,6 +1642,10 @@ export async function backupDatabase() {
     priceHistory: await getPriceHistory(),
     accionistas: await getAccionistas(),
     inversiones: await getInversiones(),
+    proveedores: await getProveedores(),
+    compras: await getCompras(),
+    pagosProveedores: await getPagosProveedores(),
+    cotizacionesProveedores: await getCotizacionesProveedores(),
     timestamp: new Date().toISOString()
   };
 }
@@ -1634,6 +1719,62 @@ export async function restoreDatabase(data) {
         }
         await pool.query("SELECT setval(pg_get_serial_sequence('Inversiones_Accionistas', 'id'), COALESCE((SELECT MAX(id) FROM Inversiones_Accionistas), 1))");
       }
+      if (data.proveedores) {
+        await pool.query('TRUNCATE TABLE Proveedores RESTART IDENTITY CASCADE');
+        for (const p of data.proveedores) {
+          await pool.query(
+            `INSERT INTO Proveedores (id, rif, razon_social, contacto_nombre, telefono, correo, direccion, dias_credito, limite_credito_usd, saldo_pendiente_usd, estado)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+            [p.id, p.rif, p.razon_social, p.contacto_nombre || '', p.telefono || '', p.correo || '', p.direccion || '', p.dias_credito || 0, p.limite_credito_usd || 0, p.saldo_pendiente_usd || 0, p.estado || 'Activo']
+          );
+        }
+        await pool.query("SELECT setval(pg_get_serial_sequence('Proveedores', 'id'), COALESCE((SELECT MAX(id) FROM Proveedores), 1))");
+      }
+      if (data.compras) {
+        await pool.query('TRUNCATE TABLE Compras, Compras_Detalle RESTART IDENTITY CASCADE');
+        for (const c of data.compras) {
+          await pool.query(
+            `INSERT INTO Compras (id, numero_factura, proveedor_id, usuario_id, fecha_emision, fecha_vencimiento, condicion_pago, subtotal_usd, impuesto_usd, descuento_usd, total_usd, total_ves, saldo_pendiente_usd, estatus, observaciones)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+            [c.id, c.numero_factura, c.proveedor_id, c.usuario_id || 1, c.fecha_emision, c.fecha_vencimiento || null, c.condicion_pago || 'Contado', c.subtotal_usd || 0, c.impuesto_usd || 0, c.descuento_usd || 0, c.total_usd || 0, c.total_ves || 0, c.saldo_pendiente_usd || 0, c.estatus || 'Pendiente', c.observaciones || '']
+          );
+          if (Array.isArray(c.items)) {
+            for (const it of c.items) {
+              await pool.query(
+                `INSERT INTO Compras_Detalle (compra_id, producto_id, cantidad, costo_unitario_usd, total_usd)
+                 VALUES ($1, $2, $3, $4, $5)`,
+                [c.id, it.producto_id, it.cantidad, it.costo_unitario_usd, it.total_usd]
+              );
+            }
+          }
+        }
+        await pool.query("SELECT setval(pg_get_serial_sequence('Compras', 'id'), COALESCE((SELECT MAX(id) FROM Compras), 1))");
+        await pool.query("SELECT setval(pg_get_serial_sequence('Compras_Detalle', 'id'), COALESCE((SELECT MAX(id) FROM Compras_Detalle), 1))");
+      }
+      const pagosList = data.pagosProveedores || data.pagos_proveedores;
+      if (pagosList) {
+        await pool.query('TRUNCATE TABLE Pagos_Proveedores RESTART IDENTITY CASCADE');
+        for (const pg of pagosList) {
+          await pool.query(
+            `INSERT INTO Pagos_Proveedores (id, compra_id, proveedor_id, usuario_id, caja_id, monto_usd, monto_ves, tasa_cambio, metodo_pago, banco_origen, numero_referencia, afecto_caja_efectivo, observacion, fecha)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+            [pg.id, pg.compra_id || null, pg.proveedor_id, pg.usuario_id || 1, pg.caja_id || null, pg.monto_usd || 0, pg.monto_ves || 0, pg.tasa_cambio || 1, pg.metodo_pago || 'Efectivo$', pg.banco_origen || '', pg.numero_referencia || '', !!pg.afecto_caja_efectivo, pg.observacion || '', pg.fecha || new Date()]
+          );
+        }
+        await pool.query("SELECT setval(pg_get_serial_sequence('Pagos_Proveedores', 'id'), COALESCE((SELECT MAX(id) FROM Pagos_Proveedores), 1))");
+      }
+      const cotList = data.cotizacionesProveedores || data.cotizaciones_proveedores;
+      if (cotList) {
+        await pool.query('TRUNCATE TABLE Cotizaciones_Proveedores RESTART IDENTITY CASCADE');
+        for (const cot of cotList) {
+          await pool.query(
+            `INSERT INTO Cotizaciones_Proveedores (id, numero_cotizacion, proveedor_id, usuario_id, fecha, fecha_vigencia, total_usd, total_ves, detalles_json, estatus)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            [cot.id, cot.numero_cotizacion, cot.proveedor_id, cot.usuario_id || 1, cot.fecha, cot.fecha_vigencia || null, cot.total_usd || 0, cot.total_ves || 0, typeof cot.detalles_json === 'string' ? cot.detalles_json : JSON.stringify(cot.detalles_json || {}), cot.estatus || 'Pendiente']
+          );
+        }
+        await pool.query("SELECT setval(pg_get_serial_sequence('Cotizaciones_Proveedores', 'id'), COALESCE((SELECT MAX(id) FROM Cotizaciones_Proveedores), 1))");
+      }
       if (data.config) {
         await saveCompanyConfig(data.config);
       }
@@ -1659,6 +1800,10 @@ export async function restoreDatabase(data) {
   }
   if (data.accionistas) writeJsonFile('accionistas.json', data.accionistas);
   if (data.inversiones) writeJsonFile('inversiones.json', data.inversiones);
+  if (data.proveedores) writeJsonFile('proveedores.json', data.proveedores);
+  if (data.compras) writeJsonFile('compras.json', data.compras);
+  if (data.pagosProveedores || data.pagos_proveedores) writeJsonFile('pagos_proveedores.json', data.pagosProveedores || data.pagos_proveedores);
+  if (data.cotizacionesProveedores || data.cotizaciones_proveedores) writeJsonFile('cotizaciones_proveedores.json', data.cotizacionesProveedores || data.cotizaciones_proveedores);
   return true;
 }
 
@@ -3326,6 +3471,811 @@ export async function deleteGastoOperativo(id) {
   writeJsonFile('gastos.json', updated);
   return true;
 }
+
+// --- PROVEEDORES CRUD ---
+export async function getProveedores() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query('SELECT * FROM Proveedores ORDER BY razon_social ASC');
+      return res.rows.map(r => ({
+        id: Number(r.id),
+        rif: r.rif,
+        razon_social: r.razon_social,
+        contacto_nombre: r.contacto_nombre || '',
+        telefono: r.telefono || '',
+        correo: r.correo || '',
+        direccion: r.direccion || '',
+        dias_credito: Number(r.dias_credito || 0),
+        limite_credito_usd: parseFloat(r.limite_credito_usd || 0),
+        saldo_pendiente_usd: parseFloat(r.saldo_pendiente_usd || 0),
+        estado: r.estado || 'Activo',
+        created_at: r.created_at ? String(r.created_at).replace('T', ' ').substring(0, 16) : ''
+      }));
+    } catch (err) {
+      console.error('Error en getProveedores (Postgres):', err.message);
+    }
+  }
+  return readJsonFile('proveedores.json', []);
+}
+
+export async function saveProveedor(p) {
+  if (usePostgres) {
+    try {
+      if (p.id) {
+        const res = await pool.query(
+          `UPDATE Proveedores
+           SET rif = $1, razon_social = $2, contacto_nombre = $3, telefono = $4, correo = $5, direccion = $6, dias_credito = $7, limite_credito_usd = $8, estado = $9
+           WHERE id = $10 RETURNING *`,
+          [p.rif?.trim(), p.razon_social?.trim(), p.contacto_nombre?.trim() || '', p.telefono?.trim() || '', p.correo?.trim() || '', p.direccion?.trim() || '', Number(p.dias_credito || 0), parseFloat(p.limite_credito_usd || 0), p.estado || 'Activo', p.id]
+        );
+        const r = res.rows[0];
+        return {
+          id: Number(r.id),
+          rif: r.rif,
+          razon_social: r.razon_social,
+          contacto_nombre: r.contacto_nombre,
+          telefono: r.telefono,
+          correo: r.correo,
+          direccion: r.direccion,
+          dias_credito: Number(r.dias_credito || 0),
+          limite_credito_usd: parseFloat(r.limite_credito_usd || 0),
+          saldo_pendiente_usd: parseFloat(r.saldo_pendiente_usd || 0),
+          estado: r.estado
+        };
+      } else {
+        const res = await pool.query(
+          `INSERT INTO Proveedores (rif, razon_social, contacto_nombre, telefono, correo, direccion, dias_credito, limite_credito_usd, saldo_pendiente_usd, estado)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+          [p.rif?.trim(), p.razon_social?.trim(), p.contacto_nombre?.trim() || '', p.telefono?.trim() || '', p.correo?.trim() || '', p.direccion?.trim() || '', Number(p.dias_credito || 0), parseFloat(p.limite_credito_usd || 0), 0, p.estado || 'Activo']
+        );
+        const r = res.rows[0];
+        return {
+          id: Number(r.id),
+          rif: r.rif,
+          razon_social: r.razon_social,
+          contacto_nombre: r.contacto_nombre,
+          telefono: r.telefono,
+          correo: r.correo,
+          direccion: r.direccion,
+          dias_credito: Number(r.dias_credito || 0),
+          limite_credito_usd: parseFloat(r.limite_credito_usd || 0),
+          saldo_pendiente_usd: 0,
+          estado: r.estado
+        };
+      }
+    } catch (err) {
+      console.error('Error en saveProveedor (Postgres):', err.message);
+      throw err;
+    }
+  }
+
+  const list = readJsonFile('proveedores.json', []);
+  if (p.id) {
+    const idx = list.findIndex(item => item.id === Number(p.id));
+    if (idx !== -1) {
+      list[idx] = {
+        ...list[idx],
+        rif: p.rif?.trim(),
+        razon_social: p.razon_social?.trim(),
+        contacto_nombre: p.contacto_nombre || '',
+        telefono: p.telefono || '',
+        correo: p.correo || '',
+        direccion: p.direccion || '',
+        dias_credito: Number(p.dias_credito || 0),
+        limite_credito_usd: parseFloat(p.limite_credito_usd || 0),
+        estado: p.estado || 'Activo'
+      };
+      p = list[idx];
+    }
+  } else {
+    const newItem = {
+      id: Date.now(),
+      rif: p.rif?.trim(),
+      razon_social: p.razon_social?.trim(),
+      contacto_nombre: p.contacto_nombre || '',
+      telefono: p.telefono || '',
+      correo: p.correo || '',
+      direccion: p.direccion || '',
+      dias_credito: Number(p.dias_credito || 0),
+      limite_credito_usd: parseFloat(p.limite_credito_usd || 0),
+      saldo_pendiente_usd: 0,
+      estado: p.estado || 'Activo',
+      created_at: getLocalISODateString()
+    };
+    list.push(newItem);
+    p = newItem;
+  }
+  writeJsonFile('proveedores.json', list);
+  return p;
+}
+
+export async function deleteProveedor(id) {
+  if (usePostgres) {
+    try {
+      const checkDebt = await pool.query('SELECT saldo_pendiente_usd FROM Proveedores WHERE id = $1', [id]);
+      if (checkDebt.rowCount > 0 && parseFloat(checkDebt.rows[0].saldo_pendiente_usd || 0) > 0.01) {
+        throw new Error('No se puede eliminar un proveedor con saldo deudor pendiente.');
+      }
+      await pool.query('DELETE FROM Proveedores WHERE id = $1', [id]);
+      return true;
+    } catch (err) {
+      console.error('Error en deleteProveedor (Postgres):', err.message);
+      throw err;
+    }
+  }
+
+  const list = readJsonFile('proveedores.json', []);
+  const idx = list.findIndex(p => p.id === Number(id));
+  if (idx !== -1) {
+    if ((list[idx].saldo_pendiente_usd || 0) > 0.01) {
+      throw new Error('No se puede eliminar un proveedor con saldo deudor pendiente.');
+    }
+    list.splice(idx, 1);
+    writeJsonFile('proveedores.json', list);
+    return true;
+  }
+  return false;
+}
+
+// --- COMPRAS CRUD & INVENTORY INCREMENTS ---
+export async function getCompras() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query(`
+        SELECT c.*, 
+               p.razon_social AS proveedor_nombre, 
+               p.rif AS proveedor_rif, 
+               u.nombre AS usuario_nombre,
+               COALESCE(
+                 json_agg(
+                   json_build_object(
+                     'id', d.id,
+                     'producto_id', d.producto_id,
+                     'cantidad', d.cantidad,
+                     'costo_unitario_usd', d.costo_unitario_usd,
+                     'total_usd', d.total_usd,
+                     'descripcion', pr.descripcion,
+                     'codigo_barras_clave', pr.codigo_barras_clave
+                   )
+                 ) FILTER (WHERE d.id IS NOT NULL), '[]'
+               ) AS items
+        FROM Compras c
+        LEFT JOIN Proveedores p ON c.proveedor_id = p.id
+        LEFT JOIN Usuarios u ON c.usuario_id = u.id
+        LEFT JOIN Compras_Detalle d ON c.id = d.compra_id
+        LEFT JOIN Productos pr ON d.producto_id = pr.id
+        GROUP BY c.id, p.razon_social, p.rif, u.nombre
+        ORDER BY c.id DESC
+      `);
+      return res.rows.map(r => ({
+        id: Number(r.id),
+        numero_factura: r.numero_factura,
+        proveedor_id: Number(r.proveedor_id),
+        proveedor_nombre: r.proveedor_nombre || '',
+        proveedor_rif: r.proveedor_rif || '',
+        usuario_id: Number(r.usuario_id),
+        usuario_nombre: r.usuario_nombre || '',
+        fecha_emision: r.fecha_emision ? String(r.fecha_emision).replace('T', ' ').substring(0, 16) : getLocalISODateString(),
+        fecha_vencimiento: r.fecha_vencimiento ? String(r.fecha_vencimiento).replace('T', ' ').substring(0, 10) : '',
+        condicion_pago: r.condicion_pago || 'Contado',
+        subtotal_usd: parseFloat(r.subtotal_usd || 0),
+        impuesto_usd: parseFloat(r.impuesto_usd || 0),
+        descuento_usd: parseFloat(r.descuento_usd || 0),
+        total_usd: parseFloat(r.total_usd || 0),
+        total_ves: parseFloat(r.total_ves || 0),
+        saldo_pendiente_usd: parseFloat(r.saldo_pendiente_usd || 0),
+        estatus: r.estatus || 'Pendiente',
+        observaciones: r.observaciones || '',
+        items: r.items || []
+      }));
+    } catch (err) {
+      console.error('Error en getCompras (Postgres):', err.message);
+    }
+  }
+  return readJsonFile('compras.json', []);
+}
+
+export async function saveCompra(compraData) {
+  const {
+    numero_factura,
+    proveedor_id,
+    usuario_id,
+    fecha_emision = getLocalISODateString(),
+    fecha_vencimiento = '',
+    condicion_pago = 'Contado',
+    subtotal_usd = 0,
+    impuesto_usd = 0,
+    descuento_usd = 0,
+    total_usd = 0,
+    total_ves = 0,
+    observaciones = '',
+    items = [],
+    metodo_pago_contado = 'Efectivo$',
+    afecto_caja_efectivo = false,
+    caja_id = null,
+    tasa_cambio = 1
+  } = compraData;
+
+  const isCredit = condicion_pago === 'Credito';
+  const initialSaldoPendiente = isCredit ? parseFloat(total_usd) : 0;
+  const initialStatus = isCredit ? 'Pendiente' : 'Pagada';
+
+  if (usePostgres) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // 1. Insert into Compras
+      const compraRes = await client.query(
+        `INSERT INTO Compras (
+           numero_factura, proveedor_id, usuario_id, fecha_emision, fecha_vencimiento,
+           condicion_pago, subtotal_usd, impuesto_usd, descuento_usd, total_usd, total_ves,
+           saldo_pendiente_usd, estatus, observaciones
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+         RETURNING id`,
+        [
+          numero_factura?.trim() || `FAC-${Date.now()}`,
+          proveedor_id,
+          usuario_id,
+          fecha_emision,
+          fecha_vencimiento || null,
+          condicion_pago,
+          subtotal_usd,
+          impuesto_usd,
+          descuento_usd,
+          total_usd,
+          total_ves,
+          initialSaldoPendiente,
+          initialStatus,
+          observaciones || ''
+        ]
+      );
+      const newCompraId = compraRes.rows[0].id;
+
+      // 2. Insert items and update inventory stock & costs
+      for (const item of items) {
+        const prodId = item.producto_id || item.product?.id || item.id;
+        const qty = parseFloat(item.cantidad || item.qty || 0);
+        const unitCost = parseFloat(item.costo_unitario_usd || item.priceUSD || item.precio_costo_usd || 0);
+        const itemTotal = parseFloat(item.total_usd || (qty * unitCost));
+
+        if (prodId && qty > 0) {
+          // Insert detail
+          await client.query(
+            `INSERT INTO Compras_Detalle (compra_id, producto_id, cantidad, costo_unitario_usd, total_usd)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [newCompraId, prodId, qty, unitCost, itemTotal]
+          );
+
+          // Get previous stock
+          const prodCheck = await client.query('SELECT stock_actual, precio_costo_usd FROM Productos WHERE id = $1', [prodId]);
+          if (prodCheck.rowCount > 0) {
+            const prevStock = parseFloat(prodCheck.rows[0].stock_actual || 0);
+            const nextStock = prevStock + qty;
+
+            // Update product stock and optionally cost price (explicit NUMERIC cast for PostgreSQL)
+            await client.query(
+              `UPDATE Productos 
+               SET stock_actual = $1, 
+                   precio_costo_usd = CASE WHEN CAST($2 AS NUMERIC) > 0 THEN CAST($2 AS NUMERIC) ELSE precio_costo_usd END
+               WHERE id = $3`,
+              [nextStock, unitCost, prodId]
+            );
+
+            // Log Inventory Movement
+            await client.query(
+              `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
+               VALUES ($1, $2, 'Entrada', $3, $4, $5, $6)`,
+              [prodId, usuario_id || 1, qty, prevStock, nextStock, `Compra Factura ${numero_factura}`]
+            );
+          }
+        }
+      }
+
+      // 3. If credit, increase supplier pending debt. If cash, register immediate payment and cash out if toggled.
+      if (isCredit) {
+        await client.query(
+          `UPDATE Proveedores 
+           SET saldo_pendiente_usd = COALESCE(saldo_pendiente_usd, 0) + $1 
+           WHERE id = $2`,
+          [total_usd, proveedor_id]
+        );
+      } else {
+        // Cash payment registration
+        await client.query(
+          `INSERT INTO Pagos_Proveedores (
+             compra_id, proveedor_id, usuario_id, caja_id, monto_usd, monto_ves,
+             tasa_cambio, metodo_pago, afecto_caja_efectivo, observacion
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [
+            newCompraId,
+            proveedor_id,
+            usuario_id || 1,
+            caja_id || null,
+            total_usd,
+            total_ves,
+            tasa_cambio || 1,
+            metodo_pago_contado || 'Efectivo$',
+            !!afecto_caja_efectivo,
+            `Pago de Contado Factura Compra #${numero_factura}`
+          ]
+        );
+
+        // If cash out from active cashier station is requested
+        if (afecto_caja_efectivo) {
+          let targetCajaId = caja_id;
+          if (!targetCajaId) {
+            const openCajaRes = await client.query(
+              "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND (usuario_id = $1 OR $1 IS NULL) ORDER BY id DESC LIMIT 1",
+              [usuario_id || null]
+            );
+            if (openCajaRes.rowCount > 0) {
+              targetCajaId = openCajaRes.rows[0].id;
+            } else {
+              const anyOpen = await client.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
+              if (anyOpen.rowCount > 0) targetCajaId = anyOpen.rows[0].id;
+            }
+          }
+
+          if (targetCajaId) {
+            const provData = await client.query('SELECT razon_social FROM Proveedores WHERE id = $1', [proveedor_id]);
+            const provName = provData.rowCount > 0 ? provData.rows[0].razon_social : 'PROVEEDOR';
+            await client.query(
+              `INSERT INTO Movimientos_Caja (caja_id, tipo, descripcion, monto_usd, monto_ves, metodo_pago)
+               VALUES ($1, 'Salida', $2, $3, $4, $5)`,
+              [
+                targetCajaId,
+                `Egreso de Caja: Pago Contado a Proveedor - ${provName} (Factura #${numero_factura})`,
+                total_usd,
+                total_ves,
+                metodo_pago_contado || 'Efectivo$'
+              ]
+            );
+          }
+        }
+      }
+
+      await client.query('COMMIT');
+      return { id: Number(newCompraId), ...compraData, estatus: initialStatus, saldo_pendiente_usd: initialSaldoPendiente };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('Error en saveCompra (Postgres):', err.message);
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  // JSON fallback
+  const compras = readJsonFile('compras.json', []);
+  const newCompra = {
+    id: Date.now(),
+    ...compraData,
+    saldo_pendiente_usd: initialSaldoPendiente,
+    estatus: initialStatus,
+    created_at: getLocalISODateString()
+  };
+  compras.unshift(newCompra);
+  writeJsonFile('compras.json', compras);
+
+  // Update products stock & costs in JSON mode
+  const jsonProducts = readJsonFile('products.json', mockProducts);
+  const jsonMovements = readJsonFile('movements.json', []);
+
+  for (const item of items) {
+    const prodId = item.producto_id || item.product?.id || item.id;
+    const qty = parseFloat(item.cantidad || item.qty || 0);
+    const unitCost = parseFloat(item.costo_unitario_usd || item.priceUSD || item.precio_costo_usd || 0);
+    const pIdx = jsonProducts.findIndex(p => p.id === Number(prodId) || String(p.id) === String(prodId));
+    if (pIdx !== -1 && qty > 0) {
+      const prevStock = parseFloat(jsonProducts[pIdx].stock_actual || 0);
+      const nextStock = prevStock + qty;
+      jsonProducts[pIdx].stock_actual = nextStock;
+      if (unitCost > 0) jsonProducts[pIdx].precio_costo_usd = unitCost;
+
+      jsonMovements.unshift({
+        id: Date.now() + Math.random(),
+        date: getLocalISODateString(),
+        productCode: jsonProducts[pIdx].barcode || jsonProducts[pIdx].codigo_barras_clave,
+        productDescription: jsonProducts[pIdx].description || jsonProducts[pIdx].descripcion,
+        type: 'Entrada',
+        qty: qty,
+        stock_anterior: prevStock,
+        stock_posterior: nextStock,
+        motivo: `Compra Factura ${numero_factura}`,
+        usuario: usuario_id || 'SISTEMA'
+      });
+    }
+  }
+  writeJsonFile('products.json', jsonProducts);
+  writeJsonFile('movements.json', jsonMovements);
+
+  // Update supplier debt in JSON
+  if (isCredit) {
+    const proveedores = readJsonFile('proveedores.json', []);
+    const pIdx = proveedores.findIndex(p => p.id === Number(proveedor_id));
+    if (pIdx !== -1) {
+      proveedores[pIdx].saldo_pendiente_usd = (proveedores[pIdx].saldo_pendiente_usd || 0) + parseFloat(total_usd);
+      writeJsonFile('proveedores.json', proveedores);
+    }
+  }
+
+  // Update caja movement in JSON
+  if (!isCredit && afecto_caja_efectivo) {
+    const jsonMovsCaja = readJsonFile('movimientos_caja.json', []);
+    jsonMovsCaja.unshift({
+      id: Date.now() + Math.random(),
+      caja_id: caja_id || 'LOCAL',
+      tipo: 'Salida',
+      descripcion: `Egreso de Caja: Pago Contado a Proveedor (Factura #${numero_factura})`,
+      monto_usd: parseFloat(total_usd || 0),
+      monto_ves: parseFloat(total_ves || 0),
+      metodo_pago: metodo_pago_contado || 'Efectivo$',
+      fecha: getLocalISODateString()
+    });
+    writeJsonFile('movimientos_caja.json', jsonMovsCaja);
+  }
+
+  return newCompra;
+}
+
+// --- PAGOS Y ABONOS A PROVEEDORES (CXP) ---
+export async function getPagosProveedores(proveedorId = null) {
+  if (usePostgres) {
+    try {
+      let query = `
+        SELECT p.*, prov.razon_social as proveedor_nombre, prov.rif as proveedor_rif,
+               c.numero_factura as compra_factura, u.nombre as usuario_nombre
+        FROM Pagos_Proveedores p
+        LEFT JOIN Proveedores prov ON p.proveedor_id = prov.id
+        LEFT JOIN Compras c ON p.compra_id = c.id
+        LEFT JOIN Usuarios u ON p.usuario_id = u.id
+      `;
+      const params = [];
+      if (proveedorId) {
+        query += ' WHERE p.proveedor_id = $1';
+        params.push(proveedorId);
+      }
+      query += ' ORDER BY p.id DESC';
+
+      const result = await pool.query(query, params);
+      return result.rows.map(r => ({
+        ...r,
+        monto_usd: parseFloat(r.monto_usd || 0),
+        monto_ves: parseFloat(r.monto_ves || 0),
+        tasa_cambio: parseFloat(r.tasa_cambio || 1),
+        fecha: r.fecha ? getLocalISODateString(r.fecha) : getLocalISODateString()
+      }));
+    } catch (err) {
+      console.error('Error al obtener pagos a proveedores (Postgres):', err.message);
+      return [];
+    }
+  }
+
+  const list = readJsonFile('pagos_proveedores.json', []);
+  if (proveedorId) return list.filter(p => p.proveedor_id === Number(proveedorId));
+  return list;
+}
+
+export async function savePagoProveedor(pagoData) {
+  const {
+    compra_id = null,
+    proveedor_id,
+    usuario_id,
+    caja_id = null,
+    monto_usd = 0,
+    monto_ves = 0,
+    tasa_cambio = 1,
+    metodo_pago = 'Efectivo$',
+    banco_origen = '',
+    numero_referencia = '',
+    afecto_caja_efectivo = false,
+    observacion = '',
+    fecha = getLocalISODateString()
+  } = pagoData;
+
+  const pagoAmountUSD = parseFloat(monto_usd || 0);
+
+  if (usePostgres) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // 1. Insert into Pagos_Proveedores
+      const res = await client.query(
+        `INSERT INTO Pagos_Proveedores (
+           compra_id, proveedor_id, usuario_id, caja_id, monto_usd, monto_ves,
+           tasa_cambio, metodo_pago, banco_origen, numero_referencia, afecto_caja_efectivo, observacion, fecha
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         RETURNING id`,
+        [
+          compra_id || null,
+          proveedor_id,
+          usuario_id,
+          caja_id || null,
+          pagoAmountUSD,
+          parseFloat(monto_ves || 0),
+          parseFloat(tasa_cambio || 1),
+          metodo_pago,
+          banco_origen || '',
+          numero_referencia || '',
+          !!afecto_caja_efectivo,
+          observacion || '',
+          fecha
+        ]
+      );
+      const newPagoId = res.rows[0].id;
+
+      // 2. Reduce debt in Compras if specific purchase is targeted
+      if (compra_id) {
+        const compraCheck = await client.query('SELECT saldo_pendiente_usd FROM Compras WHERE id = $1', [compra_id]);
+        if (compraCheck.rowCount > 0) {
+          const currentDebt = parseFloat(compraCheck.rows[0].saldo_pendiente_usd || 0);
+          const newDebt = Math.max(0, currentDebt - pagoAmountUSD);
+          const newStatus = newDebt <= 0.005 ? 'Pagada' : 'Parcial';
+          await client.query(
+            'UPDATE Compras SET saldo_pendiente_usd = $1, estatus = $2 WHERE id = $3',
+            [newDebt, newStatus, compra_id]
+          );
+        }
+      } else {
+        // Auto-settle oldest pending purchases of this supplier
+        const pendingPurchases = await client.query(
+          "SELECT id, saldo_pendiente_usd FROM Compras WHERE proveedor_id = $1 AND estatus IN ('Pendiente', 'Parcial') AND saldo_pendiente_usd > 0 ORDER BY id ASC",
+          [proveedor_id]
+        );
+        let remainingToApply = pagoAmountUSD;
+        for (const row of pendingPurchases.rows) {
+          if (remainingToApply <= 0) break;
+          const pDebt = parseFloat(row.saldo_pendiente_usd || 0);
+          const apply = Math.min(remainingToApply, pDebt);
+          const nextDebt = pDebt - apply;
+          const status = nextDebt <= 0.005 ? 'Pagada' : 'Parcial';
+          await client.query(
+            'UPDATE Compras SET saldo_pendiente_usd = $1, estatus = $2 WHERE id = $3',
+            [nextDebt, status, row.id]
+          );
+          remainingToApply -= apply;
+        }
+      }
+
+      // 3. Reduce supplier global debt
+      await client.query(
+        'UPDATE Proveedores SET saldo_pendiente_usd = GREATEST(0, COALESCE(saldo_pendiente_usd, 0) - $1) WHERE id = $2',
+        [pagoAmountUSD, proveedor_id]
+      );
+
+      // 4. If cash out from active cashier station is requested
+      if (afecto_caja_efectivo) {
+        let targetCajaId = caja_id;
+        if (!targetCajaId) {
+          const openCajaRes = await client.query(
+            "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND (usuario_id = $1 OR $1 IS NULL) ORDER BY id DESC LIMIT 1",
+            [usuario_id || null]
+          );
+          if (openCajaRes.rowCount > 0) {
+            targetCajaId = openCajaRes.rows[0].id;
+          } else {
+            const anyOpen = await client.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
+            if (anyOpen.rowCount > 0) targetCajaId = anyOpen.rows[0].id;
+          }
+        }
+
+        if (targetCajaId) {
+          const provData = await client.query('SELECT razon_social FROM Proveedores WHERE id = $1', [proveedor_id]);
+          const provName = provData.rowCount > 0 ? provData.rows[0].razon_social : 'PROVEEDOR';
+          let factInfo = '';
+          if (compra_id) {
+            const cRes = await client.query('SELECT numero_factura FROM Compras WHERE id = $1', [compra_id]);
+            if (cRes.rowCount > 0) factInfo = `(Factura #${cRes.rows[0].numero_factura})`;
+          }
+          await client.query(
+            `INSERT INTO Movimientos_Caja (caja_id, tipo, descripcion, monto_usd, monto_ves, metodo_pago)
+             VALUES ($1, 'Salida', $2, $3, $4, $5)`,
+            [
+              targetCajaId,
+              `Egreso de Caja: Pago a Proveedor - ${provName} ${factInfo} ${observacion ? '[' + observacion + ']' : ''}`.trim(),
+              pagoAmountUSD,
+              parseFloat(monto_ves || 0),
+              metodo_pago || 'Efectivo$'
+            ]
+          );
+        }
+      }
+
+      await client.query('COMMIT');
+      return { id: Number(newPagoId), ...pagoData };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('Error en savePagoProveedor (Postgres):', err.message);
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  // JSON Fallback
+  const list = readJsonFile('pagos_proveedores.json', []);
+  const newItem = { id: Date.now(), ...pagoData };
+  list.unshift(newItem);
+  writeJsonFile('pagos_proveedores.json', list);
+
+  // Update supplier in JSON
+  const proveedores = readJsonFile('proveedores.json', []);
+  const pIdx = proveedores.findIndex(p => p.id === Number(proveedor_id));
+  if (pIdx !== -1) {
+    proveedores[pIdx].saldo_pendiente_usd = Math.max(0, (proveedores[pIdx].saldo_pendiente_usd || 0) - pagoAmountUSD);
+    writeJsonFile('proveedores.json', proveedores);
+  }
+
+  // Update caja movement in JSON
+  if (afecto_caja_efectivo) {
+    const jsonMovsCaja = readJsonFile('movimientos_caja.json', []);
+    jsonMovsCaja.unshift({
+      id: Date.now() + Math.random(),
+      caja_id: caja_id || 'LOCAL',
+      tipo: 'Salida',
+      descripcion: `Egreso de Caja: Pago a Proveedor (${metodo_pago})`,
+      monto_usd: pagoAmountUSD,
+      monto_ves: parseFloat(monto_ves || 0),
+      metodo_pago: metodo_pago || 'Efectivo$',
+      fecha: getLocalISODateString()
+    });
+    writeJsonFile('movimientos_caja.json', jsonMovsCaja);
+  }
+
+  return newItem;
+}
+
+// --- COTIZACIONES DE PROVEEDORES CRUD ---
+export async function getCotizacionesProveedores() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query(`
+        SELECT c.*, p.razon_social AS proveedor_nombre, p.rif AS proveedor_rif, u.nombre AS usuario_nombre
+        FROM Cotizaciones_Proveedores c
+        LEFT JOIN Proveedores p ON c.proveedor_id = p.id
+        LEFT JOIN Usuarios u ON c.usuario_id = u.id
+        ORDER BY c.id DESC
+      `);
+      return res.rows.map(r => ({
+        id: Number(r.id),
+        numero_cotizacion: r.numero_cotizacion || '',
+        proveedor_id: Number(r.proveedor_id),
+        proveedor_nombre: r.proveedor_nombre || '',
+        proveedor_rif: r.proveedor_rif || '',
+        usuario_id: Number(r.usuario_id),
+        usuario_nombre: r.usuario_nombre || '',
+        fecha: r.fecha ? String(r.fecha).replace('T', ' ').substring(0, 16) : getLocalISODateString(),
+        fecha_vigencia: r.fecha_vigencia ? String(r.fecha_vigencia).replace('T', ' ').substring(0, 10) : '',
+        total_usd: parseFloat(r.total_usd || 0),
+        total_ves: parseFloat(r.total_ves || 0),
+        estatus: r.estatus || 'Pendiente',
+        detalles_json: typeof r.detalles_json === 'string' ? JSON.parse(r.detalles_json) : (r.detalles_json || {})
+      }));
+    } catch (err) {
+      console.error('Error en getCotizacionesProveedores (Postgres):', err.message);
+    }
+  }
+  return readJsonFile('cotizaciones_proveedores.json', []);
+}
+
+export async function saveCotizacionProveedor(data) {
+  const detallesObj = data.detalles_json || data.items || {};
+  const detallesStr = typeof detallesObj === 'string' ? detallesObj : JSON.stringify(detallesObj);
+  if (usePostgres) {
+    try {
+      let savedId;
+      if (data.id) {
+        const res = await pool.query(
+          `UPDATE Cotizaciones_Proveedores 
+           SET numero_cotizacion = $1, proveedor_id = $2, fecha = $3, fecha_vigencia = $4, total_usd = $5, total_ves = $6, detalles_json = $7, estatus = $8
+           WHERE id = $9 RETURNING id`,
+          [
+            data.numero_cotizacion || '',
+            data.proveedor_id,
+            data.fecha || getLocalISODateString(),
+            data.fecha_vigencia || null,
+            parseFloat(data.total_usd || 0),
+            parseFloat(data.total_ves || 0),
+            detallesStr,
+            data.estatus || 'Pendiente',
+            data.id
+          ]
+        );
+        savedId = res.rows[0].id;
+      } else {
+        const res = await pool.query(
+          `INSERT INTO Cotizaciones_Proveedores (
+             numero_cotizacion, proveedor_id, usuario_id, fecha, fecha_vigencia, total_usd, total_ves, detalles_json, estatus
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+          [
+            data.numero_cotizacion || `COT-${Date.now().toString().slice(-6)}`,
+            data.proveedor_id,
+            data.usuario_id || 1,
+            data.fecha || getLocalISODateString(),
+            data.fecha_vigencia || null,
+            parseFloat(data.total_usd || 0),
+            parseFloat(data.total_ves || 0),
+            detallesStr,
+            data.estatus || 'Pendiente'
+          ]
+        );
+        savedId = res.rows[0].id;
+      }
+
+      // Fetch unified joined record with provider name
+      const fullRes = await pool.query(`
+        SELECT c.*, p.razon_social AS proveedor_nombre, p.rif AS proveedor_rif, u.nombre AS usuario_nombre
+        FROM Cotizaciones_Proveedores c
+        LEFT JOIN Proveedores p ON c.proveedor_id = p.id
+        LEFT JOIN Usuarios u ON c.usuario_id = u.id
+        WHERE c.id = $1
+      `, [savedId]);
+
+      if (fullRes.rowCount > 0) {
+        const r = fullRes.rows[0];
+        return {
+          id: Number(r.id),
+          numero_cotizacion: r.numero_cotizacion || '',
+          proveedor_id: Number(r.proveedor_id),
+          proveedor_nombre: r.proveedor_nombre || '',
+          proveedor_rif: r.proveedor_rif || '',
+          usuario_id: Number(r.usuario_id),
+          usuario_nombre: r.usuario_nombre || '',
+          fecha: r.fecha ? String(r.fecha).replace('T', ' ').substring(0, 16) : getLocalISODateString(),
+          fecha_vigencia: r.fecha_vigencia ? String(r.fecha_vigencia).replace('T', ' ').substring(0, 10) : '',
+          total_usd: parseFloat(r.total_usd || 0),
+          total_ves: parseFloat(r.total_ves || 0),
+          estatus: r.estatus || 'Pendiente',
+          detalles_json: typeof r.detalles_json === 'string' ? JSON.parse(r.detalles_json) : (r.detalles_json || {})
+        };
+      }
+      return { id: Number(savedId), ...data, total_usd: parseFloat(data.total_usd || 0), total_ves: parseFloat(data.total_ves || 0) };
+    } catch (err) {
+      console.error('Error en saveCotizacionProveedor (Postgres):', err.message);
+      throw err;
+    }
+  }
+
+  const list = readJsonFile('cotizaciones_proveedores.json', []);
+  if (data.id) {
+    const idx = list.findIndex(c => c.id === Number(data.id));
+    if (idx !== -1) {
+      list[idx] = { ...list[idx], ...data, total_usd: parseFloat(data.total_usd || 0), total_ves: parseFloat(data.total_ves || 0) };
+      data = list[idx];
+    }
+  } else {
+    const newItem = {
+      id: Date.now(),
+      ...data,
+      total_usd: parseFloat(data.total_usd || 0),
+      total_ves: parseFloat(data.total_ves || 0),
+      created_at: getLocalISODateString()
+    };
+    list.unshift(newItem);
+    data = newItem;
+  }
+  writeJsonFile('cotizaciones_proveedores.json', list);
+  return data;
+}
+
+export async function deleteCotizacionProveedor(id) {
+  if (usePostgres) {
+    try {
+      await pool.query('DELETE FROM Cotizaciones_Proveedores WHERE id = $1', [id]);
+      return true;
+    } catch (err) {
+      console.error('Error en deleteCotizacionProveedor (Postgres):', err.message);
+      throw err;
+    }
+  }
+  const list = readJsonFile('cotizaciones_proveedores.json', []);
+  const updated = list.filter(c => c.id !== Number(id));
+  writeJsonFile('cotizaciones_proveedores.json', updated);
+  return true;
+}
+
 
 
 
