@@ -149,6 +149,15 @@ try {
     ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS estacion_nombre VARCHAR(50) DEFAULT 'CAJA_PRINCIPAL';
     ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS vuelto_usd NUMERIC DEFAULT 0;
     ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS vuelto_ves NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS tipo_documento VARCHAR(30) DEFAULT 'FACTURA_FISCAL';
+    ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS nro_fiscal VARCHAR(50);
+    ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS serial_fiscal VARCHAR(50);
+    ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS nro_z VARCHAR(20);
+    ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS estatus_fiscal VARCHAR(20) DEFAULT 'NO_APLICA';
+    ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS base_imponible_usd NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS iva_usd NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS exento_usd NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS igtf_usd NUMERIC DEFAULT 0;
     ALTER TABLE IF EXISTS Pagos_Venta ADD COLUMN IF NOT EXISTS monto_vuelto_usd NUMERIC DEFAULT 0;
     ALTER TABLE IF EXISTS Pagos_Venta ADD COLUMN IF NOT EXISTS monto_vuelto_ves NUMERIC DEFAULT 0;
     ALTER TABLE IF EXISTS Movimientos_Caja ADD COLUMN IF NOT EXISTS estacion_nombre VARCHAR(50) DEFAULT 'CAJA_PRINCIPAL';
@@ -2020,6 +2029,8 @@ export async function getSales() {
       const salesRes = await pool.query(`
         SELECT v.id, v.factura_nro, v.fecha, v.subtotal_usd, v.descuento_usd, v.total_usd, v.total_ves, v.con_ticket,
                v.vuelto_usd as "vueltoUSD", v.vuelto_ves as "vueltoVES",
+               v.tipo_documento, v.nro_fiscal, v.serial_fiscal, v.nro_z, v.estatus_fiscal,
+               v.base_imponible_usd, v.iva_usd, v.exento_usd, v.igtf_usd,
                v.estacion_nombre as terminal, c.cedula_rif as "clientDoc", c.nombre as "clientName", u.nombre as usuario,
                cac.estatus as caja_estatus
         FROM Ventas v
@@ -2054,6 +2065,15 @@ export async function getSales() {
           factura_nro: row.factura_nro,
           fecha: getLocalISODateString(new Date(row.fecha)),
           caja_estatus: row.caja_estatus || 'Cerrada',
+          tipo_documento: row.tipo_documento || (row.nro_fiscal ? 'FACTURA_FISCAL' : 'NOTA_ENTREGA'),
+          nro_fiscal: row.nro_fiscal || null,
+          serial_fiscal: row.serial_fiscal || null,
+          nro_z: row.nro_z || null,
+          estatus_fiscal: row.estatus_fiscal || 'NO_APLICA',
+          base_imponible_usd: parseFloat(row.base_imponible_usd || 0),
+          iva_usd: parseFloat(row.iva_usd || 0),
+          exento_usd: parseFloat(row.exento_usd || 0),
+          igtf_usd: parseFloat(row.igtf_usd || 0),
           client: {
             cedula_rif: row.clientDoc,
             nombre: row.clientName
@@ -2184,10 +2204,29 @@ export async function saveSale(s) {
           factura_nro = `${baseDev}-${devSuffix}`;
         }
       }
+      const tipoDoc = s.tipo_documento || (s.nro_fiscal ? 'FACTURA_FISCAL' : 'NOTA_ENTREGA');
+      const nroFiscal = s.nro_fiscal || null;
+      const serialFiscal = s.serial_fiscal || null;
+      const nroZ = s.nro_z || null;
+      const estatusFiscal = s.estatus_fiscal || (s.nro_fiscal ? 'EMITIDA' : 'NO_APLICA');
+      const baseImp = s.base_imponible_usd || s.baseImponible || 0;
+      const ivaVal = s.iva_usd || s.iva || 0;
+      const exentoVal = s.exento_usd || s.montoExento || 0;
+      const igtfVal = s.igtf_usd || s.igtf || 0;
+
       const saleRes = await clientTarget.query(
-        `INSERT INTO Ventas (factura_nro, cliente_id, usuario_id, caja_id, subtotal_usd, descuento_usd, total_usd, total_ves, estacion_nombre, vuelto_usd, vuelto_ves)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id, fecha`,
-        [factura_nro, clientId, userId, cajaId, s.subtotal, s.descuento, s.totalUSD, s.totalVES, s.terminal || 'CAJA_PRINCIPAL', s.vueltoUSD || 0, s.vueltoVES || 0]
+        `INSERT INTO Ventas (
+          factura_nro, cliente_id, usuario_id, caja_id, subtotal_usd, descuento_usd, total_usd, total_ves, 
+          estacion_nombre, vuelto_usd, vuelto_ves, tipo_documento, nro_fiscal, serial_fiscal, nro_z, 
+          estatus_fiscal, base_imponible_usd, iva_usd, exento_usd, igtf_usd
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) 
+         RETURNING id, fecha`,
+        [
+          factura_nro, clientId, userId, cajaId, s.subtotal, s.descuento, s.totalUSD, s.totalVES, 
+          s.terminal || 'CAJA_PRINCIPAL', s.vueltoUSD || 0, s.vueltoVES || 0,
+          tipoDoc, nroFiscal, serialFiscal, nroZ, estatusFiscal, baseImp, ivaVal, exentoVal, igtfVal
+        ]
       );
       
       const saleId = saleRes.rows[0].id;

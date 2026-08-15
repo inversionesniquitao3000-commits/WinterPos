@@ -5,7 +5,7 @@ import {
   Trash2, Edit, Plus, Download, Upload, ShieldAlert,
   Settings, CheckSquare, Square, Globe, ShieldCheck, Printer, FileText,
   LogOut, Unplug, KeyRound, Lock, Eye, EyeOff, DollarSign,
-  RefreshCw, Unlock, RotateCcw, AlertTriangle
+  RefreshCw, Unlock, RotateCcw, AlertTriangle, Cloud
 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr, formatBs } from '../utils';
@@ -368,7 +368,7 @@ export default function ConfiguracionEmpresa({
     };
   });
 
-  // 4. Tab Base de Datos - States
+  // 4. Tab Base de Datos - States & Google Drive Cloud Backup
   const [dbConfirmWord, setDbConfirmWord] = useState('');
   const [dbBackupSchedule, setDbBackupSchedule] = useState(() => {
     return localStorage.getItem('pos_backup_schedule') || 'Diario';
@@ -383,8 +383,32 @@ export default function ConfiguracionEmpresa({
     return localStorage.getItem('pos_backup_dir') || '';
   });
 
+  const [gdriveConfig, setGdriveConfig] = useState({
+    enabled: false,
+    method: 'WEBHOOK',
+    webhookUrl: '',
+    folderId: '',
+    folderName: 'WinterPOS_Backups',
+    accessToken: '',
+    lastSync: null as string | null,
+    lastStatus: 'PENDING'
+  });
+  const [gdriveTesting, setGdriveTesting] = useState(false);
+  const [gdriveSyncing, setGdriveSyncing] = useState(false);
+
+  const fetchGDriveConfig = async () => {
+    try {
+      const res = await fetch(getApiUrl('/backup/gdrive-config'));
+      if (res.ok) {
+        const data = await res.json();
+        setGdriveConfig(data);
+      }
+    } catch (_) {}
+  };
+
   useEffect(() => {
     if (activeTab === 'db') {
+      fetchGDriveConfig();
       fetch(getApiUrl('/db/backup/schedule'))
         .then(res => res.json())
         .then(data => {
@@ -944,8 +968,127 @@ export default function ConfiguracionEmpresa({
     showToast('✅ Configuración de Máquina Fiscal SENIAT guardada con éxito.');
   };
 
-  const handleTestFiscalPrinter = () => {
-    showToast('🧾 Conectando con Máquina Fiscal SENIAT... (Lectura X Solicitada)');
+  const handleTestFiscalStatus = async () => {
+    try {
+      showToast('🧾 Consultando estado de la Máquina Fiscal SENIAT...');
+      const res = await fetch(getApiUrl('/fiscal/status'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fiscalConfig: fiscalPrinterConfig })
+      });
+      const data = await res.json();
+      if (data.ready || data.status === 'ONLINE' || data.status === 'MODO_PRUEBA') {
+        showAlert(`✅ Estado de Impresora Fiscal: ${data.message}`, 'Conexión Fiscal OK', 'success');
+      } else {
+        showAlert(`⚠️ Estado: ${data.message || data.error}`, 'Aviso de Conexión Fiscal', 'warning');
+      }
+    } catch (err: any) {
+      showAlert(`❌ Error de comunicación: ${err.message}`, 'Error Fiscal', 'error');
+    }
+  };
+
+  const handleEmitReporteX = async () => {
+    try {
+      showToast('🧾 Enviando comando Lectura X a la máquina fiscal...');
+      const res = await fetch(getApiUrl('/fiscal/reporte-x'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fiscalConfig: fiscalPrinterConfig })
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        showAlert(`✅ ${data.message}`, 'Reporte X Exitoso', 'success');
+      } else {
+        showAlert(`❌ Error emitiendo Reporte X: ${data.error || 'Fallo de impresora'}`, 'Error de Impresión', 'error');
+      }
+    } catch (err: any) {
+      showAlert(`❌ Error: ${err.message}`, 'Error Fiscal', 'error');
+    }
+  };
+
+  const handleEmitReporteZ = async () => {
+    const ok = await showConfirm(
+      '⚠️ ¿Está seguro de emitir el REPORTE Z (Cierre Fiscal Diario)?\nEsta acción cerrará la jornada fiscal en la memoria de la máquina fiscal y reiniciará los contadores diarios a cero.',
+      'Confirmar Cierre Fiscal (Reporte Z)',
+      { confirmLabel: 'Sí, Emitir Reporte Z', isDanger: true }
+    );
+    if (!ok) return;
+
+    try {
+      showToast('🧾 Procesando Reporte Z en la máquina fiscal...');
+      const res = await fetch(getApiUrl('/fiscal/reporte-z'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fiscalConfig: fiscalPrinterConfig })
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        showAlert(`✅ ${data.message}`, 'Reporte Z Completado', 'success');
+      } else {
+        showAlert(`❌ Error emitiendo Reporte Z: ${data.error || 'Fallo de impresora'}`, 'Error de Cierre Fiscal', 'error');
+      }
+    } catch (err: any) {
+      showAlert(`❌ Error: ${err.message}`, 'Error Fiscal', 'error');
+    }
+  };
+
+  // Google Drive Handlers
+  const handleSaveGDriveConfig = async () => {
+    try {
+      const res = await fetch(getApiUrl('/backup/gdrive-config'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(gdriveConfig)
+      });
+      if (res.ok) {
+        showToast('✅ Configuración de Google Drive guardada con éxito.');
+      } else {
+        showAlert('Error al guardar configuración de Google Drive', 'Error', 'error');
+      }
+    } catch (err: any) {
+      showAlert(`Error: ${err.message}`, 'Error de Conexión', 'error');
+    }
+  };
+
+  const handleTestGDrive = async () => {
+    setGdriveTesting(true);
+    try {
+      await fetch(getApiUrl('/backup/gdrive-config'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(gdriveConfig)
+      });
+      const res = await fetch(getApiUrl('/backup/gdrive-test'), { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        showAlert(`✅ ${data.message || 'Conexión exitosa con Google Drive.'}`, 'Test de Google Drive Exitoso', 'success');
+        fetchGDriveConfig();
+      } else {
+        showAlert(`❌ Fallo en la prueba de Google Drive: ${data.error || data.message || 'Verifique la URL del Webhook o Token.'}`, 'Fallo de Conexión', 'error');
+      }
+    } catch (err: any) {
+      showAlert(`❌ Error de conexión: ${err.message}`, 'Error de Red', 'error');
+    } finally {
+      setGdriveTesting(false);
+    }
+  };
+
+  const handleSyncGDriveNow = async () => {
+    setGdriveSyncing(true);
+    try {
+      const res = await fetch(getApiUrl('/backup/gdrive-sync'), { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        showAlert(`✅ ${data.message}`, 'Copia en la Nube Exitosa', 'success');
+        fetchGDriveConfig();
+      } else {
+        showAlert(`❌ Error al sincronizar con Google Drive: ${data.error || data.message}`, 'Error de Respaldo', 'error');
+      }
+    } catch (err: any) {
+      showAlert(`❌ Error: ${err.message}`, 'Error', 'error');
+    } finally {
+      setGdriveSyncing(false);
+    }
   };
 
   // DB Admin Handlers
@@ -2534,21 +2677,42 @@ export default function ConfiguracionEmpresa({
                 </div>
               </div>
 
-              <div className="pt-2 flex flex-col sm:flex-row gap-2">
+              <div className="pt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
                 <button
                   type="button"
-                  onClick={handleTestFiscalPrinter}
-                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-2.5 px-3 rounded-lg text-xs transition-all border border-slate-300 flex items-center justify-center gap-1.5"
+                  onClick={handleTestFiscalStatus}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-2.5 px-2 rounded-lg text-xs transition-all border border-slate-300 flex items-center justify-center gap-1.5 cursor-pointer"
+                  title="Verificar comunicación con la máquina fiscal"
                 >
-                  <FileText className="w-3.5 h-3.5 text-slate-600" />
-                  PROBAR LECTURA X
+                  <RefreshCw className="w-3.5 h-3.5 text-slate-600" />
+                  VERIFICAR ESTADO
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleEmitReporteX}
+                  className="bg-sky-50 hover:bg-sky-100 text-sky-800 font-bold py-2.5 px-2 rounded-lg text-xs transition-all border border-sky-250 flex items-center justify-center gap-1.5 cursor-pointer"
+                  title="Emite un Reporte X (Lectura Parcial Informativa de Mediodía)"
+                >
+                  <FileText className="w-3.5 h-3.5 text-sky-600" />
+                  LECTURA X (MEDIODÍA)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleEmitReporteZ}
+                  className="bg-rose-50 hover:bg-rose-100 text-rose-800 font-bold py-2.5 px-2 rounded-lg text-xs transition-all border border-rose-250 flex items-center justify-center gap-1.5 cursor-pointer"
+                  title="Emite el Reporte Z oficial (Cierre Fiscal Diario definitivo)"
+                >
+                  <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
+                  REPORTE Z (CIERRE)
                 </button>
 
                 <button
                   type="submit"
-                  className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 px-3 rounded-lg text-xs transition-all shadow-sm"
+                  className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 px-2 rounded-lg text-xs transition-all shadow-sm cursor-pointer"
                 >
-                  GUARDAR CONFIGURACIÓN FISCAL
+                  GUARDAR CONFIGURACIÓN
                 </button>
               </div>
             </form>
@@ -2836,7 +3000,6 @@ export default function ConfiguracionEmpresa({
                   </p>
                 </div>
               )}
-
               {/* Resumen de configuración actual */}
               {dbBackupSchedule !== 'Desactivado' && dbBackupSchedule !== 'Especifico' && (
                 <div className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 flex items-center gap-2">
@@ -2859,9 +3022,175 @@ export default function ConfiguracionEmpresa({
                   className="bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-bold font-sans text-xs px-6 py-2.5 rounded-lg transition-all shadow-sm flex items-center gap-2"
                 >
                   <HardDrive className="w-3.5 h-3.5" />
-                  Guardar Programaci�n
+                  Guardar Programación Local
                 </button>
               </div>
+            </div>
+
+            {/* GOOGLE DRIVE CLOUD BACKUP INTEGRATION */}
+            <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-5">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center border border-blue-200">
+                    <Cloud className="w-4 h-4 text-blue-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-800 uppercase font-sans">
+                      Respaldo Automático en la Nube (Google Drive)
+                    </h3>
+                    <p className="text-[11px] text-slate-500 font-sans">
+                      Sincronice copias de seguridad en su cuenta de Google Drive para máxima seguridad ante robos o fallas de disco.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-700 font-sans">Sincronización Cloud</span>
+                  <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setGdriveConfig(prev => ({ ...prev, enabled: true }))}
+                      className={`px-3 py-1 text-[11px] rounded-md font-extrabold transition-all cursor-pointer ${
+                        gdriveConfig.enabled ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      ACTIVO
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGdriveConfig(prev => ({ ...prev, enabled: false }))}
+                      className={`px-3 py-1 text-[11px] rounded-md font-extrabold transition-all cursor-pointer ${
+                        !gdriveConfig.enabled ? 'bg-slate-400 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      INACTIVO
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {gdriveConfig.enabled && (
+                <div className="space-y-4 pt-1 font-sans text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-700 block mb-1">Método de Integración</label>
+                      <select
+                        value={gdriveConfig.method}
+                        onChange={(e) => setGdriveConfig(prev => ({ ...prev, method: e.target.value }))}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs font-medium text-slate-800 focus:bg-white focus:border-blue-500 focus:outline-none"
+                      >
+                        <option value="WEBHOOK">Google Apps Script Webhook (Recomendado - Fácil)</option>
+                        <option value="ACCESS_TOKEN">Google Drive OAuth2 / API Token</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-700 block mb-1">Nombre de Carpeta en Google Drive</label>
+                      <input
+                        type="text"
+                        placeholder="Ej. WinterPOS_Backups"
+                        value={gdriveConfig.folderName}
+                        onChange={(e) => setGdriveConfig(prev => ({ ...prev, folderName: e.target.value }))}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs font-mono text-slate-800 focus:bg-white focus:border-blue-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {gdriveConfig.method === 'WEBHOOK' ? (
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                        URL de Webhook (Google Apps Script Web App)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="https://script.google.com/macros/s/AKfycb.../exec"
+                        value={gdriveConfig.webhookUrl}
+                        onChange={(e) => setGdriveConfig(prev => ({ ...prev, webhookUrl: e.target.value }))}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs font-mono text-slate-800 focus:bg-white focus:border-blue-500 focus:outline-none"
+                      />
+                      <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                        💡 Pegue aquí la URL de la aplicación web desplegada en su cuenta de Google Apps Script. El servidor enviará el JSON automáticamente.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1">Google OAuth Bearer Token</label>
+                        <input
+                          type="password"
+                          placeholder="ya29.a0AfH6S..."
+                          value={gdriveConfig.accessToken}
+                          onChange={(e) => setGdriveConfig(prev => ({ ...prev, accessToken: e.target.value }))}
+                          className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs font-mono text-slate-800 focus:bg-white focus:border-blue-500 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1">ID de Carpeta de Google Drive (Opcional)</label>
+                        <input
+                          type="text"
+                          placeholder="1A2B3C4D5E6F..."
+                          value={gdriveConfig.folderId}
+                          onChange={(e) => setGdriveConfig(prev => ({ ...prev, folderId: e.target.value }))}
+                          className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs font-mono text-slate-800 focus:bg-white focus:border-blue-500 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Status Banner */}
+                  <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg flex flex-wrap items-center justify-between gap-2 text-xs font-sans">
+                    <div>
+                      <span className="text-slate-500 font-bold block">Última Sincronización en la Nube:</span>
+                      <span className="text-slate-800 font-mono font-bold">
+                        {gdriveConfig.lastSync ? new Date(gdriveConfig.lastSync).toLocaleString('es-VE') : 'Nunca sincronizado'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 font-bold block">Estado:</span>
+                      <span className={`font-extrabold px-2 py-0.5 rounded text-[10.5px] font-mono ${
+                        gdriveConfig.lastStatus?.startsWith('SUCCESS')
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                          : gdriveConfig.lastStatus?.startsWith('ERROR')
+                            ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                            : 'bg-slate-200 text-slate-700'
+                      }`}>
+                        {gdriveConfig.lastStatus || 'PENDING'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Buttons */}
+                  <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                    <button
+                      type="button"
+                      disabled={gdriveTesting}
+                      onClick={handleTestGDrive}
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-2 px-3 rounded-lg text-xs transition-all border border-slate-300 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${gdriveTesting ? 'animate-spin' : ''}`} />
+                      {gdriveTesting ? 'Probando...' : 'Probar Subida a Drive'}
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={gdriveSyncing}
+                      onClick={handleSyncGDriveNow}
+                      className="bg-blue-50 hover:bg-blue-100 text-blue-800 font-bold py-2 px-3 rounded-lg text-xs transition-all border border-blue-200 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <Cloud className="w-3.5 h-3.5 text-blue-600" />
+                      {gdriveSyncing ? 'Subiendo...' : 'Sincronizar Respaldo Ahora'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleSaveGDriveConfig}
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg text-xs transition-all shadow-sm cursor-pointer"
+                    >
+                      Guardar Configuración Drive
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -3563,6 +3892,53 @@ export default function ConfiguracionEmpresa({
                   </button>
                 )}
               </div>
+
+              {/* EMITIR NOTAS DE ENTREGA / NO FISCAL PERMISSION TOGGLE FOR USER */}
+              <div className="mt-2.5 p-2.5 bg-blue-50/80 border border-blue-250 rounded-lg flex items-center justify-between gap-3 shadow-2xs font-sans">
+                <div className="flex items-start gap-2">
+                  <FileText className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-slate-800 text-[11px] block">
+                      Autorizar Emisión de Notas de Entrega / Comprobantes No Fiscales (F1 Caja)
+                    </span>
+                    <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
+                      Permite al operador alternar a <strong className="text-blue-900">"Nota de Entrega"</strong> sin enviar la factura a la máquina fiscal.
+                    </span>
+                  </div>
+                </div>
+
+                {userForm.rol?.toUpperCase() === 'ADMINISTRADOR' ? (
+                  <span className="px-2 py-1 bg-blue-100 border border-blue-300 text-blue-800 rounded font-bold text-[9px] uppercase whitespace-nowrap">
+                    Autorizado (Admin)
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUserForm(prev => {
+                        const nextPerms = { ...prev.permisos };
+                        const currCaja = nextPerms.caja || { ver: false, crear: false, editar: false, eliminar: false };
+                        nextPerms.caja = {
+                          ...currCaja,
+                          emitir_no_fiscal: !currCaja.emitir_no_fiscal
+                        };
+                        return { ...prev, permisos: nextPerms };
+                      });
+                    }}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded border transition-all cursor-pointer bg-white border-slate-300 hover:border-blue-500 text-slate-700"
+                  >
+                    {userForm.permisos?.caja?.emitir_no_fiscal ? (
+                      <span className="flex items-center gap-1 text-emerald-700 font-bold text-[10.5px]">
+                        <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> Habilitado
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-slate-400 font-medium text-[10.5px]">
+                        <Square className="w-3.5 h-3.5 text-slate-350" /> Bloqueado
+                      </span>
+                    )}
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="flex gap-2.5 pt-3">
@@ -3706,6 +4082,53 @@ export default function ConfiguracionEmpresa({
                     ) : (
                       <span className="flex items-center gap-1 text-slate-400 font-medium text-[10.5px]">
                         <Square className="w-3.5 h-3.5 text-slate-350" /> Oculto
+                      </span>
+                    )}
+                  </button>
+                )}
+              </div>
+
+              {/* EMITIR NOTAS DE ENTREGA / NO FISCAL PERMISSION TOGGLE FOR ROLE */}
+              <div className="mt-2.5 p-2.5 bg-blue-50/80 border border-blue-250 rounded-lg flex items-center justify-between gap-3 shadow-2xs font-sans">
+                <div className="flex items-start gap-2">
+                  <FileText className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-slate-800 text-[11px] block">
+                      Autorizar Emisión de Notas de Entrega / Comprobantes No Fiscales (F1 Caja)
+                    </span>
+                    <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
+                      Permite a este perfil alternar a <strong className="text-blue-900">"Nota de Entrega"</strong> sin pasar por la máquina fiscal.
+                    </span>
+                  </div>
+                </div>
+
+                {roleForm.nombre?.trim().toUpperCase() === 'ADMINISTRADOR' ? (
+                  <span className="px-2 py-1 bg-blue-100 border border-blue-300 text-blue-800 rounded font-bold text-[9px] uppercase whitespace-nowrap">
+                    Autorizado (Admin)
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRoleForm(prev => {
+                        const nextPerms = { ...prev.permisos };
+                        const currCaja = nextPerms.caja || { ver: false, crear: false, editar: false, eliminar: false };
+                        nextPerms.caja = {
+                          ...currCaja,
+                          emitir_no_fiscal: !currCaja.emitir_no_fiscal
+                        };
+                        return { ...prev, permisos: nextPerms };
+                      });
+                    }}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded border transition-all cursor-pointer bg-white border-slate-300 hover:border-blue-500 text-slate-700"
+                  >
+                    {roleForm.permisos?.caja?.emitir_no_fiscal ? (
+                      <span className="flex items-center gap-1 text-emerald-700 font-bold text-[10.5px]">
+                        <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> Habilitado
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-slate-400 font-medium text-[10.5px]">
+                        <Square className="w-3.5 h-3.5 text-slate-350" /> Bloqueado
                       </span>
                     )}
                   </button>

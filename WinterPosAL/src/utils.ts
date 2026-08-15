@@ -239,7 +239,20 @@ export function printTicketReceipt(
 
         <div class="divider"></div>
 
-        <div>FACTURA: ${ticketData.factura_nro || 'FAC-000000'}</div>
+        ${ticketData.tipo_documento === 'NOTA_ENTREGA' ? `
+          <div class="text-center bold" style="font-size: 11px; background: #eee; padding: 2px 0; margin-bottom: 3px;">
+            NOTA DE ENTREGA / CONTROL INTERNO
+          </div>
+          <div class="text-center" style="font-size: 8px; margin-bottom: 4px;">(DOCUMENTO NO FISCAL - USO ADMINISTRATIVO)</div>
+        ` : `
+          <div class="text-center bold" style="font-size: 11px; background: #e2fbe8; padding: 2px 0; margin-bottom: 3px;">
+            COMPROBANTE DE VENTA FISCAL
+          </div>
+          ${ticketData.nro_fiscal ? `<div class="bold">FACTURA FISCAL N°: ${ticketData.nro_fiscal}</div>` : ''}
+          ${ticketData.serial_fiscal ? `<div>SERIAL FISCAL: ${ticketData.serial_fiscal}</div>` : ''}
+        `}
+
+        <div>CORRELATIVO POS: ${ticketData.factura_nro || 'FAC-000000'}</div>
         <div>FECHA: ${fechaStr}</div>
         <div>CAJERO: ${cashierName.toUpperCase()}</div>
         <div>VENDEDOR: ${sellerName.toUpperCase()}</div>

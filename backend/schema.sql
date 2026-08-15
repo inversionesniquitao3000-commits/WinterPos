@@ -164,6 +164,15 @@ CREATE TABLE IF NOT EXISTS Ventas (
     vuelto_usd NUMERIC(12, 2) DEFAULT 0.00,
     vuelto_ves NUMERIC(12, 2) DEFAULT 0.00,
     con_ticket BOOLEAN DEFAULT TRUE,
+    tipo_documento VARCHAR(30) DEFAULT 'FACTURA_FISCAL',
+    nro_fiscal VARCHAR(50),
+    serial_fiscal VARCHAR(50),
+    nro_z VARCHAR(20),
+    estatus_fiscal VARCHAR(20) DEFAULT 'NO_APLICA',
+    base_imponible_usd NUMERIC(12, 2) DEFAULT 0.00,
+    iva_usd NUMERIC(12, 2) DEFAULT 0.00,
+    exento_usd NUMERIC(12, 2) DEFAULT 0.00,
+    igtf_usd NUMERIC(12, 2) DEFAULT 0.00,
     estatus VARCHAR(10) DEFAULT 'Procesada' CHECK (estatus IN ('Procesada', 'Anulada'))
 );
 

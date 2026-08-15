@@ -5,7 +5,7 @@ import {
   XCircle, ArrowUpRight, 
   Calculator, CheckCircle2, Ticket,
   Clock, ListOrdered, Plus, AlertCircle, DollarSign, RotateCcw, Printer,
-  Calendar, Lock, Coins, RefreshCw
+  Calendar, Lock, Coins, RefreshCw, ShieldCheck, FileText
 } from 'lucide-react';
 import { formatNumberToWordsUSD, printTicketReceipt, formatBs } from '../utils';
 import { useDialog } from '../hooks/useDialog';
@@ -984,6 +984,19 @@ export default function CajaPOS({
 
   // Checkout modal state
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
+  const [tipoDocumento, setTipoDocumento] = useState<'FACTURA_FISCAL' | 'NOTA_ENTREGA'>('FACTURA_FISCAL');
+
+  const canEmitNoFiscal = useMemo(() => {
+    if (currentUser?.rol?.toLowerCase() === 'administrador') return true;
+    return !!currentUser?.permisos?.caja?.emitir_no_fiscal;
+  }, [currentUser]);
+
+  // If user has no permission to emit no-fiscal, force FACTURA_FISCAL
+  useEffect(() => {
+    if (!canEmitNoFiscal && tipoDocumento === 'NOTA_ENTREGA') {
+      setTipoDocumento('FACTURA_FISCAL');
+    }
+  }, [canEmitNoFiscal, tipoDocumento]);
 
   // Keyboard row selection and mixed change state
   const [selectedItemIndex, setSelectedItemIndex] = useState<number>(0);
@@ -1828,6 +1841,61 @@ export default function CajaPOS({
       }
     }
 
+    let nroFiscal: string | null = null;
+    let serialFiscal: string | null = null;
+    let nroZ: string | null = null;
+    let estatusFiscal = 'NO_APLICA';
+
+    // If document is marked as FACTURA_FISCAL, process with fiscal service
+    if (tipoDocumento === 'FACTURA_FISCAL') {
+      try {
+        const savedFiscalConfig = localStorage.getItem('pos_fiscal_printer_config');
+        const fiscalConfig = savedFiscalConfig ? JSON.parse(savedFiscalConfig) : { estadoFiscal: 'MODO_PRUEBA' };
+
+        if (fiscalConfig.estadoFiscal !== 'DESACTIVADA') {
+          const fiscalRes = await fetch(getApiUrl('/fiscal/print-invoice'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              saleData: {
+                client: selectedClient,
+                items: saleItems,
+                subtotal: subtotalUSD,
+                iva: ivaAmount,
+                totalUSD,
+                totalVES,
+                pagos
+              },
+              fiscalConfig
+            })
+          });
+
+          if (fiscalRes.ok) {
+            const fData = await fiscalRes.json();
+            if (fData.ok) {
+              nroFiscal = fData.nroFiscal || null;
+              serialFiscal = fData.serialFiscal || null;
+              nroZ = fData.nroZ || null;
+              estatusFiscal = 'EMITIDA';
+            }
+          } else {
+            const errData = await fiscalRes.json().catch(() => ({}));
+            const proceed = await showConfirm(
+              `⚠️ Error en la Máquina Fiscal SENIAT: ${errData.error || 'Fallo de conexión o impresora sin papel'}.\n\n¿Desea registrar esta venta como NOTA DE ENTREGA / CONTINGENCIA sin emisión física en la máquina fiscal?`,
+              'Fallo de Impresión Fiscal',
+              { confirmLabel: 'Emitir como Nota de Entrega', cancelLabel: 'Cancelar y Reintentar', isDanger: true }
+            );
+            if (!proceed) return;
+            estatusFiscal = 'FALLO';
+          }
+        }
+      } catch (fErr: any) {
+        console.warn('Fallo de conexión con servicio fiscal:', fErr.message);
+      }
+    }
+
+    const isActuallyFiscal = tipoDocumento === 'FACTURA_FISCAL' && estatusFiscal !== 'FALLO';
+
     const salePayload = {
       factura_nro: 'FAC-PENDIENTE', // Server will assign the real number via seq_factura
       client: selectedClient,
@@ -1839,7 +1907,16 @@ export default function CajaPOS({
       totalVES,
       pagos,
       vueltoUSD: finalVueltoUSD,
-      vueltoVES: finalVueltoVES
+      vueltoVES: finalVueltoVES,
+      tipo_documento: isActuallyFiscal ? 'FACTURA_FISCAL' : 'NOTA_ENTREGA',
+      nro_fiscal: nroFiscal,
+      serial_fiscal: serialFiscal,
+      nro_z: nroZ,
+      estatus_fiscal: estatusFiscal,
+      base_imponible_usd: baseImponibleUSD,
+      iva_usd: ivaAmount,
+      exento_usd: netExemptUSD,
+      igtf_usd: 0
     };
 
     // Await the server response to get the confirmed factura_nro
@@ -2711,8 +2788,8 @@ export default function CajaPOS({
       {/* LEFT TERMINAL AREA: PRODUCTS SELECTION & SALE TABLE */}
       <div className="xl:col-span-3 space-y-4 flex flex-col h-[calc(100vh-180px)]">
         
-        {/* INPUTS HEADER STACK - Light Mode */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-white p-4 border border-slate-200 rounded-xl shadow-sm">
+        {/* INPUTS HEADER STACK - Light Mode with Fiscal Switch */}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3.5 bg-white p-3.5 border border-slate-200 rounded-xl shadow-sm">
           
           {/* SEARCH PRODUCT SELECTOR */}
           <div className="space-y-1">
@@ -2986,6 +3063,51 @@ export default function CajaPOS({
             >
               <option value={currentUser.nombre}>{currentUser.nombre}</option>
             </select>
+          </div>
+
+          {/* SELECTOR TIPO DE COMPROBANTE: FACTURA FISCAL vs NOTA DE ENTREGA */}
+          <div className="space-y-1">
+            <label className="text-[10px] text-slate-500 font-sans block font-semibold flex items-center justify-between">
+              <span>Tipo de Comprobante</span>
+              {!canEmitNoFiscal && (
+                <span className="text-[9px] text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded font-mono font-bold">🔒 Solo Fiscal</span>
+              )}
+            </label>
+            <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-300 gap-1 h-[42px] items-center">
+              <button
+                type="button"
+                onClick={() => setTipoDocumento('FACTURA_FISCAL')}
+                className={`flex-1 h-full rounded-md font-extrabold text-[11px] font-sans transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  tipoDocumento === 'FACTURA_FISCAL'
+                    ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-500'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                }`}
+                title="Emite Factura Fiscal Homologada por el SENIAT"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Fiscal SENIAT</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (!canEmitNoFiscal) {
+                    showAlert('Su usuario no tiene permisos para emitir Notas de Entrega no fiscales. Contacte a un administrador.', 'Permiso Denegado', 'error');
+                    return;
+                  }
+                  setTipoDocumento('NOTA_ENTREGA');
+                }}
+                className={`flex-1 h-full rounded-md font-extrabold text-[11px] font-sans transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  tipoDocumento === 'NOTA_ENTREGA'
+                    ? 'bg-blue-600 text-white shadow-sm ring-1 ring-blue-500'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                }`}
+                title={canEmitNoFiscal ? "Emite Nota de Entrega / Comprobante de Control Interno" : "No autorizado para emitir notas de entrega"}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Nota Entrega</span>
+              </button>
+            </div>
           </div>
 
         </div>
@@ -3407,10 +3529,46 @@ export default function CajaPOS({
           <div ref={checkoutModalRef} className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-3xl shadow-2xl flex flex-col my-auto max-h-[92vh]">
             
             <div className="bg-slate-100 border-b border-slate-250 px-6 py-3.5 flex justify-between items-center flex-shrink-0">
-              <span className="text-xs font-black text-slate-700 tracking-widest uppercase flex items-center gap-1.5">
-                <Calculator className="w-4 h-4 text-winter-blueBtn" />
-                Interfaz de Liquidación (Checkout)
-              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-black text-slate-700 tracking-widest uppercase flex items-center gap-1.5">
+                  <Calculator className="w-4 h-4 text-winter-blueBtn" />
+                  Liquidación (Checkout)
+                </span>
+                
+                {/* DOCUMENT TYPE BADGE IN MODAL */}
+                <div className="flex items-center bg-white border border-slate-250 rounded-lg p-0.5 shadow-2xs">
+                  <button
+                    type="button"
+                    onClick={() => setTipoDocumento('FACTURA_FISCAL')}
+                    className={`px-2.5 py-0.5 rounded text-[10px] font-sans font-extrabold flex items-center gap-1 transition-all ${
+                      tipoDocumento === 'FACTURA_FISCAL'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <ShieldCheck className="w-3 h-3" />
+                    Fiscal SENIAT
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!canEmitNoFiscal) {
+                        showAlert('No posee permisos para emitir comprobantes no fiscales.', 'Acceso Restringido', 'error');
+                        return;
+                      }
+                      setTipoDocumento('NOTA_ENTREGA');
+                    }}
+                    className={`px-2.5 py-0.5 rounded text-[10px] font-sans font-extrabold flex items-center gap-1 transition-all ${
+                      tipoDocumento === 'NOTA_ENTREGA'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <FileText className="w-3 h-3" />
+                    Nota Entrega
+                  </button>
+                </div>
+              </div>
               <button onClick={() => setShowCheckoutModal(false)} className="text-slate-400 hover:text-slate-700 focus:ring-2 focus:ring-winter-blueBtn focus:outline-none p-1 rounded">✕</button>
             </div>
 

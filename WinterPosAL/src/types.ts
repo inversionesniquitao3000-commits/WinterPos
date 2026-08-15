@@ -46,6 +46,7 @@ export interface User {
       eliminar: boolean;
       admin?: boolean;
       ver_costos?: boolean;
+      emitir_no_fiscal?: boolean;
     }
   };
 }
@@ -61,6 +62,7 @@ export interface Role {
       eliminar: boolean;
       admin?: boolean;
       ver_costos?: boolean;
+      emitir_no_fiscal?: boolean;
     }
   };
 }
@@ -166,6 +168,15 @@ export interface Sale {
   estatus?: string;
   iva?: number;
   terminal?: string;
+  tipo_documento?: 'FACTURA_FISCAL' | 'NOTA_ENTREGA' | string;
+  nro_fiscal?: string;
+  serial_fiscal?: string;
+  nro_z?: string;
+  estatus_fiscal?: 'EMITIDA' | 'PENDIENTE' | 'FALLO' | 'NO_APLICA' | string;
+  base_imponible_usd?: number;
+  iva_usd?: number;
+  exento_usd?: number;
+  igtf_usd?: number;
 }
 
 export interface CierreDetails {

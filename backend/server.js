@@ -25,6 +25,8 @@ import {
 } from './whatsapp-service.js';
 
 import { verifyLicense, activateLicense, registerTerminalActivity } from './license-manager.js';
+import { processFiscalSale, emitReporteX, emitReporteZ, checkFiscalStatus } from './fiscal-service.js';
+import { getDriveConfig, saveDriveConfig, uploadBackupToGoogleDrive } from './gdrive-service.js';
 
 import path from 'path';
 import fs from 'fs';
@@ -740,6 +742,49 @@ app.post('/api/sales', async (req, res) => {
   }
 });
 
+// ==========================================
+// FISCAL PRINTER ENDPOINTS (SENIAT / HKA / BIXOLON / SIMULATOR)
+// ==========================================
+app.post('/api/fiscal/print-invoice', async (req, res) => {
+  try {
+    const { saleData, fiscalConfig } = req.body;
+    const result = await processFiscalSale(saleData, fiscalConfig);
+    res.json(result);
+  } catch (err) {
+    console.error('❌ Error emitiendo factura fiscal:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/fiscal/reporte-x', async (req, res) => {
+  try {
+    const result = await emitReporteX(req.body.fiscalConfig || req.body);
+    res.json(result);
+  } catch (err) {
+    console.error('❌ Error emitiendo Reporte X:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/fiscal/reporte-z', async (req, res) => {
+  try {
+    const result = await emitReporteZ(req.body.fiscalConfig || req.body);
+    res.json(result);
+  } catch (err) {
+    console.error('❌ Error emitiendo Reporte Z:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/fiscal/status', async (req, res) => {
+  try {
+    const result = await checkFiscalStatus(req.body.fiscalConfig || req.body);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/cajas/estado', async (req, res) => {
   const terminal = req.query.terminal || req.query.estacion_nombre;
   const usuarioId = req.query.usuarioId || req.query.usuario_id;
@@ -1314,6 +1359,16 @@ async function runBackupTask() {
       sched.lastBackup = now.toISOString();
       writeJsonFile('backup_schedule.json', sched);
       console.log(`✅ [Backups] Backup automático guardado correctamente: ${path.join(saveDir, fileName)}`);
+
+      // Automatic Google Drive Cloud Sync if enabled
+      try {
+        const dConfig = getDriveConfig();
+        if (dConfig.enabled) {
+          uploadBackupToGoogleDrive(backupData, fileName).catch(gErr => {
+            console.warn('⚠️ [Backups] Error en subida automática a Google Drive:', gErr.message);
+          });
+        }
+      } catch (gErr) {}
     }
   } catch (err) {
     console.error('⚠️ [Backups] Error en backup automático:', err.message);
@@ -1324,6 +1379,47 @@ async function runBackupTask() {
 setInterval(runBackupTask, 3600000);
 // Check once at startup after 5 seconds
 setTimeout(runBackupTask, 5000);
+
+// ==========================================
+// GOOGLE DRIVE BACKUP ENDPOINTS
+// ==========================================
+app.get('/api/backup/gdrive-config', (req, res) => {
+  try {
+    res.json(getDriveConfig());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/backup/gdrive-config', (req, res) => {
+  try {
+    const saved = saveDriveConfig(req.body);
+    res.json(saved);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/backup/gdrive-test', async (req, res) => {
+  try {
+    const testData = { test: true, app: 'WinterPOS', date: new Date().toISOString() };
+    const result = await uploadBackupToGoogleDrive(testData, `winterpos_test_ping_${Date.now()}.json`);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/backup/gdrive-sync', async (req, res) => {
+  try {
+    const backup = await backupDatabase();
+    const fileName = `winterpos_manual_${new Date().toISOString().split('T')[0]}_${Date.now()}.json`;
+    const result = await uploadBackupToGoogleDrive(backup, fileName);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // WHATSAPP INTEGRATION ENDPOINTS
 app.get('/api/whatsapp/status', (req, res) => {

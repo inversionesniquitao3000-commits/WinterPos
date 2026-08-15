@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Sale, CierreCaja, User } from '../types';
-import { History, Printer, ShieldAlert, ShoppingCart, Eye, Edit, Trash2, Search, ChevronUp, ChevronDown, ChevronsUpDown, CheckCircle2, FileDown, MessageCircle } from 'lucide-react';
+import { History, Printer, ShieldAlert, ShoppingCart, Eye, Edit, Trash2, Search, ChevronUp, ChevronDown, ChevronsUpDown, CheckCircle2, FileDown, MessageCircle, FileText } from 'lucide-react';
 import { formatNumberToWordsUSD, getLocalDateStr, formatBs } from '../utils';
 import { useDialog } from '../hooks/useDialog';
 
@@ -17,7 +17,18 @@ interface VentasHistoricoProps {
 
 export default function VentasHistorico({ sales, cierres, onReprintTicket, currentUser, onUpdateCierre, onDeleteCierre, getApiUrl, tasaDia = 0 }: VentasHistoricoProps) {
   const { showAlert } = useDialog();
+
+  const companyConfig = useMemo(() => {
+    try {
+      const saved = localStorage.getItem('pos_company_config');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
   const [activeSubTab, setActiveSubTab] = useState<'ventas' | 'cierres'>('ventas');
+  const [filterDocType, setFilterDocType] = useState<'ALL' | 'FISCAL' | 'NOTA_ENTREGA'>('ALL');
   const [selectedCierre, setSelectedCierre] = useState<CierreCaja | null>(null);
   const [selectedCierreRow, setSelectedCierreRow] = useState<CierreCaja | null>(null);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
@@ -308,15 +319,23 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
       : <ChevronDown className="inline w-3 h-3 ml-0.5 text-blue-500" />;
   };
 
-  // Filter sales list by date range if enabled
+  // Filter sales list by date range and document type if enabled
   const filteredSales = useMemo(() => {
-    if (!filterEnabled) return sales;
-    return sales.filter(s => {
-      if (!s.fecha) return false;
-      const dateStr = s.fecha.substring(0, 10); // "YYYY-MM-DD"
-      return dateStr >= startDate && dateStr <= endDate;
-    });
-  }, [sales, startDate, endDate, filterEnabled]);
+    let list = sales;
+    if (filterEnabled) {
+      list = list.filter(s => {
+        if (!s.fecha) return false;
+        const dateStr = s.fecha.substring(0, 10); // "YYYY-MM-DD"
+        return dateStr >= startDate && dateStr <= endDate;
+      });
+    }
+    if (filterDocType === 'FISCAL') {
+      list = list.filter(s => s.tipo_documento === 'FACTURA_FISCAL' || s.nro_fiscal || (!s.tipo_documento && !s.factura_nro.startsWith('DEV-')));
+    } else if (filterDocType === 'NOTA_ENTREGA') {
+      list = list.filter(s => s.tipo_documento === 'NOTA_ENTREGA');
+    }
+    return list;
+  }, [sales, startDate, endDate, filterEnabled, filterDocType]);
 
   // Apply search term and sorting to sales
   const finalFilteredSales = useMemo(() => {
@@ -1081,6 +1100,170 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
     printWindow.document.close();
   };
 
+  const handleDownloadLibroVentasFiscalPDF = () => {
+    const fiscalSales = finalFilteredSales.filter(s => 
+      s.tipo_documento === 'FACTURA_FISCAL' || s.nro_fiscal || (!s.tipo_documento && !s.factura_nro.startsWith('DEV-'))
+    );
+
+    const title = "LIBRO DE VENTAS FISCAL (SENIAT - PROVIDENCIA 0071)";
+    const dateStr = new Date().toLocaleString('es-VE');
+    const periodText = filterEnabled ? `Período Fiscal: Desde ${startDate} Hasta ${endDate}` : "Período Fiscal: Histórico Completo";
+
+    let totalVentasIncIva = 0;
+    let totalExento = 0;
+    let totalBaseImponible = 0;
+    let totalIvaDebito = 0;
+    let totalIgtf = 0;
+
+    const rowsHtml = fiscalSales.map((sale, index) => {
+      const isDev = sale.factura_nro.startsWith('DEV-');
+      const mult = isDev ? -1 : 1;
+      const totalVenta = (sale.totalUSD ?? 0) * mult;
+      
+      const exento = (sale.exento_usd ?? 0) * mult;
+      const base = (sale.base_imponible_usd ?? (totalVenta > 0 ? (totalVenta - exento) / 1.16 : 0));
+      const iva = (sale.iva_usd ?? (totalVenta > 0 ? totalVenta - base - exento : 0));
+      const igtf = (sale.igtf_usd ?? 0) * mult;
+
+      totalVentasIncIva += totalVenta;
+      totalExento += exento;
+      totalBaseImponible += base;
+      totalIvaDebito += iva;
+      totalIgtf += igtf;
+
+      return `
+        <tr style="${isDev ? 'background-color: #fff1f2;' : ''}">
+          <td style="text-align: center;">${index + 1}</td>
+          <td style="text-align: center; font-family: monospace;">${(sale.fecha || '').substring(0, 10)}</td>
+          <td style="font-family: monospace;">${sale.client?.cedula_rif || 'V-00000000'}</td>
+          <td style="text-transform: uppercase;">${sale.client?.nombre || 'CLIENTE CONTADO'}</td>
+          <td style="text-align: center; font-family: monospace; font-weight: bold;">${sale.nro_fiscal || sale.factura_nro}</td>
+          <td style="text-align: center; font-family: monospace;">${sale.serial_fiscal || 'Z3C0000000'}</td>
+          <td style="text-align: center; font-family: monospace;">${sale.nro_z || 'Z-0001'}</td>
+          <td class="text-right font-bold">$${totalVenta.toFixed(2)}</td>
+          <td class="text-right">$${exento.toFixed(2)}</td>
+          <td class="text-right font-bold">$${base.toFixed(2)}</td>
+          <td class="text-right font-bold text-emerald">$${iva.toFixed(2)}</td>
+          <td class="text-right">$${igtf.toFixed(2)}</td>
+        </tr>
+      `;
+    }).join('');
+
+    const tableHtml = `
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th style="text-align: center; width: 3%;">N°</th>
+            <th style="text-align: center; width: 8%;">FECHA</th>
+            <th style="width: 10%;">RIF / CI</th>
+            <th style="width: 20%;">RAZÓN SOCIAL / NOMBRE</th>
+            <th style="text-align: center; width: 9%;">N° FACTURA</th>
+            <th style="text-align: center; width: 10%;">SERIAL FISCAL</th>
+            <th style="text-align: center; width: 6%;">N° Z</th>
+            <th class="text-right" style="width: 9%;">TOTAL VENTAS</th>
+            <th class="text-right" style="width: 8%;">EXENTO</th>
+            <th class="text-right" style="width: 9%;">BASE IMP. 16%</th>
+            <th class="text-right" style="width: 8%;">IVA (16%)</th>
+            <th class="text-right" style="width: 6%;">IGTF (3%)</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${fiscalSales.length === 0 ? `
+            <tr><td colspan="12" style="text-align: center; color: #777; padding: 20px;">No se registraron comprobantes fiscales en el período seleccionado.</td></tr>
+          ` : rowsHtml}
+        </tbody>
+        <tfoot>
+          <tr style="background-color: #0f172a; color: #fff; font-weight: bold; font-family: monospace;">
+            <td colspan="7" style="text-align: right; padding: 8px;">TOTALES GENERALES DEL LIBRO FISCAL:</td>
+            <td class="text-right" style="padding: 8px;">$${totalVentasIncIva.toFixed(2)}</td>
+            <td class="text-right" style="padding: 8px;">$${totalExento.toFixed(2)}</td>
+            <td class="text-right" style="padding: 8px;">$${totalBaseImponible.toFixed(2)}</td>
+            <td class="text-right" style="padding: 8px; color: #4ade80;">$${totalIvaDebito.toFixed(2)}</td>
+            <td class="text-right" style="padding: 8px;">$${totalIgtf.toFixed(2)}</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      <div style="display: flex; gap: 20px; margin-top: 25px;">
+        <div class="report-summary" style="flex: 1;">
+          <h4 style="margin: 0 0 10px 0; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; font-size: 11px;">RESUMEN DECLARACIÓN SENIAT</h4>
+          <p><strong>Comprobantes Fiscales Emitidos:</strong> ${fiscalSales.length}</p>
+          <p><strong>Total Ventas Facturadas (USD):</strong> $${totalVentasIncIva.toFixed(2)} USD</p>
+          <p><strong>Total Base Imponible (16%):</strong> $${totalBaseImponible.toFixed(2)} USD</p>
+          <p><strong>Total Débito Fiscal IVA a Declarar:</strong> $${totalIvaDebito.toFixed(2)} USD</p>
+          <p><strong>Total Ventas Exentas:</strong> $${totalExento.toFixed(2)} USD</p>
+        </div>
+
+        <div style="flex: 1; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px 16px; background-color: #f8fafc; font-size: 10px;">
+          <h4 style="margin: 0 0 8px 0; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; font-size: 11px;">VALIDACIÓN LEGAL Y FISCAL</h4>
+          <p>Documento emitido conforme a las especificaciones de la Providencia Administrativa SNAT/2011/0071 del Servicio Nacional Integrado de Administración Aduanera y Tributaria (SENIAT).</p>
+          <p style="margin-top: 15px; border-top: 1px dashed #94a3b8; padding-top: 8px;">
+            <strong>Firma Contador / Administrador:</strong> ___________________________
+          </p>
+        </div>
+      </div>
+    `;
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      showAlert('No se pudo abrir la ventana de impresión. Por favor habilite los popups en su navegador.', 'Popups Bloqueados', 'warning');
+      return;
+    }
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>${title}</title>
+          <style>
+            @page { size: landscape; margin: 12mm; }
+            body { font-family: 'Segoe UI', Arial, sans-serif; margin: 15px; color: #1e293b; }
+            .header { display: flex; justify-content: space-between; border-bottom: 2px solid #0f172a; padding-bottom: 10px; margin-bottom: 15px; }
+            .header-left h1 { margin: 0; font-size: 16px; color: #0f172a; text-transform: uppercase; }
+            .header-left p { margin: 2px 0 0 0; font-size: 10.5px; color: #475569; }
+            .header-right { text-align: right; font-size: 10px; color: #475569; }
+            .header-right p { margin: 2px 0 0 0; }
+            h2 { font-size: 13px; color: #0f172a; text-transform: uppercase; margin: 0 0 10px 0; background: #e2e8f0; padding: 6px 10px; border-radius: 4px; text-align: center; }
+            .report-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10px; }
+            .report-table th { background-color: #0f172a; color: #ffffff; border: 1px solid #0f172a; padding: 6px 6px; font-weight: bold; text-transform: uppercase; font-size: 8.5px; }
+            .report-table td { border: 1px solid #cbd5e1; padding: 5px 6px; font-size: 9.5px; }
+            .text-center { text-align: center !important; }
+            .text-right { text-align: right !important; }
+            .font-bold { font-weight: bold; }
+            .text-emerald { color: #059669 !important; }
+            .report-summary { padding: 12px 16px; background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; }
+            .report-summary p { margin: 0 0 4px 0; font-size: 10.5px; }
+            @media print { body { margin: 5px; } .no-print { display: none; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="header-left">
+              <h1>${companyConfig?.nombre_comercio || 'INVERSIONES NIQUITAO 3000 C.A.'}</h1>
+              <p>RIF: ${companyConfig?.rif || 'J-41132631'} | Dirección: ${companyConfig?.direccion || 'Centro, Caracas'}</p>
+              <p style="margin-top: 4px; font-weight: bold; color: #0f172a;">${periodText}</p>
+            </div>
+            <div class="header-right">
+              <p><strong>Fecha Emisión:</strong> ${dateStr}</p>
+              <p><strong>Régimen:</strong> Contribuyente Ordinario IVA</p>
+              <p><strong>Sistema:</strong> WinterPOS Cloud Fiscal</p>
+            </div>
+          </div>
+          
+          <h2>${title}</h2>
+          ${tableHtml}
+          
+          <script>
+            window.onload = function() {
+              window.print();
+              setTimeout(function() { window.close(); }, 400);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
   const handleDownloadTransactionsReport = () => {
     const targetSales = selectedSaleIds.length > 0
       ? finalFilteredSales.filter(s => selectedSaleIds.includes(s.factura_nro))
@@ -1351,7 +1534,71 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
               className="bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs outline-none focus:border-winter-blueBtn text-slate-700 font-mono disabled:opacity-50"
             />
           </div>
+
+          {/* DOCUMENT TYPE FILTER TOGGLE */}
+          {activeSubTab === 'ventas' && (
+            <div className="flex items-center gap-1 bg-white border border-slate-300 p-0.5 rounded-md font-sans">
+              <button
+                type="button"
+                onClick={() => setFilterDocType('ALL')}
+                className={`px-2 py-0.5 text-[10.5px] rounded font-bold transition-all ${
+                  filterDocType === 'ALL'
+                    ? 'bg-slate-800 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                🌐 Todos ({filteredSales.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterDocType('FISCAL')}
+                className={`px-2 py-0.5 text-[10.5px] rounded font-bold transition-all flex items-center gap-1 ${
+                  filterDocType === 'FISCAL'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-emerald-700 hover:bg-emerald-50'
+                }`}
+                title="Mostrar únicamente facturas fiscales SENIAT"
+              >
+                🧾 Fiscal SENIAT
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterDocType('NOTA_ENTREGA')}
+                className={`px-2 py-0.5 text-[10.5px] rounded font-bold transition-all flex items-center gap-1 ${
+                  filterDocType === 'NOTA_ENTREGA'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-blue-700 hover:bg-blue-50'
+                }`}
+                title="Mostrar únicamente notas de entrega / comprobantes no fiscales"
+              >
+                📄 Notas de Entrega
+              </button>
+            </div>
+          )}
         </div>
+
+        {/* ACTIONS RIGHT */}
+        {activeSubTab === 'ventas' && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleDownloadLibroVentasFiscalPDF}
+              className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs px-3 py-1.5 rounded font-bold font-sans flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+              title="Generar e imprimir el Libro de Ventas Fiscal Oficial del SENIAT (Providencia 0071)"
+            >
+              <FileText className="w-3.5 h-3.5 text-emerald-700" />
+              <span>📑 Libro de Ventas SENIAT</span>
+            </button>
+
+            <button
+              onClick={handleDownloadTransactionsReport}
+              className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 text-xs px-3 py-1.5 rounded font-bold font-sans flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+              title="Exportar reporte de ventas filtradas en PDF"
+            >
+              <Printer className="w-3.5 h-3.5 text-slate-600" />
+              <span>PDF General</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {activeSubTab === 'ventas' && (
@@ -1484,7 +1731,18 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                           </td>
                           <td className="px-3 py-1 font-mono">{sale.fecha}</td>
                           <td className={`px-3 py-1 font-bold font-mono ${isDev ? 'text-rose-700' : 'text-slate-600'}`}>
-                            {sale.factura_nro}
+                            <div className="flex flex-col">
+                              <span>{sale.factura_nro}</span>
+                              {sale.tipo_documento === 'NOTA_ENTREGA' ? (
+                                <span className="text-[8.5px] bg-slate-100 text-slate-700 border border-slate-250 px-1 py-0.2 rounded font-sans font-extrabold w-fit mt-0.5">
+                                  📄 NOTA ENTREGA
+                                </span>
+                              ) : (
+                                <span className="text-[8.5px] bg-emerald-50 text-emerald-800 border border-emerald-250 px-1 py-0.2 rounded font-sans font-extrabold w-fit mt-0.5">
+                                  🧾 FISCAL {sale.nro_fiscal ? `#${sale.nro_fiscal}` : ''}
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="px-3 py-1 font-sans font-medium">{sale.client.nombre}</td>
                           <td className="px-3 py-1 font-sans">
