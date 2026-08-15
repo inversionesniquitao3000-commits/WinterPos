@@ -352,9 +352,11 @@ export default function ConfiguracionEmpresa({
     exigirRifCliente: boolean;
     imprimirCopiaFiscal: boolean;
     estadoFiscal: string;
+    tipoDocumentoDefault?: 'FACTURA_FISCAL' | 'NOTA_ENTREGA';
   }>(() => {
     const saved = localStorage.getItem('pos_fiscal_printer_config');
-    return saved ? JSON.parse(saved) : {
+    const defaultDoc = (localStorage.getItem('pos_default_tipo_documento') as any) || 'FACTURA_FISCAL';
+    return saved ? { tipoDocumentoDefault: defaultDoc, ...JSON.parse(saved) } : {
       modelo: 'HKA_FACTORY',
       puerto: 'COM1',
       baudRate: 9600,
@@ -364,7 +366,8 @@ export default function ConfiguracionEmpresa({
       imprimirIgtf: true,
       exigirRifCliente: true,
       imprimirCopiaFiscal: false,
-      estadoFiscal: 'ACTIVA'
+      estadoFiscal: 'ACTIVA',
+      tipoDocumentoDefault: defaultDoc
     };
   });
 
@@ -965,7 +968,11 @@ export default function ConfiguracionEmpresa({
   const handleSaveFiscalPrinter = (e: React.FormEvent) => {
     e.preventDefault();
     localStorage.setItem('pos_fiscal_printer_config', JSON.stringify(fiscalPrinterConfig));
-    showToast('✅ Configuración de Máquina Fiscal SENIAT guardada con éxito.');
+    if (fiscalPrinterConfig.tipoDocumentoDefault) {
+      localStorage.setItem('pos_default_tipo_documento', fiscalPrinterConfig.tipoDocumentoDefault);
+      localStorage.setItem('pos_tipo_documento_activo', fiscalPrinterConfig.tipoDocumentoDefault);
+    }
+    showToast('✅ Configuración de Máquina Fiscal y Comprobante Predeterminado guardada con éxito.');
   };
 
   const handleTestFiscalStatus = async () => {
@@ -2671,6 +2678,40 @@ export default function ConfiguracionEmpresa({
                             NO
                           </button>
                         </div>
+                      </div>
+                    </div>
+
+                    {/* Tipo de Comprobante Predeterminado en Caja POS */}
+                    <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-xs mt-3">
+                      <div>
+                        <span className="text-xs text-slate-800 font-black block">Tipo de Comprobante Predeterminado (Caja POS)</span>
+                        <span className="text-[10px] text-slate-500 block">Determina la opción predeterminada al ingresar al módulo de venta F1 Caja.</span>
+                      </div>
+                      <div className="flex bg-white p-0.5 rounded-lg border border-slate-300 gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setFiscalPrinterConfig(prev => ({ ...prev, tipoDocumentoDefault: 'FACTURA_FISCAL' }))}
+                          className={`px-3 py-1.5 text-[11px] rounded-md font-extrabold transition-all flex items-center gap-1.5 cursor-pointer ${
+                            (fiscalPrinterConfig.tipoDocumentoDefault || 'FACTURA_FISCAL') === 'FACTURA_FISCAL'
+                              ? 'bg-emerald-600 text-white shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                          }`}
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          Fiscal SENIAT
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFiscalPrinterConfig(prev => ({ ...prev, tipoDocumentoDefault: 'NOTA_ENTREGA' }))}
+                          className={`px-3 py-1.5 text-[11px] rounded-md font-extrabold transition-all flex items-center gap-1.5 cursor-pointer ${
+                            fiscalPrinterConfig.tipoDocumentoDefault === 'NOTA_ENTREGA'
+                              ? 'bg-blue-600 text-white shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                          }`}
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          Nota Entrega
+                        </button>
                       </div>
                     </div>
                   </div>

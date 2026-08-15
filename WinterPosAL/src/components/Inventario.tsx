@@ -2746,7 +2746,18 @@ export default function Inventario({
                           >
                             <td className="px-2 py-1 font-mono font-bold text-slate-450 truncate" title={p.barcode}>{p.barcode}</td>
                             <td className="px-2 py-1 font-sans select-text break-words">
-                              <div className="font-bold text-slate-850 text-[11px] leading-tight">{p.description}</div>
+                              <div className="font-bold text-slate-850 text-[11px] leading-tight flex items-center gap-1.5 flex-wrap">
+                                <span>{p.description}</span>
+                                {p.exento_impuesto === true ? (
+                                  <span className="bg-amber-100 text-amber-900 border border-amber-300 font-extrabold text-[8.5px] px-1 py-0.2 rounded font-mono shadow-2xs" title="Producto Exento de IVA (0%)">
+                                    (E)
+                                  </span>
+                                ) : (
+                                  <span className="bg-sky-50 text-sky-800 border border-sky-200 font-bold text-[8px] px-1 py-0.2 rounded font-mono" title="Producto Gravable con IVA">
+                                    (G)
+                                  </span>
+                                )}
+                              </div>
                               {(p.a_granel || p.fecha_vencimiento) && (
                                 <div className="flex gap-1.5 mt-0.5 text-[8px] leading-none">
                                   {p.a_granel && (

@@ -1003,19 +1003,48 @@ export default function CajaPOS({
     }
   };
 
-  // Checkout modal state
+  // Checkout modal state & Tipo de Comprobante Persistence
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
-  const [tipoDocumento, setTipoDocumento] = useState<'FACTURA_FISCAL' | 'NOTA_ENTREGA'>('FACTURA_FISCAL');
+  const [tipoDocumento, setTipoDocumento] = useState<'FACTURA_FISCAL' | 'NOTA_ENTREGA'>(() => {
+    try {
+      const active = localStorage.getItem('pos_tipo_documento_activo');
+      if (active === 'NOTA_ENTREGA' || active === 'FACTURA_FISCAL') return active;
+      const savedFiscal = localStorage.getItem('pos_fiscal_printer_config');
+      if (savedFiscal) {
+        const parsed = JSON.parse(savedFiscal);
+        if (parsed.tipoDocumentoDefault === 'NOTA_ENTREGA' || parsed.tipoDocumentoDefault === 'FACTURA_FISCAL') {
+          return parsed.tipoDocumentoDefault;
+        }
+      }
+      const def = localStorage.getItem('pos_default_tipo_documento');
+      if (def === 'NOTA_ENTREGA' || def === 'FACTURA_FISCAL') return def;
+    } catch (_) {}
+    return 'FACTURA_FISCAL';
+  });
 
   const canEmitNoFiscal = useMemo(() => {
     if (currentUser?.rol?.toLowerCase() === 'administrador') return true;
     return !!currentUser?.permisos?.caja?.emitir_no_fiscal;
   }, [currentUser]);
 
+  const handleSelectTipoDoc = (tipo: 'FACTURA_FISCAL' | 'NOTA_ENTREGA') => {
+    if (tipo === 'NOTA_ENTREGA' && !canEmitNoFiscal) {
+      showAlert('Su usuario no tiene permisos para emitir Notas de Entrega no fiscales. Contacte a un administrador.', 'Permiso Denegado', 'error');
+      return;
+    }
+    setTipoDocumento(tipo);
+    try {
+      localStorage.setItem('pos_tipo_documento_activo', tipo);
+    } catch (_) {}
+  };
+
   // If user has no permission to emit no-fiscal, force FACTURA_FISCAL
   useEffect(() => {
     if (!canEmitNoFiscal && tipoDocumento === 'NOTA_ENTREGA') {
       setTipoDocumento('FACTURA_FISCAL');
+      try {
+        localStorage.setItem('pos_tipo_documento_activo', 'FACTURA_FISCAL');
+      } catch (_) {}
     }
   }, [canEmitNoFiscal, tipoDocumento]);
 
@@ -2930,6 +2959,15 @@ export default function CajaPOS({
                       >
                         <span className="font-mono text-slate-500 font-bold mr-1.5">{p.barcode}</span>
                         <span className={`${!hasStock ? 'line-through' : ''}`}>{p.description}</span>
+                        {p.exento_impuesto === true ? (
+                          <span className="bg-amber-100 text-amber-900 border border-amber-300 font-extrabold text-[8.5px] px-1 py-0.2 rounded font-mono ml-1.5 inline-block shadow-2xs" title="Producto Exento de IVA (0%)">
+                            (E)
+                          </span>
+                        ) : (
+                          <span className="bg-sky-50 text-sky-800 border border-sky-200 font-bold text-[8px] px-1 py-0.2 rounded font-mono ml-1.5 inline-block" title="Producto Gravable con IVA">
+                            (G)
+                          </span>
+                        )}
                         {hasStock ? (
                           <span className="float-right text-emerald-600 font-bold font-mono text-right flex flex-col items-end">
                             <span>${p.precio_detalle_usd.toFixed(2)} <span className="text-slate-600 font-bold text-[11px] font-mono">/ {formatBs(priceVES)}</span></span>
@@ -3117,7 +3155,7 @@ export default function CajaPOS({
             <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-300 gap-1 h-[42px] items-center">
               <button
                 type="button"
-                onClick={() => setTipoDocumento('FACTURA_FISCAL')}
+                onClick={() => handleSelectTipoDoc('FACTURA_FISCAL')}
                 className={`flex-1 h-full rounded-md font-extrabold text-[11px] font-sans transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                   tipoDocumento === 'FACTURA_FISCAL'
                     ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-500'
@@ -3131,13 +3169,7 @@ export default function CajaPOS({
 
               <button
                 type="button"
-                onClick={() => {
-                  if (!canEmitNoFiscal) {
-                    showAlert('Su usuario no tiene permisos para emitir Notas de Entrega no fiscales. Contacte a un administrador.', 'Permiso Denegado', 'error');
-                    return;
-                  }
-                  setTipoDocumento('NOTA_ENTREGA');
-                }}
+                onClick={() => handleSelectTipoDoc('NOTA_ENTREGA')}
                 className={`flex-1 h-full rounded-md font-extrabold text-[11px] font-sans transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                   tipoDocumento === 'NOTA_ENTREGA'
                     ? 'bg-blue-600 text-white shadow-sm ring-1 ring-blue-500'
@@ -3198,7 +3230,23 @@ export default function CajaPOS({
                         }`}
                       >
                         <td className="px-4 py-3 font-bold font-mono text-slate-450">{item.product.barcode}</td>
-                        <td className="px-4 py-3 font-sans select-text">{item.product.description}</td>
+                        <td className="px-4 py-3 font-sans select-text">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-slate-850">{item.product.description}</span>
+                            {item.product.exento_impuesto === true ? (
+                              <span className="bg-amber-100 text-amber-900 border border-amber-300 font-extrabold text-[9px] px-1.5 py-0.5 rounded font-mono shadow-2xs" title="Producto Exento de IVA (0%)">
+                                (E)
+                              </span>
+                            ) : (
+                              <span className="bg-sky-50 text-sky-800 border border-sky-200 font-bold text-[8.5px] px-1 py-0.5 rounded font-mono" title="Producto Gravable con IVA">
+                                (G)
+                              </span>
+                            )}
+                            {item.product.a_granel && (
+                              <span className="bg-orange-100 text-orange-800 text-[9px] px-1.5 py-0.5 rounded font-bold font-sans">A Granel</span>
+                            )}
+                          </div>
+                        </td>
                         <td className="px-4 py-3 text-center">
                           <span className={`px-1.5 py-0.5 rounded text-[9px] border font-bold ${
                             item.priceType === 'Mayor' 
@@ -4738,9 +4786,12 @@ export default function CajaPOS({
                   const qtyDisplay = (isBulk || (rawQty % 1 !== 0))
                     ? (rawQty % 1 === 0 ? rawQty.toString() : rawQty.toFixed(3))
                     : Math.round(rawQty).toString();
+                  const isExempt = item.product?.exento_impuesto === true || item.exento_impuesto === true || (item.product?.porcentaje_impuesto !== undefined && item.product?.porcentaje_impuesto === 0);
+                  const taxLabel = isExempt ? ' (E)' : ' (G)';
+
                   return (
                     <div key={item.product?.id || item.productCode || item.code} className="flex justify-between">
-                      <span className="w-1/2 overflow-hidden truncate">{item.product?.description || item.description}</span>
+                      <span className="w-1/2 overflow-hidden truncate">{item.product?.description || item.description}{taxLabel}</span>
                       <span className="w-1/12 text-center">{qtyDisplay}</span>
                       <span className="w-1/4 text-right">${item.priceUSD.toFixed(2)}</span>
                       <span className="w-1/6 text-right">${item.totalUSD.toFixed(2)}</span>
@@ -4757,6 +4808,12 @@ export default function CajaPOS({
                   <span>SUBTOTAL USD:</span>
                   <span>${printedTicketData.subtotal.toFixed(2)}</span>
                 </div>
+                {printedTicketData.exento_usd > 0 && (
+                  <div className="flex justify-between text-slate-700">
+                    <span>MONTO EXENTO (E):</span>
+                    <span>${printedTicketData.exento_usd.toFixed(2)}</span>
+                  </div>
+                )}
                 {printedTicketData.iva > 0 && (
                   <div className="flex justify-between text-slate-700">
                     <span>IVA (16%) USD:</span>

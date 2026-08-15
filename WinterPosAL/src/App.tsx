@@ -2948,9 +2948,12 @@ export default function App() {
                   const qtyDisplay = (isBulk || (rawQty % 1 !== 0))
                     ? (rawQty % 1 === 0 ? rawQty.toString() : rawQty.toFixed(3))
                     : Math.round(rawQty).toString();
+                  const isExempt = item.product?.exento_impuesto === true || item.exento_impuesto === true || (item.product?.porcentaje_impuesto !== undefined && item.product?.porcentaje_impuesto === 0);
+                  const taxLabel = isExempt ? ' (E)' : ' (G)';
+
                   return (
                     <div key={idx} className="flex justify-between">
-                      <span className="w-1/2 overflow-hidden truncate">{item.product?.description || item.description}</span>
+                      <span className="w-1/2 overflow-hidden truncate">{item.product?.description || item.description}{taxLabel}</span>
                       <span className="w-1/12 text-center">{qtyDisplay}</span>
                       <span className="w-1/4 text-right">${item.priceUSD.toFixed(2)}</span>
                       <span className="w-1/6 text-right">${item.totalUSD.toFixed(2)}</span>
@@ -2967,6 +2970,12 @@ export default function App() {
                   <span>SUBTOTAL USD:</span>
                   <span>${reprintSale.subtotal.toFixed(2)}</span>
                 </div>
+                {((reprintSale.exento_usd ?? 0) > 0) && (
+                  <div className="flex justify-between text-slate-700">
+                    <span>MONTO EXENTO (E):</span>
+                    <span>${(reprintSale.exento_usd || 0).toFixed(2)}</span>
+                  </div>
+                )}
                 {reprintSale.descuento > 0 && (
                   <div className="flex justify-between text-red-500">
                     <span>DESCUENTO:</span>
