@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Sale, CierreCaja, User } from '../types';
 import { History, Printer, ShieldAlert, ShoppingCart, Eye, Edit, Trash2, Search, ChevronUp, ChevronDown, ChevronsUpDown, CheckCircle2, FileDown, MessageCircle } from 'lucide-react';
-import { formatNumberToWordsUSD, getLocalDateStr } from '../utils';
+import { formatNumberToWordsUSD, getLocalDateStr, formatBs } from '../utils';
 import { useDialog } from '../hooks/useDialog';
 
 interface VentasHistoricoProps {
@@ -1499,7 +1499,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                             {isDev ? '-' : ''}${Math.abs(sale.totalUSD ?? 0).toFixed(2)}
                           </td>
                           <td className={`px-3 py-1 text-center font-mono font-bold ${isDev ? 'text-rose-500' : 'text-slate-500'}`}>
-                            {isDev ? '-' : ''}Bs {Math.abs(sale.totalVES ?? 0).toFixed(2)}
+                            {isDev ? '-' : ''}{formatBs(Math.abs(sale.totalVES ?? 0))}
                           </td>
                           <td className="px-3 py-1.5 font-sans">
                             <div className="flex flex-wrap gap-1 max-w-[220px]">
@@ -1607,7 +1607,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                   </div>
                   <div className="flex justify-between font-mono text-[11px] text-slate-500">
                     <span>Total VES:</span>
-                    <span>Bs {Math.abs(activeSelectedSale.totalVES || 0).toFixed(2)}</span>
+                    <span>{formatBs(Math.abs(activeSelectedSale.totalVES || 0))}</span>
                   </div>
                 </div>
               ) : selectedSaleIds.length > 1 ? (
@@ -1622,7 +1622,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                   </div>
                   <div className="flex justify-between font-mono text-[11px] text-emerald-800">
                     <span>Total VES:</span>
-                    <span>Bs {selectedSalesSummary.totalVES.toFixed(2)}</span>
+                    <span>{formatBs(selectedSalesSummary.totalVES)}</span>
                   </div>
                 </div>
               ) : (

@@ -32,7 +32,7 @@ import {
   ShoppingBag, Package, Users, Truck,
   TrendingUp, Settings, LogOut, Globe, Cpu, History, Printer, CheckCircle2, ShieldCheck, Briefcase
 } from 'lucide-react';
-import { printTicketReceipt } from './utils';
+import { printTicketReceipt, formatBs, formatUSD } from './utils';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -2460,7 +2460,7 @@ export default function App() {
                 <span>CAJA ABIERTA</span>
               </div>
               <span className="text-[9px] text-slate-300 font-normal mt-1 block">
-                Inicio: ${montoAperturaUsd.toFixed(2)} / {montoAperturaVes.toFixed(2)} Bs
+                Inicio: {formatUSD(montoAperturaUsd)} / {formatBs(montoAperturaVes)}
               </span>
             </div>
           ) : (
@@ -2486,7 +2486,7 @@ export default function App() {
             <div className="flex items-center gap-1.5 font-sans">
               <span className="text-emerald-300 font-extrabold text-[11px] uppercase tracking-wider">TASA BCV:</span>
               <span className="bg-slate-950 text-white font-mono font-black text-xs px-2.5 py-0.5 rounded border border-emerald-400/60 shadow-inner flex items-center gap-1">
-                <span className="text-emerald-300 text-sm font-extrabold">{tasaDia.toFixed(2)}</span>
+                <span className="text-emerald-300 text-sm font-extrabold">{formatBs(tasaDia, false)}</span>
                 <span className="text-[10px] text-emerald-200/90 font-bold">Bs</span>
               </span>
             </div>
@@ -2969,7 +2969,7 @@ export default function App() {
                 </div>
                 <div className="flex justify-between text-slate-600 font-bold border-t border-dashed border-slate-350 pt-1">
                   <span>TOTAL VES:</span>
-                  <span>Bs {reprintSale.totalVES.toFixed(2)}</span>
+                  <span>{formatBs(reprintSale.totalVES)}</span>
                 </div>
               </div>
 
@@ -2981,13 +2981,13 @@ export default function App() {
                 {reprintSale.pagos.map((p, idx) => (
                   <div key={idx} className="flex justify-between">
                     <span>{p.metodo} {p.bancoEmisor ? `(${p.bancoEmisor})` : ''} {p.reference ? `Ref:${p.reference}` : ''}:</span>
-                    <span>{p.metodo.endsWith('$') || p.metodo.includes('Credito') ? `$${p.monto.toFixed(2)}` : `Bs ${p.monto.toFixed(2)}`}</span>
+                    <span>{p.metodo.endsWith('$') || p.metodo.includes('Credito') ? `$${p.monto.toFixed(2)}` : formatBs(p.montoVES || p.monto)}</span>
                   </div>
                 ))}
                 {reprintSale.vueltoVES > 0 && (
                   <div className="flex justify-between font-bold border-t border-slate-300 pt-1 text-[11px]">
                     <span>CAMBIO VES:</span>
-                    <span>Bs {reprintSale.vueltoVES.toFixed(2)}</span>
+                    <span>{formatBs(reprintSale.vueltoVES)}</span>
                   </div>
                 )}
               </div>

@@ -7,7 +7,7 @@ import {
   Clock, ListOrdered, Plus, AlertCircle, DollarSign, RotateCcw, Printer,
   Calendar, Lock, Coins, RefreshCw
 } from 'lucide-react';
-import { formatNumberToWordsUSD, printTicketReceipt } from '../utils';
+import { formatNumberToWordsUSD, printTicketReceipt, formatBs, formatUSD } from '../utils';
 import { useDialog } from '../hooks/useDialog';
 import CambioDivisasModal from './CambioDivisasModal';
 
@@ -2814,7 +2814,7 @@ export default function CajaPOS({
                         <span className={`${!hasStock ? 'line-through' : ''}`}>{p.description}</span>
                         {hasStock ? (
                           <span className="float-right text-emerald-600 font-bold font-mono text-right flex flex-col items-end">
-                            <span>${p.precio_detalle_usd.toFixed(2)} <span className="text-slate-550 font-normal text-[9px] font-sans">/ Bs {priceVES.toFixed(2)}</span></span>
+                            <span>${p.precio_detalle_usd.toFixed(2)} <span className="text-slate-600 font-bold text-[11px] font-mono">/ {formatBs(priceVES)}</span></span>
                             <span className="text-[9px] text-slate-500 font-sans font-semibold">Stock: {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}</span>
                           </span>
                         ) : (
@@ -3077,13 +3077,13 @@ export default function CajaPOS({
                         <td className="px-4 py-3 text-right font-mono">
                           <div className="flex flex-col text-right">
                             <span className="text-sm font-black text-slate-900 font-mono">${item.priceUSD.toFixed(2)}</span>
-                            <span className="text-[11px] font-bold text-slate-500 font-sans">Bs {(item.priceUSD * tasaDia).toFixed(2)}</span>
+                            <span className="text-[13px] font-extrabold text-blue-700 font-mono tracking-tight">{formatBs(item.priceUSD * tasaDia)}</span>
                           </div>
                         </td>
                         <td className="px-4 py-3 text-right font-mono">
                           <div className="flex flex-col text-right">
                             <span className="text-base font-black text-emerald-600 font-mono">${item.totalUSD.toFixed(2)}</span>
-                            <span className="text-[11px] font-bold text-slate-500 font-sans">Bs {(item.totalUSD * tasaDia).toFixed(2)}</span>
+                            <span className="text-[13px] font-extrabold text-emerald-700 font-mono tracking-tight">{formatBs(item.totalUSD * tasaDia)}</span>
                           </div>
                         </td>
                         <td className="px-4 py-3 text-center">
@@ -3190,8 +3190,8 @@ export default function CajaPOS({
             </div>
 
             <div className="flex justify-between items-baseline text-slate-500 border-t border-dashed border-slate-200 pt-1.5">
-              <span className="text-[9.5px] font-sans uppercase">Ref VES (Tasa {tasaDia.toFixed(2)}):</span>
-              <span className="text-xs font-bold font-mono">Bs {totalVES.toFixed(2)}</span>
+              <span className="text-[10px] font-sans uppercase font-bold text-slate-500">Ref VES (Tasa {formatBs(tasaDia, false)}):</span>
+              <span className="text-sm font-black font-mono text-slate-800">{formatBs(totalVES)}</span>
             </div>
           </div>
         </div>
@@ -3811,7 +3811,7 @@ export default function CajaPOS({
                       </div>
                       <div className="flex justify-between items-baseline text-slate-700 border-t border-slate-200/80 pt-1">
                         <span className="font-sans font-bold text-xs uppercase tracking-wide">TOTAL VES:</span>
-                        <span className="font-mono text-base font-extrabold text-slate-900">Bs {totalVES.toFixed(2)}</span>
+                        <span className="font-mono text-xl font-black text-slate-900">{formatBs(totalVES)}</span>
                       </div>
                     </div>
                     
@@ -3835,8 +3835,8 @@ export default function CajaPOS({
                             ${remainingUSD.toFixed(2)} USD
                           </span>
                           {remainingUSD > 0 && (
-                            <span className="text-xs text-red-800 font-black font-mono mt-0.5">
-                              Bs {(remainingUSD * tasaDia).toFixed(2)} VES
+                            <span className="text-base text-red-800 font-black font-mono mt-0.5 tracking-tight">
+                              {formatBs(remainingUSD * tasaDia)} VES
                             </span>
                           )}
                         </div>
@@ -3847,8 +3847,8 @@ export default function CajaPOS({
                     <div className="border-t border-dashed border-slate-250 pt-2">
                       <span className="text-[10px] text-slate-500 block font-sans uppercase tracking-wider font-bold">Diferencia / Cambio (Vuelto):</span>
                       <div className="flex justify-between items-center mt-1 bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-lg font-mono">
-                        <span className="text-purple-700 font-black text-lg">
-                          Bs {changeVES.toFixed(2)}
+                        <span className="text-purple-700 font-black text-2xl">
+                          {formatBs(changeVES)}
                         </span>
                         <span className="text-purple-800 font-extrabold text-xs">
                           (${changeUSD.toFixed(2)} USD)
@@ -3886,12 +3886,12 @@ export default function CajaPOS({
                           <div>
                             <label className="text-[9.5px] text-slate-500 block mb-0.5">Restante en VES (Bs)</label>
                             <div className="w-full bg-purple-100/50 border border-purple-200 rounded p-1 font-bold font-mono text-purple-900 text-sm">
-                              Bs {((changeUSD - (Math.min(changeUSD, Math.max(0, parseFloat(mixedChangeUSDVal) || 0)))) * tasaVuelto).toFixed(2)}
+                              {formatBs((changeUSD - (Math.min(changeUSD, Math.max(0, parseFloat(mixedChangeUSDVal) || 0)))) * tasaVuelto)}
                             </div>
                           </div>
                         </div>
                         <div className="text-[8.5px] text-slate-500 italic mt-0.5 leading-tight">
-                          * Ingrese el monto en USD que devolverá en billetes. El sistema calcula la diferencia a devolver en Bolívares usando la tasa de vuelto ({tasaVuelto.toFixed(2)} Bs).
+                          * Ingrese el monto en USD que devolverá en billetes. El sistema calcula la diferencia a devolver en Bolívares usando la tasa de vuelto ({formatBs(tasaVuelto, false)} Bs).
                         </div>
                       </div>
                     )}
@@ -4301,7 +4301,7 @@ export default function CajaPOS({
                         />
                         {totalAbono > 0 && (
                           <span className="absolute right-3 top-2.5 text-[11px] font-mono text-slate-500 font-bold">
-                            = Bs {(totalAbono * tasaDia).toFixed(2)} VES
+                            = {formatBs(totalAbono * tasaDia)} VES
                           </span>
                         )}
                       </div>
@@ -4332,7 +4332,7 @@ export default function CajaPOS({
                         {!isUsdMethod(abonoMethod) && (
                           <div className="bg-emerald-50 border border-emerald-200 px-3 py-2 rounded-lg flex justify-between items-center text-xs font-mono">
                             <span className="font-sans text-[10px] font-bold uppercase text-emerald-800">Cobrar en Bolívares:</span>
-                            <span className="font-black text-emerald-700 text-sm">Bs {(totalAbono * tasaDia).toFixed(2)} VES</span>
+                            <span className="font-black text-emerald-700 text-sm">{formatBs(totalAbono * tasaDia)} VES</span>
                           </div>
                         )}
 
@@ -4361,7 +4361,7 @@ export default function CajaPOS({
                           <span>Falta por Cubrir:</span>
                           <div className="text-right font-mono font-black">
                             <span className="text-sm block">${restanteUsd.toFixed(2)} USD</span>
-                            <span className="text-[10px] block opacity-80">Bs {restanteVes.toFixed(2)} VES</span>
+                            <span className="text-[10px] block opacity-80">{formatBs(restanteVes)} VES</span>
                           </div>
                         </div>
 
@@ -4376,7 +4376,7 @@ export default function CajaPOS({
                                 </div>
                                 <div className="flex items-center gap-2">
                                   {p.monto_usd > 0 && <span className="text-emerald-700 font-bold">${p.monto_usd.toFixed(2)}</span>}
-                                  {p.monto_ves > 0 && <span className="text-blue-700 font-bold">Bs {p.monto_ves.toFixed(2)}</span>}
+                                  {p.monto_ves > 0 && <span className="text-blue-700 font-bold">{formatBs(p.monto_ves)}</span>}
                                   <button onClick={() => setAbonoPayments(prev => prev.filter((_, j) => j !== i))} className="text-red-400 hover:text-red-600 text-xs p-1">✕</button>
                                 </div>
                               </div>
@@ -4708,7 +4708,7 @@ export default function CajaPOS({
                     <div className="space-y-2 border-t border-slate-100 pt-2 font-mono">
                       <div className="flex justify-between">
                         <span>Apertura de Caja :</span>
-                        <span className="font-bold text-slate-800">$ {cierreResult.aperturaUsd.toFixed(2)} / Bs {cierreResult.aperturaVes.toFixed(2)}</span>
+                        <span className="font-bold text-slate-800">$ {cierreResult.aperturaUsd.toFixed(2)} / {formatBs(cierreResult.aperturaVes)}</span>
                       </div>
                       
                       {/* Ventas en Efectivo ($) siempre se muestra por ser pilar */}
@@ -4720,7 +4720,7 @@ export default function CajaPOS({
                       {((cierreResult.ventasEfectivoVes ?? 0) > 0 || !hideZeroLines) && (
                         <div className="flex justify-between font-bold text-slate-800">
                           <span>Ventas en Efectivo (Bs) :</span>
-                          <span>Bs {cierreResult.ventasEfectivoVes!.toFixed(2)}</span>
+                          <span>{formatBs(cierreResult.ventasEfectivoVes)}</span>
                         </div>
                       )}
 
@@ -4734,28 +4734,28 @@ export default function CajaPOS({
                       {((cierreResult.abonosEfectivoBsVes ?? 0) > 0 || !hideZeroLines) && (
                         <div className="flex justify-between font-bold text-emerald-700">
                           <span>Abono Clientes (Efectivo Bs) :</span>
-                          <span>Bs {cierreResult.abonosEfectivoBsVes!.toFixed(2)}</span>
+                          <span>{formatBs(cierreResult.abonosEfectivoBsVes)}</span>
                         </div>
                       )}
 
                       {((cierreResult.abonosBiopagoVes ?? 0) > 0 || !hideZeroLines) && (
                         <div className="flex justify-between font-bold text-sky-700">
                           <span>Abono Clientes (Biopago) :</span>
-                          <span>Bs {cierreResult.abonosBiopagoVes!.toFixed(2)}</span>
+                          <span>{formatBs(cierreResult.abonosBiopagoVes)}</span>
                         </div>
                       )}
 
                       {((cierreResult.abonosPuntoVes ?? 0) > 0 || !hideZeroLines) && (
                         <div className="flex justify-between font-bold text-indigo-700">
                           <span>Abono Clientes (Punto / Tarjeta) :</span>
-                          <span>Bs {cierreResult.abonosPuntoVes!.toFixed(2)}</span>
+                          <span>{formatBs(cierreResult.abonosPuntoVes)}</span>
                         </div>
                       )}
 
                       {((cierreResult.abonosPagoMovilVes ?? 0) > 0 || !hideZeroLines) && (
                         <div className="flex justify-between font-bold text-blue-700">
                           <span>Abono Clientes (Pago Móvil) :</span>
-                          <span>Bs {cierreResult.abonosPagoMovilVes!.toFixed(2)}</span>
+                          <span>{formatBs(cierreResult.abonosPagoMovilVes)}</span>
                         </div>
                       )}
 
@@ -4797,7 +4797,7 @@ export default function CajaPOS({
                       {((cierreResult.entradaEfectivoVes ?? 0) > 0 || !hideZeroLines) && (
                         <div className="flex justify-between">
                           <span>Entrada Efectivo (Bs) :</span>
-                          <span className="font-bold text-slate-800">Bs {(cierreResult.entradaEfectivoVes ?? 0).toFixed(2)}</span>
+                          <span className="font-bold text-slate-800">{formatBs(cierreResult.entradaEfectivoVes ?? 0)}</span>
                         </div>
                       )}
 
@@ -4825,7 +4825,7 @@ export default function CajaPOS({
                       {((cierreResult.salidaEfectivoVes ?? 0) > 0 || !hideZeroLines) && (
                         <div className="flex justify-between text-red-555 font-bold">
                           <span>Salida Efectivo (Bs) :</span>
-                          <span>- Bs {(cierreResult.salidaEfectivoVes ?? 0).toFixed(2)}</span>
+                          <span>- {formatBs(cierreResult.salidaEfectivoVes ?? 0)}</span>
                         </div>
                       )}
 
@@ -4839,7 +4839,7 @@ export default function CajaPOS({
                       {((cierreResult.devolucionEfectivoVes ?? 0) > 0 || !hideZeroLines) && (
                         <div className="flex justify-between text-red-555 font-bold">
                           <span>Devolución Efectivo (Bs) :</span>
-                          <span>- Bs {(cierreResult.devolucionEfectivoVes ?? 0).toFixed(2)}</span>
+                          <span>- {formatBs(cierreResult.devolucionEfectivoVes ?? 0)}</span>
                         </div>
                       )}
 
@@ -4853,7 +4853,7 @@ export default function CajaPOS({
                       {((cierreResult.vueltosEntregadosVes ?? 0) > 0 || !hideZeroLines) && (
                         <div className="flex justify-between text-amber-700 font-bold">
                           <span>Vuelto Entregado (Bs) :</span>
-                          <span>- Bs {(cierreResult.vueltosEntregadosVes ?? 0).toFixed(2)}</span>
+                          <span>- {formatBs(cierreResult.vueltosEntregadosVes ?? 0)}</span>
                         </div>
                       )}
                     </div>

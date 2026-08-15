@@ -7,6 +7,7 @@ import {
   updateProductStock, updateProductPrices, updateProductPricesBulk, getClients, saveClient, registerAbono,
   getTasaHistory, saveTasa, clearTasaHistory, getMovements, saveMovement, getPriceHistory, savePriceHistory,
   getSales, saveSale, getCierres, abrirCaja, cerrarCaja, getCajaEstado, registrarCajaMovimiento, updateCierre, deleteCierre,
+  getOpenCajas, forceCloseCaja,
   updateClient, deleteClient, getAbonos, deleteProduct, updateProduct, saveProductsBulk, saveClientsBulk,
   saveUser, updateUser, deleteUser, getRoles, saveRole, updateRole, deleteRole, wipeDatabase, backupDatabase, restoreDatabase,
   readJsonFile, writeJsonFile,
@@ -785,6 +786,46 @@ app.post('/api/cajas/movimiento', async (req, res) => {
   const cUsd = comision_usd || comisionUsd || 0;
   const success = await registrarCajaMovimiento(tipo, descripcion, usd, ves, terminal, usuarioId, usuarioNombre, payMethod, cVes, cUsd);
   res.json({ success });
+});
+
+app.get('/api/cajas/abiertas', async (req, res) => {
+  try {
+    const openList = await getOpenCajas();
+    res.json(openList);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/cajas/forzar-cierre', async (req, res) => {
+  try {
+    const { cajaId, adminName } = req.body;
+    if (!cajaId) {
+      return res.status(400).json({ success: false, message: 'cajaId es requerido' });
+    }
+    const result = await forceCloseCaja(cajaId, adminName || 'ADMINISTRADOR');
+    if (result && result.success) {
+      const closureTime = Date.now();
+      if (result.usuarioId) {
+        userShiftClosureEvents.set(`id_${result.usuarioId}`, closureTime);
+        activeSessions.delete(result.usuarioId);
+        activeSessions.delete(String(result.usuarioId));
+        activeSessions.delete(parseInt(result.usuarioId));
+      }
+      if (result.terminal) {
+        for (const [sId, sess] of activeSessions.entries()) {
+          if (sess.terminal === result.terminal) {
+            activeSessions.delete(sId);
+          }
+        }
+      }
+      console.log(`[Admin Force Shift Closure] 🔒 Cierre forzado de caja ID ${cajaId} por ${adminName || 'Admin'}. Usuario ID ${result.usuarioId} liberado.`);
+    }
+    res.json(result);
+  } catch (err) {
+    console.error('Error en /api/cajas/forzar-cierre:', err.message);
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 app.get('/api/cajas/cierres', async (req, res) => {

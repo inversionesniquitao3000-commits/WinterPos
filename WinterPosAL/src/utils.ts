@@ -59,6 +59,48 @@ export function formatNumberToWordsUSD(amount: number): string {
   return `${integerWords} CON ${centsFormatted} DOLARES`;
 }
 
+/**
+ * Formatea un monto numérico a formato estándar de Bolívares (VES / Bs):
+ * - Separador de miles: punto (.)
+ * - Separador de decimales: coma (,)
+ * Ejemplo: 2236.22 -> "Bs 2.236,22" o "2.236,22"
+ */
+export function formatBs(amount: number | string | null | undefined, includeSymbol: boolean = true): string {
+  const num = typeof amount === 'number' ? amount : parseFloat(String(amount ?? 0));
+  if (isNaN(num)) return includeSymbol ? 'Bs 0,00' : '0,00';
+  
+  const isNegative = num < 0;
+  const absNum = Math.abs(num);
+  const fixed = absNum.toFixed(2);
+  const parts = fixed.split('.');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  const formatted = parts.join(',');
+  const sign = isNegative ? '-' : '';
+  
+  return includeSymbol ? `${sign}Bs ${formatted}` : `${sign}${formatted}`;
+}
+
+/**
+ * Formatea un monto numérico a formato estándar de Dólares (USD):
+ * - Separador de miles: coma (,)
+ * - Separador de decimales: punto (.)
+ * Ejemplo: 2236.22 -> "$2,236.22" o "2,236.22"
+ */
+export function formatUSD(amount: number | string | null | undefined, includeSymbol: boolean = true): string {
+  const num = typeof amount === 'number' ? amount : parseFloat(String(amount ?? 0));
+  if (isNaN(num)) return includeSymbol ? '$0.00' : '0.00';
+  
+  const isNegative = num < 0;
+  const absNum = Math.abs(num);
+  const fixed = absNum.toFixed(2);
+  const parts = fixed.split('.');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const formatted = parts.join('.');
+  const sign = isNegative ? '-' : '';
+  
+  return includeSymbol ? `${sign}$${formatted}` : `${sign}${formatted}`;
+}
+
 export function getLocalDateStr(d: Date = new Date()): string {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -128,7 +170,7 @@ export function printTicketReceipt(
     const refStr = p.reference || p.referencia ? ` Ref:${p.reference || p.referencia}` : '';
     const amountStr = (p.metodo.endsWith('$') || p.metodo.includes('Credito'))
       ? `$${p.monto.toFixed(2)}`
-      : `Bs ${(p.montoVES || p.monto).toFixed(2)}`;
+      : formatBs(p.montoVES || p.monto);
     return `
       <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
         <span>${p.metodo}${bankStr}${refStr}:</span>
@@ -255,7 +297,7 @@ export function printTicketReceipt(
           </div>
           <div class="bold row-flex" style="margin-top: 2px;">
             <span>TOTAL VES:</span>
-            <span>Bs ${(ticketData.totalVES || 0).toFixed(2)}</span>
+            <span>${formatBs(ticketData.totalVES || 0)}</span>
           </div>
         </div>
 
@@ -267,7 +309,7 @@ export function printTicketReceipt(
         ${ticketData.vueltoVES > 0 ? `
           <div class="bold row-flex" style="margin-top: 3px; border-top: 1px dashed #000; padding-top: 2px;">
             <span>CAMBIO ENTREGADO VES:</span>
-            <span>Bs ${ticketData.vueltoVES.toFixed(2)}</span>
+            <span>${formatBs(ticketData.vueltoVES)}</span>
           </div>
         ` : ''}
 

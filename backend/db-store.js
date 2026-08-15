@@ -2982,6 +2982,105 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
   };
 }
 
+export async function getOpenCajas() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query(`
+        SELECT c.id, c.usuario_id, c.estacion_nombre as terminal, 
+               c.monto_apertura_usd, c.monto_apertura_ves, c.fecha_apertura, c.estatus,
+               u.usuario, u.nombre as "usuario_nombre", u.rol
+        FROM Cajas_Apertura_Cierre c
+        LEFT JOIN Usuarios u ON c.usuario_id = u.id
+        WHERE c.estatus = 'Abierta'
+        ORDER BY c.id DESC
+      `);
+      return res.rows.map(r => ({
+        id: r.id,
+        usuarioId: r.usuario_id,
+        terminal: r.terminal || 'CAJA_PRINCIPAL',
+        montoAperturaUsd: parseFloat(r.monto_apertura_usd || 0),
+        montoAperturaVes: parseFloat(r.monto_apertura_ves || 0),
+        fechaApertura: getLocalISODateString(r.fecha_apertura),
+        usuario: r.usuario || 'Desconocido',
+        usuarioNombre: r.usuario_nombre || r.usuario || 'Desconocido',
+        rol: r.rol || 'Cajero'
+      }));
+    } catch (err) {
+      console.error('Error en getOpenCajas (Postgres):', err.message);
+      return [];
+    }
+  }
+  const activeCheck = readJsonFile('caja_activa.json', { abierta: false });
+  if (activeCheck && activeCheck.abierta) {
+    return [{
+      id: 1,
+      usuarioId: activeCheck.usuarioId || 1,
+      terminal: activeCheck.terminal || 'CAJA_01',
+      montoAperturaUsd: activeCheck.aperturaUsd || 0,
+      montoAperturaVes: activeCheck.aperturaVes || 0,
+      fechaApertura: activeCheck.fechaApertura || getLocalISODateString(),
+      usuario: activeCheck.usuario || 'Usuario',
+      usuarioNombre: activeCheck.usuarioNombre || 'Usuario',
+      rol: 'Cajero'
+    }];
+  }
+  return [];
+}
+
+export async function forceCloseCaja(cajaId, adminName = 'ADMINISTRADOR') {
+  if (usePostgres) {
+    try {
+      const id = parseInt(cajaId);
+      const cajaRes = await pool.query('SELECT * FROM Cajas_Apertura_Cierre WHERE id = $1', [id]);
+      if (cajaRes.rowCount === 0) return { success: false, message: 'Caja no encontrada.' };
+      
+      const caja = cajaRes.rows[0];
+      const nowStr = getLocalISODateString();
+      
+      // Calculate sales under this caja
+      const salesRes = await pool.query('SELECT COALESCE(SUM(total_usd), 0) as total FROM Ventas WHERE caja_id = $1', [id]);
+      const ventaTotal = parseFloat(salesRes.rows[0]?.total || 0);
+
+      await pool.query(`
+        UPDATE Cajas_Apertura_Cierre SET
+          estatus = 'Cerrada',
+          fecha_cierre = $1,
+          monto_cierre_real_usd = monto_apertura_usd,
+          monto_cierre_real_ves = monto_apertura_ves,
+          monto_cierre_esperado_usd = monto_apertura_usd,
+          monto_cierre_esperado_ves = monto_apertura_ves,
+          venta_total_usd = $2,
+          detalles_json = $3
+        WHERE id = $4
+      `, [
+        nowStr,
+        ventaTotal,
+        JSON.stringify({
+          motivo: `Cierre Forzado por Administrador (${adminName})`,
+          fechaCierre: nowStr,
+          forzadoPorAdmin: true,
+          admin: adminName
+        }),
+        id
+      ]);
+      
+      return { 
+        success: true, 
+        usuarioId: caja.usuario_id,
+        terminal: caja.estacion_nombre
+      };
+    } catch (err) {
+      console.error('Error en forceCloseCaja (Postgres):', err.message);
+      throw err;
+    }
+  }
+  
+  const activeCheck = readJsonFile('caja_activa.json', { abierta: false });
+  activeCheck.abierta = false;
+  writeJsonFile('caja_activa.json', activeCheck);
+  return { success: true };
+}
+
 export async function registrarCajaMovimiento(tipo, descripcion, usd, ves, terminal, usuarioId, usuarioNombre, metodoPago = 'EFECTIVO', comisionVes = 0, comisionUsd = 0) {
   if (usePostgres) {
     try {

@@ -8,7 +8,7 @@ import {
   RefreshCw, Unlock, RotateCcw, AlertTriangle
 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
-import { getLocalDateStr } from '../utils';
+import { getLocalDateStr, formatBs, formatUSD } from '../utils';
 import { MasterPassModal } from './MasterPassModal';
 
 interface ConfiguracionEmpresaProps {
@@ -151,6 +151,7 @@ export default function ConfiguracionEmpresa({
   const [mpMessage, setMpMessage] = useState<{type: 'success' | 'error'; text: string} | null>(null);
   const [mpLoading, setMpLoading] = useState(false);
   const [activeSessionsList, setActiveSessionsList] = useState<any[]>([]);
+  const [openCajasList, setOpenCajasList] = useState<any[]>([]);
   const [activeGuideModule, setActiveGuideModule] = useState<string>('inventario');
   const [onlyClientBalances, setOnlyClientBalances] = useState(false);
 
@@ -164,13 +165,57 @@ export default function ConfiguracionEmpresa({
     } catch (_) {}
   };
 
+  const fetchOpenCajas = async () => {
+    try {
+      const res = await fetch(getApiUrl('/cajas/abiertas'));
+      if (res.ok) {
+        const data = await res.json();
+        setOpenCajasList(data);
+      }
+    } catch (_) {}
+  };
+
   useEffect(() => {
     if (subTabUsers === 'sesiones') {
       fetchActiveSessions();
-      const interval = setInterval(fetchActiveSessions, 5000);
+      fetchOpenCajas();
+      const interval = setInterval(() => {
+        fetchActiveSessions();
+        fetchOpenCajas();
+      }, 5000);
       return () => clearInterval(interval);
     }
   }, [subTabUsers]);
+
+  const handleForceCloseCaja = async (caja: any) => {
+    const ok = await showConfirm(
+      `¿Desea forzar el CIERRE del turno/caja de "${caja.usuarioNombre || caja.usuario}" en la estación "${caja.terminal}"?\n\nEsta acción registrará el cierre en el historial y liberará la estación de inmediato para que el usuario pueda ingresar normalmente.`,
+      'Forzar Cierre de Turno Remoto',
+      { confirmLabel: '🔒 Forzar Cierre de Caja', isDanger: true }
+    );
+    if (ok) {
+      try {
+        const res = await fetch(getApiUrl('/cajas/forzar-cierre'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            cajaId: caja.id,
+            adminName: currentUser.nombre || currentUser.usuario || 'ADMINISTRADOR'
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showAlert(`La caja de "${caja.usuarioNombre || caja.usuario}" (${caja.terminal}) fue cerrada y liberada exitosamente.`, 'Turno de Caja Liberado', 'success');
+          fetchOpenCajas();
+          fetchActiveSessions();
+        } else {
+          showAlert(data.message || 'Error al forzar cierre de la caja.', 'Error', 'error');
+        }
+      } catch (err: any) {
+        showAlert('Error de comunicación con el servidor: ' + err.message, 'Error', 'error');
+      }
+    }
+  };
 
   const handleForceDisconnectSession = async (userId: number | string, username: string) => {
     const ok = await showConfirm(
@@ -1768,6 +1813,81 @@ export default function ConfiguracionEmpresa({
                     </tbody>
                   </table>
                 </div>
+
+                {/* MONITOR Y CONTROL DE CAJAS / TURNOS ABIERTOS EN LA RED */}
+                <div className="border-t border-slate-200 pt-6 mt-6 space-y-4">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h3 className="text-xs font-bold text-slate-800 uppercase font-sans flex items-center gap-2">
+                        <Lock className="w-3.5 h-3.5 text-amber-600" />
+                        Turnos de Caja Abiertos en la Red ({openCajasList.length})
+                      </h3>
+                      <p className="text-[11px] text-slate-500 font-sans mt-0.5">
+                        Si un usuario quedó con el turno abierto o bloqueado en otra estación (ej. CAJA_02), el Administrador puede forzar el cierre y liberarlo de inmediato.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={fetchOpenCajas}
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold font-sans text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 transition-all"
+                    >
+                      🔄 Refrescar Cajas
+                    </button>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left font-sans border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-200 text-slate-400 text-[10px] uppercase font-bold">
+                          <th className="py-2.5 px-3">Estación / Terminal</th>
+                          <th className="py-2.5 px-3">Usuario Asignado</th>
+                          <th className="py-2.5 px-3">Fecha y Hora Apertura</th>
+                          <th className="py-2.5 px-3">Monto Apertura ($ / Bs)</th>
+                          <th className="py-2.5 px-3 text-right">Acción de Administrador</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {openCajasList.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="py-8 text-center text-slate-400 font-sans italic">
+                              ✅ No hay turnos de caja abiertos en este momento. Todas las cajas están cerradas.
+                            </td>
+                          </tr>
+                        ) : (
+                          openCajasList.map(c => (
+                            <tr key={c.id} className="border-b border-slate-100 hover:bg-amber-50/40 text-xs">
+                              <td className="py-3 px-3 font-mono font-black text-amber-800 flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                                {c.terminal}
+                              </td>
+                              <td className="py-3 px-3">
+                                <span className="font-bold text-slate-800 block">{c.usuarioNombre || c.usuario}</span>
+                                <span className="text-[10px] text-slate-400 font-mono">ID: {c.usuarioId} ({c.usuario})</span>
+                              </td>
+                              <td className="py-3 px-3 font-mono text-slate-600 text-[11px]">{c.fechaApertura}</td>
+                              <td className="py-3 px-3 font-mono">
+                                <span className="font-bold text-slate-800">${c.montoAperturaUsd.toFixed(2)}</span>
+                                <span className="text-[11px] text-slate-500 ml-1.5">/ {formatBs(c.montoAperturaVes)}</span>
+                              </td>
+                              <td className="py-3 px-3 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => handleForceCloseCaja(c)}
+                                  className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs transition-all shadow-sm flex items-center gap-1.5 ml-auto"
+                                  title="Forzar el cierre de esta caja y desbloquear al usuario"
+                                >
+                                  <Lock className="w-3.5 h-3.5" />
+                                  Forzar Cierre Remoto
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
               </div>
             )}
             {/* SUBTAB: POLITICAS DE MULTISESION */}
