@@ -263,6 +263,7 @@ export default function Inventario({
   const [filterStock, setFilterStock] = useState<'todos' | 'con_existencia' | 'sin_existencia' | 'menor_igual' | 'mayor_igual'>('todos');
   const [customStockValue, setCustomStockValue] = useState<string>('5');
   const [filterMinStock, setFilterMinStock] = useState<'todos' | 'bajo_minimo'>('todos');
+  const [filterTax, setFilterTax] = useState<'todos' | 'exentos' | 'gravables'>('todos');
 
 
 
@@ -1631,7 +1632,7 @@ export default function Inventario({
   // Reset page when filters or search change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, selectedCategories, filterStock, customStockValue, filterMinStock]);
+  }, [searchTerm, selectedCategories, filterStock, customStockValue, filterMinStock, filterTax]);
 
   const filteredProducts = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -1659,10 +1660,16 @@ export default function Inventario({
       const matchesMinStock = 
         filterMinStock === 'todos' ? true :
         filterMinStock === 'bajo_minimo' ? stockAct <= stockMin : true;
+
+      const isExempt = p.exento_impuesto === true || p.porcentaje_impuesto === 0;
+      const matchesTax = 
+        filterTax === 'todos' ? true :
+        filterTax === 'exentos' ? isExempt :
+        filterTax === 'gravables' ? !isExempt : true;
         
-      return matchesSearch && matchesCategory && matchesStock && matchesMinStock;
+      return matchesSearch && matchesCategory && matchesStock && matchesMinStock && matchesTax;
     });
-  }, [safeProducts, searchTerm, selectedCategories, filterStock, customStockValue, filterMinStock]);
+  }, [safeProducts, searchTerm, selectedCategories, filterStock, customStockValue, filterMinStock, filterTax]);
 
   const sortedProducts = useMemo(() => {
     if (sortRules.length === 0) return filteredProducts;
@@ -1917,6 +1924,9 @@ export default function Inventario({
       (filterStock as string) === 'menor_15' ? 'EXISTENCIA ≤ 15' : 'TODOS';
     const minStockFilterLabel = 
       filterMinStock === 'todos' ? 'TODOS' : 'BAJO STOCK MÍNIMO';
+    const taxFilterLabel = 
+      filterTax === 'todos' ? 'TODOS' :
+      filterTax === 'exentos' ? 'SOLO EXENTOS (E)' : 'SOLO GRAVABLES (G)';
 
     const fieldNames: Record<string, string> = {
       descripcion: 'Descripción',
@@ -1936,7 +1946,7 @@ export default function Inventario({
     const rowsHtml = sortedProducts.map(p => `
       <tr style="border-bottom: 1px solid #e2e8f0; page-break-inside: avoid;">
         <td style="padding: 1.5px 3px; font-family: monospace; font-size: 8px; font-weight: bold; color: #334155;">${p.barcode}</td>
-        <td style="padding: 1.5px 3px; font-size: 8.5px; font-weight: bold; color: #0f172a;">${p.description}</td>
+        <td style="padding: 1.5px 3px; font-size: 8.5px; font-weight: bold; color: #0f172a;">${p.description} ${p.exento_impuesto === true ? '(E)' : '(G)'}</td>
         <td style="padding: 1.5px 3px; font-size: 8px; color: #475569;">${p.category}</td>
         <td style="padding: 1.5px 3px; text-align: right; font-family: monospace; font-size: 8px; color: #64748b;">${formatStockVal(p.stock_minimo, p.a_granel)}</td>
         <td style="padding: 1.5px 3px; text-align: right; font-family: monospace; font-size: 8px; font-weight: bold; ${p.stock_actual <= p.stock_minimo ? 'color: #dc2626;' : 'color: #0f172a;'}">${formatStockVal(p.stock_actual, p.a_granel)}</td>
@@ -1986,7 +1996,8 @@ export default function Inventario({
             Filtros Aplicados: 
             <span style="background: #f1f5f9; border: 1px solid #cbd5e1; padding: 1px 4px; border-radius: 3px; margin-right: 4px; color: #1e293b;">Categoría: ${categoryFilterLabel}</span>
             <span style="background: #f1f5f9; border: 1px solid #cbd5e1; padding: 1px 4px; border-radius: 3px; margin-right: 4px; color: #1e293b;">Stock: ${stockFilterLabel}</span>
-            <span style="background: #f1f5f9; border: 1px solid #cbd5e1; padding: 1px 4px; border-radius: 3px; color: #1e293b;">Alerta: ${minStockFilterLabel}</span>
+            <span style="background: #f1f5f9; border: 1px solid #cbd5e1; padding: 1px 4px; border-radius: 3px; margin-right: 4px; color: #1e293b;">Alerta: ${minStockFilterLabel}</span>
+            <span style="background: #f1f5f9; border: 1px solid #cbd5e1; padding: 1px 4px; border-radius: 3px; color: #1e293b;">IVA: ${taxFilterLabel}</span>
             <span style="color: #64748b; font-style: italic; font-weight: normal; margin-left: 4px;">${sortInfo}</span>
           </div>
 
@@ -2448,7 +2459,7 @@ export default function Inventario({
           </div>
 
           {/* FILTER CONTROLS */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 bg-slate-50/50 border border-slate-200/60 rounded-xl py-1.5 px-3 shadow-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 bg-slate-50/50 border border-slate-200/60 rounded-xl py-1.5 px-3 shadow-sm">
             {/* Multi-Category Selector */}
             <div className="relative flex flex-col gap-0.5" ref={categoryMenuRef}>
               <label className="text-[10px] font-bold text-slate-500 font-sans uppercase">Categorías (Multi-Selección)</label>
@@ -2547,6 +2558,20 @@ export default function Inventario({
               >
                 <option value="todos">MOSTRAR TODO EL STOCK</option>
                 <option value="bajo_minimo">BAJO STOCK MÍNIMO (ALERTA)</option>
+              </select>
+            </div>
+
+            {/* Tax Regime Filter (Exentos vs Gravables) */}
+            <div className="flex flex-col gap-0.5">
+              <label className="text-[10px] font-bold text-slate-500 font-sans uppercase">Régimen IVA (Exento / Gravable)</label>
+              <select
+                value={filterTax}
+                onChange={(e) => setFilterTax(e.target.value as any)}
+                className="bg-white border border-slate-300 rounded-lg py-1 px-2 text-xs text-slate-800 font-sans font-bold focus:border-winter-inventarioStart focus:outline-none shadow-sm"
+              >
+                <option value="todos">TODOS (TODOS LOS PRODUCTOS)</option>
+                <option value="exentos">🟢 SOLO EXENTOS (E) - 0% IVA</option>
+                <option value="gravables">🔵 SOLO GRAVABLES (G) - CON IVA 16%</option>
               </select>
             </div>
           </div>
