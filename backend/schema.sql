@@ -371,4 +371,30 @@ CREATE TABLE IF NOT EXISTS Cotizaciones_Proveedores (
     estatus VARCHAR(20) DEFAULT 'Pendiente' CHECK (estatus IN ('Pendiente', 'Aprobada', 'Rechazada', 'Convertida'))
 );
 
+-- ==========================================
+-- 20. ÍNDICES DE ALTO RENDIMIENTO (MULTI-TERMINAL POS)
+-- ==========================================
+CREATE INDEX IF NOT EXISTS idx_ventas_caja_id ON Ventas(caja_id);
+CREATE INDEX IF NOT EXISTS idx_ventas_cliente_id ON Ventas(cliente_id);
+CREATE INDEX IF NOT EXISTS idx_ventas_usuario_id ON Ventas(usuario_id);
+CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON Ventas(fecha);
+CREATE INDEX IF NOT EXISTS idx_ventas_factura_nro ON Ventas(factura_nro);
+CREATE INDEX IF NOT EXISTS idx_ventas_id_desc ON Ventas(id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_ventas_detalle_venta_id ON Ventas_Detalle(venta_id);
+CREATE INDEX IF NOT EXISTS idx_ventas_detalle_producto_id ON Ventas_Detalle(producto_id);
+
+CREATE INDEX IF NOT EXISTS idx_pagos_venta_venta_id ON Pagos_Venta(venta_id);
+
+CREATE INDEX IF NOT EXISTS idx_movimientos_caja_caja_id ON Movimientos_Caja(caja_id);
+CREATE INDEX IF NOT EXISTS idx_movimientos_inv_producto_id ON Movimientos_Inventario(producto_id);
+
+CREATE INDEX IF NOT EXISTS idx_productos_barcode ON Productos(codigo_barras_clave);
+CREATE INDEX IF NOT EXISTS idx_clientes_cedula ON Clientes(cedula_rif);
+CREATE INDEX IF NOT EXISTS idx_abonos_cliente_id ON Abonos(cliente_id);
+CREATE INDEX IF NOT EXISTS idx_cajas_estatus ON Cajas_Apertura_Cierre(estatus);
+CREATE INDEX IF NOT EXISTS idx_cajas_estatus_usuario ON Cajas_Apertura_Cierre(estatus, usuario_id);
+CREATE INDEX IF NOT EXISTS idx_cajas_estatus_terminal ON Cajas_Apertura_Cierre(estatus, estacion_nombre);
+
+
 

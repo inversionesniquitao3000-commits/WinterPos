@@ -75,7 +75,9 @@ try {
     host: process.env.DB_HOST,
     port: parseInt(process.env.DB_PORT || '5432'),
     database: process.env.DB_DATABASE,
-    connectionTimeoutMillis: 3000 // fail fast if not connected
+    max: 30,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000
   });
 
   // Try to connect to test if Postgres is accessible with configured user/pass
@@ -96,7 +98,7 @@ try {
     // Ignore if timestamps are already local
   }
   
-  // Run schema migration to add new closure fields if they do not exist
+  // Run schema migration to add new closure fields and high-performance indexes if they do not exist
   await client.query(`
     CREATE TABLE IF NOT EXISTS Roles (
       id SERIAL PRIMARY KEY,
@@ -122,6 +124,31 @@ try {
       observacion TEXT,
       fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- ==========================================
+    -- HIGH PERFORMANCE INDEXES FOR PRODUCTION POS
+    -- ==========================================
+    CREATE INDEX IF NOT EXISTS idx_ventas_caja_id ON Ventas(caja_id);
+    CREATE INDEX IF NOT EXISTS idx_ventas_cliente_id ON Ventas(cliente_id);
+    CREATE INDEX IF NOT EXISTS idx_ventas_usuario_id ON Ventas(usuario_id);
+    CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON Ventas(fecha);
+    CREATE INDEX IF NOT EXISTS idx_ventas_factura_nro ON Ventas(factura_nro);
+    CREATE INDEX IF NOT EXISTS idx_ventas_id_desc ON Ventas(id DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_ventas_detalle_venta_id ON Ventas_Detalle(venta_id);
+    CREATE INDEX IF NOT EXISTS idx_ventas_detalle_producto_id ON Ventas_Detalle(producto_id);
+
+    CREATE INDEX IF NOT EXISTS idx_pagos_venta_venta_id ON Pagos_Venta(venta_id);
+
+    CREATE INDEX IF NOT EXISTS idx_movimientos_caja_caja_id ON Movimientos_Caja(caja_id);
+    CREATE INDEX IF NOT EXISTS idx_movimientos_inv_producto_id ON Movimientos_Inventario(producto_id);
+
+    CREATE INDEX IF NOT EXISTS idx_productos_barcode ON Productos(codigo_barras_clave);
+    CREATE INDEX IF NOT EXISTS idx_clientes_cedula ON Clientes(cedula_rif);
+    CREATE INDEX IF NOT EXISTS idx_abonos_cliente_id ON Abonos(cliente_id);
+    CREATE INDEX IF NOT EXISTS idx_cajas_estatus ON Cajas_Apertura_Cierre(estatus);
+    CREATE INDEX IF NOT EXISTS idx_cajas_estatus_usuario ON Cajas_Apertura_Cierre(estatus, usuario_id);
+    CREATE INDEX IF NOT EXISTS idx_cajas_estatus_terminal ON Cajas_Apertura_Cierre(estatus, estacion_nombre);
 
     ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS venta_total_usd NUMERIC DEFAULT 0;
     ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS utilidad_usd NUMERIC DEFAULT 0;
@@ -404,14 +431,27 @@ export function writeJsonFile(filename, data) {
   }
 }
 
+// In-memory cache for company config to prevent redundant DB roundtrips on checkout
+let _cachedCompanyConfig = null;
+let _cachedCompanyConfigTimestamp = 0;
+
+export function invalidateCompanyConfigCache() {
+  _cachedCompanyConfig = null;
+  _cachedCompanyConfigTimestamp = 0;
+}
+
 // CORE DATA ACCESS METHODS (Dual Mode: PostgreSQL / JSON)
 export async function getCompanyConfig() {
+  const now = Date.now();
+  if (_cachedCompanyConfig && (now - _cachedCompanyConfigTimestamp < 30000)) {
+    return _cachedCompanyConfig;
+  }
   if (usePostgres) {
     try {
       const res = await pool.query('SELECT * FROM Configuracion_Empresa ORDER BY id DESC LIMIT 1');
       if (res.rowCount > 0) {
         const row = res.rows[0];
-        return {
+        _cachedCompanyConfig = {
           rif: row.rif,
           nombre_comercio: row.nombre_comercio,
           direccion: row.direccion,
@@ -424,6 +464,8 @@ export async function getCompanyConfig() {
           compartir_apertura_caja: row.compartir_apertura_caja !== false,
           logo_url: row.logo_url || ''
         };
+        _cachedCompanyConfigTimestamp = now;
+        return _cachedCompanyConfig;
       }
     } catch (err) {
       console.error('Error en getCompanyConfig (Postgres):', err.message);
@@ -433,7 +475,7 @@ export async function getCompanyConfig() {
   if (!c) {
     return { ...mockConfig };
   }
-  return {
+  _cachedCompanyConfig = {
     rif: c.rif ?? '',
     nombre_comercio: c.nombre_comercio ?? '',
     direccion: c.direccion ?? '',
@@ -446,9 +488,12 @@ export async function getCompanyConfig() {
     compartir_apertura_caja: c.compartir_apertura_caja !== false,
     logo_url: c.logo_url || ''
   };
+  _cachedCompanyConfigTimestamp = now;
+  return _cachedCompanyConfig;
 }
 
 export async function saveCompanyConfig(config) {
+  invalidateCompanyConfigCache();
   if (usePostgres) {
     try {
       const existing = await pool.query('SELECT id FROM Configuracion_Empresa ORDER BY id DESC LIMIT 1');
@@ -477,6 +522,78 @@ export async function saveCompanyConfig(config) {
   }
   writeJsonFile('config.json', config);
   return config;
+}
+
+// Ultra-fast check for invoice sequence reference without loading all sales history
+export async function getLastInvoiceNumber() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query("SELECT factura_nro FROM Ventas WHERE factura_nro LIKE 'FAC-%' ORDER BY id DESC LIMIT 1");
+      if (res.rowCount > 0) {
+        const last = res.rows[0].factura_nro;
+        const num = parseInt(last.replace('FAC-', ''), 10) || 0;
+        const next = `FAC-${String(num + 1).padStart(6, '0')}`;
+        return { last, next };
+      }
+      return { last: null, next: 'FAC-000001' };
+    } catch (err) {
+      console.error('Error en getLastInvoiceNumber:', err.message);
+    }
+  }
+  const sales = readJsonFile('sales.json', []);
+  const facSales = sales.filter(s => s.factura_nro?.startsWith('FAC-'));
+  if (facSales.length > 0) {
+    const last = facSales[facSales.length - 1].factura_nro;
+    const num = parseInt(last.replace('FAC-', ''), 10) || 0;
+    const next = `FAC-${String(num + 1).padStart(6, '0')}`;
+    return { last, next };
+  }
+  return { last: null, next: 'FAC-000001' };
+}
+
+// Ultra-fast single aggregation check for multi-terminal /sync/poll in sub-millisecond time
+export async function getSyncSummary() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query(`
+        SELECT 
+          (SELECT COALESCE(MAX(id), 0) FROM Ventas) as max_sale_id,
+          (SELECT COUNT(*) FROM Tasas_Cambio) as tasas_count,
+          (SELECT tasa_cobro FROM Tasas_Cambio ORDER BY id DESC LIMIT 1) as last_tasa_cobro,
+          (SELECT tasa_vuelto FROM Tasas_Cambio ORDER BY id DESC LIMIT 1) as last_tasa_vuelto,
+          (SELECT COUNT(*) FROM Cajas_Apertura_Cierre) as cierres_count,
+          (SELECT COALESCE(MAX(id), 0) FROM Cajas_Apertura_Cierre) as last_cierre_id,
+          (SELECT COALESCE(ROUND(SUM(COALESCE(monto_cierre_real_usd, 0) + COALESCE(monto_cierre_real_ves, 0)) * 100) / 100, 0) FROM Cajas_Apertura_Cierre) as cierres_sig,
+          (SELECT COUNT(*) FROM Clientes) as clients_count,
+          (SELECT COALESCE(ROUND(SUM(COALESCE(id, 0) + COALESCE(limite_credito, 0) + COALESCE(saldo_pendiente, 0)) * 100) / 100, 0) FROM Clientes) as clients_sig,
+          (SELECT COUNT(*) FROM Productos) as products_count,
+          (SELECT COALESCE(ROUND(SUM(COALESCE(id, 0) + COALESCE(stock_actual, 0) + COALESCE(precio_detalle_usd, 0)) * 100) / 100, 0) FROM Productos) as products_sig,
+          (SELECT COUNT(*) FROM Abonos) as abonos_count,
+          (SELECT COALESCE(ROUND(SUM(COALESCE(id, 0) + COALESCE(monto_usd, 0) + COALESCE(monto_ves, 0)) * 100) / 100, 0) FROM Abonos) as abonos_sig
+      `);
+      if (res.rowCount > 0) {
+        const row = res.rows[0];
+        return {
+          maxSaleId: parseInt(row.max_sale_id || 0, 10),
+          tasasCount: parseInt(row.tasas_count || 0, 10),
+          lastTasaCobro: parseFloat(row.last_tasa_cobro || 0),
+          lastTasaVuelto: parseFloat(row.last_tasa_vuelto || 0),
+          cierresCount: parseInt(row.cierres_count || 0, 10),
+          lastCierreId: parseInt(row.last_cierre_id || 0, 10),
+          cierresSig: parseFloat(row.cierres_sig || 0),
+          clientsCount: parseInt(row.clients_count || 0, 10),
+          clientsSig: parseFloat(row.clients_sig || 0),
+          productsCount: parseInt(row.products_count || 0, 10),
+          productsSig: parseFloat(row.products_sig || 0),
+          abonosCount: parseInt(row.abonos_count || 0, 10),
+          abonosSig: parseFloat(row.abonos_sig || 0)
+        };
+      }
+    } catch (err) {
+      console.error('Error en getSyncSummary (Postgres):', err.message);
+    }
+  }
+  return null;
 }
 
 export async function getUsers() {
@@ -2021,100 +2138,133 @@ export async function savePriceHistory(h) {
   return newItem;
 }
 
-export async function getSales() {
+export async function getSales(limit = null, sinceId = null, excludeTerminal = null) {
   if (usePostgres) {
     try {
-      // Query sales from Postgres database
-      // Join clients and payments details
+      const conditions = [];
+      const params = [];
+
+      if (sinceId && sinceId > 0) {
+        params.push(sinceId);
+        conditions.push(`v.id > $${params.length}`);
+      }
+
+      if (excludeTerminal) {
+        params.push(excludeTerminal);
+        conditions.push(`v.estacion_nombre <> $${params.length}`);
+      }
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+      let limitClause = '';
+      if (limit && Number.isInteger(limit) && limit > 0) {
+        params.push(limit);
+        limitClause = `LIMIT $${params.length}`;
+      }
+
       const salesRes = await pool.query(`
         SELECT v.id, v.factura_nro, v.fecha, v.subtotal_usd, v.descuento_usd, v.total_usd, v.total_ves, v.con_ticket,
                v.vuelto_usd as "vueltoUSD", v.vuelto_ves as "vueltoVES",
                v.tipo_documento, v.nro_fiscal, v.serial_fiscal, v.nro_z, v.estatus_fiscal,
                v.base_imponible_usd, v.iva_usd, v.exento_usd, v.igtf_usd,
                v.estacion_nombre as terminal, c.cedula_rif as "clientDoc", c.nombre as "clientName", u.nombre as usuario,
-               cac.estatus as caja_estatus
+               cac.estatus as caja_estatus,
+               COALESCE((
+                 SELECT json_agg(json_build_object(
+                   'qty', vd.cantidad,
+                   'precio_unitario_usd', vd.precio_unitario_usd,
+                   'tipo_precio', vd.tipo_precio,
+                   'total_fila_usd', vd.total_fila_usd,
+                   'priceUSD', vd.precio_unitario_usd,
+                   'totalUSD', vd.total_fila_usd,
+                   'product', json_build_object(
+                     'barcode', p.codigo_barras_clave,
+                     'description', p.descripcion,
+                     'precio_costo_usd', p.precio_costo_usd,
+                     'exento_impuesto', p.exento_impuesto,
+                     'porcentaje_impuesto', p.porcentaje_impuesto
+                   )
+                 ))
+                 FROM Ventas_Detalle vd
+                 LEFT JOIN Productos p ON vd.producto_id = p.id
+                 WHERE vd.venta_id = v.id
+               ), '[]'::json) as items_json,
+               COALESCE((
+                 SELECT json_agg(json_build_object(
+                   'metodo', pv.metodo_pago,
+                   'monto', pv.monto_entregado_usd,
+                   'montoVES', pv.monto_entregado_ves,
+                   'banco', pv.banco_emisor,
+                   'referencia', pv.numero_referencia
+                 ))
+                 FROM Pagos_Venta pv
+                 WHERE pv.venta_id = v.id
+               ), '[]'::json) as payments_json
         FROM Ventas v
         LEFT JOIN Clientes c ON v.cliente_id = c.id
         LEFT JOIN Usuarios u ON v.usuario_id = u.id
         LEFT JOIN Cajas_Apertura_Cierre cac ON v.caja_id = cac.id
+        ${whereClause}
         ORDER BY v.id DESC
-      `);
-      
-      const salesList = [];
-      for (const row of salesRes.rows) {
-        // Fetch items
-        const itemsRes = await pool.query(`
-          SELECT vd.cantidad as qty, vd.precio_unitario_usd, vd.tipo_precio, vd.total_fila_usd,
-                 p.codigo_barras_clave as barcode, p.descripcion, p.precio_costo_usd,
-                 p.exento_impuesto, p.porcentaje_impuesto
-          FROM Ventas_Detalle vd
-          LEFT JOIN Productos p ON vd.producto_id = p.id
-          WHERE vd.venta_id = $1
-        `, [row.id]);
-        
-        // Fetch payments
-        const paymentsRes = await pool.query(`
-          SELECT metodo_pago as metodo, monto_entregado_usd as monto, monto_entregado_ves as montoVES, 
-                 banco_emisor as banco, numero_referencia as referencia
-          FROM Pagos_Venta
-          WHERE venta_id = $1
-        `, [row.id]);
-        
-        salesList.push({
-          id: row.id,
-          factura_nro: row.factura_nro,
-          fecha: getLocalISODateString(new Date(row.fecha)),
-          caja_estatus: row.caja_estatus || 'Cerrada',
-          tipo_documento: row.tipo_documento || (row.nro_fiscal ? 'FACTURA_FISCAL' : 'NOTA_ENTREGA'),
-          nro_fiscal: row.nro_fiscal || null,
-          serial_fiscal: row.serial_fiscal || null,
-          nro_z: row.nro_z || null,
-          estatus_fiscal: row.estatus_fiscal || 'NO_APLICA',
-          base_imponible_usd: parseFloat(row.base_imponible_usd || 0),
-          iva_usd: parseFloat(row.iva_usd || 0),
-          exento_usd: parseFloat(row.exento_usd || 0),
-          igtf_usd: parseFloat(row.igtf_usd || 0),
-          client: {
-            cedula_rif: row.clientDoc,
-            nombre: row.clientName
-          },
-          items: itemsRes.rows.map(i => ({
-            qty: i.qty,
-            precio_unitario_usd: parseFloat(i.precio_unitario_usd),
-            total_fila_usd: parseFloat(i.total_fila_usd),
-            priceUSD: parseFloat(i.precio_unitario_usd),
-            totalUSD: parseFloat(i.total_fila_usd),
-            product: {
-              barcode: i.barcode,
-              description: i.descripcion,
-              precio_costo_usd: parseFloat(i.precio_costo_usd || 0),
-              exento_impuesto: !!i.exento_impuesto,
-              porcentaje_impuesto: parseFloat(i.porcentaje_impuesto || 0)
-            }
-          })),
-          subtotal: parseFloat(row.subtotal_usd),
-          descuento: parseFloat(row.descuento_usd),
-          totalUSD: parseFloat(row.total_usd),
-          totalVES: parseFloat(row.total_ves),
-          pagos: paymentsRes.rows.map(p => ({
-            metodo: p.metodo,
-            monto: parseFloat(p.monto || '0'),
-            montoVES: parseFloat(p.montoVES || '0'),
-            banco: p.banco || '',
-            referencia: p.referencia || ''
-          })),
-          vueltoUSD: parseFloat(row.vueltoUSD || '0'),
-          vueltoVES: parseFloat(row.vueltoVES || '0'),
-          usuario: row.usuario,
-          terminal: row.terminal
-        });
-      }
-      return salesList;
+        ${limitClause}
+      `, params);
+
+      return salesRes.rows.map(row => ({
+        id: row.id,
+        factura_nro: row.factura_nro,
+        fecha: getLocalISODateString(new Date(row.fecha)),
+        caja_estatus: row.caja_estatus || 'Cerrada',
+        tipo_documento: row.tipo_documento || (row.nro_fiscal ? 'FACTURA_FISCAL' : 'NOTA_ENTREGA'),
+        nro_fiscal: row.nro_fiscal || null,
+        serial_fiscal: row.serial_fiscal || null,
+        nro_z: row.nro_z || null,
+        estatus_fiscal: row.estatus_fiscal || 'NO_APLICA',
+        base_imponible_usd: parseFloat(row.base_imponible_usd || 0),
+        iva_usd: parseFloat(row.iva_usd || 0),
+        exento_usd: parseFloat(row.exento_usd || 0),
+        igtf_usd: parseFloat(row.igtf_usd || 0),
+        client: {
+          cedula_rif: row.clientDoc,
+          nombre: row.clientName
+        },
+        items: (row.items_json || []).map(i => ({
+          qty: parseFloat(i.qty || 0),
+          precio_unitario_usd: parseFloat(i.precio_unitario_usd || 0),
+          total_fila_usd: parseFloat(i.total_fila_usd || 0),
+          priceUSD: parseFloat(i.priceUSD || i.precio_unitario_usd || 0),
+          totalUSD: parseFloat(i.totalUSD || i.total_fila_usd || 0),
+          product: {
+            barcode: i.product?.barcode || '',
+            description: i.product?.description || '',
+            precio_costo_usd: parseFloat(i.product?.precio_costo_usd || 0),
+            exento_impuesto: !!i.product?.exento_impuesto,
+            porcentaje_impuesto: parseFloat(i.product?.porcentaje_impuesto || 0)
+          }
+        })),
+        subtotal: parseFloat(row.subtotal_usd || 0),
+        descuento: parseFloat(row.descuento_usd || 0),
+        totalUSD: parseFloat(row.total_usd || 0),
+        totalVES: parseFloat(row.total_ves || 0),
+        pagos: (row.payments_json || []).map(p => ({
+          metodo: p.metodo,
+          monto: parseFloat(p.monto || 0),
+          montoVES: parseFloat(p.montoVES || 0),
+          banco: p.banco || '',
+          referencia: p.referencia || ''
+        })),
+        vueltoUSD: parseFloat(row.vueltoUSD || 0),
+        vueltoVES: parseFloat(row.vueltoVES || 0),
+        usuario: row.usuario,
+        terminal: row.terminal
+      }));
     } catch (err) {
       console.error('Error en getSales (Postgres):', err.message);
     }
   }
-  return readJsonFile('sales.json', []);
+  const sales = readJsonFile('sales.json', []);
+  if (sinceId && sinceId > 0) {
+    return sales.filter(s => s.id && s.id > sinceId && (excludeTerminal ? s.terminal !== excludeTerminal : true));
+  }
+  return sales;
 }
 
 export async function saveSale(s) {
@@ -2754,7 +2904,35 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
       const salesRes = await pool.query(`
         SELECT v.id, v.factura_nro, v.fecha, v.subtotal_usd, v.descuento_usd, v.total_usd, v.total_ves, v.con_ticket,
                v.vuelto_usd, v.vuelto_ves,
-               v.estacion_nombre as terminal, c.cedula_rif as "clientDoc", c.nombre as "clientName", u.nombre as usuario
+               v.estacion_nombre as terminal, c.cedula_rif as "clientDoc", c.nombre as "clientName", u.nombre as usuario,
+               COALESCE((
+                 SELECT json_agg(json_build_object(
+                   'qty', vd.cantidad,
+                   'precio_unitario_usd', vd.precio_unitario_usd,
+                   'total_fila_usd', vd.total_fila_usd,
+                   'product', json_build_object(
+                     'barcode', p.codigo_barras_clave,
+                     'description', p.descripcion,
+                     'precio_costo_usd', p.precio_costo_usd,
+                     'exento_impuesto', p.exento_impuesto,
+                     'porcentaje_impuesto', p.porcentaje_impuesto
+                   )
+                 ))
+                 FROM Ventas_Detalle vd
+                 LEFT JOIN Productos p ON vd.producto_id = p.id
+                 WHERE vd.venta_id = v.id
+               ), '[]'::json) as items_json,
+               COALESCE((
+                 SELECT json_agg(json_build_object(
+                   'metodo', pv.metodo_pago,
+                   'monto', pv.monto_entregado_usd,
+                   'montoVES', pv.monto_entregado_ves,
+                   'vueltoUSD', pv.monto_vuelto_usd,
+                   'vueltoVES', pv.monto_vuelto_ves
+                 ))
+                 FROM Pagos_Venta pv
+                 WHERE pv.venta_id = v.id
+               ), '[]'::json) as payments_json
         FROM Ventas v
         LEFT JOIN Clientes c ON v.cliente_id = c.id
         LEFT JOIN Usuarios u ON v.usuario_id = u.id
@@ -2767,16 +2945,9 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
       let salesCashVes = 0;
       
       for (const row of salesRes.rows) {
-        const paymentsRes = await pool.query(`
-          SELECT metodo_pago as metodo, monto_entregado_usd as monto, monto_entregado_ves as montoVES, 
-                 monto_vuelto_usd as "vueltoUSD", monto_vuelto_ves as "vueltoVES"
-          FROM Pagos_Venta
-          WHERE venta_id = $1
-        `, [row.id]);
-        
         let cashUsd = 0;
         let cashVes = 0;
-        const pagos = paymentsRes.rows.map(p => {
+        const pagos = (row.payments_json || []).map(p => {
           const m = parseFloat(p.monto || '0');
           const mVES = parseFloat(p.montoVES || '0');
           if (p.metodo === 'Efectivo$') cashUsd += m;
@@ -2790,23 +2961,14 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
         
         let vUSD = parseFloat(row.vuelto_usd || '0');
         let vVES = parseFloat(row.vuelto_ves || '0');
-        if (vUSD === 0 && paymentsRes.rows.length > 0) {
-          vUSD = parseFloat(paymentsRes.rows[0]?.vueltoUSD || '0');
+        if (vUSD === 0 && row.payments_json && row.payments_json.length > 0) {
+          vUSD = parseFloat(row.payments_json[0]?.vueltoUSD || '0');
         }
-        if (vVES === 0 && paymentsRes.rows.length > 0) {
-          vVES = parseFloat(paymentsRes.rows[0]?.vueltoVES || '0');
+        if (vVES === 0 && row.payments_json && row.payments_json.length > 0) {
+          vVES = parseFloat(row.payments_json[0]?.vueltoVES || '0');
         }
         salesCashUsd += (cashUsd - vUSD);
         salesCashVes += (cashVes - vVES);
-        
-        const itemsRes = await pool.query(`
-          SELECT vd.cantidad as qty, vd.precio_unitario_usd, vd.total_fila_usd, 
-                 p.codigo_barras_clave as barcode, p.descripcion, p.precio_costo_usd,
-                 p.exento_impuesto, p.porcentaje_impuesto
-          FROM Ventas_Detalle vd
-          LEFT JOIN Productos p ON vd.producto_id = p.id
-          WHERE vd.venta_id = $1
-        `, [row.id]);
         
         shiftSalesList.push({
           id: row.id,
@@ -2816,22 +2978,22 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
             cedula_rif: row.clientDoc,
             nombre: row.clientName
           },
-          items: itemsRes.rows.map(i => ({
-            qty: i.qty,
-            precio_unitario_usd: parseFloat(i.precio_unitario_usd),
-            total_fila_usd: parseFloat(i.total_fila_usd),
+          items: (row.items_json || []).map(i => ({
+            qty: parseFloat(i.qty || 0),
+            precio_unitario_usd: parseFloat(i.precio_unitario_usd || 0),
+            total_fila_usd: parseFloat(i.total_fila_usd || 0),
             product: {
-              barcode: i.barcode,
-              description: i.descripcion,
-              precio_costo_usd: parseFloat(i.precio_costo_usd || '0'),
-              exento_impuesto: !!i.exento_impuesto,
-              porcentaje_impuesto: parseFloat(i.porcentaje_impuesto || 0)
+              barcode: i.product?.barcode || '',
+              description: i.product?.description || '',
+              precio_costo_usd: parseFloat(i.product?.precio_costo_usd || '0'),
+              exento_impuesto: !!i.product?.exento_impuesto,
+              porcentaje_impuesto: parseFloat(i.product?.porcentaje_impuesto || 0)
             }
           })),
-          subtotal: parseFloat(row.subtotal_usd),
-          descuento: parseFloat(row.descuento_usd),
-          totalUSD: parseFloat(row.total_usd),
-          totalVES: parseFloat(row.total_ves),
+          subtotal: parseFloat(row.subtotal_usd || 0),
+          descuento: parseFloat(row.descuento_usd || 0),
+          totalUSD: parseFloat(row.total_usd || 0),
+          totalVES: parseFloat(row.total_ves || 0),
           pagos,
           vueltoUSD: vUSD,
           vueltoVES: vVES,

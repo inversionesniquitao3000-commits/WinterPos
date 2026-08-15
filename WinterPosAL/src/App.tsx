@@ -838,7 +838,7 @@ export default function App() {
     };
 
     pollSync();
-    const interval = setInterval(pollSync, 1000);
+    const interval = setInterval(pollSync, 2500);
     return () => clearInterval(interval);
   }, [currentUser?.id, lanIP, dbMode]);
 
