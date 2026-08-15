@@ -755,43 +755,64 @@ export default function CajaPOS({
   const [searchSelectedIndex, setSearchSelectedIndex] = useState<number>(-1);
   const searchDropdownRef = useRef<HTMLDivElement>(null);
 
+  const productsByBarcodeMap = useMemo(() => {
+    const map = new Map<string, Product>();
+    for (let i = 0; i < products.length; i++) {
+      const p = products[i];
+      if (p.barcode) {
+        map.set(p.barcode.toUpperCase().trim(), p);
+      }
+      if (p.id) {
+        map.set(p.id.toString(), p);
+      }
+    }
+    return map;
+  }, [products]);
+
   const searchSuggestions = useMemo(() => {
     const term = searchProdTerm.trim().toLowerCase();
     if (!term) return [];
-    const filtered = products.filter(p =>
-      p.description.toLowerCase().includes(term) ||
-      p.barcode.toLowerCase().includes(term)
-    );
 
-    return filtered.sort((a, b) => {
+    // Si coincide exactamente con un código de barra, priorizar de inmediato
+    const exact = productsByBarcodeMap.get(term.toUpperCase());
+    if (exact && term.length >= 5) {
+      return [exact];
+    }
+
+    const matches: Product[] = [];
+    for (let i = 0; i < products.length; i++) {
+      const p = products[i];
+      const desc = p.description.toLowerCase();
+      const code = (p.barcode || '').toLowerCase();
+      if (code.startsWith(term) || desc.includes(term) || code.includes(term)) {
+        matches.push(p);
+        if (matches.length >= 35) break; // Límite de colección para máximo rendimiento
+      }
+    }
+
+    return matches.sort((a, b) => {
       const aStock = typeof a.stock_actual === 'number' ? a.stock_actual : (parseFloat(a.stock_actual as any) || 0);
       const bStock = typeof b.stock_actual === 'number' ? b.stock_actual : (parseFloat(b.stock_actual as any) || 0);
       const aHasStock = aStock > 0 ? 1 : 0;
       const bHasStock = bStock > 0 ? 1 : 0;
 
-      // 1. Productos con stock primero, sin stock de último
-      if (aHasStock !== bHasStock) {
-        return bHasStock - aHasStock;
-      }
+      // 1. Con stock primero
+      if (aHasStock !== bHasStock) return bHasStock - aHasStock;
 
-      // 2. Coincidencia al inicio por código/clave
+      // 2. Coincidencia al inicio por código
       const aCodeStarts = (a.barcode || '').toLowerCase().startsWith(term) ? 1 : 0;
       const bCodeStarts = (b.barcode || '').toLowerCase().startsWith(term) ? 1 : 0;
-      if (aCodeStarts !== bCodeStarts) {
-        return bCodeStarts - aCodeStarts;
-      }
+      if (aCodeStarts !== bCodeStarts) return bCodeStarts - aCodeStarts;
 
       // 3. Coincidencia al inicio por descripción
       const aDescStarts = (a.description || '').toLowerCase().startsWith(term) ? 1 : 0;
       const bDescStarts = (b.description || '').toLowerCase().startsWith(term) ? 1 : 0;
-      if (aDescStarts !== bDescStarts) {
-        return bDescStarts - aDescStarts;
-      }
+      if (aDescStarts !== bDescStarts) return bDescStarts - aDescStarts;
 
-      // 4. Orden alfabético por descripción
-      return (a.description || '').localeCompare(b.description || '', 'es', { sensitivity: 'base' });
-    });
-  }, [products, searchProdTerm]);
+      // 4. Comparación rápida alfabética
+      return a.description < b.description ? -1 : 1;
+    }).slice(0, 25); // Máximo 25 elementos en el DOM para evitar congelamiento de pantalla
+  }, [products, searchProdTerm, productsByBarcodeMap]);
 
   useEffect(() => {
     if (searchSelectedIndex >= 0 && searchDropdownRef.current) {
@@ -1126,6 +1147,10 @@ export default function CajaPOS({
   const [qtyEditItem, setQtyEditItem] = useState<SaleItem | null>(null);
   const [qtyEditVal, setQtyEditVal] = useState('');
   const qtyEditModalRef = useRef<HTMLDivElement>(null);
+
+  // Anti-Double-Click & Concurrent Checkout Lock
+  const [isSubmittingSale, setIsSubmittingSale] = useState(false);
+  const isSubmittingRef = useRef(false);
 
   // Toast notifications state
   const [toast, setToast] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -1759,202 +1784,218 @@ export default function CajaPOS({
   };
 
   const handleConfirmCheckout = async (shouldPrint: boolean = false) => {
-    if (!canConfirmCheckout) {
-      showAlert('Información de cobro incompleta o inválida. Verifique los montos ingresados.', 'Pago Incompleto', 'warning');
+    // Atomic Anti-Double-Click Lock: reject any concurrent or rapid secondary click
+    if (isSubmittingRef.current || isSubmittingSale) {
+      console.warn('⚠️ [Seguridad POS] Intento de cobro concurrente/doble clic bloqueado.');
       return;
     }
+    isSubmittingRef.current = true;
+    setIsSubmittingSale(true);
 
-    // Reference validations (Pago Móvil)
-    if (pagoMovilVESVal > 0) {
-      if (!refPagoMovil.trim() || refPagoMovil.trim().length < 4) {
-        showAlert('La referencia bancaria es obligatoria y debe tener mínimo 4 caracteres para pagos por Pago Móvil.', 'Referencia Requerida', 'warning');
+    try {
+      if (!canConfirmCheckout) {
+        showAlert('Información de cobro incompleta o inválida. Verifique los montos ingresados.', 'Pago Incompleto', 'warning');
         return;
       }
-      if (!bankPagoMovil) {
-        showAlert('Debe especificar el banco emisor para Pago Móvil.', 'Banco Requerido', 'warning');
-        return;
-      }
-    }
 
-    // Limit credit validations
-    if (creditUSDVal > 0) {
-      if (creditUSDVal > selectedClient.credito_disponible) {
-        showAlert(`Crédito insuficiente. Límite disponible del cliente: $${selectedClient.credito_disponible.toFixed(2)} USD.`, 'Crédito Insuficiente', 'warning');
-        return;
-      }
-    }
-
-    // Build payment array
-    const pagos: Payment[] = [];
-    if (cashUSDVal > 0) pagos.push({ metodo: 'Efectivo$', monto: cashUSDVal, montoUSD: cashUSDVal });
-    if (cashVESVal > 0) pagos.push({ metodo: 'EfectivoBs', monto: cashVESVal, montoUSD: cashVESVal / tasaDia });
-    if (cardVESVal > 0) pagos.push({ metodo: 'TarjetaBs', monto: cardVESVal, montoUSD: cardVESVal / tasaDia });
-    if (cardUSDVal > 0) pagos.push({ metodo: 'Tarjeta$', monto: cardUSDVal, montoUSD: cardUSDVal });
-    if (pagoMovilVESVal > 0) {
-      pagos.push({
-        metodo: 'PagoMovil',
-        monto: pagoMovilVESVal,
-        montoUSD: pagoMovilVESVal / tasaDia,
-        reference: refPagoMovil,
-        bancoEmisor: bankPagoMovil
-      });
-    }
-    if (biopagoVESVal > 0) {
-      pagos.push({
-        metodo: 'Biopago',
-        monto: biopagoVESVal,
-        montoUSD: biopagoVESVal / tasaDia,
-        reference: '',
-        bancoEmisor: ''
-      });
-    }
-    if (binanceUSDVal > 0) pagos.push({ metodo: 'Binance', monto: binanceUSDVal, montoUSD: binanceUSDVal });
-    if (paypalUSDVal > 0) pagos.push({ metodo: 'PayPal', monto: paypalUSDVal, montoUSD: paypalUSDVal });
-    if (creditUSDVal > 0) {
-      pagos.push({ metodo: 'CreditoCliente', monto: creditUSDVal, montoUSD: creditUSDVal });
-    }
-
-    let finalVueltoUSD = 0;
-    let finalVueltoVES = 0;
-
-    if (changeUSD > 0) {
-      const mixedUsdInput = parseFloat(mixedChangeUSDVal);
-      if (!isNaN(mixedUsdInput) && mixedChangeUSDVal.trim() !== '') {
-        // Auxiliary mixed change calculator explicitly specified a USD amount to return in bills
-        finalVueltoUSD = Math.min(changeUSD, Math.max(0, mixedUsdInput));
-        finalVueltoVES = parseFloat(((changeUSD - finalVueltoUSD) * tasaVuelto).toFixed(2));
-      } else {
-        // Default change currency logic: if Auxiliar Vuelto field is left empty, return 0 USD bills and 100% in Bolívares (VES)
-        const paidInCashUSD = cashUSDVal > 0;
-        const paidInCashVES = cashVESVal > 0;
-
-        if (paidInCashUSD && !paidInCashVES) {
-          finalVueltoUSD = 0;
-          finalVueltoVES = parseFloat((changeUSD * tasaVuelto).toFixed(2));
-        } else if (paidInCashVES && !paidInCashUSD) {
-          finalVueltoUSD = 0;
-          finalVueltoVES = changeVES;
-        } else {
-          finalVueltoUSD = 0;
-          finalVueltoVES = parseFloat((changeUSD * tasaVuelto).toFixed(2));
+      // Reference validations (Pago Móvil)
+      if (pagoMovilVESVal > 0) {
+        if (!refPagoMovil.trim() || refPagoMovil.trim().length < 4) {
+          showAlert('La referencia bancaria es obligatoria y debe tener mínimo 4 caracteres para pagos por Pago Móvil.', 'Referencia Requerida', 'warning');
+          return;
+        }
+        if (!bankPagoMovil) {
+          showAlert('Debe especificar el banco emisor para Pago Móvil.', 'Banco Requerido', 'warning');
+          return;
         }
       }
-    }
 
-    let nroFiscal: string | null = null;
-    let serialFiscal: string | null = null;
-    let nroZ: string | null = null;
-    let estatusFiscal = 'NO_APLICA';
+      // Limit credit validations
+      if (creditUSDVal > 0) {
+        if (creditUSDVal > selectedClient.credito_disponible) {
+          showAlert(`Crédito insuficiente. Límite disponible del cliente: $${selectedClient.credito_disponible.toFixed(2)} USD.`, 'Crédito Insuficiente', 'warning');
+          return;
+        }
+      }
 
-    // If document is marked as FACTURA_FISCAL, process with fiscal service
-    if (tipoDocumento === 'FACTURA_FISCAL') {
-      try {
-        const savedFiscalConfig = localStorage.getItem('pos_fiscal_printer_config');
-        const fiscalConfig = savedFiscalConfig ? JSON.parse(savedFiscalConfig) : { estadoFiscal: 'MODO_PRUEBA' };
+      // Build payment array
+      const pagos: Payment[] = [];
+      if (cashUSDVal > 0) pagos.push({ metodo: 'Efectivo$', monto: cashUSDVal, montoUSD: cashUSDVal });
+      if (cashVESVal > 0) pagos.push({ metodo: 'EfectivoBs', monto: cashVESVal, montoUSD: cashVESVal / tasaDia });
+      if (cardVESVal > 0) pagos.push({ metodo: 'TarjetaBs', monto: cardVESVal, montoUSD: cardVESVal / tasaDia });
+      if (cardUSDVal > 0) pagos.push({ metodo: 'Tarjeta$', monto: cardUSDVal, montoUSD: cardUSDVal });
+      if (pagoMovilVESVal > 0) {
+        pagos.push({
+          metodo: 'PagoMovil',
+          monto: pagoMovilVESVal,
+          montoUSD: pagoMovilVESVal / tasaDia,
+          reference: refPagoMovil,
+          bancoEmisor: bankPagoMovil
+        });
+      }
+      if (biopagoVESVal > 0) {
+        pagos.push({
+          metodo: 'Biopago',
+          monto: biopagoVESVal,
+          montoUSD: biopagoVESVal / tasaDia,
+          reference: '',
+          bancoEmisor: ''
+        });
+      }
+      if (binanceUSDVal > 0) pagos.push({ metodo: 'Binance', monto: binanceUSDVal, montoUSD: binanceUSDVal });
+      if (paypalUSDVal > 0) pagos.push({ metodo: 'PayPal', monto: paypalUSDVal, montoUSD: paypalUSDVal });
+      if (creditUSDVal > 0) {
+        pagos.push({ metodo: 'CreditoCliente', monto: creditUSDVal, montoUSD: creditUSDVal });
+      }
 
-        if (fiscalConfig.estadoFiscal !== 'DESACTIVADA') {
-          const fiscalRes = await fetch(getApiUrl('/fiscal/print-invoice'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              saleData: {
-                client: selectedClient,
-                items: saleItems,
-                subtotal: subtotalUSD,
-                iva: ivaAmount,
-                totalUSD,
-                totalVES,
-                pagos
-              },
-              fiscalConfig
-            })
-          });
+      let finalVueltoUSD = 0;
+      let finalVueltoVES = 0;
 
-          if (fiscalRes.ok) {
-            const fData = await fiscalRes.json();
-            if (fData.ok) {
-              nroFiscal = fData.nroFiscal || null;
-              serialFiscal = fData.serialFiscal || null;
-              nroZ = fData.nroZ || null;
-              estatusFiscal = 'EMITIDA';
-            }
+      if (changeUSD > 0) {
+        const mixedUsdInput = parseFloat(mixedChangeUSDVal);
+        if (!isNaN(mixedUsdInput) && mixedChangeUSDVal.trim() !== '') {
+          // Auxiliary mixed change calculator explicitly specified a USD amount to return in bills
+          finalVueltoUSD = Math.min(changeUSD, Math.max(0, mixedUsdInput));
+          finalVueltoVES = parseFloat(((changeUSD - finalVueltoUSD) * tasaVuelto).toFixed(2));
+        } else {
+          // Default change currency logic: if Auxiliar Vuelto field is left empty, return 0 USD bills and 100% in Bolívares (VES)
+          const paidInCashUSD = cashUSDVal > 0;
+          const paidInCashVES = cashVESVal > 0;
+
+          if (paidInCashUSD && !paidInCashVES) {
+            finalVueltoUSD = 0;
+            finalVueltoVES = parseFloat((changeUSD * tasaVuelto).toFixed(2));
+          } else if (paidInCashVES && !paidInCashUSD) {
+            finalVueltoUSD = 0;
+            finalVueltoVES = changeVES;
           } else {
-            const errData = await fiscalRes.json().catch(() => ({}));
-            const proceed = await showConfirm(
-              `⚠️ Error en la Máquina Fiscal SENIAT: ${errData.error || 'Fallo de conexión o impresora sin papel'}.\n\n¿Desea registrar esta venta como NOTA DE ENTREGA / CONTINGENCIA sin emisión física en la máquina fiscal?`,
-              'Fallo de Impresión Fiscal',
-              { confirmLabel: 'Emitir como Nota de Entrega', cancelLabel: 'Cancelar y Reintentar', isDanger: true }
-            );
-            if (!proceed) return;
-            estatusFiscal = 'FALLO';
+            finalVueltoUSD = 0;
+            finalVueltoVES = parseFloat((changeUSD * tasaVuelto).toFixed(2));
           }
         }
-      } catch (fErr: any) {
-        console.warn('Fallo de conexión con servicio fiscal:', fErr.message);
       }
-    }
 
-    const isActuallyFiscal = tipoDocumento === 'FACTURA_FISCAL' && estatusFiscal !== 'FALLO';
+      let nroFiscal: string | null = null;
+      let serialFiscal: string | null = null;
+      let nroZ: string | null = null;
+      let estatusFiscal = 'NO_APLICA';
 
-    const salePayload = {
-      factura_nro: 'FAC-PENDIENTE', // Server will assign the real number via seq_factura
-      client: selectedClient,
-      items: saleItems,
-      subtotal: subtotalUSD,
-      descuento: discountAmountUSD,
-      iva: ivaAmount,
-      totalUSD,
-      totalVES,
-      pagos,
-      vueltoUSD: finalVueltoUSD,
-      vueltoVES: finalVueltoVES,
-      tipo_documento: isActuallyFiscal ? 'FACTURA_FISCAL' : 'NOTA_ENTREGA',
-      nro_fiscal: nroFiscal,
-      serial_fiscal: serialFiscal,
-      nro_z: nroZ,
-      estatus_fiscal: estatusFiscal,
-      base_imponible_usd: baseImponibleUSD,
-      iva_usd: ivaAmount,
-      exento_usd: netExemptUSD,
-      igtf_usd: 0
-    };
+      // If document is marked as FACTURA_FISCAL, process with fiscal service
+      if (tipoDocumento === 'FACTURA_FISCAL') {
+        try {
+          const savedFiscalConfig = localStorage.getItem('pos_fiscal_printer_config');
+          const fiscalConfig = savedFiscalConfig ? JSON.parse(savedFiscalConfig) : { estadoFiscal: 'MODO_PRUEBA' };
 
-    // Await the server response to get the confirmed factura_nro
-    let confirmedSale: any;
-    try {
-      confirmedSale = await onRegisterSale(salePayload);
-    } catch (err: any) {
-      // Server failed to save the sale — show error and abort
-      showAlert(
-        `❌ Error al guardar la venta en el servidor: ${err.message || 'Error desconocido'}. La venta NO fue registrada. Verifique la conexión con el servidor e intente de nuevo.`,
-        'Error Crítico de Venta',
-        'error'
-      );
-      return;
-    }
-    const finalSaleForTicket = confirmedSale ?? salePayload;
+          if (fiscalConfig.estadoFiscal !== 'DESACTIVADA') {
+            const fiscalRes = await fetch(getApiUrl('/fiscal/print-invoice'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                saleData: {
+                  client: selectedClient,
+                  items: saleItems,
+                  subtotal: subtotalUSD,
+                  iva: ivaAmount,
+                  totalUSD,
+                  totalVES,
+                  pagos
+                },
+                fiscalConfig
+              })
+            });
 
-    setShowCheckoutModal(false);
-    if (shouldPrint) {
-      setPrintedTicketData(finalSaleForTicket as any);
-      setShowTicketModal(true);
+            if (fiscalRes.ok) {
+              const fData = await fiscalRes.json();
+              if (fData.ok) {
+                nroFiscal = fData.nroFiscal || null;
+                serialFiscal = fData.serialFiscal || null;
+                nroZ = fData.nroZ || null;
+                estatusFiscal = 'EMITIDA';
+              }
+            } else {
+              const errData = await fiscalRes.json().catch(() => ({}));
+              const proceed = await showConfirm(
+                `⚠️ Error en la Máquina Fiscal SENIAT: ${errData.error || 'Fallo de conexión o impresora sin papel'}.\n\n¿Desea registrar esta venta como NOTA DE ENTREGA / CONTINGENCIA sin emisión física en la máquina fiscal?`,
+                'Fallo de Impresión Fiscal',
+                { confirmLabel: 'Emitir como Nota de Entrega', cancelLabel: 'Cancelar y Reintentar', isDanger: true }
+              );
+              if (!proceed) return;
+              estatusFiscal = 'FALLO';
+            }
+          }
+        } catch (fErr: any) {
+          console.warn('Fallo de conexión con servicio fiscal:', fErr.message);
+        }
+      }
+
+      const isActuallyFiscal = tipoDocumento === 'FACTURA_FISCAL' && estatusFiscal !== 'FALLO';
+
+      const salePayload = {
+        factura_nro: 'FAC-PENDIENTE', // Server will assign the real number via seq_factura
+        client: selectedClient,
+        items: saleItems,
+        subtotal: subtotalUSD,
+        descuento: discountAmountUSD,
+        iva: ivaAmount,
+        totalUSD,
+        totalVES,
+        pagos,
+        vueltoUSD: finalVueltoUSD,
+        vueltoVES: finalVueltoVES,
+        tipo_documento: isActuallyFiscal ? 'FACTURA_FISCAL' : 'NOTA_ENTREGA',
+        nro_fiscal: nroFiscal,
+        serial_fiscal: serialFiscal,
+        nro_z: nroZ,
+        estatus_fiscal: estatusFiscal,
+        base_imponible_usd: baseImponibleUSD,
+        iva_usd: ivaAmount,
+        exento_usd: netExemptUSD,
+        igtf_usd: 0
+      };
+
+      // Await the server response to get the confirmed factura_nro
+      let confirmedSale: any;
+      try {
+        confirmedSale = await onRegisterSale(salePayload);
+      } catch (err: any) {
+        // Server failed to save the sale — show error and abort
+        showAlert(
+          `❌ Error al guardar la venta en el servidor: ${err.message || 'Error desconocido'}. La venta NO fue registrada. Verifique la conexión con el servidor e intente de nuevo.`,
+          'Error Crítico de Venta',
+          'error'
+        );
+        return;
+      }
+      const finalSaleForTicket = confirmedSale ?? salePayload;
+
+      setShowCheckoutModal(false);
+      if (shouldPrint) {
+        setPrintedTicketData(finalSaleForTicket as any);
+        setShowTicketModal(true);
+        setTimeout(() => {
+          printTicketReceipt(finalSaleForTicket, companyConfig, currentUser, selectedSeller);
+        }, 300);
+      }
+
+      // Clear sale state and reset client to default 'Público General'
+      setSaleItems([]);
+      setDiscountPct(0);
+      localStorage.removeItem('pos_current_cart');
+      localStorage.removeItem('pos_current_discount');
+      localStorage.removeItem('pos_current_client_doc');
+
+      const defaultCli = clients.find(c => c.cedula_rif === 'V-00000000') || clients[0];
+      if (defaultCli) {
+        setSelectedClient(defaultCli);
+        setDiscountPct(defaultCli.porcentaje_descuento);
+        setClientSearchTerm('');
+      }
+    } finally {
+      // Cooldown timer to prevent accidental multi-key bounces
       setTimeout(() => {
-        printTicketReceipt(finalSaleForTicket, companyConfig, currentUser, selectedSeller);
-      }, 300);
-    }
-
-    // Clear sale state and reset client to default 'Público General'
-    setSaleItems([]);
-    setDiscountPct(0);
-    localStorage.removeItem('pos_current_cart');
-    localStorage.removeItem('pos_current_discount');
-    localStorage.removeItem('pos_current_client_doc');
-
-    const defaultCli = clients.find(c => c.cedula_rif === 'V-00000000') || clients[0];
-    if (defaultCli) {
-      setSelectedClient(defaultCli);
-      setDiscountPct(defaultCli.porcentaje_descuento);
-      setClientSearchTerm('');
+        isSubmittingRef.current = false;
+        setIsSubmittingSale(false);
+      }, 500);
     }
   };
 
@@ -2003,7 +2044,7 @@ export default function CajaPOS({
       }
 
       if (e.key === 'Enter') {
-        if (canConfirmCheckout) {
+        if (canConfirmCheckout && !isSubmittingRef.current && !isSubmittingSale) {
           if (document.activeElement?.tagName === 'BUTTON') {
             return;
           }
@@ -2015,7 +2056,7 @@ export default function CajaPOS({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showCheckoutModal, canConfirmCheckout]);
+  }, [showCheckoutModal, canConfirmCheckout, isSubmittingSale]);
 
   const handleSaveApertura = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2830,11 +2871,11 @@ export default function CajaPOS({
                     if (searchSelectedIndex >= 0 && searchSelectedIndex < searchSuggestions.length) {
                       matched = searchSuggestions[searchSelectedIndex];
                     } else {
-                      // Search for exact barcode/code match first
-                      matched = products.find(p => p.barcode.toUpperCase() === term.toUpperCase() || p.id.toString() === term);
+                      // Búsqueda ultra rápida O(1) por código de barra exacto
+                      matched = productsByBarcodeMap.get(term.toUpperCase()) || productsByBarcodeMap.get(term);
 
-                      // If no exact match, try the first product in the filtered list
-                      if (!matched && searchSuggestions.length === 1) {
+                      // Si no hay código de barra exacto pero hay sugerencias, tomar la primera
+                      if (!matched && searchSuggestions.length > 0) {
                         matched = searchSuggestions[0];
                       }
                     }
@@ -3894,21 +3935,39 @@ export default function CajaPOS({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <button
                       onClick={() => handleConfirmCheckout(true)}
-                      disabled={!canConfirmCheckout}
-                      className="bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 disabled:text-slate-450 text-white py-3.5 px-3 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 font-sans focus:ring-2 focus:ring-sky-500 focus:ring-offset-1 focus:outline-none shadow-sm cursor-pointer disabled:cursor-not-allowed active:scale-[0.98]"
+                      disabled={!canConfirmCheckout || isSubmittingSale}
+                      className="bg-sky-600 hover:bg-sky-700 disabled:bg-slate-300 disabled:text-slate-500 text-white py-3.5 px-3 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 font-sans focus:ring-2 focus:ring-sky-500 focus:ring-offset-1 focus:outline-none shadow-sm cursor-pointer disabled:cursor-not-allowed active:scale-[0.98]"
                     >
-                      <Ticket className="w-4 h-4" />
-                      Cobrar con Ticket
+                      {isSubmittingSale ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                          <span>Procesando...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Ticket className="w-4 h-4" />
+                          <span>Cobrar con Ticket</span>
+                        </>
+                      )}
                     </button>
                     
                     <button
                       onClick={() => handleConfirmCheckout(false)}
-                      disabled={!canConfirmCheckout}
-                      className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-455 text-white py-3.5 px-3 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 font-sans focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 focus:outline-none ring-2 ring-emerald-500/20 shadow-sm cursor-pointer disabled:cursor-not-allowed active:scale-[0.98]"
+                      disabled={!canConfirmCheckout || isSubmittingSale}
+                      className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:text-slate-500 text-white py-3.5 px-3 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 font-sans focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 focus:outline-none ring-2 ring-emerald-500/20 shadow-sm cursor-pointer disabled:cursor-not-allowed active:scale-[0.98]"
                       title="Presione Enter para confirmar"
                     >
-                      <CheckCircle2 className="w-4 h-4" />
-                      Cobrar Sin Imprimir (Enter)
+                      {isSubmittingSale ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                          <span>Guardando Venta...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>Cobrar Sin Imprimir (Enter)</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>

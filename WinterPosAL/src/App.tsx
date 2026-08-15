@@ -251,13 +251,23 @@ export default function App() {
   const [inversionesUnlocked, setInversionesUnlocked] = useState(false);
   const [inversionesSubTab, setInversionesSubTab] = useState<'matriz' | 'historial' | 'utilidades' | 'accionistas'>('matriz');
 
-  // Sync to localStorage
+  // Debounced Sync to localStorage (avoids blocking the UI thread on large catalogs)
   useEffect(() => {
-    localStorage.setItem('pos_products', JSON.stringify(products));
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem('pos_products', JSON.stringify(products));
+      } catch (_) {}
+    }, 600);
+    return () => clearTimeout(timer);
   }, [products]);
 
   useEffect(() => {
-    localStorage.setItem('pos_clients', JSON.stringify(clients));
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem('pos_clients', JSON.stringify(clients));
+      } catch (_) {}
+    }, 600);
+    return () => clearTimeout(timer);
   }, [clients]);
 
   useEffect(() => {

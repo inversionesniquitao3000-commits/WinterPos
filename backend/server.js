@@ -728,13 +728,42 @@ app.get('/api/bcv', async (req, res) => {
   res.json(rates);
 });
 
+// Recent Sales Deduplication Cache (Anti-Double-Charge Idempotency Shield)
+const recentSalesDeduplication = new Map();
+
 app.post('/api/sales', async (req, res) => {
   try {
-    const saved = await saveSale(req.body);
+    const saleData = req.body;
+
+    // Build unique sale fingerprint
+    const clientDoc = saleData.client?.cedula_rif || saleData.client?.cedula || 'V-00000000';
+    const itemsSig = (saleData.items || []).map(i => `${i.product?.id || i.product?.barcode || i.description}_${i.qty}`).join('|');
+    const signature = `${saleData.terminal || 'LOCAL'}_${clientDoc}_${saleData.totalUSD}_${itemsSig}`;
+
+    const now = Date.now();
+    const existing = recentSalesDeduplication.get(signature);
+
+    // If identical request arrives within 3.5 seconds, return the existing confirmed sale without creating a duplicate
+    if (existing && (now - existing.timestamp < 3500)) {
+      console.warn(`🛡️ [Anti-Duplicación] Petición concurrente detectada (${now - existing.timestamp}ms). Retornando venta confirmada "${existing.result.factura_nro}" para evitar cobro duplicado.`);
+      return res.json(existing.result);
+    }
+
+    const saved = await saveSale(saleData);
     if (!saved) {
-      // saveSale throws on Postgres error, but guard against null return from JSON fallback
       return res.status(500).json({ error: 'Error interno al registrar la venta. Intente de nuevo.' });
     }
+
+    // Save in deduplication cache
+    recentSalesDeduplication.set(signature, { timestamp: now, result: saved });
+
+    // Clean up expired cache items
+    for (const [key, val] of recentSalesDeduplication.entries()) {
+      if (now - val.timestamp > 15000) {
+        recentSalesDeduplication.delete(key);
+      }
+    }
+
     res.json(saved);
   } catch (err) {
     console.error('❌ Error crítico al registrar venta:', err.message);
