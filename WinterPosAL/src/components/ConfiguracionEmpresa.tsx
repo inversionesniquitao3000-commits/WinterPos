@@ -8,7 +8,7 @@ import {
   RefreshCw, Unlock, RotateCcw, AlertTriangle
 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
-import { getLocalDateStr, formatBs, formatUSD } from '../utils';
+import { getLocalDateStr, formatBs } from '../utils';
 import { MasterPassModal } from './MasterPassModal';
 
 interface ConfiguracionEmpresaProps {

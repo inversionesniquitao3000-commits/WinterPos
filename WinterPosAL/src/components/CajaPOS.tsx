@@ -7,7 +7,7 @@ import {
   Clock, ListOrdered, Plus, AlertCircle, DollarSign, RotateCcw, Printer,
   Calendar, Lock, Coins, RefreshCw
 } from 'lucide-react';
-import { formatNumberToWordsUSD, printTicketReceipt, formatBs, formatUSD } from '../utils';
+import { formatNumberToWordsUSD, printTicketReceipt, formatBs } from '../utils';
 import { useDialog } from '../hooks/useDialog';
 import CambioDivisasModal from './CambioDivisasModal';
 
