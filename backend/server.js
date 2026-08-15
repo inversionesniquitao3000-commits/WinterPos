@@ -572,13 +572,6 @@ app.get('/api/sync/poll', async (req, res) => {
   }
 });
 
-    res.json(result);
-  } catch (err) {
-    console.error('Error en /api/sync/poll:', err.message);
-    res.json({ sales: [], tasas: null, cierres: null, abonos: null, sessionClosed: false, serverTime: new Date().toISOString() });
-  }
-});
-
 
 import https from 'https';
 
