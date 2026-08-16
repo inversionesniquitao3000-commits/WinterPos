@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS Configuracion_Empresa (
     metodos_pago_activos JSONB NOT NULL DEFAULT '["efectivo_usd", "efectivo_ves", "debito", "pago_movil", "biopago", "credito"]'::jsonb,
     permitir_multisesion BOOLEAN DEFAULT TRUE,
     compartir_apertura_caja BOOLEAN DEFAULT TRUE,
-    master_pass VARCHAR(255) DEFAULT '1234'
+    master_pass VARCHAR(255) DEFAULT '1234',
+    gdrive_config TEXT
 );
 
 -- ==========================================

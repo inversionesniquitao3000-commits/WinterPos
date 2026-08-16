@@ -3,36 +3,32 @@ import path from 'path';
 import https from 'https';
 import http from 'http';
 import { fileURLToPath } from 'url';
+import { getGDriveConfigDb, saveGDriveConfigDb } from './db-store.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const GDRIVE_CONFIG_FILE = path.join(__dirname, 'data', 'gdrive_config.json');
-
-export function getDriveConfig() {
+export async function getDriveConfig() {
   try {
-    if (fs.existsSync(GDRIVE_CONFIG_FILE)) {
-      return JSON.parse(fs.readFileSync(GDRIVE_CONFIG_FILE, 'utf8'));
-    }
-  } catch (e) {}
-  return {
-    enabled: false,
-    method: 'WEBHOOK', // 'WEBHOOK' | 'ACCESS_TOKEN'
-    webhookUrl: '',
-    folderId: '',
-    folderName: 'WinterPOS_Backups',
-    accessToken: '',
-    lastSync: null,
-    lastStatus: 'PENDING'
-  };
+    return await getGDriveConfigDb();
+  } catch (e) {
+    console.error('Error al obtener configuración de Google Drive:', e.message);
+    return {
+      enabled: false,
+      method: 'WEBHOOK',
+      webhookUrl: '',
+      folderId: '',
+      folderName: 'WinterPOS_Backups',
+      accessToken: '',
+      lastSync: null,
+      lastStatus: 'PENDING'
+    };
+  }
 }
 
-export function saveDriveConfig(config) {
+export async function saveDriveConfig(config) {
   try {
-    const dataDir = path.join(__dirname, 'data');
-    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-    fs.writeFileSync(GDRIVE_CONFIG_FILE, JSON.stringify(config, null, 2), 'utf8');
-    return { ok: true, config };
+    return await saveGDriveConfigDb(config);
   } catch (e) {
     console.error('Error guardando configuración de Google Drive:', e.message);
     throw e;
@@ -43,7 +39,7 @@ export function saveDriveConfig(config) {
  * Uploads backup payload to Google Drive using configured webhook or Google REST API.
  */
 export async function uploadBackupToGoogleDrive(backupData, fileName = `winterpos_backup_${Date.now()}.json`) {
-  const config = getDriveConfig();
+  const config = await getDriveConfig();
   if (!config.enabled) {
     return { ok: false, message: 'Respaldo en Google Drive no está habilitado.' };
   }
@@ -58,7 +54,8 @@ export async function uploadBackupToGoogleDrive(backupData, fileName = `winterpo
 
   if (config.method === 'WEBHOOK' && config.webhookUrl) {
     try {
-      const response = await fetch(config.webhookUrl, {
+      const webhookUrl = config.webhookUrl.trim();
+      const response = await fetch(webhookUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -73,10 +70,10 @@ export async function uploadBackupToGoogleDrive(backupData, fileName = `winterpo
         responseData = JSON.parse(responseText);
       } catch (_) {}
 
-      if (response.ok && (responseData.ok !== false)) {
+      if (response.ok || (response.status >= 200 && response.status < 400)) {
         config.lastSync = new Date().toISOString();
         config.lastStatus = 'SUCCESS';
-        saveDriveConfig(config);
+        await saveDriveConfig(config);
         return {
           ok: true,
           message: `✅ Respaldo "${fileName}" subido exitosamente a Google Drive.`,
@@ -85,12 +82,12 @@ export async function uploadBackupToGoogleDrive(backupData, fileName = `winterpo
       } else {
         const errMsg = responseData.error || responseData.message || `HTTP ${response.status}: ${responseText.substring(0, 100)}`;
         config.lastStatus = `ERROR: ${errMsg}`;
-        saveDriveConfig(config);
+        await saveDriveConfig(config);
         throw new Error(`Google Drive respondió con error: ${errMsg}`);
       }
     } catch (err) {
       config.lastStatus = `ERROR: ${err.message}`;
-      saveDriveConfig(config);
+      await saveDriveConfig(config);
       throw new Error(`Error al conectar con Google Drive: ${err.message}`);
     }
   }
@@ -131,11 +128,11 @@ export async function uploadBackupToGoogleDrive(backupData, fileName = `winterpo
         (res) => {
           let body = '';
           res.on('data', (d) => (body += d));
-          res.on('end', () => {
+          res.on('end', async () => {
             if (res.statusCode >= 200 && res.statusCode < 300) {
               config.lastSync = new Date().toISOString();
               config.lastStatus = 'SUCCESS';
-              saveDriveConfig(config);
+              await saveDriveConfig(config);
               resolve({
                 ok: true,
                 message: `✅ Respaldo "${fileName}" sincronizado en Google Drive vía API.`,
@@ -143,7 +140,7 @@ export async function uploadBackupToGoogleDrive(backupData, fileName = `winterpo
               });
             } else {
               config.lastStatus = `ERROR: HTTP ${res.statusCode}`;
-              saveDriveConfig(config);
+              await saveDriveConfig(config);
               reject(new Error(`Google API error (${res.statusCode}): ${body.substring(0, 150)}`));
             }
           });

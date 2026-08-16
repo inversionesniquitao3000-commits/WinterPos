@@ -1337,19 +1337,22 @@ setTimeout(runBackupTask, 5000);
 // ==========================================
 // GOOGLE DRIVE BACKUP ENDPOINTS
 // ==========================================
-app.get('/api/backup/gdrive-config', (req, res) => {
+app.get('/api/backup/gdrive-config', async (req, res) => {
   try {
-    res.json(getDriveConfig());
+    const config = await getDriveConfig();
+    res.json(config);
   } catch (err) {
+    console.error('Error en GET /api/backup/gdrive-config:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-app.post('/api/backup/gdrive-config', (req, res) => {
+app.post('/api/backup/gdrive-config', async (req, res) => {
   try {
-    const saved = saveDriveConfig(req.body);
+    const saved = await saveDriveConfig(req.body);
     res.json(saved);
   } catch (err) {
+    console.error('Error en POST /api/backup/gdrive-config:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

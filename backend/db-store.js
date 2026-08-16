@@ -206,6 +206,7 @@ try {
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS compartir_apertura_caja BOOLEAN DEFAULT TRUE;
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS master_pass VARCHAR(255) DEFAULT '1234';
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS logo_url TEXT DEFAULT '';
+    ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS gdrive_config TEXT;
 
     CREATE TABLE IF NOT EXISTS Accionistas (
       id SERIAL PRIMARY KEY,
@@ -522,6 +523,57 @@ export async function saveCompanyConfig(config) {
   }
   writeJsonFile('config.json', config);
   return config;
+}
+
+// Google Drive Configuration persistence (Dual Mode: PostgreSQL / JSON)
+const defaultGDriveConfig = {
+  enabled: false,
+  method: 'WEBHOOK', // 'WEBHOOK' | 'ACCESS_TOKEN'
+  webhookUrl: '',
+  folderId: '',
+  folderName: 'WinterPOS_Backups',
+  accessToken: '',
+  lastSync: null,
+  lastStatus: 'PENDING'
+};
+
+export async function getGDriveConfigDb() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query('SELECT gdrive_config FROM Configuracion_Empresa ORDER BY id DESC LIMIT 1');
+      if (res.rowCount > 0 && res.rows[0].gdrive_config) {
+        try {
+          const parsed = typeof res.rows[0].gdrive_config === 'string'
+            ? JSON.parse(res.rows[0].gdrive_config)
+            : res.rows[0].gdrive_config;
+          return { ...defaultGDriveConfig, ...parsed };
+        } catch (_) {}
+      }
+    } catch (err) {
+      console.error('Error en getGDriveConfigDb (Postgres):', err.message);
+    }
+  }
+  return readJsonFile('gdrive_config.json', defaultGDriveConfig);
+}
+
+export async function saveGDriveConfigDb(config) {
+  const current = await getGDriveConfigDb();
+  const merged = { ...defaultGDriveConfig, ...current, ...config };
+  if (usePostgres) {
+    try {
+      const existing = await pool.query('SELECT id FROM Configuracion_Empresa ORDER BY id DESC LIMIT 1');
+      if (existing.rowCount > 0) {
+        await pool.query(
+          'UPDATE Configuracion_Empresa SET gdrive_config = $1 WHERE id = $2',
+          [JSON.stringify(merged), existing.rows[0].id]
+        );
+      }
+    } catch (err) {
+      console.error('Error en saveGDriveConfigDb (Postgres):', err.message);
+    }
+  }
+  writeJsonFile('gdrive_config.json', merged);
+  return { ok: true, config: merged };
 }
 
 // Ultra-fast check for invoice sequence reference without loading all sales history
@@ -2467,7 +2519,7 @@ export async function saveSale(s) {
       return {
         ...s,
         id: saleId,
-        factura_nro, // Return the server-assigned invoice number to the frontend
+        factura_nro,
         fecha: getLocalISODateString(new Date(saleRes.rows[0].fecha))
       };
     } catch (err) {

@@ -1047,10 +1047,12 @@ export default function ConfiguracionEmpresa({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(gdriveConfig)
       });
-      if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok !== false) {
         showToast('✅ Configuración de Google Drive guardada con éxito.');
+        fetchGDriveConfig();
       } else {
-        showAlert('Error al guardar configuración de Google Drive', 'Error', 'error');
+        showAlert(data.error || 'Error al guardar configuración de Google Drive', 'Error', 'error');
       }
     } catch (err: any) {
       showAlert(`Error: ${err.message}`, 'Error de Conexión', 'error');
