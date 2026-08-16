@@ -38,9 +38,11 @@ export async function saveDriveConfig(config) {
 /**
  * Uploads backup payload to Google Drive using configured webhook or Google REST API.
  */
-export async function uploadBackupToGoogleDrive(backupData, fileName = `winterpos_backup_${Date.now()}.json`) {
-  const config = await getDriveConfig();
-  if (!config.enabled) {
+export async function uploadBackupToGoogleDrive(backupData, fileName = `winterpos_backup_${Date.now()}.json`, overrideConfig = null) {
+  const config = overrideConfig || (await getDriveConfig());
+  const isTest = fileName.includes('test_ping');
+
+  if (!config.enabled && !isTest) {
     return { ok: false, message: 'Respaldo en Google Drive no está habilitado.' };
   }
 

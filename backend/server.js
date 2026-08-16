@@ -1359,8 +1359,9 @@ app.post('/api/backup/gdrive-config', async (req, res) => {
 
 app.post('/api/backup/gdrive-test', async (req, res) => {
   try {
+    const testConfig = req.body && Object.keys(req.body).length > 0 ? req.body : null;
     const testData = { test: true, app: 'WinterPOS', date: new Date().toISOString() };
-    const result = await uploadBackupToGoogleDrive(testData, `winterpos_test_ping_${Date.now()}.json`);
+    const result = await uploadBackupToGoogleDrive(testData, `winterpos_test_ping_${Date.now()}.json`, testConfig);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });

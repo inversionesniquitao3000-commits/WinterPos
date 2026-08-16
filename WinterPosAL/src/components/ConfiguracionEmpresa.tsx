@@ -1067,7 +1067,11 @@ export default function ConfiguracionEmpresa({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(gdriveConfig)
       });
-      const res = await fetch(getApiUrl('/backup/gdrive-test'), { method: 'POST' });
+      const res = await fetch(getApiUrl('/backup/gdrive-test'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(gdriveConfig)
+      });
       const data = await res.json();
       if (res.ok && data.ok) {
         showAlert(`✅ ${data.message || 'Conexión exitosa con Google Drive.'}`, 'Test de Google Drive Exitoso', 'success');
