@@ -1,4 +1,4 @@
-import { readJsonFile, writeJsonFile } from './db-store.js';
+import { getWhatsConfigDb, saveWhatsConfigDb, readJsonFile, writeJsonFile } from './db-store.js';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -8,8 +8,19 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Configuration file path
-const CONFIG_FILE = 'whatsapp_config.json';
+// Session and auth directory in writable AppData (safe across all Windows installations)
+const AUTH_DATA_DIR = path.join(
+  process.env.LOCALAPPDATA || process.env.APPDATA || (process.platform === 'win32' ? 'C:\\ProgramData' : os.homedir()),
+  'WinterPOS',
+  'whatsapp_auth'
+);
+
+// Ensure writable session folder exists
+if (!fs.existsSync(AUTH_DATA_DIR)) {
+  try {
+    fs.mkdirSync(AUTH_DATA_DIR, { recursive: true });
+  } catch (_) {}
+}
 
 // Helper to clean orphaned Chrome processes that lock the WhatsApp profile
 export function killOrphanedChrome() {
@@ -20,7 +31,7 @@ export function killOrphanedChrome() {
   } catch (err) {
     try {
       const out = execSync('wmic process where "name=\'chrome.exe\'" get processid,commandline /format:csv', { stdio: ['ignore', 'pipe', 'ignore'], timeout: 4000 }).toString();
-      const lines = out.split('\r\n').filter(l => l.includes('session-winterpos-session') || l.includes('wwebjs_auth') || l.includes('puppeteer'));
+      const lines = out.split('\r\n').filter(l => l.includes('session-winterpos-session') || l.includes('wwebjs_auth') || l.includes('puppeteer') || l.includes('whatsapp_auth'));
       for (const line of lines) {
         const parts = line.trim().split(',');
         const pid = parts[parts.length - 1];
@@ -37,12 +48,12 @@ export function killOrphanedChrome() {
 // Helper to clean lock files in session folder
 export function cleanSessionLocks() {
   const dirsToClean = [
+    AUTH_DATA_DIR,
+    path.join(AUTH_DATA_DIR, 'session-winterpos-session'),
     path.resolve(process.cwd(), '.wwebjs_auth', 'session-winterpos-session'),
     path.resolve(process.cwd(), '.wwebjs_auth'),
     path.join(__dirname, '.wwebjs_auth', 'session-winterpos-session'),
-    path.join(__dirname, '.wwebjs_auth'),
-    'C:\\Program Files (x86)\\WinterPosAL\\backend\\.wwebjs_auth\\session-winterpos-session',
-    'C:\\Program Files (x86)\\WinterPosAL\\backend\\.wwebjs_auth'
+    path.join(__dirname, '.wwebjs_auth')
   ];
   const lockFiles = ['DevToolsActivePort', 'SingletonLock', 'SingletonCookie', 'SingletonSocket', 'CrashpadMetrics-active.pma', 'lockfile'];
 
@@ -66,12 +77,11 @@ export function cleanSessionLocks() {
 // Helper to completely delete session and cache folders
 export function deleteFullSessionFolder() {
   const dirsToDelete = [
+    AUTH_DATA_DIR,
     path.resolve(process.cwd(), '.wwebjs_auth'),
     path.resolve(process.cwd(), '.wwebjs_cache'),
     path.join(__dirname, '.wwebjs_auth'),
-    path.join(__dirname, '.wwebjs_cache'),
-    'C:\\Program Files (x86)\\WinterPosAL\\backend\\.wwebjs_auth',
-    'C:\\Program Files (x86)\\WinterPosAL\\backend\\.wwebjs_cache'
+    path.join(__dirname, '.wwebjs_cache')
   ];
 
   for (const dir of dirsToDelete) {
@@ -96,6 +106,9 @@ export function deleteFullSessionFolder() {
       console.warn(`[WhatsApp] Advertencia al eliminar directorio ${dir}:`, err.message);
     }
   }
+  try {
+    fs.mkdirSync(AUTH_DATA_DIR, { recursive: true });
+  } catch (_) {}
 }
 
 // Desbloquear sesiones atrapadas sin borrar credenciales válidas
@@ -201,35 +214,38 @@ let authWatchdogTimer = null;
 let isReconnecting = false;
 
 // Load config
-export function getWhatsAppConfig() {
-  return readJsonFile(CONFIG_FILE, defaultConfig);
+export async function getWhatsAppConfig() {
+  try {
+    return await getWhatsConfigDb();
+  } catch (e) {
+    return defaultConfig;
+  }
 }
 
-export function saveWhatsAppConfig(config) {
-  const current = getWhatsAppConfig();
-  const updated = { ...current, ...config };
-  writeJsonFile(CONFIG_FILE, updated);
+export async function saveWhatsAppConfig(config) {
+  const updated = await saveWhatsConfigDb(config);
   
   // Re-evaluate client status if toggle changed
   if (updated.enabled) {
-    initWhatsAppClient();
+    initWhatsAppClient().catch(err => console.warn('[WhatsApp] Error en inicio tras guardar configuración:', err?.message || err));
   } else {
-    destroyWhatsAppClient();
+    destroyWhatsAppClient().catch(() => {});
   }
   return updated;
 }
 
-export function getWhatsAppStatus() {
+export async function getWhatsAppStatus() {
   if (!detectedChromePath) {
     detectedChromePath = findChromeExecutable();
   }
+  const config = await getWhatsAppConfig();
   return {
     status: connectionStatus,
     qr: connectionStatus === 'QR_READY' ? lastQrCode : '',
     isMock: isMockMode,
     detectedChromePath: detectedChromePath,
     lastError: lastInitError,
-    config: getWhatsAppConfig()
+    config
   };
 }
 
@@ -263,12 +279,6 @@ async function destroyWhatsAppClient() {
 }
 
 function findChromeExecutable() {
-  const config = getWhatsAppConfig();
-  if (config.chromePath && fs.existsSync(config.chromePath)) {
-    console.log('[WhatsApp] Usando ejecutable de Chrome configurado manualmente:', config.chromePath);
-    return config.chromePath;
-  }
-
   if (process.platform === 'win32') {
     const homeDir = os.homedir();
     const localAppData = process.env.LOCALAPPDATA || path.join(homeDir, 'AppData\\Local');
@@ -322,12 +332,15 @@ function findChromeExecutable() {
       }
     }
 
-    // Fallback Priority: Brave / Microsoft Edge / Chromium
+    // Fallback Priority: Microsoft Edge (present by default on all Windows 10/11) / Brave
     const fallbackPaths = [
-      path.join(progFiles, 'BraveSoftware\\Brave-Browser\\Application\\brave.exe'),
       'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+      'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
       path.join(progFilesX86, 'Microsoft\\Edge\\Application\\msedge.exe'),
-      path.join(progFiles, 'Microsoft\\Edge\\Application\\msedge.exe')
+      path.join(progFiles, 'Microsoft\\Edge\\Application\\msedge.exe'),
+      path.join(localAppData, 'Microsoft\\Edge\\Application\\msedge.exe'),
+      path.join(progFiles, 'BraveSoftware\\Brave-Browser\\Application\\brave.exe'),
+      path.join(localAppData, 'BraveSoftware\\Brave-Browser\\Application\\brave.exe')
     ];
 
     for (const p of fallbackPaths) {
@@ -343,7 +356,7 @@ function findChromeExecutable() {
 function startHeartbeat() {
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   heartbeatTimer = setInterval(async () => {
-    const config = getWhatsAppConfig();
+    const config = await getWhatsAppConfig();
     if (!config.enabled || !client || isMockMode) return;
 
     try {
@@ -411,9 +424,9 @@ function startAuthWatchdog() {
           return;
         }
 
-        // Si pasan 50 segundos (~17 chequeos) y sigue colgado, recargar el marco para destrabarlo
-        if (checksCount >= 17) {
-          console.warn('[WhatsApp Watchdog] Sincronización demorada (>50s). Recargando página para desbloquear...');
+        // Si pasan 60 segundos y sigue colgado, recargar el marco para destrabarlo
+        if (checksCount >= 20) {
+          console.warn('[WhatsApp Watchdog] Sincronización demorada (>60s). Recargando página para desbloquear...');
           checksCount = 0;
           await client.pupPage.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
         }
@@ -424,7 +437,7 @@ function startAuthWatchdog() {
 
 // Initialize WhatsApp client
 export async function initWhatsAppClient() {
-  const config = getWhatsAppConfig();
+  const config = await getWhatsAppConfig();
   if (!config.enabled) {
     await destroyWhatsAppClient();
     return;
@@ -450,7 +463,7 @@ export async function initWhatsAppClient() {
     const qrcode = await import('qrcode');
 
     detectedChromePath = findChromeExecutable();
-    console.log('[WhatsApp] Motor Chrome detectado en:', detectedChromePath || 'Chromium interno');
+    console.log('[WhatsApp] Motor de navegación detectado en:', detectedChromePath || 'Chromium interno');
 
     const userAgentStr = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
     const puppeteerConfig = {
@@ -461,7 +474,7 @@ export async function initWhatsAppClient() {
         '--disable-dev-shm-usage',
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
-        '--no-zygote',
+        '--no-default-browser-check',
         '--disable-gpu',
         '--disable-extensions',
         '--disable-component-update',
@@ -483,7 +496,7 @@ export async function initWhatsAppClient() {
     client = new Client({
       authStrategy: new LocalAuth({ 
         clientId: "winterpos-session",
-        dataPath: path.join(__dirname, '.wwebjs_auth')
+        dataPath: AUTH_DATA_DIR
       }),
       userAgent: userAgentStr,
       authTimeoutMs: 180000,
@@ -540,7 +553,7 @@ export async function initWhatsAppClient() {
       lastQrCode = '';
 
       // Auto-reconectar automáticamente si no fue logout manual
-      const conf = getWhatsAppConfig();
+      const conf = await getWhatsAppConfig();
       if (conf.enabled && reason !== 'LOGOUT' && !isReconnecting) {
         isReconnecting = true;
         console.log('[WhatsApp] Programando reconexión automática en 4 segundos...');
@@ -620,7 +633,7 @@ async function ensureWWebJSInjected(c) {
 
 // Send Report Endpoint handler
 export async function sendCierreReport(imageBase64, textSummary) {
-  const config = getWhatsAppConfig();
+  const config = await getWhatsAppConfig();
   if (!config.enabled || !config.groupId) {
     throw new Error('Servicio de WhatsApp deshabilitado o sin grupo de destino configurado.');
   }
@@ -654,9 +667,11 @@ export async function sendCierreReport(imageBase64, textSummary) {
       try {
         console.log(`[WhatsApp] Intentando unir al grupo usando código: ${inviteCode}`);
         const groupId = await client.acceptInvite(inviteCode);
-        target = groupId;
-        config.groupId = target;
-        saveWhatsAppConfig(config);
+        if (groupId) {
+          target = groupId;
+          config.groupId = target;
+          await saveWhatsAppConfig(config);
+        }
       } catch (errInvite) {
         console.warn('[WhatsApp] No se pudo unir automáticamente al grupo:', errInvite.message || errInvite);
       }
@@ -667,7 +682,11 @@ export async function sendCierreReport(imageBase64, textSummary) {
         target = `${target}@g.us`;
       } else {
         let cleanNum = target.replace(/[^0-9]/g, '');
-        if (cleanNum.startsWith('0')) cleanNum = '58' + cleanNum.substring(1);
+        if (cleanNum.startsWith('0')) {
+          cleanNum = '58' + cleanNum.substring(1);
+        } else if (cleanNum.length === 10 && (cleanNum.startsWith('412') || cleanNum.startsWith('414') || cleanNum.startsWith('424') || cleanNum.startsWith('416') || cleanNum.startsWith('426'))) {
+          cleanNum = '58' + cleanNum;
+        }
         target = `${cleanNum}@c.us`;
       }
     }

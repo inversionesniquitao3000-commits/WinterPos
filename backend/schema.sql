@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS Configuracion_Empresa (
     permitir_multisesion BOOLEAN DEFAULT TRUE,
     compartir_apertura_caja BOOLEAN DEFAULT TRUE,
     master_pass VARCHAR(255) DEFAULT '1234',
-    gdrive_config TEXT
+    gdrive_config TEXT,
+    whatsapp_config TEXT
 );
 
 -- ==========================================

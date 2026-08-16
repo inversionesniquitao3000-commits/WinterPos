@@ -207,6 +207,7 @@ try {
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS master_pass VARCHAR(255) DEFAULT '1234';
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS logo_url TEXT DEFAULT '';
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS gdrive_config TEXT;
+    ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS whatsapp_config TEXT;
 
     CREATE TABLE IF NOT EXISTS Accionistas (
       id SERIAL PRIMARY KEY,
@@ -574,6 +575,89 @@ export async function saveGDriveConfigDb(config) {
   }
   writeJsonFile('gdrive_config.json', merged);
   return { ok: true, config: merged };
+}
+
+// WhatsApp Configuration persistence (Dual Mode: PostgreSQL / JSON)
+const defaultWhatsAppConfig = {
+  enabled: false,
+  groupId: '',
+  groupName: 'Grupo de Cierres POS',
+  messageTemplate: `📊 *REPORTE DE ARQUEO Y CIERRE DE CAJA*
+
+📅 *Fecha:* {fecha}
+👤 *Cajero:* {usuario}
+🖥️ *Terminal:* {terminal}
+
+💵 *EFECTIVO ESPERADO EN GAVETA:*
+• Dólares (USD): $ {dineroEnCajaExpected}
+• Bolívares (VES): Bs {expectedVes}
+
+📥 *EFECTIVO FÍSICO RECIBIDO:*
+• Dólares (USD): $ {realUsd}
+• Bolívares (VES): Bs {realVes}
+
+⚖️ *DIFERENCIA (BALANCE):*
+• Dólares (USD): {diffUsd}
+• Bolívares (VES): {diffVes}
+
+🛍️ *VENTAS TOTALES DEL TURNO:* $ {ventaTotalUsd} USD
+📉 *DESCUENTOS APLICADOS:* $ {descuentosUsd} USD
+
+*WinterPosAL Cloud System*`,
+  utilidadesMessageTemplate: `💼 *REPORTE DE UTILIDADES Y GASTOS OPERATIVOS*
+🏬 *{empresa}*
+📅 *Fecha:* {fecha}
+💱 *Tasa BCV:* {tasaBcv} Bs/USD
+
+📊 *RESUMEN FINANCIERO:*
+📈 *Utilidad Bruta:* ${'{utilidadBrutaUsd}'} USD | Bs {utilidadBrutaVes} VES
+🔻 *(-) Gastos Deducibles:* -${'{totalGastosUsd}'} USD | -Bs {totalGastosVes} VES
+💰 *(=) Utilidad Neta Distribuable:* *${'{utilidadNetaUsd}'} USD* | *Bs {utilidadNetaVes} VES*
+
+📝 *DESGLOSE DE GASTOS OPERATIVOS ({cantGastos}):*
+{desgloseGastos}
+
+👥 *MONTO A COBRAR POR ACCIONISTA:*
+{desgloseAccionistas}`
+};
+
+export async function getWhatsConfigDb() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query('SELECT whatsapp_config FROM Configuracion_Empresa ORDER BY id DESC LIMIT 1');
+      if (res.rowCount > 0 && res.rows[0].whatsapp_config) {
+        try {
+          const parsed = typeof res.rows[0].whatsapp_config === 'string'
+            ? JSON.parse(res.rows[0].whatsapp_config)
+            : res.rows[0].whatsapp_config;
+          return { ...defaultWhatsAppConfig, ...parsed };
+        } catch (_) {}
+      }
+    } catch (err) {
+      console.error('Error en getWhatsConfigDb (Postgres):', err.message);
+    }
+  }
+  return readJsonFile('whatsapp_config.json', defaultWhatsAppConfig);
+}
+
+export async function saveWhatsConfigDb(config) {
+  const current = await getWhatsConfigDb();
+  const merged = { ...defaultWhatsAppConfig, ...current, ...config };
+  if (usePostgres) {
+    try {
+      const existing = await pool.query('SELECT id FROM Configuracion_Empresa ORDER BY id DESC LIMIT 1');
+      if (existing.rowCount > 0) {
+        await pool.query(
+          'UPDATE Configuracion_Empresa SET whatsapp_config = $1 WHERE id = $2',
+          [JSON.stringify(merged), existing.rows[0].id]
+        );
+      }
+    } catch (err) {
+      console.error('Error en saveWhatsConfigDb (Postgres):', err.message);
+    }
+  }
+  writeJsonFile('whatsapp_config.json', merged);
+  return merged;
 }
 
 // Ultra-fast check for invoice sequence reference without loading all sales history

@@ -1380,9 +1380,9 @@ app.post('/api/backup/gdrive-sync', async (req, res) => {
 });
 
 // WHATSAPP INTEGRATION ENDPOINTS
-app.get('/api/whatsapp/status', (req, res) => {
+app.get('/api/whatsapp/status', async (req, res) => {
   try {
-    const status = getWhatsAppStatus();
+    const status = await getWhatsAppStatus();
     res.json(status);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1397,7 +1397,7 @@ app.post('/api/whatsapp/install-chromium', async (req, res) => {
       // Intenta reinicializar el cliente incluso si npx falla (por estar offline pero tener Chrome instalado)
       try {
         await initWhatsAppClient();
-        const currentStatus = getWhatsAppStatus();
+        const currentStatus = await getWhatsAppStatus();
 
         if (currentStatus.isMock) {
           console.warn('[WhatsApp] La instalación o reconexión no logró iniciar un navegador Chrome real.');
@@ -1426,9 +1426,9 @@ app.post('/api/whatsapp/install-chromium', async (req, res) => {
   }
 });
 
-app.post('/api/whatsapp/config', (req, res) => {
+app.post('/api/whatsapp/config', async (req, res) => {
   try {
-    const saved = saveWhatsAppConfig(req.body);
+    const saved = await saveWhatsAppConfig(req.body);
     res.json(saved);
   } catch (err) {
     res.status(500).json({ error: err.message });
