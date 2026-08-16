@@ -39,8 +39,20 @@ Name: "debugmode"; Description: "⚙️ Activar Modo Depuración / Debugger (Mue
 ; Icono principal del sistema
 Source: "app_icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 
-; Copy runtime files (Backend, Compiled Frontend Dist, Launchers, Dependencies) - EXCLUDES React source code and dev files
-Source: "..\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*,.vscode\*,.gemini\*,brain\*,scratch\*,installer\*,installer_output\*,.wwebjs_auth\*,.wwebjs_cache\*,node_modules\.cache\*,WinterPosAL\src\*,WinterPosAL\public\*,WinterPosAL\node_modules\*,WinterPosAL\tsconfig*.json,WinterPosAL\vite.config.ts,WinterPosAL\generar_manuales.js"
+; Launchers and root scripts
+Source: "..\Iniciar_WinterPos.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\Iniciar_WinterPos.vbs"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\package.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist_root\desktop-main.js"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\desktop-main.js"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+
+; Protected Backend (Takes obfuscated files from dist_backend)
+Source: "..\dist_backend\*"; DestDir: "{app}\backend"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Backend runtime dependencies (Node modules)
+Source: "..\backend\node_modules\*"; DestDir: "{app}\backend\node_modules"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".cache\*,**\.cache\*"
+
+; Compiled Frontend Dist (React Vite)
+Source: "..\WinterPosAL\dist\*"; DestDir: "{app}\WinterPosAL\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 ; Modo Silencioso (Por defecto)
@@ -61,7 +73,7 @@ Name: "{app}\data"; Permissions: users-full
 Filename: "icacls"; Parameters: """{app}"" /grant Users:(OI)(CI)F /T"; Flags: runhidden; StatusMsg: "Configurando permisos de escritura para licencia y datos..."
 
 ; Register Windows Service automatically (Runs silently in background)
-Filename: "cmd.exe"; Parameters: "/c node ""{app}\tools\install_service.js"""; Flags: runhidden; StatusMsg: "Registrando servicio de segundo plano WinterPos..."; Check: IsServerModeSelected
+Filename: "cmd.exe"; Parameters: "/c node ""{app}\backend\service\install_service.js"""; Flags: runhidden; StatusMsg: "Registrando servicio de segundo plano WinterPos..."; Check: IsServerModeSelected
 
 ; Add Firewall Rule for WinterPos Web Server (Port 5000)
 Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""WinterPos Server (Puerto 5000)"" dir=in action=allow protocol=TCP localport=5000 profile=any"; Flags: runhidden; StatusMsg: "Configurando Cortafuegos de Windows (Puerto 5000)..."
@@ -79,6 +91,10 @@ begin
 end;
 
 var
+  AuthPage: TWizardPage;
+  UserEdit: TNewEdit;
+  PassEdit: TNewEdit;
+  ShowPassCheck: TNewCheckBox;
   RolePage: TWizardPage;
   ServerRadio: TRadioButton;
   ClientRadio: TRadioButton;
@@ -87,15 +103,93 @@ var
   IpLabel: TNewStaticText;
   HelpText: TNewStaticText;
 
+procedure OnShowPassCheckClick(Sender: TObject);
+begin
+  if (ShowPassCheck <> nil) and (PassEdit <> nil) then
+  begin
+    if ShowPassCheck.Checked then
+      PassEdit.PasswordChar := #0
+    else
+      PassEdit.PasswordChar := '*';
+  end;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if (AuthPage <> nil) and (CurPageID = AuthPage.ID) then
+  begin
+    if (Trim(UserEdit.Text) <> 'laguna12') or (PassEdit.Text <> 'Osopolar*01') then
+    begin
+      MsgBox('⛔ ACCESO DENEGADO' + #13#10 + #13#10 +
+             'El usuario o la contraseña de instalación son incorrectos.' + #13#10 +
+             'No está autorizado para instalar este software en este equipo.', mbError, MB_OK);
+      Result := False;
+    end;
+  end;
+end;
+
 function IsServerModeSelected: Boolean;
 begin
   Result := (ServerRadio <> nil) and ServerRadio.Checked;
 end;
 
 procedure InitializeWizard;
+var
+  InfoLabel: TNewStaticText;
+  UserLabel: TNewStaticText;
+  PassLabel: TNewStaticText;
 begin
+  // Page 0: Autenticación de Seguridad de Instalador
+  AuthPage := CreateCustomPage(wpWelcome, '🔒 Autenticación de Seguridad del Instalador', 'Ingrese las credenciales autorizadas del técnico para desbloquear la instalación.');
+
+  InfoLabel := TNewStaticText.Create(AuthPage);
+  InfoLabel.Parent := AuthPage.Surface;
+  InfoLabel.Left := ScaleX(16);
+  InfoLabel.Top := ScaleY(10);
+  InfoLabel.Width := ScaleX(440);
+  InfoLabel.WordWrap := True;
+  InfoLabel.Caption := 'Este paquete de instalación está protegido. Para continuar con la instalación de WinterPos en este equipo, introduzca el usuario y la contraseña de instalación:';
+
+  UserLabel := TNewStaticText.Create(AuthPage);
+  UserLabel.Parent := AuthPage.Surface;
+  UserLabel.Left := ScaleX(16);
+  UserLabel.Top := ScaleY(65);
+  UserLabel.Caption := 'Usuario de Instalación:';
+  UserLabel.Font.Style := [fsBold];
+
+  UserEdit := TNewEdit.Create(AuthPage);
+  UserEdit.Parent := AuthPage.Surface;
+  UserEdit.Left := ScaleX(16);
+  UserEdit.Top := ScaleY(85);
+  UserEdit.Width := ScaleX(280);
+  UserEdit.Text := '';
+
+  PassLabel := TNewStaticText.Create(AuthPage);
+  PassLabel.Parent := AuthPage.Surface;
+  PassLabel.Left := ScaleX(16);
+  PassLabel.Top := ScaleY(125);
+  PassLabel.Caption := 'Contraseña de Acceso:';
+  PassLabel.Font.Style := [fsBold];
+
+  PassEdit := TNewEdit.Create(AuthPage);
+  PassEdit.Parent := AuthPage.Surface;
+  PassEdit.Left := ScaleX(16);
+  PassEdit.Top := ScaleY(145);
+  PassEdit.Width := ScaleX(280);
+  PassEdit.PasswordChar := '*';
+  PassEdit.Text := '';
+
+  ShowPassCheck := TNewCheckBox.Create(AuthPage);
+  ShowPassCheck.Parent := AuthPage.Surface;
+  ShowPassCheck.Left := ScaleX(16);
+  ShowPassCheck.Top := ScaleY(180);
+  ShowPassCheck.Width := ScaleX(280);
+  ShowPassCheck.Caption := '👁️ Mostrar contraseña';
+  ShowPassCheck.OnClick := @OnShowPassCheckClick;
+
   // Page 1: Role Selection
-  RolePage := CreateCustomPage(wpWelcome, 'Modo de Instalación (Liviano)', 'Seleccione el rol de este equipo en el sistema de ventas.');
+  RolePage := CreateCustomPage(AuthPage.ID, 'Modo de Instalación (Liviano)', 'Seleccione el rol de este equipo en el sistema de ventas.');
   
   ServerRadio := TRadioButton.Create(RolePage);
   ServerRadio.Parent := RolePage.Surface;

@@ -69,7 +69,24 @@ setTimeout(() => {
   }
 }, 4000);
 
+// Keep the process alive while serverProcess runs
+serverProcess.on('close', (code) => {
+  if (isDebug) {
+    console.log(`\n[WinterPos] Servidor detenido con código ${code}`);
+  }
+  process.exit(code || 0);
+});
+
+serverProcess.on('error', (err) => {
+  console.error('[WinterPos Error en Servidor]', err);
+});
+
 process.on('SIGINT', () => {
+  if (serverProcess) serverProcess.kill();
+  process.exit();
+});
+
+process.on('SIGTERM', () => {
   if (serverProcess) serverProcess.kill();
   process.exit();
 });

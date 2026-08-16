@@ -1,7 +1,7 @@
-import './build_ico_now.js';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import os from 'os';
 import {
   getCompanyConfig, saveCompanyConfig, getUsers, getProducts, saveProduct,
   updateProductStock, updateProductPrices, updateProductPricesBulk, getClients, saveClient, registerAbono,
@@ -38,28 +38,28 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Auto-generate installer/app_icon.ico if missing
-const icoTargetPath = path.resolve(__dirname, '../installer/app_icon.ico');
-if (!fs.existsSync(icoTargetPath)) {
-  const srcPngPath = 'C:\\Users\\NM29402.SC1_MZ1_JBTES\\.gemini\\antigravity-ide\\brain\\2dee14b5-c638-4898-be82-4522901e1212\\winterpos_al_icon_1786021999064.png';
-  if (fs.existsSync(srcPngPath)) {
-    const pngBuffer = fs.readFileSync(srcPngPath);
-    const header = Buffer.alloc(22);
-    header.writeUInt16LE(0, 0);
-    header.writeUInt16LE(1, 2);
-    header.writeUInt16LE(1, 4);
-    header.writeUInt8(0, 6);
-    header.writeUInt8(0, 7);
-    header.writeUInt8(0, 8);
-    header.writeUInt8(0, 9);
-    header.writeUInt16LE(1, 10);
-    header.writeUInt16LE(32, 12);
-    header.writeUInt32LE(pngBuffer.length, 14);
-    header.writeUInt32LE(22, 18);
-    const icoBuffer = Buffer.concat([header, pngBuffer]);
-    fs.writeFileSync(icoTargetPath, icoBuffer);
-    console.log(`[Icon Build] ✅ Creado icono oficial app_icon.ico en ${icoTargetPath}`);
+// Helper to get local LAN IP filtering virtual interfaces (VMware, VirtualBox, etc.)
+export function getLocalIpAddress() {
+  const interfaces = os.networkInterfaces();
+  const virtualKeywords = ['vmware', 'vmnet', 'virtual', 'vbox', 'vethernet', 'tap', 'tun', 'docker', 'wsl', 'loopback', 'bluetooth', 'npcap'];
+  
+  let candidates = [];
+  for (const name of Object.keys(interfaces)) {
+    const isVirtual = virtualKeywords.some(k => name.toLowerCase().includes(k));
+    for (const iface of interfaces[name] || []) {
+      if (iface.family === 'IPv4' && !iface.internal && iface.address !== '127.0.0.1') {
+        if (!isVirtual) {
+          const isWifiOrEth = /wi-?fi|ethernet|lan|inal[aá]mbrica|conexi[oó]n/i.test(name);
+          candidates.push({ address: iface.address, priority: isWifiOrEth ? 1 : 2 });
+        } else {
+          candidates.push({ address: iface.address, priority: 3 });
+        }
+      }
+    }
   }
+  
+  candidates.sort((a, b) => a.priority - b.priority);
+  return candidates.length > 0 ? candidates[0].address : '127.0.0.1';
 }
 
 dotenv.config();
@@ -182,7 +182,11 @@ if (fs.existsSync(distPath)) {
 
 // Endpoints
 app.get('/api/status', (req, res) => {
-  res.json({ status: 'ok', serverTime: new Date().toISOString() });
+  res.json({ 
+    status: 'ok', 
+    serverTime: new Date().toISOString(),
+    localIp: getLocalIpAddress()
+  });
 });
 
 app.get('/api/config', async (req, res) => {

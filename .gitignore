@@ -1,7 +1,14 @@
 # Binarios del instalador (demasiado grandes para Git)
-installer_output/*.exe
+installer_output/
+installer_output/*
 installer/*.exe
 installer/*.exe.exe
+
+# Dependencias node_modules
+node_modules/
+backend/node_modules/
+WinterPosAL/node_modules/
+WinterPosAL/dist/
 
 # Caché y autenticación de WhatsApp Web
 backend/.wwebjs_auth/
@@ -12,4 +19,9 @@ backend/node_modules/.cache/
 
 # Variables de entorno locales
 backend/.env
+
+# Carpetas de distribución generadas automáticamente para Inno Setup (protegidas)
+dist_backend/
+dist_root/
+.dev_source_backup/
 

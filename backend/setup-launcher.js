@@ -7,17 +7,28 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Helper to get local LAN IP
-function getLocalIpAddress() {
+// Helper to get local LAN IP filtering virtual interfaces (VMware, VirtualBox, etc.)
+export function getLocalIpAddress() {
   const interfaces = os.networkInterfaces();
+  const virtualKeywords = ['vmware', 'vmnet', 'virtual', 'vbox', 'vethernet', 'tap', 'tun', 'docker', 'wsl', 'loopback', 'bluetooth', 'npcap'];
+  
+  let candidates = [];
   for (const name of Object.keys(interfaces)) {
-    for (const iface of interfaces[name]) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        return iface.address;
+    const isVirtual = virtualKeywords.some(k => name.toLowerCase().includes(k));
+    for (const iface of interfaces[name] || []) {
+      if (iface.family === 'IPv4' && !iface.internal && iface.address !== '127.0.0.1') {
+        if (!isVirtual) {
+          const isWifiOrEth = /wi-?fi|ethernet|lan|inal[aá]mbrica|conexi[oó]n/i.test(name);
+          candidates.push({ address: iface.address, priority: isWifiOrEth ? 1 : 2 });
+        } else {
+          candidates.push({ address: iface.address, priority: 3 });
+        }
       }
     }
   }
-  return '127.0.0.1';
+  
+  candidates.sort((a, b) => a.priority - b.priority);
+  return candidates.length > 0 ? candidates[0].address : '127.0.0.1';
 }
 
 console.log('====================================================');
@@ -69,6 +80,10 @@ async function main() {
   console.log(` 💻 Acceso Local: ${appUrl}`);
   console.log(` 🌐 Acceso desde otras Cajas (LAN): ${lanUrl}`);
   console.log(`====================================================\n`);
+
+  serverProcess.on('close', (code) => {
+    process.exit(code || 0);
+  });
 
   process.on('SIGINT', () => {
     if (serverProcess) serverProcess.kill();

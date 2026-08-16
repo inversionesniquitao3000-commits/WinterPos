@@ -351,13 +351,42 @@ export default function App() {
   }, [shiftDevolucionesVes]);
 
   useEffect(() => {
-    const updateNetworkSettings = () => {
-      const ip = localStorage.getItem('pos_lan_ip') || '192.168.11.40';
-      const mode = localStorage.getItem('pos_db_mode') || 'remote';
-      setLanIP(ip);
+    const updateNetworkSettings = async () => {
+      const isLocalHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      let mode = localStorage.getItem('pos_db_mode');
+      if (!mode) {
+        mode = isLocalHost ? 'local' : 'remote';
+        localStorage.setItem('pos_db_mode', mode);
+      }
+      
+      let ip = localStorage.getItem('pos_lan_ip');
+      
+      try {
+        const host = isLocalHost ? 'localhost' : window.location.hostname;
+        const res = await fetch(`http://${host}:5000/api/status`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.localIp) {
+            // If local server or stale default, replace with real detected IP
+            if (!ip || mode === 'local' || ip === '192.168.11.40' || ip === '192.168.1.100') {
+              ip = data.localIp;
+              localStorage.setItem('pos_lan_ip', data.localIp);
+            }
+          }
+        }
+      } catch (_) {}
+
+      const fallbackIp = !isLocalHost
+        ? window.location.hostname
+        : (ip || '127.0.0.1');
+
+      setLanIP(ip || fallbackIp);
       setDbMode(mode);
     };
+
     updateNetworkSettings();
+    const timer = setInterval(updateNetworkSettings, 10000);
+    return () => clearInterval(timer);
   }, [currentUser]);
 
   const getApiUrl = (path: string) => {

@@ -5,6 +5,11 @@
   "main": "desktop-main.js",
   "type": "module",
   "scripts": {
-    "start": "node desktop-main.js"
+    "start": "node desktop-main.js",
+    "build:frontend": "npm run build --prefix WinterPosAL",
+    "build:protect": "npm run build --prefix WinterPosAL && node tools/protect-backend.js"
+  },
+  "devDependencies": {
+    "javascript-obfuscator": "^5.5.0"
   }
 }

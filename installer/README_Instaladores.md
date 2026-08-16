@@ -24,20 +24,45 @@
 
 ---
 
-## 🚀 CÓMO COMPILAR LOS INSTALADORES
+## 🔒 SEGURIDAD Y PROTECCIÓN DE CÓDIGO FUENTE (PRODUCCIÓN)
 
-1. Descargue e instale **Inno Setup 6** (gratuito) desde [https://jrsoftware.org/isdl.php](https://jrsoftware.org/isdl.php).
-2. Abra cualquiera de los archivos `.iss` con Inno Setup Compiler.
-3. Presione **`Ctrl + F9`** (o el botón *Compile* en la barra de herramientas).
-4. El ejecutable compilado listo para entregar al cliente se generará en la carpeta: `..\installer_output\`.
+Para evitar que los clientes o terceros puedan ver tu código fuente o las herramientas de licenciamiento:
+
+1. **Aislamiento Total:** El generador de licencias (`tools/generate-license.js`), la clave privada RSA (`private_key.pem`) y el registro de clientes están **100% excluidos** del instalador.
+2. **Cifrado y Ofuscación Anti-Manipulación:** Antes de compilar, el backend se encripta con algoritmos de ofuscación de grado militar (RC4, aplanamiento de flujo de control, auto-defensa contra manipulación).
+3. **Frontend sin Sourcemaps:** El frontend en React se compila sin mapas de desarrollo.
+
+---
+
+## 🚀 CÓMO COMPILAR LOS INSTALADORES DE FORMA PROTEGIDA
+
+1. Ejecute el archivo **`Preparar_Instalador_Protegido.bat`** (ubicado en la raíz de WinterPos).
+   * Este script compila automáticamente el frontend y encripta el backend.
+2. Abra **Inno Setup 6** con el script que desee (ej. `installer\WinterPos_Installer_Completo.iss`).
+3. Presione **`Ctrl + F9`** para compilar el `.exe` final.
+4. Cuando termine, en la ventana de `Preparar_Instalador_Protegido.bat` presione `S` para restaurar su código fuente limpio de desarrollo.
+
+---
+
+## 🔑 CREDENCIALES DE ACCESO DEL INSTALADOR
+
+Al iniciar cualquiera de los instaladores generados, se solicitará autenticación del técnico autorizado:
+
+* **Usuario:** `laguna12`
+* **Contraseña:** `Osopolar*01`
+* **Casilla:** `👁️ Mostrar contraseña` (para verificar que se escribió correctamente).
+
+Sin estas credenciales, el instalador no permitirá continuar ni instalará ningún componente en el equipo.
 
 ---
 
 ## ⚙️ CARACTERÍSTICAS Y AUTOMATIZACIONES INCLUIDAS
 
+* **Bloqueo por Autenticación de Seguridad** (Usuario y Contraseña protegida).
 * **Asistente de Selección de Rol (Servidor Central vs Caja Secundaria)**.
 * **Configuración Automática de Red e IP del Servidor (`backend\.env`)**.
 * **Reglas del Cortafuegos de Windows (Netsh)** para apertura de puertos `5000` (Web/API) y `5432` (PostgreSQL).
 * **Acceso Directo Silencioso (`Iniciar_WinterPos.vbs`)** para ocultar la consola CMD en producción.
 * **Casilla opcional de Modo Depuración (`debugmode`)** para revisar la consola CMD con logs técnicos en vivo.
 * **Icono Personalizado Oficial (`app_icon.ico`)** en el instalador, acceso directo y desinstalador.
+

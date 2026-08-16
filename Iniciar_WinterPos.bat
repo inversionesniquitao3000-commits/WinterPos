@@ -22,7 +22,13 @@ if exist "%~dp0node.exe" (
 )
 
 echo ====================================================
-echo      INICIANDO WINTERPOS PUNTO DE VENTA
+echo      INICIANDO WINTERPOS PUNTO DE VENTA (MODO DEBUG)
 echo ====================================================
 "%NODE_CMD%" desktop-main.js
+
+echo.
+echo ====================================================
+echo   El servidor WinterPos se ha detenido.
+echo ====================================================
+pause
 

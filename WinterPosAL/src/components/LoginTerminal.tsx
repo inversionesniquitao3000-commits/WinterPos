@@ -18,7 +18,10 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
   const [clickCount, setClickCount] = useState(0);
   const [serverIP, setServerIP] = useState(() => {
     const saved = localStorage.getItem('pos_lan_ip');
-    return saved || '192.168.11.40';
+    if (saved && saved !== '192.168.11.40') return saved;
+    return window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+      ? window.location.hostname
+      : '127.0.0.1';
   });
   const [serverPort, setServerPort] = useState(() => {
     const saved = localStorage.getItem('pos_lan_port');
@@ -26,7 +29,7 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
   });
   const [dbMode, setDbMode] = useState(() => {
     const saved = localStorage.getItem('pos_db_mode');
-    return saved || 'remote';
+    return saved || 'local';
   });
   const [terminalNameState, setTerminalNameState] = useState(() => {
     const saved = localStorage.getItem('pos_terminal_name');
@@ -110,11 +113,11 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
     setIsLoading(true);
 
     try {
-      const savedIp = localStorage.getItem('pos_lan_ip') || '192.168.11.40';
-      const savedMode = localStorage.getItem('pos_db_mode') || 'remote';
+      const savedIp = localStorage.getItem('pos_lan_ip');
+      const savedMode = localStorage.getItem('pos_db_mode') || 'local';
       const browserHost = window.location.hostname;
       const isRemoteAccess = browserHost !== 'localhost' && browserHost !== '127.0.0.1';
-      const host = isRemoteAccess ? browserHost : (savedMode === 'local' ? 'localhost' : savedIp);
+      const host = isRemoteAccess ? browserHost : (savedMode === 'local' ? 'localhost' : (savedIp || 'localhost'));
       const checkUrl = `http://${host}:5000/api/users/login-check`;
       const terminalSaved = localStorage.getItem('pos_terminal_name') || 'LOCAL';
 
