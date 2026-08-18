@@ -5,7 +5,8 @@ import {
   XCircle, ArrowUpRight, 
   Calculator, CheckCircle2, Ticket,
   Clock, ListOrdered, Plus, AlertCircle, DollarSign, RotateCcw, Printer,
-  Calendar, Lock, Coins, RefreshCw, ShieldCheck, FileText
+  Calendar, Lock, Coins, RefreshCw, ShieldCheck, FileText,
+  Banknote, Eye, LogOut, X
 } from 'lucide-react';
 import { formatNumberToWordsUSD, printTicketReceipt, formatBs } from '../utils';
 import { useDialog } from '../hooks/useDialog';
@@ -182,32 +183,63 @@ export default function CajaPOS({
   useEffect(() => {
     if (showCierreModal) {
       fetchWaCierreStatus();
-      // Check if there are EUR operations in active shift
+      // Check if there are EUR operations or EUR sales in active shift
       const checkEurOps = async () => {
         try {
+          const termName = localStorage.getItem('pos_terminal_name') || 'CAJA_01';
+          const uKey = currentUser?.id || currentUser?.usuario || 'default';
+          let aperturaStr = localStorage.getItem(`pos_apertura_fecha_${uKey}`) || localStorage.getItem(`pos_apertura_fecha_${currentUser?.usuario}`) || localStorage.getItem('pos_apertura_fecha') || '';
+          
+          // Also try to get fresh estado from server
+          try {
+            const estadoRes = await fetch(getApiUrl(`/cajas/estado?terminal=${encodeURIComponent(termName)}&usuarioId=${currentUser.id}&usuarioNombre=${encodeURIComponent(currentUser.nombre)}`));
+            if (estadoRes.ok) {
+              const cajaData = await estadoRes.json();
+              if (cajaData?.fechaApertura) {
+                aperturaStr = cajaData.fechaApertura;
+              }
+            }
+          } catch (err) {
+            // fallback to local aperturaStr
+          }
+
+          const aperturaMs = aperturaStr ? new Date(aperturaStr).getTime() : 0;
+
+          let hasEurInOps = false;
           const res = await fetch(getApiUrl('/cajas/divisas-operaciones'));
           if (res.ok) {
             const list = await res.json();
             if (Array.isArray(list)) {
-              const aperturaStr = localStorage.getItem('pos_apertura_fecha') || '';
-              const aperturaMs = aperturaStr ? new Date(aperturaStr).getTime() : 0;
-              const termName = localStorage.getItem('pos_terminal_name') || 'CAJA_01';
               const eurOps = list.filter((op: any) => {
                 const opTime = op.timestamp || (op.fecha ? new Date(op.fecha).getTime() : 0);
+                // Exclude operations prior to current session opening
                 if (aperturaMs > 0 && opTime > 0 && opTime < (aperturaMs - 60000)) return false;
+                // If aperturaMs is not available, do not include historical operations from past days
+                if (!aperturaMs && opTime > 0 && (Date.now() - opTime > 12 * 60 * 60 * 1000)) return false;
                 if (op.terminal && op.terminal !== termName) return false;
+                if (op.usuario_id && currentUser?.id && Number(op.usuario_id) !== Number(currentUser.id)) return false;
                 return op.currency === 'EUR' || (op.tipo_operacion === 'COMPRA_DIVISA' && op.currency === 'EUR');
               });
-              setHasEurInShift(eurOps.length > 0);
+              hasEurInOps = eurOps.length > 0;
             }
           }
+
+          // Check if any sale in current shift had Euro payments
+          const hasEurInSales = (shiftSales || []).some(s => 
+            s && !s.factura_nro?.startsWith('DEV-') && (s.pagos || []).some((p: any) => 
+              p.metodo === 'Efectivo€' || p.metodo === 'EUR' || (p as any).currency === 'EUR' || (p.metodo && p.metodo.includes('€'))
+            )
+          );
+
+          setHasEurInShift(hasEurInOps || hasEurInSales);
         } catch (e) {
           console.warn('⚠️ Error al verificar operaciones de Euro para el cierre:', e);
+          setHasEurInShift(false);
         }
       };
       checkEurOps();
     }
-  }, [showCierreModal]);
+  }, [showCierreModal, shiftSales]);
   const [movType, setMovType] = useState<'Entrada' | 'Salida'>('Entrada');
   const [movDesc, setMovDesc] = useState('');
   const [movUsd, setMovUsd] = useState('');
@@ -2087,14 +2119,14 @@ export default function CajaPOS({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [showCheckoutModal, canConfirmCheckout, isSubmittingSale]);
 
-  const handleSaveApertura = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const usdStr = aperturaUsdVal.trim();
-    const vesStr = aperturaVesVal.trim();
+  const handleSaveApertura = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const cleanUsdStr = (aperturaUsdVal || '').toString().trim().replace(/[^\d.]/g, '');
+    const cleanVesStr = (aperturaVesVal || '').toString().trim().replace(/[^\d.,]/g, '').replace(/\./g, '').replace(/,/g, '.');
 
-    if (usdStr === "" && vesStr === "") {
+    if (cleanUsdStr === "" && cleanVesStr === "") {
       const confirmZero = await showConfirm(
-        'No ha ingresado montos de apertura. ¿Desea iniciar la caja en cero ($0.00 USD / Bs 0.00 VES)?',
+        'No ha ingresado montos de apertura. ¿Desea iniciar la caja en cero ($0 USD / Bs 0,00 VES)?',
         'Apertura en Cero',
         { confirmLabel: 'Sí, Iniciar en Cero' }
       );
@@ -2103,17 +2135,21 @@ export default function CajaPOS({
       }
     }
 
-    const usd = parseFloat(usdStr) || 0;
-    const ves = parseFloat(vesStr) || 0;
+    const usd = Math.round(parseFloat(cleanUsdStr) || 0);
+    const ves = parseFloat(cleanVesStr) || 0;
     onAbrirCaja(usd, ves);
     setShowAperturaModal(false);
   };
 
   const handleSaveCierre = async (e: React.FormEvent) => {
     e.preventDefault();
-    const realUsd = parseFloat(cierreRealUsd) || 0;
-    const realVes = parseFloat(cierreRealVes) || 0;
-    const realEur = parseFloat(cierreRealEur) || 0;
+    const cleanUsdStr = (cierreRealUsd || '').toString().trim().replace(/[^\d.]/g, '');
+    const cleanVesStr = (cierreRealVes || '').toString().trim().replace(/[^\d.,]/g, '').replace(/\./g, '').replace(/,/g, '.');
+    const cleanEurStr = (cierreRealEur || '').toString().trim().replace(/[^\d.]/g, '');
+
+    const realUsd = parseFloat(cleanUsdStr) || 0;
+    const realVes = parseFloat(cleanVesStr) || 0;
+    const realEur = parseFloat(cleanEurStr) || 0;
 
     let targetShiftSales = shiftSales;
     let targetShiftAbonos = abonos || [];
@@ -2131,7 +2167,8 @@ export default function CajaPOS({
     let serverPagoMovilVes = 0;
     let serverTransferenciaVes = 0;
 
-    let fetchedFechaApertura = localStorage.getItem('pos_apertura_fecha') || '';
+    const uKey = currentUser?.id || currentUser?.usuario || 'default';
+    let fetchedFechaApertura = localStorage.getItem(`pos_apertura_fecha_${uKey}`) || localStorage.getItem(`pos_apertura_fecha_${currentUser?.usuario}`) || localStorage.getItem('pos_apertura_fecha') || '';
     // Fetch fresh unified caja estado from server before generating final cierre card
     try {
       const termName = localStorage.getItem('pos_terminal_name') || 'CAJA_01';
@@ -3541,73 +3578,223 @@ export default function CajaPOS({
 
       </div>
 
-      {/* MODAL: CAJA APERTURA - Light Styled */}
+      {/* MODAL: CAJA APERTURA - Ultra-Modern High Visibility Styled with Focus Trap */}
       {showAperturaModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 font-mono text-slate-800">
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-sm shadow-2xl p-6 space-y-5">
-            <div className="text-center">
-              <div className="inline-flex p-3 bg-emerald-50 border border-emerald-250 rounded-full mb-3 text-emerald-600">
-                <Calculator className="w-6 h-6 animate-pulse" />
+        <div 
+          onKeyDown={(e) => {
+            if (e.key === 'Tab') {
+              const container = e.currentTarget;
+              const focusable = Array.from(
+                container.querySelectorAll<HTMLElement>(
+                  'input:not([disabled]):not([tabindex="-1"]), button:not([disabled]):not([tabindex="-1"])'
+                )
+              );
+              if (focusable.length === 0) return;
+              const first = focusable[0];
+              const last = focusable[focusable.length - 1];
+
+              if (e.shiftKey) {
+                if (document.activeElement === first || !container.contains(document.activeElement)) {
+                  e.preventDefault();
+                  last.focus();
+                }
+              } else {
+                if (document.activeElement === last || !container.contains(document.activeElement)) {
+                  e.preventDefault();
+                  first.focus();
+                }
+              }
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              onLogout();
+            }
+          }}
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 font-sans text-slate-800 animate-fade-in"
+        >
+          <div className="bg-white border border-slate-200/90 rounded-2xl overflow-hidden w-full max-w-[480px] shadow-[0_25px_50px_-12px_rgba(0,0,0,0.3)] flex flex-col">
+            
+            {/* Top Accent Gradient Line */}
+            <div className="h-1.5 w-full bg-gradient-to-r from-emerald-500 via-sky-500 to-indigo-600 flex-shrink-0" />
+
+            <div className="p-5 sm:p-6 space-y-4">
+              
+              {/* HEADER SECTION */}
+              <div className="text-center space-y-2">
+                <div className="inline-flex p-3 bg-gradient-to-br from-emerald-50 to-teal-100 border border-emerald-200 rounded-2xl shadow-inner text-emerald-600">
+                  <Banknote className="w-7 h-7 animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black tracking-wide text-slate-900 uppercase">
+                    Apertura de Caja Registradora
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">
+                    Indique los fondos físicos en gaveta al inicio del turno
+                  </p>
+                </div>
+
+                {/* Station & Cashier Info Pills */}
+                <div className="flex flex-wrap items-center justify-center gap-1.5 pt-1 text-[11px] font-semibold text-slate-600">
+                  <span className="bg-slate-100 border border-slate-250 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-ping" />
+                    Estación: <strong className="text-slate-800">{localStorage.getItem('pos_terminal_name') || 'CAJA_01'}</strong>
+                  </span>
+                  <span className="bg-slate-100 border border-slate-250 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                    Cajero: <strong className="text-slate-800">{currentUser?.nombre || 'Operador'}</strong>
+                  </span>
+                  {tasaDia > 0 && (
+                    <span className="bg-blue-50 border border-blue-200 text-blue-800 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                      Tasa: <strong>{formatBs(tasaDia)}</strong>
+                    </span>
+                  )}
+                </div>
               </div>
-              <h3 className="text-sm font-extrabold text-slate-800">APERTURA DE CAJA REGISTRADORA</h3>
-              <p className="text-[10px] text-slate-500 font-sans mt-1">Identificador de Estación: CAJA_01</p>
+
+              {/* FORM CONTROLS */}
+              <form onSubmit={handleSaveApertura} className="space-y-3.5">
+                
+                {/* 1. DÓLARES USD INPUT CARD */}
+                <div className="bg-gradient-to-br from-emerald-50/70 via-emerald-50/30 to-white border-2 border-emerald-300 hover:border-emerald-500 focus-within:border-emerald-600 focus-within:ring-4 focus-within:ring-emerald-500/25 focus-within:shadow-md rounded-xl p-3.5 transition-all shadow-sm">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-black text-emerald-950 flex items-center gap-1.5 uppercase tracking-wide">
+                      <DollarSign className="w-4 h-4 text-emerald-600" />
+                      Efectivo en Dólares ($ USD)
+                    </label>
+                    <span className="text-[10px] font-extrabold bg-emerald-100/90 text-emerald-800 px-2 py-0.5 rounded-md border border-emerald-200/80">
+                      Billetes Enteros
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="bg-emerald-600 text-white font-black font-mono text-xl px-3.5 py-2 rounded-lg flex items-center justify-center shadow-sm select-none">
+                      $
+                    </div>
+                    <div className="relative flex-1">
+                      <input
+                        autoFocus
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="0"
+                        value={aperturaUsdVal ? parseInt(aperturaUsdVal.replace(/\D/g, '') || '0', 10).toLocaleString('es-VE') : ''}
+                        onChange={(e) => {
+                          const digits = e.target.value.replace(/\D/g, '');
+                          setAperturaUsdVal(digits);
+                        }}
+                        className="w-full bg-white border-2 border-emerald-200 rounded-lg px-3 py-2 text-3xl sm:text-4xl font-black font-mono text-emerald-950 text-right tracking-tight focus:outline-none focus:border-emerald-600 focus:ring-4 focus:ring-emerald-400/40 focus:bg-emerald-50/20 shadow-inner transition-all"
+                      />
+                      {aperturaUsdVal !== '' && aperturaUsdVal !== '0' && (
+                        <button
+                          type="button"
+                          tabIndex={-1}
+                          onClick={() => setAperturaUsdVal('')}
+                          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-rose-500 p-1 rounded transition-colors"
+                          title="Limpiar monto en $"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                    <span className="text-xs font-black font-mono text-emerald-800 bg-emerald-100/80 px-2 py-2.5 rounded-lg border border-emerald-200 select-none">
+                      USD
+                    </span>
+                  </div>
+                </div>
+
+                {/* 2. BOLÍVARES VES INPUT CARD */}
+                <div className="bg-gradient-to-br from-indigo-50/70 via-indigo-50/30 to-white border-2 border-indigo-300 hover:border-indigo-500 focus-within:border-indigo-600 focus-within:ring-4 focus-within:ring-indigo-500/25 focus-within:shadow-md rounded-xl p-3.5 transition-all shadow-sm">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-black text-indigo-950 flex items-center gap-1.5 uppercase tracking-wide">
+                      <Coins className="w-4 h-4 text-indigo-600" />
+                      Efectivo en Bolívares (Bs VES)
+                    </label>
+                    <span className="text-[10px] font-extrabold bg-indigo-100/90 text-indigo-800 px-2 py-0.5 rounded-md border border-indigo-200/80">
+                      Billetes Enteros
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="bg-indigo-600 text-white font-black font-mono text-base px-3 py-2 rounded-lg flex items-center justify-center shadow-sm select-none">
+                      Bs
+                    </div>
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="0"
+                        value={aperturaVesVal ? parseInt(aperturaVesVal.replace(/\D/g, '') || '0', 10).toLocaleString('es-VE') : ''}
+                        onChange={(e) => {
+                          const digits = e.target.value.replace(/\D/g, '');
+                          setAperturaVesVal(digits);
+                        }}
+                        className="w-full bg-white border-2 border-indigo-200 rounded-lg px-3 py-2 text-3xl sm:text-4xl font-black font-mono text-indigo-950 text-right tracking-tight focus:outline-none focus:border-indigo-600 focus:ring-4 focus:ring-indigo-400/40 focus:bg-indigo-50/20 shadow-inner transition-all"
+                      />
+                      {aperturaVesVal !== '' && aperturaVesVal !== '0' && (
+                        <button
+                          type="button"
+                          tabIndex={-1}
+                          onClick={() => setAperturaVesVal('')}
+                          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-rose-500 p-1 rounded transition-colors"
+                          title="Limpiar monto en Bs"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                    <span className="text-xs font-black font-mono text-indigo-800 bg-indigo-100/80 px-2 py-2.5 rounded-lg border border-indigo-200 select-none">
+                      VES
+                    </span>
+                  </div>
+                </div>
+
+                {/* 3. RESUMEN EN VIVO DE FONDO EN CAJA */}
+                <div className="bg-slate-50 border border-slate-250 rounded-xl p-2.5 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2">
+                    <Calculator className="w-4 h-4 text-slate-500" />
+                    <span className="text-slate-600 font-bold">Total Inicial en Gaveta:</span>
+                  </div>
+                  <div className="text-right font-mono font-black text-sm">
+                    <span className="text-slate-900">
+                      ${parseInt(aperturaUsdVal.replace(/\D/g, '') || '0', 10).toLocaleString('es-VE')} USD
+                    </span>
+                    <span className="text-slate-400 mx-1.5">+</span>
+                    <span className="text-indigo-700">
+                      Bs {parseInt(aperturaVesVal.replace(/\D/g, '') || '0', 10).toLocaleString('es-VE')} VES
+                    </span>
+                  </div>
+                </div>
+
+                {/* 4. BOTONES DE ACCIÓN CON FOCO DE ALTO CONTRASTE */}
+                <div className="space-y-2 pt-1">
+                  <button
+                    type="submit"
+                    className="w-full bg-gradient-to-r from-winter-blueBtn to-indigo-700 hover:from-winter-blueBtnHover hover:to-indigo-800 focus:from-winter-blueBtnHover focus:to-indigo-900 text-white py-3.5 rounded-xl font-black font-sans text-xs sm:text-sm tracking-wider transition-all shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2 active:scale-[0.99] cursor-pointer focus:outline-none focus:ring-4 focus:ring-blue-400 focus:ring-offset-2 focus:scale-[1.02] border-2 border-transparent focus:border-white"
+                  >
+                    <CheckCircle2 className="w-5 h-5 text-emerald-300" />
+                    CONFIRMAR E INICIAR APERTURA (Enter)
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUserDismissedApertura(true);
+                      setShowAperturaModal(false);
+                    }}
+                    className="w-full bg-amber-500 hover:bg-amber-600 focus:bg-amber-600 text-slate-950 font-black py-2.5 rounded-xl font-sans text-xs tracking-wider transition-all shadow-sm flex items-center justify-center gap-2 active:scale-[0.99] cursor-pointer focus:outline-none focus:ring-4 focus:ring-amber-400 focus:ring-offset-2 focus:scale-[1.02] border-2 border-transparent focus:border-slate-900"
+                  >
+                    <Eye className="w-4 h-4" />
+                    INGRESAR EN MODO CONSULTA (SIN APERTURA)
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={onLogout}
+                    className="w-full bg-slate-100 hover:bg-slate-200 focus:bg-rose-50 text-slate-600 focus:text-rose-950 border-2 border-slate-300 focus:border-rose-400 py-2 rounded-xl font-bold font-sans text-xs tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer focus:outline-none focus:ring-4 focus:ring-rose-400 focus:ring-offset-2 focus:scale-[1.02]"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    CANCELAR Y CERRAR SESIÓN (Esc)
+                  </button>
+                </div>
+              </form>
             </div>
-
-            <form onSubmit={handleSaveApertura} className="space-y-4">
-              <div>
-                <label className="text-[10px] text-slate-500 block mb-1 font-sans">Monto Apertura (Dólares USD)</label>
-                <div className="flex rounded border border-slate-300 bg-slate-50 items-center focus-within:bg-white focus-within:border-winter-blueBtn transition-all">
-                  <span className="bg-slate-200 px-3 py-1.5 text-xs text-emerald-700 border-r border-slate-300 font-bold">$</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={aperturaUsdVal}
-                    onChange={(e) => setAperturaUsdVal(e.target.value)}
-                    className="bg-transparent border-none text-slate-800 text-xs px-3 py-1.5 w-full font-bold focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-[10px] text-slate-500 block mb-1 font-sans">Monto Apertura (Bolívares VES)</label>
-                <div className="flex rounded border border-slate-300 bg-slate-50 items-center focus-within:bg-white focus-within:border-winter-blueBtn transition-all">
-                  <span className="bg-slate-200 px-3 py-1.5 text-xs text-purple-750 border-r border-slate-300 font-bold">Bs</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={aperturaVesVal}
-                    onChange={(e) => setAperturaVesVal(e.target.value)}
-                    className="bg-transparent border-none text-slate-800 text-xs px-3 py-1.5 w-full font-bold focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="w-full bg-winter-blueBtn hover:bg-winter-blueBtnHover text-white py-3 rounded-lg font-bold font-sans text-xs tracking-wider transition-all shadow"
-              >
-                CONFIRMAR E INICIAR APERTURA
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setUserDismissedApertura(true);
-                  setShowAperturaModal(false);
-                }}
-                className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold py-2.5 rounded-lg font-sans text-xs tracking-wider transition-all shadow"
-              >
-                INGRESAR EN MODO CONSULTA (SIN APERTURA)
-              </button>
-              <button
-                type="button"
-                onClick={onLogout}
-                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-655 border border-slate-300 py-2 rounded-lg font-bold font-sans text-xs tracking-wider transition-all mt-1"
-              >
-                CANCELAR Y CERRAR SESIÓN
-              </button>
-            </form>
           </div>
         </div>
       )}
@@ -4888,526 +5075,790 @@ export default function CajaPOS({
         </div>
       )}
 
-      {/* MODAL: CIERRE DE CAJA - Light Styled */}
+      {/* MODAL: CIERRE DE CAJA - Ultra-Modern High Visibility Styled with Focus Trap */}
       {showCierreModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-slate-800 animate-fade-in">
-          <div className={`bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xl p-5 space-y-3.5 transition-all max-h-[96vh] flex flex-col ${cierreResult ? 'max-w-4xl w-full' : 'max-w-md w-full'}`}>
+        <div 
+          onKeyDown={(e) => {
+            if (e.key === 'Tab') {
+              const container = e.currentTarget;
+              const focusable = Array.from(
+                container.querySelectorAll<HTMLElement>(
+                  'input:not([disabled]):not([tabindex="-1"]), button:not([disabled]):not([tabindex="-1"])'
+                )
+              );
+              if (focusable.length === 0) return;
+              const first = focusable[0];
+              const last = focusable[focusable.length - 1];
+
+              if (e.shiftKey) {
+                if (document.activeElement === first || !container.contains(document.activeElement)) {
+                  e.preventDefault();
+                  last.focus();
+                }
+              } else {
+                if (document.activeElement === last || !container.contains(document.activeElement)) {
+                  e.preventDefault();
+                  first.focus();
+                }
+              }
+            } else if (e.key === 'Escape' && !cierreResult) {
+              e.preventDefault();
+              setShowCierreModal(false);
+              setCierreResult(null);
+            }
+          }}
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 font-sans text-slate-800 animate-fade-in"
+        >
+          <div className={`bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-[0_25px_50px_-12px_rgba(0,0,0,0.3)] transition-all max-h-[96vh] flex flex-col ${cierreResult ? 'max-w-4xl w-full' : 'max-w-[480px] w-full'}`}>
             
-            <div className="flex justify-between items-center border-b border-slate-200 pb-2.5 flex-shrink-0">
-              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
-                <XCircle className="w-4 h-4 text-red-500" />
-                CONCILIACIÓN Y CIERRE DE CAJA
-              </h3>
-              <button onClick={() => { setShowCierreModal(false); setCierreResult(null); }} className="text-slate-400 hover:text-slate-655">✕ Cerrar [ESC]</button>
-            </div>
+            {/* Top Accent Gradient Line */}
+            <div className="h-1.5 w-full bg-gradient-to-r from-rose-500 via-red-500 to-amber-500 flex-shrink-0" />
 
-            <div className="overflow-y-auto flex-grow pr-1.5 space-y-3.5 max-h-[82vh] scrollbar-thin">
-              {!cierreResult ? (
-              <form onSubmit={handleSaveCierre} className="space-y-4">
-                <p className="text-[12px] text-slate-500 font-sans leading-relaxed">
-                  Ingrese el saldo físico real disponible en la gaveta de caja en dólares y bolívares para realizar el balance y auditoría final.
-                </p>
-
-                <div>
-                  <label className="text-[11px] text-slate-500 block mb-1 font-sans">Efectivo en Caja Real ($ USD)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    required
-                    value={cierreRealUsd}
-                    onChange={(e) => setCierreRealUsd(e.target.value)}
-                    className="w-full bg-slate-55 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-800 focus:bg-white focus:border-winter-blueBtn focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] text-slate-500 block mb-1 font-sans">Efectivo en Caja Real (Bs VES)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    required
-                    value={cierreRealVes}
-                    onChange={(e) => setCierreRealVes(e.target.value)}
-                    className="w-full bg-slate-55 border border-slate-300 rounded p-2 text-xs font-bold font-mono text-slate-800 focus:bg-white focus:border-winter-blueBtn focus:outline-none"
-                  />
-                </div>
-
-                {hasEurInShift && (
-                  <div>
-                    <label className="text-[11px] text-indigo-700 block mb-1 font-sans font-bold">Efectivo en Caja Real (€ EUR)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      required
-                      value={cierreRealEur}
-                      onChange={(e) => setCierreRealEur(e.target.value)}
-                      className="w-full bg-indigo-50/50 border border-indigo-300 rounded p-2 text-xs font-bold font-mono text-indigo-900 focus:bg-white focus:border-indigo-600 focus:outline-none"
-                    />
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  className="w-full bg-red-600 hover:bg-red-700 active:scale-[0.99] text-white py-3 rounded-lg font-extrabold font-sans text-xs tracking-wider transition-all shadow-md shadow-red-200 flex items-center justify-center gap-2"
-                >
-                  <XCircle className="w-4 h-4" />
-                  EJECUTAR CIERRE FINAL
-                </button>
-              </form>
-            ) : (
-              <div id="cierre-arqueo-card" className="space-y-4 w-full bg-white p-4 rounded-xl border border-slate-150 shadow-sm">
+            {!cierreResult ? (
+              <div className="p-5 sm:p-6 space-y-4">
                 
-                {/* BLUE HEADER TICKET STYLE */}
-                <div className="bg-winter-header text-white px-4 py-2 flex items-center justify-between rounded-t-lg">
-                  <h3 className="text-sm font-extrabold flex items-center gap-1.5 font-sans">
-                    Cierre de Caja
-                  </h3>
-                  <span className="text-[11px] opacity-75 font-mono">{new Date().toLocaleDateString()}</span>
+                {/* HEADER SECTION */}
+                <div className="text-center space-y-2">
+                  <div className="inline-flex p-3 bg-gradient-to-br from-rose-50 to-red-100 border border-rose-200 rounded-2xl shadow-inner text-rose-600">
+                    <Lock className="w-7 h-7 animate-pulse" />
+                  </div>
+                  <div>
+                    <h3 className="text-base sm:text-lg font-black tracking-wide text-slate-900 uppercase">
+                      Conciliación y Cierre de Caja
+                    </h3>
+                    <p className="text-xs text-slate-500 font-medium mt-0.5">
+                      Ingrese el saldo físico real disponible en gaveta para auditar el arqueo final
+                    </p>
+                  </div>
+
+                  {/* Station & Cashier Info Pills */}
+                  <div className="flex flex-wrap items-center justify-center gap-1.5 pt-1 text-[11px] font-semibold text-slate-600">
+                    <span className="bg-slate-100 border border-slate-250 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-rose-500 inline-block animate-ping" />
+                      Estación: <strong className="text-slate-800">{localStorage.getItem('pos_terminal_name') || 'CAJA_01'}</strong>
+                    </span>
+                    <span className="bg-slate-100 border border-slate-250 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                      Cajero: <strong className="text-slate-800">{currentUser?.nombre || 'Operador'}</strong>
+                    </span>
+                    {tasaDia > 0 && (
+                      <span className="bg-blue-50 border border-blue-200 text-blue-800 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                        Tasa: <strong>{formatBs(tasaDia)}</strong>
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                <div className="bg-white border border-slate-250 p-3.5 rounded-b-lg grid grid-cols-1 md:grid-cols-2 gap-4 text-[12px] text-slate-700 leading-relaxed shadow-inner">
+                {/* FORM CONTROLS */}
+                <form onSubmit={handleSaveCierre} className="space-y-3.5">
                   
-                  {/* Left Column: Cash Drawer Arqueo */}
-                  <div className="space-y-3">
-                    <div>
-                      <span className="text-slate-500 font-sans block text-[11px] font-bold uppercase">Usuario</span>
-                      <strong className="text-slate-850 text-sm block truncate uppercase">
-                        {currentUser.usuario.toUpperCase()} - {currentUser.nombre} (Estación: {localStorage.getItem('pos_terminal_name') || 'CAJA_01'})
-                      </strong>
+                  {/* 1. DÓLARES USD INPUT CARD */}
+                  <div className="bg-gradient-to-br from-emerald-50/70 via-emerald-50/30 to-white border-2 border-emerald-300 hover:border-emerald-500 focus-within:border-emerald-600 focus-within:ring-4 focus-within:ring-emerald-500/25 focus-within:shadow-md rounded-xl p-3.5 transition-all shadow-sm">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs font-black text-emerald-950 flex items-center gap-1.5 uppercase tracking-wide">
+                        <DollarSign className="w-4 h-4 text-emerald-600" />
+                        Efectivo en Caja Real ($ USD)
+                      </label>
+                      <span className="text-[10px] font-extrabold bg-emerald-100/90 text-emerald-800 px-2 py-0.5 rounded-md border border-emerald-200/80">
+                        Billetes Enteros
+                      </span>
                     </div>
 
-                    <div className="space-y-2 border-t border-slate-100 pt-2 font-mono">
-                      <div className="flex justify-between">
-                        <span>Apertura de Caja :</span>
-                        <span className="font-bold text-slate-800">$ {cierreResult.aperturaUsd.toFixed(2)} / {formatBs(cierreResult.aperturaVes)}</span>
+                    <div className="flex items-center gap-2">
+                      <div className="bg-emerald-600 text-white font-black font-mono text-xl px-3.5 py-2 rounded-lg flex items-center justify-center shadow-sm select-none">
+                        $
                       </div>
-                      
-                      {/* Ventas en Efectivo ($) siempre se muestra por ser pilar */}
-                      <div className="flex justify-between">
-                        <span>Ventas en Efectivo ($) :</span>
-                        <span className="font-bold text-slate-800">$ {cierreResult.ventasEfectivoUsd.toFixed(2)}</span>
+                      <div className="relative flex-1">
+                        <input
+                          autoFocus
+                          type="text"
+                          inputMode="numeric"
+                          placeholder="0"
+                          value={cierreRealUsd ? parseInt(cierreRealUsd.replace(/\D/g, '') || '0', 10).toLocaleString('es-VE') : ''}
+                          onChange={(e) => {
+                            const digits = e.target.value.replace(/\D/g, '');
+                            setCierreRealUsd(digits);
+                          }}
+                          className="w-full bg-white border-2 border-emerald-200 rounded-lg px-3 py-2 text-3xl sm:text-4xl font-black font-mono text-emerald-950 text-right tracking-tight focus:outline-none focus:border-emerald-600 focus:ring-4 focus:ring-emerald-400/40 focus:bg-emerald-50/20 shadow-inner transition-all"
+                        />
+                        {cierreRealUsd !== '' && cierreRealUsd !== '0' && (
+                          <button
+                            type="button"
+                            tabIndex={-1}
+                            onClick={() => setCierreRealUsd('')}
+                            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-rose-500 p-1 rounded transition-colors"
+                            title="Limpiar monto en $"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
-
-                      {((cierreResult.ventasEfectivoVes ?? 0) > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between font-bold text-slate-800">
-                          <span>Ventas en Efectivo (Bs) :</span>
-                          <span>{formatBs(cierreResult.ventasEfectivoVes)}</span>
-                        </div>
-                      )}
-
-                      {((cierreResult.abonosEfectivoUsd ?? 0) > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between font-bold text-emerald-700">
-                          <span>Abono Clientes (Efectivo $) :</span>
-                          <span>$ {cierreResult.abonosEfectivoUsd!.toFixed(2)}</span>
-                        </div>
-                      )}
-
-                      {((cierreResult.abonosEfectivoBsVes ?? 0) > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between font-bold text-emerald-700">
-                          <span>Abono Clientes (Efectivo Bs) :</span>
-                          <span>{formatBs(cierreResult.abonosEfectivoBsVes)}</span>
-                        </div>
-                      )}
-
-                      {((cierreResult.abonosBiopagoVes ?? 0) > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between font-bold text-sky-700">
-                          <span>Abono Clientes (Biopago) :</span>
-                          <span>{formatBs(cierreResult.abonosBiopagoVes)}</span>
-                        </div>
-                      )}
-
-                      {((cierreResult.abonosPuntoVes ?? 0) > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between font-bold text-indigo-700">
-                          <span>Abono Clientes (Punto / Tarjeta) :</span>
-                          <span>{formatBs(cierreResult.abonosPuntoVes)}</span>
-                        </div>
-                      )}
-
-                      {((cierreResult.abonosPagoMovilVes ?? 0) > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between font-bold text-blue-700">
-                          <span>Abono Clientes (Pago Móvil) :</span>
-                          <span>{formatBs(cierreResult.abonosPagoMovilVes)}</span>
-                        </div>
-                      )}
-
-                      {((cierreResult.abonosZelleUsd ?? 0) > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between font-bold text-purple-700">
-                          <span>Abono Clientes (Zelle $) :</span>
-                          <span>$ {cierreResult.abonosZelleUsd!.toFixed(2)}</span>
-                        </div>
-                      )}
-
-                      {((cierreResult.abonosBinanceUsd ?? 0) > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between font-bold text-amber-700">
-                          <span>Abono Clientes (Binance $) :</span>
-                          <span>$ {cierreResult.abonosBinanceUsd!.toFixed(2)}</span>
-                        </div>
-                      )}
-
-                      {((cierreResult.abonosPayPalUsd ?? 0) > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between font-bold text-sky-600">
-                          <span>Abono Clientes (PayPal $) :</span>
-                          <span>$ {cierreResult.abonosPayPalUsd!.toFixed(2)}</span>
-                        </div>
-                      )}
-
-                      {(cierreResult.abonoClientesUsd === 0 && !hideZeroLines) && (
-                        <div className="flex justify-between">
-                          <span>Abono de Clientes :</span>
-                          <span className="font-bold text-slate-800">$ 0.00</span>
-                        </div>
-                      )}
-
-                      {(cierreResult.entradaEfectivoUsd > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between">
-                          <span>Entrada Efectivo ($) :</span>
-                          <span className="font-bold text-slate-800">$ {cierreResult.entradaEfectivoUsd.toFixed(2)}</span>
-                        </div>
-                      )}
-
-                      {((cierreResult.entradaEfectivoVes ?? 0) > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between">
-                          <span>Entrada Efectivo (Bs) :</span>
-                          <span className="font-bold text-slate-800">{formatBs(cierreResult.entradaEfectivoVes ?? 0)}</span>
-                        </div>
-                      )}
-
-                      {((cierreResult.cambioDivisasUsd ?? 0) > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between text-emerald-700 font-bold">
-                          <span>Divisas Compradas ($) :</span>
-                          <span>+ $ {(cierreResult.cambioDivisasUsd ?? 0).toFixed(2)}</span>
-                        </div>
-                      )}
-
-                      {((cierreResult.cambioDivisasEur ?? 0) > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between text-indigo-700 font-bold">
-                          <span>Divisas Compradas (€) :</span>
-                          <span>+ € {(cierreResult.cambioDivisasEur ?? 0).toFixed(2)}</span>
-                        </div>
-                      )}
-
-                      {(cierreResult.salidaEfectivoUsd > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between text-red-555 font-bold">
-                          <span>Salida Efectivo ($) :</span>
-                          <span>- $ {cierreResult.salidaEfectivoUsd.toFixed(2)}</span>
-                        </div>
-                      )}
-
-                      {((cierreResult.salidaEfectivoVes ?? 0) > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between text-red-555 font-bold">
-                          <span>Salida Efectivo (Bs) :</span>
-                          <span>- {formatBs(cierreResult.salidaEfectivoVes ?? 0)}</span>
-                        </div>
-                      )}
-
-                      {(cierreResult.devolucionEfectivoUsd > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between text-red-555 font-bold">
-                          <span>Devolución Efectivo ($) :</span>
-                          <span>- $ {cierreResult.devolucionEfectivoUsd.toFixed(2)}</span>
-                        </div>
-                      )}
-
-                      {((cierreResult.devolucionEfectivoVes ?? 0) > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between text-red-555 font-bold">
-                          <span>Devolución Efectivo (Bs) :</span>
-                          <span>- {formatBs(cierreResult.devolucionEfectivoVes ?? 0)}</span>
-                        </div>
-                      )}
-
-                      {((cierreResult.vueltosEntregadosUsd ?? 0) > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between text-amber-700 font-bold">
-                          <span>Vuelto Entregado ($) :</span>
-                          <span>- $ {(cierreResult.vueltosEntregadosUsd ?? 0).toFixed(2)}</span>
-                        </div>
-                      )}
-
-                      {((cierreResult.vueltosEntregadosVes ?? 0) > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between text-amber-700 font-bold">
-                          <span>Vuelto Entregado (Bs) :</span>
-                          <span>- {formatBs(cierreResult.vueltosEntregadosVes ?? 0)}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Dinero en Caja Expected Footer */}
-                    <div className="border-t border-slate-300 pt-2.5 space-y-0.5">
-                      <div className="flex justify-between text-sm font-black text-slate-900 items-baseline">
-                        <span className="font-sans uppercase text-[11px] font-extrabold text-slate-600">Dinero en Caja :</span>
-                        <span className="text-xl text-winter-blueBtn font-mono font-black">
-                          $ {cierreResult.dineroEnCajaExpected.toFixed(2)}
-                        </span>
-                      </div>
-                      <div className="text-[8.5px] text-slate-455 italic font-mono font-medium uppercase tracking-tighter text-right">
-                        {formatNumberToWordsUSD(cierreResult.dineroEnCajaExpected)}
-                      </div>
+                      <span className="text-xs font-black font-mono text-emerald-800 bg-emerald-100/80 px-2 py-2.5 rounded-lg border border-emerald-200 select-none">
+                        USD
+                      </span>
                     </div>
                   </div>
 
-                  {/* Right Column: Sales Performance & Payment breakdown */}
-                  <div className="space-y-3 border-t md:border-t-0 md:border-l border-slate-200 md:pl-6">
-                    <div className="space-y-2 font-mono">
-                      <div className="flex justify-between">
-                        <span>Ventas Totales :</span>
-                        <span className="font-bold text-slate-800">$ {cierreResult.ventasTotalesUsd.toFixed(2)}</span>
-                      </div>
-                      {(cierreResult.descuentosUsd > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between">
-                          <span>Descuentos :</span>
-                          <span className="font-bold text-slate-800">$ {cierreResult.descuentosUsd.toFixed(2)}</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between font-bold text-slate-900 border-b border-dashed border-slate-200 pb-1.5">
-                        <span className="font-sans text-[11px] font-bold text-slate-500 uppercase">Venta Bruta :</span>
-                        <span>$ {cierreResult.ventaBrutaUsd.toFixed(2)}</span>
-                      </div>
+                  {/* 2. BOLÍVARES VES INPUT CARD */}
+                  <div className="bg-gradient-to-br from-indigo-50/70 via-indigo-50/30 to-white border-2 border-indigo-300 hover:border-indigo-500 focus-within:border-indigo-600 focus-within:ring-4 focus-within:ring-indigo-500/25 focus-within:shadow-md rounded-xl p-3.5 transition-all shadow-sm">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs font-black text-indigo-950 flex items-center gap-1.5 uppercase tracking-wide">
+                        <Coins className="w-4 h-4 text-indigo-600" />
+                        Efectivo en Caja Real (Bs VES)
+                      </label>
+                      <span className="text-[10px] font-extrabold bg-indigo-100/90 text-indigo-800 px-2 py-0.5 rounded-md border border-indigo-200/80">
+                        Billetes Enteros
+                      </span>
                     </div>
 
-                    <div className="space-y-2 pt-1 font-mono text-[13px]">
-                      {(cierreResult.pagosEfectivoUsd > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between">
-                          <span>Efectivo $ :</span>
-                          <span className="font-bold text-slate-800">$ {(cierreResult.pagosEfectivoUsd && !isNaN(cierreResult.pagosEfectivoUsd) ? cierreResult.pagosEfectivoUsd : 0).toFixed(2)}</span>
-                        </div>
-                      )}
-                      
-                      {(cierreResult.pagosEfectivoBsVes > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between">
-                          <span>Efectivo Bs :</span>
-                          <span className="font-bold text-slate-800">Bs {(cierreResult.pagosEfectivoBsVes && !isNaN(cierreResult.pagosEfectivoBsVes) ? cierreResult.pagosEfectivoBsVes : 0).toFixed(2)}</span>
-                        </div>
-                      )}
-
-                      {(cierreResult.pagosBiopagoVes > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between">
-                          <span>Biopago :</span>
-                          <span className="font-bold text-slate-800">Bs {(cierreResult.pagosBiopagoVes && !isNaN(cierreResult.pagosBiopagoVes) ? cierreResult.pagosBiopagoVes : 0).toFixed(2)}</span>
-                        </div>
-                      )}
-
-                      {(cierreResult.pagosPuntoVes > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between">
-                          <span>Punto / Tarjeta :</span>
-                          <span className="font-bold text-slate-800">Bs {(cierreResult.pagosPuntoVes && !isNaN(cierreResult.pagosPuntoVes) ? cierreResult.pagosPuntoVes : 0).toFixed(2)}</span>
-                        </div>
-                      )}
-
-                      {((cierreResult.pagosPagoMovilVes || 0) > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between">
-                          <span>Pago Móvil :</span>
-                          <span className="font-bold text-slate-800">Bs {(cierreResult.pagosPagoMovilVes && !isNaN(cierreResult.pagosPagoMovilVes) ? cierreResult.pagosPagoMovilVes : 0).toFixed(2)}</span>
-                        </div>
-                      )}
-
-                      {((cierreResult.pagosTransferenciaVes || 0) > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between">
-                          <span>Transferencia :</span>
-                          <span className="font-bold text-slate-800">Bs {(cierreResult.pagosTransferenciaVes && !isNaN(cierreResult.pagosTransferenciaVes) ? cierreResult.pagosTransferenciaVes : 0).toFixed(2)}</span>
-                        </div>
-                      )}
-
-                      {(cierreResult.pagosCreditoUsd > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between">
-                          <span>A Crédito :</span>
-                          <span className="font-bold text-slate-800">$ {(cierreResult.pagosCreditoUsd && !isNaN(cierreResult.pagosCreditoUsd) ? cierreResult.pagosCreditoUsd : 0).toFixed(2)}</span>
-                        </div>
-                      )}
-
-                      {(cierreResult.devolucionVentasUsd > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between text-red-550 font-bold">
-                          <span>Devolución Ventas ($) :</span>
-                          <span>- $ {(cierreResult.devolucionVentasUsd && !isNaN(cierreResult.devolucionVentasUsd) ? cierreResult.devolucionVentasUsd : 0).toFixed(2)}</span>
-                        </div>
-                      )}
-
-                      {((cierreResult.devolucionVentasVes || 0) > 0 || !hideZeroLines) && (
-                        <div className="flex justify-between text-red-550 font-bold">
-                          <span>Devolución Ventas (Bs) :</span>
-                          <span>- Bs {(cierreResult.devolucionVentasVes && !isNaN(cierreResult.devolucionVentasVes) ? cierreResult.devolucionVentasVes : 0).toFixed(2)}</span>
-                        </div>
-                      )}
+                    <div className="flex items-center gap-2">
+                      <div className="bg-indigo-600 text-white font-black font-mono text-base px-3 py-2 rounded-lg flex items-center justify-center shadow-sm select-none">
+                        Bs
+                      </div>
+                      <div className="relative flex-1">
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          placeholder="0"
+                          value={cierreRealVes ? parseInt(cierreRealVes.replace(/\D/g, '') || '0', 10).toLocaleString('es-VE') : ''}
+                          onChange={(e) => {
+                            const digits = e.target.value.replace(/\D/g, '');
+                            setCierreRealVes(digits);
+                          }}
+                          className="w-full bg-white border-2 border-indigo-200 rounded-lg px-3 py-2 text-3xl sm:text-4xl font-black font-mono text-indigo-950 text-right tracking-tight focus:outline-none focus:border-indigo-600 focus:ring-4 focus:ring-indigo-400/40 focus:bg-indigo-50/20 shadow-inner transition-all"
+                        />
+                        {cierreRealVes !== '' && cierreRealVes !== '0' && (
+                          <button
+                            type="button"
+                            tabIndex={-1}
+                            onClick={() => setCierreRealVes('')}
+                            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-rose-500 p-1 rounded transition-colors"
+                            title="Limpiar monto en Bs"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                      <span className="text-xs font-black font-mono text-indigo-800 bg-indigo-100/80 px-2 py-2.5 rounded-lg border border-indigo-200 select-none">
+                        VES
+                      </span>
                     </div>
+                  </div>
 
-                    {/* Venta Total Footer */}
-                    <div className="border-t border-slate-300 pt-2.5 space-y-0.5">
-                      <div className="flex justify-between text-sm font-black text-slate-900 items-baseline">
-                        <span className="font-sans uppercase text-[11px] font-extrabold text-slate-600">Venta Total :</span>
-                        <span className="text-xl text-winter-blueBtn font-mono font-black">
-                          $ {(cierreResult.ventaTotalUsd && !isNaN(cierreResult.ventaTotalUsd) ? cierreResult.ventaTotalUsd : 0).toFixed(2)}
+                  {/* 3. EURO EUR INPUT CARD (SOLO SI HUBO OPERACIONES EN EUROS EN EL TURNO) */}
+                  {hasEurInShift && (
+                    <div className="bg-gradient-to-br from-purple-50/70 via-purple-50/30 to-white border-2 border-purple-300 hover:border-purple-500 focus-within:border-purple-600 focus-within:ring-4 focus-within:ring-purple-500/25 focus-within:shadow-md rounded-xl p-3.5 transition-all shadow-sm">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-xs font-black text-purple-950 flex items-center gap-1.5 uppercase tracking-wide">
+                          <Coins className="w-4 h-4 text-purple-600" />
+                          Efectivo en Caja Real (€ EUR)
+                        </label>
+                        <span className="text-[10px] font-extrabold bg-purple-100/90 text-purple-800 px-2 py-0.5 rounded-md border border-purple-200/80">
+                          Billetes Enteros
                         </span>
                       </div>
-                      <div className="text-[8.5px] text-slate-450 italic font-mono font-medium uppercase tracking-tighter text-right">
-                        {formatNumberToWordsUSD(cierreResult.ventaTotalUsd && !isNaN(cierreResult.ventaTotalUsd) ? cierreResult.ventaTotalUsd : 0)}
+
+                      <div className="flex items-center gap-2">
+                        <div className="bg-purple-600 text-white font-black font-mono text-xl px-3.5 py-2 rounded-lg flex items-center justify-center shadow-sm select-none">
+                          €
+                        </div>
+                        <div className="relative flex-1">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            placeholder="0"
+                            value={cierreRealEur ? parseInt(cierreRealEur.replace(/\D/g, '') || '0', 10).toLocaleString('es-VE') : ''}
+                            onChange={(e) => {
+                              const digits = e.target.value.replace(/\D/g, '');
+                              setCierreRealEur(digits);
+                            }}
+                            className="w-full bg-white border-2 border-purple-200 rounded-lg px-3 py-2 text-3xl sm:text-4xl font-black font-mono text-purple-950 text-right tracking-tight focus:outline-none focus:border-purple-600 focus:ring-4 focus:ring-purple-400/40 focus:bg-purple-50/20 shadow-inner transition-all"
+                          />
+                          {cierreRealEur !== '' && cierreRealEur !== '0' && (
+                            <button
+                              type="button"
+                              tabIndex={-1}
+                              onClick={() => setCierreRealEur('')}
+                              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-rose-500 p-1 rounded transition-colors"
+                              title="Limpiar monto en €"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                        <span className="text-xs font-black font-mono text-purple-800 bg-purple-100/80 px-2 py-2.5 rounded-lg border border-purple-200 select-none">
+                          EUR
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 4. RESUMEN EN VIVO DE FONDO FÍSICO DECLARADO */}
+                  <div className="bg-slate-50 border border-slate-250 rounded-xl p-2.5 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <Calculator className="w-4 h-4 text-slate-500" />
+                      <span className="text-slate-600 font-bold">Total Físico Declarado:</span>
+                    </div>
+                    <div className="text-right font-mono font-black text-sm">
+                      <span className="text-slate-900">
+                        ${parseInt(cierreRealUsd.replace(/\D/g, '') || '0', 10).toLocaleString('es-VE')} USD
+                      </span>
+                      <span className="text-slate-400 mx-1.5">+</span>
+                      <span className="text-indigo-700">
+                        Bs {parseInt(cierreRealVes.replace(/\D/g, '') || '0', 10).toLocaleString('es-VE')} VES
+                      </span>
+                      {hasEurInShift && (
+                        <>
+                          <span className="text-slate-400 mx-1.5">+</span>
+                          <span className="text-purple-700">
+                            € {parseInt(cierreRealEur.replace(/\D/g, '') || '0', 10).toLocaleString('es-VE')} EUR
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 5. BOTONES DE ACCIÓN CON FOCO DE ALTO CONTRASTE */}
+                  <div className="space-y-2 pt-1">
+                    <button
+                      type="submit"
+                      className="w-full bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-700 hover:to-rose-800 focus:from-red-700 focus:to-rose-900 text-white py-3.5 rounded-xl font-black font-sans text-xs sm:text-sm tracking-wider transition-all shadow-lg shadow-red-500/25 flex items-center justify-center gap-2 active:scale-[0.99] cursor-pointer focus:outline-none focus:ring-4 focus:ring-rose-400 focus:ring-offset-2 focus:scale-[1.02] border-2 border-transparent focus:border-white"
+                    >
+                      <Lock className="w-5 h-5 text-rose-200" />
+                      EJECUTAR CIERRE FINAL (Enter)
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => { setShowCierreModal(false); setCierreResult(null); }}
+                      className="w-full bg-slate-100 hover:bg-slate-200 focus:bg-slate-200 text-slate-600 focus:text-slate-900 border-2 border-slate-300 focus:border-slate-800 py-2 rounded-xl font-bold font-sans text-xs tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer focus:outline-none focus:ring-4 focus:ring-slate-400 focus:ring-offset-2 focus:scale-[1.02]"
+                    >
+                      <X className="w-4 h-4" />
+                      CANCELAR Y VOLVER AL POS (Esc)
+                    </button>
+                  </div>
+                </form>
+              </div>
+            ) : (
+              <div className="flex flex-col max-h-[94vh] h-full">
+                {/* STICKY TOP HEADER */}
+                <div className="flex justify-between items-center border-b border-slate-200 px-5 py-3 bg-white flex-shrink-0">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-rose-100 text-rose-600 rounded-lg">
+                      <Lock className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-black text-slate-900 tracking-wide font-sans uppercase">
+                        Auditoría y Cierre de Caja
+                      </h3>
+                      <p className="text-[11px] text-slate-500 font-medium">
+                        Resumen final de arqueo, ventas y reconciliación de fondos
+                      </p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => { setShowCierreModal(false); setCierreResult(null); }} 
+                    className="text-slate-400 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg font-sans text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                    Cerrar [ESC]
+                  </button>
+                </div>
+
+                {/* SCROLLABLE BODY CONTAINING ARQUEO CARD */}
+                <div className="overflow-y-auto flex-1 p-4 sm:p-5 space-y-4 scrollbar-thin max-h-[calc(94vh-160px)]">
+                  <div id="cierre-arqueo-card" className="space-y-4 w-full bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm">
+                  
+                    {/* BLUE HEADER TICKET STYLE */}
+                    <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white px-5 py-3 flex items-center justify-between rounded-xl shadow-sm">
+                      <div className="flex items-center gap-2.5">
+                        <FileText className="w-5 h-5 text-blue-400" />
+                        <div>
+                          <h3 className="text-sm sm:text-base font-black font-sans uppercase tracking-wider">
+                            Comprobante de Cierre de Caja
+                          </h3>
+                          <span className="text-[11px] text-slate-300 font-mono">
+                            Estación: <strong>{localStorage.getItem('pos_terminal_name') || 'CAJA_01'}</strong> • Cajero: <strong>{currentUser?.nombre || currentUser?.usuario}</strong>
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-xs font-black font-mono bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-lg">
+                          {new Date().toLocaleDateString('es-VE')} {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
                       </div>
                     </div>
 
-                    {/* PROFITABILITY BREAKDOWN */}
-                    {(() => {
-                      const subtotalNeto = cierreResult.subtotalNetoUsd ?? cierreResult.ventaTotalUsd ?? 0;
-                      const costoTotal = cierreResult.costoTotalUsd ?? 0;
-                      const utilidadBrutaProductos = subtotalNeto - costoTotal;
-                      const comisionVes = cierreResult.ventaEfectivoComisionVes ?? 0;
-                      const comisionUsd = cierreResult.ventaEfectivoComisionUsd ?? (tasaDia > 0 ? comisionVes / tasaDia : 0);
-                      const utilidadNetaTotalCierre = utilidadBrutaProductos + comisionUsd;
+                    <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-2 gap-5 shadow-inner">
+                      
+                      {/* Left Column: Cash Drawer Arqueo */}
+                      <div className="space-y-3.5">
+                        <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-lg flex justify-between items-center">
+                          <div>
+                            <span className="text-slate-500 font-sans block text-[10px] font-extrabold uppercase">Operador Responsable</span>
+                            <strong className="text-slate-900 text-xs sm:text-sm font-black uppercase">
+                              {currentUser.usuario.toUpperCase()} - {currentUser.nombre}
+                            </strong>
+                          </div>
+                          <span className="bg-blue-100 text-blue-800 text-[10px] font-black px-2 py-0.5 rounded-md border border-blue-200">
+                            {localStorage.getItem('pos_terminal_name') || 'CAJA_01'}
+                          </span>
+                        </div>
 
-                      return (
-                        <div className="pt-2.5 font-sans space-y-2 text-[11.5px] text-slate-700 bg-emerald-50/50 p-3 rounded border border-emerald-100 mt-2 select-text">
-                          <div className="font-bold text-[10px] text-emerald-855 uppercase border-b border-emerald-200/60 pb-1 font-sans flex justify-between">
-                            <span>CÁLCULO DE UTILIDAD DEL CIERRE</span>
+                        <div className="space-y-2 border-t border-slate-200 pt-2.5 font-mono text-xs sm:text-sm">
+                          <div className="flex justify-between items-center py-1 border-b border-dashed border-slate-150">
+                            <span className="text-slate-600 font-semibold font-sans">Apertura de Caja :</span>
+                            <span className="font-black text-slate-900 text-sm sm:text-base">
+                              $ {cierreResult.aperturaUsd.toFixed(2)} <span className="text-slate-400 font-normal">/</span> {formatBs(cierreResult.aperturaVes)}
+                            </span>
                           </div>
-                          <div className="flex justify-between font-mono">
-                            <span>Ventas Netas (sin IVA):</span>
-                            <span className="font-bold text-slate-800">$ {subtotalNeto.toFixed(2)}</span>
+                          
+                          {/* Ventas en Efectivo ($) */}
+                          <div className="flex justify-between items-center py-0.5">
+                            <span className="text-slate-600 font-semibold font-sans">Ventas en Efectivo ($) :</span>
+                            <span className="font-black text-emerald-700 text-sm sm:text-base">$ {cierreResult.ventasEfectivoUsd.toFixed(2)}</span>
                           </div>
-                          <div className="flex justify-between font-mono">
-                            <span>Costo de Mercancía:</span>
-                            <span className="font-bold text-red-600">- $ {costoTotal.toFixed(2)}</span>
-                          </div>
-                          <div className="flex justify-between font-mono text-[11.5px] border-t border-emerald-300/80 pt-1 mt-1 font-bold text-emerald-800">
-                            <span>Utilidad Bruta por Productos:</span>
-                            <span className="font-black">$ {utilidadBrutaProductos.toFixed(2)}</span>
-                          </div>
-                          {comisionVes > 0 && (
-                            <div className="flex justify-between font-mono text-emerald-900 font-extrabold bg-emerald-100/70 p-1.5 rounded border border-emerald-300">
-                              <span>+ Comisiones Venta Efectivo:</span>
-                              <span>+ Bs {comisionVes.toFixed(2)} (+${comisionUsd.toFixed(2)})</span>
+
+                          {((cierreResult.ventasEfectivoVes ?? 0) > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5">
+                              <span className="text-slate-600 font-semibold font-sans">Ventas en Efectivo (Bs) :</span>
+                              <span className="font-black text-indigo-700 text-sm sm:text-base">{formatBs(cierreResult.ventasEfectivoVes)}</span>
                             </div>
                           )}
-                          <div className="flex justify-between font-mono text-[13px] border-t-2 border-emerald-500 pt-1.5 mt-1 font-black text-emerald-950 bg-emerald-200/60 p-2 rounded-lg shadow-sm">
-                            <span>UTILIDAD NETA TOTAL CIERRE:</span>
-                            <span className="text-lg font-black text-emerald-700">$ {utilidadNetaTotalCierre.toFixed(2)}</span>
+
+                          {((cierreResult.abonosEfectivoUsd ?? 0) > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5 text-emerald-700">
+                              <span className="font-semibold font-sans">Abono Clientes (Efectivo $) :</span>
+                              <span className="font-black text-sm sm:text-base">$ {cierreResult.abonosEfectivoUsd!.toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {((cierreResult.abonosEfectivoBsVes ?? 0) > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5 text-emerald-700">
+                              <span className="font-semibold font-sans">Abono Clientes (Efectivo Bs) :</span>
+                              <span className="font-black text-sm sm:text-base">{formatBs(cierreResult.abonosEfectivoBsVes)}</span>
+                            </div>
+                          )}
+
+                          {((cierreResult.abonosBiopagoVes ?? 0) > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5 text-sky-700">
+                              <span className="font-semibold font-sans">Abono Clientes (Biopago) :</span>
+                              <span className="font-black text-sm sm:text-base">{formatBs(cierreResult.abonosBiopagoVes)}</span>
+                            </div>
+                          )}
+
+                          {((cierreResult.abonosPuntoVes ?? 0) > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5 text-indigo-700">
+                              <span className="font-semibold font-sans">Abono Clientes (Punto / Tarjeta) :</span>
+                              <span className="font-black text-sm sm:text-base">{formatBs(cierreResult.abonosPuntoVes)}</span>
+                            </div>
+                          )}
+
+                          {((cierreResult.abonosPagoMovilVes ?? 0) > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5 text-blue-700">
+                              <span className="font-semibold font-sans">Abono Clientes (Pago Móvil) :</span>
+                              <span className="font-black text-sm sm:text-base">{formatBs(cierreResult.abonosPagoMovilVes)}</span>
+                            </div>
+                          )}
+
+                          {((cierreResult.abonosZelleUsd ?? 0) > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5 text-purple-700">
+                              <span className="font-semibold font-sans">Abono Clientes (Zelle $) :</span>
+                              <span className="font-black text-sm sm:text-base">$ {cierreResult.abonosZelleUsd!.toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {((cierreResult.abonosBinanceUsd ?? 0) > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5 text-amber-700">
+                              <span className="font-semibold font-sans">Abono Clientes (Binance $) :</span>
+                              <span className="font-black text-sm sm:text-base">$ {cierreResult.abonosBinanceUsd!.toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {((cierreResult.abonosPayPalUsd ?? 0) > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5 text-sky-600">
+                              <span className="font-semibold font-sans">Abono Clientes (PayPal $) :</span>
+                              <span className="font-black text-sm sm:text-base">$ {cierreResult.abonosPayPalUsd!.toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {(cierreResult.entradaEfectivoUsd > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5 text-emerald-700">
+                              <span className="font-semibold font-sans">Entrada Efectivo ($) :</span>
+                              <span className="font-black text-sm sm:text-base">$ {cierreResult.entradaEfectivoUsd.toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {((cierreResult.entradaEfectivoVes ?? 0) > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5 text-emerald-700">
+                              <span className="font-semibold font-sans">Entrada Efectivo (Bs) :</span>
+                              <span className="font-black text-sm sm:text-base">{formatBs(cierreResult.entradaEfectivoVes ?? 0)}</span>
+                            </div>
+                          )}
+
+                          {/* Divisas Compradas (€ EUR) - Only shown if there were EUR operations in shift */}
+                          {hasEurInShift && (cierreResult.cambioDivisasEur || 0) > 0 && (
+                            <div className="flex justify-between items-center py-0.5 text-indigo-700">
+                              <span className="font-semibold font-sans">Divisas Compradas (€) :</span>
+                              <span className="font-black text-sm sm:text-base">+ € {(cierreResult.cambioDivisasEur || 0).toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {(cierreResult.salidaEfectivoUsd > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5 text-rose-600">
+                              <span className="font-semibold font-sans">Salida Efectivo ($) :</span>
+                              <span className="font-black text-sm sm:text-base">- $ {cierreResult.salidaEfectivoUsd.toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {((cierreResult.salidaEfectivoVes ?? 0) > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5 text-rose-600">
+                              <span className="font-semibold font-sans">Salida Efectivo (Bs) :</span>
+                              <span className="font-black text-sm sm:text-base">- {formatBs(cierreResult.salidaEfectivoVes ?? 0)}</span>
+                            </div>
+                          )}
+
+                          {(cierreResult.devolucionEfectivoUsd > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5 text-rose-600">
+                              <span className="font-semibold font-sans">Devolución Efectivo ($) :</span>
+                              <span className="font-black text-sm sm:text-base">- $ {cierreResult.devolucionEfectivoUsd.toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {((cierreResult.devolucionEfectivoVes ?? 0) > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5 text-rose-600">
+                              <span className="font-semibold font-sans">Devolución Efectivo (Bs) :</span>
+                              <span className="font-black text-sm sm:text-base">- {formatBs(cierreResult.devolucionEfectivoVes ?? 0)}</span>
+                            </div>
+                          )}
+
+                          {((cierreResult.vueltosEntregadosUsd ?? 0) > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5 text-amber-700">
+                              <span className="font-semibold font-sans">Vuelto Entregado ($) :</span>
+                              <span className="font-black text-sm sm:text-base">- $ {(cierreResult.vueltosEntregadosUsd ?? 0).toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {((cierreResult.vueltosEntregadosVes ?? 0) > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5 text-amber-700">
+                              <span className="font-semibold font-sans">Vuelto Entregado (Bs) :</span>
+                              <span className="font-black text-sm sm:text-base">- {formatBs(cierreResult.vueltosEntregadosVes ?? 0)}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Dinero en Caja Expected Card */}
+                        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-xl p-3.5 space-y-1 shadow-sm">
+                          <div className="flex justify-between items-center">
+                            <span className="font-sans uppercase text-xs font-black text-blue-900 tracking-wide">
+                              Dinero en Caja (Esperado) :
+                            </span>
+                            <span className="text-2xl sm:text-3xl text-blue-700 font-mono font-black tracking-tight">
+                              $ {cierreResult.dineroEnCajaExpected.toFixed(2)}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-blue-600/80 italic font-mono font-medium uppercase tracking-tight text-right">
+                            {formatNumberToWordsUSD(cierreResult.dineroEnCajaExpected)}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right Column: Sales Performance & Payment breakdown */}
+                      <div className="space-y-3.5 border-t md:border-t-0 md:border-l border-slate-200 md:pl-5">
+                        <div className="space-y-2 font-mono text-xs sm:text-sm">
+                          <div className="flex justify-between items-center py-0.5">
+                            <span className="font-sans font-semibold text-slate-600">Ventas Totales :</span>
+                            <span className="font-black text-slate-900 text-sm sm:text-base">$ {cierreResult.ventasTotalesUsd.toFixed(2)}</span>
+                          </div>
+                          {(cierreResult.descuentosUsd > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5 text-amber-700">
+                              <span className="font-sans font-semibold">Descuentos :</span>
+                              <span className="font-black text-sm sm:text-base">$ {cierreResult.descuentosUsd.toFixed(2)}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between items-center font-bold text-slate-900 border-b border-dashed border-slate-200 pb-1.5">
+                            <span className="font-sans text-xs font-black text-slate-500 uppercase">Venta Bruta :</span>
+                            <span className="font-black text-slate-900 text-sm sm:text-base">$ {cierreResult.ventaBrutaUsd.toFixed(2)}</span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5 pt-1 font-mono text-xs sm:text-sm">
+                          {(cierreResult.pagosEfectivoUsd > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5">
+                              <span className="font-sans font-semibold text-slate-600">Efectivo $ :</span>
+                              <span className="font-black text-emerald-700 text-sm sm:text-base">$ {(cierreResult.pagosEfectivoUsd && !isNaN(cierreResult.pagosEfectivoUsd) ? cierreResult.pagosEfectivoUsd : 0).toFixed(2)}</span>
+                            </div>
+                          )}
+                          
+                          {(cierreResult.pagosEfectivoBsVes > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5">
+                              <span className="font-sans font-semibold text-slate-600">Efectivo Bs :</span>
+                              <span className="font-black text-indigo-700 text-sm sm:text-base">Bs {(cierreResult.pagosEfectivoBsVes && !isNaN(cierreResult.pagosEfectivoBsVes) ? cierreResult.pagosEfectivoBsVes : 0).toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {(cierreResult.pagosBiopagoVes > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5">
+                              <span className="font-sans font-semibold text-slate-600">Biopago :</span>
+                              <span className="font-black text-sky-700 text-sm sm:text-base">Bs {(cierreResult.pagosBiopagoVes && !isNaN(cierreResult.pagosBiopagoVes) ? cierreResult.pagosBiopagoVes : 0).toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {(cierreResult.pagosPuntoVes > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5">
+                              <span className="font-sans font-semibold text-slate-600">Punto / Tarjeta :</span>
+                              <span className="font-black text-indigo-700 text-sm sm:text-base">Bs {(cierreResult.pagosPuntoVes && !isNaN(cierreResult.pagosPuntoVes) ? cierreResult.pagosPuntoVes : 0).toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {((cierreResult.pagosPagoMovilVes || 0) > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5">
+                              <span className="font-sans font-semibold text-slate-600">Pago Móvil :</span>
+                              <span className="font-black text-blue-700 text-sm sm:text-base">Bs {(cierreResult.pagosPagoMovilVes && !isNaN(cierreResult.pagosPagoMovilVes) ? cierreResult.pagosPagoMovilVes : 0).toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {((cierreResult.pagosTransferenciaVes || 0) > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5">
+                              <span className="font-sans font-semibold text-slate-600">Transferencia :</span>
+                              <span className="font-black text-purple-700 text-sm sm:text-base">Bs {(cierreResult.pagosTransferenciaVes && !isNaN(cierreResult.pagosTransferenciaVes) ? cierreResult.pagosTransferenciaVes : 0).toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {(cierreResult.pagosCreditoUsd > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5">
+                              <span className="font-sans font-semibold text-slate-600">A Crédito :</span>
+                              <span className="font-black text-slate-800 text-sm sm:text-base">$ {(cierreResult.pagosCreditoUsd && !isNaN(cierreResult.pagosCreditoUsd) ? cierreResult.pagosCreditoUsd : 0).toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {(cierreResult.devolucionVentasUsd > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5 text-rose-600 font-bold">
+                              <span className="font-sans">Devolución Ventas ($) :</span>
+                              <span className="font-black text-sm sm:text-base">- $ {(cierreResult.devolucionVentasUsd && !isNaN(cierreResult.devolucionVentasUsd) ? cierreResult.devolucionVentasUsd : 0).toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {((cierreResult.devolucionVentasVes || 0) > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5 text-rose-600 font-bold">
+                              <span className="font-sans">Devolución Ventas (Bs) :</span>
+                              <span className="font-black text-sm sm:text-base">- Bs {(cierreResult.devolucionVentasVes && !isNaN(cierreResult.devolucionVentasVes) ? cierreResult.devolucionVentasVes : 0).toFixed(2)}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Venta Total Footer Card */}
+                        <div className="bg-slate-100 border border-slate-300 rounded-xl p-3 space-y-1">
+                          <div className="flex justify-between items-center">
+                            <span className="font-sans uppercase text-xs font-black text-slate-700">Venta Total :</span>
+                            <span className="text-2xl sm:text-3xl text-slate-900 font-mono font-black">
+                              $ {(cierreResult.ventaTotalUsd && !isNaN(cierreResult.ventaTotalUsd) ? cierreResult.ventaTotalUsd : 0).toFixed(2)}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 italic font-mono font-medium uppercase tracking-tight text-right">
+                            {formatNumberToWordsUSD(cierreResult.ventaTotalUsd && !isNaN(cierreResult.ventaTotalUsd) ? cierreResult.ventaTotalUsd : 0)}
+                          </div>
+                        </div>
+
+                        {/* PROFITABILITY BREAKDOWN */}
+                        {(() => {
+                          const subtotalNeto = cierreResult.subtotalNetoUsd ?? cierreResult.ventaTotalUsd ?? 0;
+                          const costoTotal = cierreResult.costoTotalUsd ?? 0;
+                          const utilidadBrutaProductos = subtotalNeto - costoTotal;
+                          const comisionVes = cierreResult.ventaEfectivoComisionVes ?? 0;
+                          const comisionUsd = cierreResult.ventaEfectivoComisionUsd ?? (tasaDia > 0 ? comisionVes / tasaDia : 0);
+                          const utilidadNetaTotalCierre = utilidadBrutaProductos + comisionUsd;
+
+                          return (
+                            <div className="font-sans space-y-2 text-xs text-slate-700 bg-emerald-50/70 p-3 rounded-xl border border-emerald-200 mt-2 select-text">
+                              <div className="font-black text-[11px] text-emerald-900 uppercase border-b border-emerald-200 pb-1 font-sans flex justify-between">
+                                <span>Cálculo de Utilidad del Cierre</span>
+                              </div>
+                              <div className="flex justify-between font-mono">
+                                <span className="font-sans text-slate-600 font-semibold">Ventas Netas (sin IVA):</span>
+                                <span className="font-black text-slate-900 text-sm">$ {subtotalNeto.toFixed(2)}</span>
+                              </div>
+                              <div className="flex justify-between font-mono">
+                                <span className="font-sans text-slate-600 font-semibold">Costo de Mercancía:</span>
+                                <span className="font-black text-rose-600 text-sm">- $ {costoTotal.toFixed(2)}</span>
+                              </div>
+                              <div className="flex justify-between font-mono border-t border-emerald-200 pt-1 font-bold text-emerald-900">
+                                <span className="font-sans">Utilidad Bruta por Productos:</span>
+                                <span className="font-black text-sm">$ {utilidadBrutaProductos.toFixed(2)}</span>
+                              </div>
+                              {comisionVes > 0 && (
+                                <div className="flex justify-between font-mono text-emerald-950 font-black bg-emerald-100/80 p-2 rounded-lg border border-emerald-300">
+                                  <span className="font-sans">+ Comisiones Venta Efectivo:</span>
+                                  <span>+ Bs {comisionVes.toFixed(2)} (+${comisionUsd.toFixed(2)})</span>
+                                </div>
+                              )}
+                              <div className="flex justify-between items-center font-mono border-t-2 border-emerald-500 pt-1.5 mt-1 font-black text-emerald-950 bg-emerald-200/80 p-2.5 rounded-lg shadow-sm">
+                                <span className="font-sans uppercase text-xs">UTILIDAD NETA TOTAL:</span>
+                                <span className="text-xl sm:text-2xl font-black text-emerald-800">$ {utilidadNetaTotalCierre.toFixed(2)}</span>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                    </div>
+
+                    {/* Arqueo Audit differences table */}
+                    {(() => {
+                      const expectedEur = cierreResult.cambioDivisasEur || 0;
+                      const realEurVal = hasEurInShift || expectedEur > 0 ? (parseFloat(cierreRealEur) || 0) : 0;
+                      const diffUsd = parseFloat(cierreRealUsd) - cierreResult.dineroEnCajaExpected;
+                      const diffVes = parseFloat(cierreRealVes) - cierreResult.expectedVes;
+                      const diffEur = realEurVal - expectedEur;
+                      const showEur = hasEurInShift && (expectedEur > 0 || realEurVal > 0);
+
+                      const hasLoss = diffUsd < -0.01 || diffVes < -0.01 || (showEur && diffEur < -0.01);
+                      const hasGain = diffUsd > 0.01 || diffVes > 0.01 || (showEur && diffEur > 0.01);
+                      
+                      let boxBgClass = 'bg-slate-50 border-slate-200';
+                      let titleClass = 'text-slate-900 border-slate-200';
+                      
+                      if (hasLoss) {
+                        boxBgClass = 'bg-rose-50/70 border-rose-300 ring-2 ring-rose-500/10';
+                        titleClass = 'text-rose-950 border-rose-200';
+                      } else if (hasGain) {
+                        boxBgClass = 'bg-emerald-50/70 border-emerald-300';
+                        titleClass = 'text-emerald-950 border-emerald-200';
+                      }
+
+                      return (
+                        <div className={`${boxBgClass} p-4 border rounded-xl space-y-3 font-sans shadow-sm transition-all`}>
+                          <div className={`font-black text-center border-b pb-2 uppercase text-xs sm:text-sm tracking-wider ${titleClass}`}>
+                            RECONCILIACIÓN DE EFECTIVO ENTREGADO (ARQUEO FÍSICO)
+                          </div>
+                          
+                          <div className="grid grid-cols-3 gap-3 text-slate-500 font-extrabold text-[11px] uppercase tracking-wide border-b border-slate-200/80 pb-1">
+                            <span>Efectivo</span>
+                            <span className="text-right">Gaveta Esperado</span>
+                            <span className="text-right">Físico Recibido</span>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-3 font-mono font-black text-sm sm:text-base py-1">
+                            <span className="text-emerald-800 font-sans font-bold flex items-center gap-1">
+                              <DollarSign className="w-4 h-4 text-emerald-600" /> Dólares USD:
+                            </span>
+                            <span className="text-right text-slate-800">${cierreResult.dineroEnCajaExpected.toFixed(2)}</span>
+                            <span className="text-right text-emerald-700 bg-emerald-100/70 px-2 py-0.5 rounded-md border border-emerald-200">
+                              ${parseFloat(cierreRealUsd || '0').toFixed(2)}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-3 font-mono font-black text-sm sm:text-base py-1 border-t border-slate-200/60">
+                            <span className="text-indigo-800 font-sans font-bold flex items-center gap-1">
+                              <Coins className="w-4 h-4 text-indigo-600" /> Bolívares Bs:
+                            </span>
+                            <span className="text-right text-slate-800">Bs {cierreResult.expectedVes.toFixed(2)}</span>
+                            <span className="text-right text-indigo-700 bg-indigo-100/70 px-2 py-0.5 rounded-md border border-indigo-200">
+                              Bs {parseFloat(cierreRealVes || '0').toFixed(2)}
+                            </span>
+                          </div>
+
+                          {showEur && (
+                            <div className="grid grid-cols-3 gap-3 font-mono font-black text-sm sm:text-base py-1 border-t border-slate-200/60">
+                              <span className="text-purple-800 font-sans font-bold flex items-center gap-1">
+                                <Coins className="w-4 h-4 text-purple-600" /> Euros EUR:
+                              </span>
+                              <span className="text-right text-slate-800">€{expectedEur.toFixed(2)}</span>
+                              <span className="text-right text-purple-700 bg-purple-100/70 px-2 py-0.5 rounded-md border border-purple-200">
+                                €{realEurVal.toFixed(2)}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* DIFFERENCE CARDS */}
+                          <div className="pt-2 border-t-2 border-slate-200/80">
+                            <span className="text-[11px] font-black uppercase text-slate-600 block mb-1.5">
+                              Diferencias Auditadas en Gaveta:
+                            </span>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs sm:text-sm font-mono font-black">
+                              <div className={`p-2.5 rounded-lg border flex items-center justify-between ${diffUsd === 0 ? 'bg-slate-100 border-slate-200 text-slate-800' : diffUsd > 0 ? 'bg-emerald-100 border-emerald-300 text-emerald-900' : 'bg-rose-100 border-rose-300 text-rose-950'}`}>
+                                <span className="font-sans font-bold text-xs">Diferencia USD:</span>
+                                <span className="text-base sm:text-lg">
+                                  {diffUsd >= 0 ? '+' : ''}${diffUsd.toFixed(2)}
+                                </span>
+                              </div>
+
+                              <div className={`p-2.5 rounded-lg border flex items-center justify-between ${diffVes === 0 ? 'bg-slate-100 border-slate-200 text-slate-800' : diffVes > 0 ? 'bg-emerald-100 border-emerald-300 text-emerald-900' : 'bg-rose-100 border-rose-300 text-rose-950'}`}>
+                                <span className="font-sans font-bold text-xs">Diferencia Bs:</span>
+                                <span className="text-base sm:text-lg">
+                                  {diffVes >= 0 ? '+' : ''}Bs {diffVes.toFixed(2)}
+                                </span>
+                              </div>
+
+                              {showEur && (
+                                <div className={`sm:col-span-2 p-2.5 rounded-lg border flex items-center justify-between ${diffEur === 0 ? 'bg-slate-100 border-slate-200 text-slate-800' : diffEur > 0 ? 'bg-emerald-100 border-emerald-300 text-emerald-900' : 'bg-rose-100 border-rose-300 text-rose-950'}`}>
+                                  <span className="font-sans font-bold text-xs">Diferencia EUR:</span>
+                                  <span className="text-base sm:text-lg">
+                                    {diffEur >= 0 ? '+' : ''}€ {diffEur.toFixed(2)}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
                       );
                     })()}
                   </div>
-
                 </div>
 
-                {/* Arqueo Audit differences table */}
-                {(() => {
-                  const expectedEur = cierreResult.cambioDivisasEur || 0;
-                  const realEurVal = hasEurInShift || expectedEur > 0 ? (parseFloat(cierreRealEur) || 0) : 0;
-                  const diffUsd = parseFloat(cierreRealUsd) - cierreResult.dineroEnCajaExpected;
-                  const diffVes = parseFloat(cierreRealVes) - cierreResult.expectedVes;
-                  const diffEur = realEurVal - expectedEur;
-                  const showEur = hasEurInShift || expectedEur > 0 || realEurVal > 0;
+                {/* STICKY BOTTOM ACTION FOOTER (ALWAYS VISIBLE AT 100% ZOOM) */}
+                <div className="bg-slate-50 border-t border-slate-200 px-5 py-3.5 space-y-2.5 flex-shrink-0 shadow-lg">
+                  <div className="bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg text-[11px] text-amber-900 font-sans font-medium flex items-center gap-2">
+                    <span className="text-base">⚠️</span>
+                    <span>Al confirmar, se guardará el arqueo inmutable en el historial y se cerrará su sesión automáticamente.</span>
+                  </div>
 
-                  const hasLoss = diffUsd < -0.01 || diffVes < -0.01 || (showEur && diffEur < -0.01);
-                  const hasGain = diffUsd > 0.01 || diffVes > 0.01 || (showEur && diffEur > 0.01);
-                  
-                  let boxBgClass = 'bg-slate-50 border-slate-200';
-                  let titleClass = 'text-slate-800 border-slate-100';
-                  
-                  if (hasLoss) {
-                    boxBgClass = 'bg-rose-50 border-rose-200 ring-2 ring-rose-500/10';
-                    titleClass = 'text-rose-900 border-rose-150';
-                  } else if (hasGain) {
-                    boxBgClass = 'bg-emerald-50/70 border-emerald-200';
-                    titleClass = 'text-emerald-900 border-emerald-150';
-                  }
-
-                  return (
-                    <div className={`${boxBgClass} p-3.5 border rounded-lg text-[12px] space-y-2.5 font-sans shadow-sm transition-all`}>
-                      <div className={`font-extrabold text-center border-b pb-1.5 uppercase text-xs tracking-wider ${titleClass}`}>
-                        RECONCILIACIÓN DE EFECTIVO ENTREGADO
-                      </div>
-                      <div className="grid grid-cols-3 gap-2 text-slate-500 font-bold text-[10px] uppercase tracking-wide">
-                        <span>Efectivo</span>
-                        <span className="text-right">Gaveta Esperado</span>
-                        <span className="text-right">Físico Recibido</span>
-                      </div>
-                      <div className="grid grid-cols-3 gap-2 font-mono font-bold text-slate-750 text-[12px]">
-                        <span className="text-emerald-700">Dólares USD:</span>
-                        <span className="text-right">${cierreResult.dineroEnCajaExpected.toFixed(2)}</span>
-                        <span className="text-right text-emerald-600">${parseFloat(cierreRealUsd).toFixed(2)}</span>
-                      </div>
-                      {showEur && (
-                        <div className="grid grid-cols-3 gap-2 font-mono font-bold text-slate-750 text-[12px]">
-                          <span className="text-indigo-700">Euros EUR:</span>
-                          <span className="text-right">€{expectedEur.toFixed(2)}</span>
-                          <span className="text-right text-indigo-600">€{realEurVal.toFixed(2)}</span>
-                        </div>
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 w-full sm:w-auto">
+                      {waCierreStatus.enabled && (
+                        <label className="flex items-center gap-2 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2 text-xs cursor-pointer select-none hover:bg-indigo-100 transition-all font-sans font-bold text-indigo-950">
+                          <input
+                            type="checkbox"
+                            checked={sendToWhatsApp}
+                            onChange={(e) => setSendToWhatsApp(e.target.checked)}
+                            disabled={isSendingWa}
+                            className="w-4 h-4 text-indigo-600 rounded border-slate-300"
+                          />
+                          <span>Enviar a WhatsApp</span>
+                        </label>
                       )}
-                      <div className="grid grid-cols-3 gap-2 font-mono font-bold text-slate-750 text-[12px] border-b border-slate-205 pb-1.5">
-                        <span className="text-purple-750">Bolívares Bs:</span>
-                        <span className="text-right">Bs {cierreResult.expectedVes.toFixed(2)}</span>
-                        <span className="text-right text-purple-600">Bs {parseFloat(cierreRealVes).toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between font-extrabold text-[12px] text-slate-800 font-mono">
-                        <span>DIFERENCIA {showEur ? 'USD / EUR / VES:' : 'USD / VES:'}</span>
-                        <div className="text-right space-y-0.5">
-                          <span className={diffUsd >= 0 ? 'text-emerald-600' : 'text-rose-600 font-black'}>
-                            USD: ${diffUsd.toFixed(2)}
-                          </span>
-                          {showEur && (
-                            <span className={`block ${diffEur >= 0 ? 'text-emerald-600' : 'text-rose-600 font-black'}`}>
-                              EUR: € {diffEur.toFixed(2)}
-                            </span>
-                          )}
-                          <span className={`block ${diffVes >= 0 ? 'text-emerald-600' : 'text-rose-600 font-black'}`}>
-                            VES: Bs {diffVes.toFixed(2)}
-                          </span>
-                        </div>
-                      </div>
+
+                      <label className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-xs cursor-pointer select-none hover:bg-emerald-100 transition-all font-sans font-bold text-emerald-950">
+                        <input
+                          type="checkbox"
+                          checked={hideZeroLines}
+                          onChange={(e) => setHideZeroLines(e.target.checked)}
+                          className="w-4 h-4 text-emerald-600 rounded border-slate-300"
+                        />
+                        <span>Solo con data (Ocultar ceros)</span>
+                      </label>
                     </div>
-                  );
-                })()}
 
-                <div className="bg-red-50 border border-red-200 p-3 rounded text-[11px] text-red-750 leading-relaxed font-sans font-medium">
-                  ⚠️ NOTA: Al confirmar, se guardará el registro inmutable en el historial de arqueos y se cerrará su sesión de trabajo automáticamente.
+                    <button
+                      onClick={handleConfirmCierre}
+                      disabled={isSendingWa}
+                      className="w-full sm:w-auto sm:min-w-[320px] bg-gradient-to-r from-blue-600 via-blue-700 to-indigo-800 hover:from-blue-700 hover:to-indigo-900 active:scale-[0.99] disabled:bg-slate-300 text-white py-3 px-6 rounded-xl font-sans text-xs sm:text-sm font-black uppercase tracking-wider transition-all shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {isSendingWa ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                          <span>PROCESANDO Y ENVIANDO...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-5 h-5 text-blue-200" />
+                          <span>CONFIRMAR REGISTRO Y REINICIAR TERMINAL</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
-
-                <div className="flex flex-col sm:flex-row gap-2.5">
-                  {waCierreStatus.enabled && (
-                    <label className="flex-1 flex items-center gap-2 bg-indigo-50/50 border border-indigo-150 rounded-lg p-3 text-xs cursor-pointer select-none hover:bg-indigo-50 transition-all font-sans">
-                      <input
-                        type="checkbox"
-                        checked={sendToWhatsApp}
-                        onChange={(e) => setSendToWhatsApp(e.target.checked)}
-                        disabled={isSendingWa}
-                        className="w-4 h-4 text-indigo-650 rounded border-slate-350 focus:ring-indigo-550"
-                      />
-                      <div className="flex flex-col">
-                        <span className="font-bold text-indigo-900">Enviar a WhatsApp</span>
-                        <span className="text-[9px] text-slate-500">Envía ticket y resumen de texto.</span>
-                      </div>
-                    </label>
-                  )}
-
-                  <label className="flex-1 flex items-center gap-2 bg-emerald-50/50 border border-emerald-150 rounded-lg p-3 text-xs cursor-pointer select-none hover:bg-emerald-50 transition-all font-sans">
-                    <input
-                      type="checkbox"
-                      checked={hideZeroLines}
-                      onChange={(e) => setHideZeroLines(e.target.checked)}
-                      className="w-4 h-4 text-emerald-650 rounded border-slate-350 focus:ring-emerald-550"
-                    />
-                    <div className="flex flex-col">
-                      <span className="font-bold text-emerald-900">Solo con data (Ocultar ceros)</span>
-                      <span className="text-[9px] text-slate-500">Oculta del ticket los rubros sin transacciones ($0.00).</span>
-                    </div>
-                  </label>
-                </div>
-
-                <button
-                  onClick={handleConfirmCierre}
-                  disabled={isSendingWa}
-                  className="w-full bg-winter-blueBtn hover:bg-winter-blueBtnHover disabled:bg-slate-300 text-white py-3.5 rounded-lg font-sans text-[13px] font-black uppercase tracking-wider transition-all shadow flex items-center justify-center gap-2"
-                >
-                  {isSendingWa ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                      <span>PROCESANDO Y ENVIANDO...</span>
-                    </>
-                  ) : (
-                    <span>CONFIRMAR REGISTRO Y REINICIAR TERMINAL</span>
-                  )}
-                </button>
               </div>
             )}
-            </div>
           </div>
         </div>
       )}

@@ -114,12 +114,18 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
   };
 
   const captureCierrePNG = async (c: CierreCaja): Promise<string> => {
-    setCapturingCierre(c);
-    await new Promise(resolve => setTimeout(resolve, 280));
     let imageBase64 = '';
     try {
       const htmlToImage = await import(/* @vite-ignore */ 'html-to-image');
-      const element = document.getElementById('cierre-capture-card') || document.getElementById('cierre-comprobante-card');
+      let element = document.getElementById('cierre-comprobante-card');
+      
+      // If modal is not open in DOM, render hidden capture element
+      if (!element) {
+        setCapturingCierre(c);
+        await new Promise(resolve => setTimeout(resolve, 350));
+        element = document.getElementById('cierre-capture-card');
+      }
+
       if (element) {
         imageBase64 = await htmlToImage.toPng(element, { backgroundColor: '#ffffff', quality: 0.95 });
       }
@@ -132,38 +138,46 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
   };
 
   const handleResendWhatsAppCierre = async (c: CierreCaja) => {
-    setSendingProgressMsg(`Capturando y reenviando comprobante de ${c.usuario}...`);
+    setSendingProgressMsg(`Capturando comprobante y procesando reenvío por WhatsApp... (${c.usuario || 'Operador'})`);
     try {
+      // 1. Capture PNG image
       const imageBase64 = await captureCierrePNG(c);
+      
+      // 2. Format detailed text summary
       const fecha = c.fechaCierre || c.fecha || new Date().toLocaleDateString('es-VE');
-      const usuario = c.usuario || 'N/A';
-      const terminal = c.terminal || 'LOCAL';
-      const dineroEnCajaExpected = (c.dineroEnCajaExpected ?? (c as any).expectedUsd ?? 0).toFixed(2);
-      const expectedVes = (c.expectedVes ?? 0).toFixed(2);
-      const realUsd = (c.realUsd ?? 0).toFixed(2);
-      const realVes = (c.realVes ?? 0).toFixed(2);
-      const diffUsd = ((c.realUsd ?? 0) - (c.dineroEnCajaExpected ?? (c as any).expectedUsd ?? 0)).toFixed(2);
-      const diffVes = ((c.realVes ?? 0) - (c.expectedVes ?? 0)).toFixed(2);
-      const ventaTotalUsd = (c.ventaTotalUsd ?? 0).toFixed(2);
-      const descuentosUsd = (c.descuentosUsd ?? 0).toFixed(2);
+      const usuario = (c.usuario || 'N/A').toUpperCase();
+      const terminal = c.terminal || 'CAJA_01';
+      const dineroEnCajaExpected = (c.dineroEnCajaExpected ?? (c as any).expectedUsd ?? 0);
+      const expectedVes = (c.expectedVes ?? 0);
+      const realUsd = (c.realUsd ?? 0);
+      const realVes = (c.realVes ?? 0);
+      const diffUsd = realUsd - dineroEnCajaExpected;
+      const diffVes = realVes - expectedVes;
+      const ventaTotalUsd = (c.ventaTotalUsd ?? 0);
+      const descuentosUsd = (c.descuentosUsd ?? 0);
+      const utilidadUsd = c.utilidadUsd ?? (ventaTotalUsd - (c.costoTotalUsd ?? 0));
 
-      let textSummary = `📊 *REPORTE REENVIADO DE CIERRE DE CAJA*\n\n`;
-      textSummary += `📅 *Fecha Cierre:* ${fecha}\n`;
+      let textSummary = `📊 *COMPROBANTE DE CIERRE DE CAJA (REENVÍO)*\n\n`;
+      textSummary += `📅 *Fecha:* ${fecha}\n`;
       textSummary += `👤 *Cajero:* ${usuario}\n`;
       textSummary += `🖥️ *Terminal:* ${terminal}\n\n`;
       textSummary += `💵 *EFECTIVO ESPERADO EN GAVETA:*\n`;
-      textSummary += `• Dólares (USD): $ ${dineroEnCajaExpected}\n`;
-      textSummary += `• Bolívares (VES): Bs ${expectedVes}\n\n`;
-      textSummary += `📥 *EFECTIVO FÍSICO RECIBIDO:*\n`;
-      textSummary += `• Dólares (USD): $ ${realUsd}\n`;
-      textSummary += `• Bolívares (VES): Bs ${realVes}\n\n`;
-      textSummary += `⚖️ *DIFERENCIA (BALANCE):*\n`;
-      textSummary += `• Dólares (USD): ${parseFloat(diffUsd) >= 0 ? '+' : ''}$ ${diffUsd}\n`;
-      textSummary += `• Bolívares (VES): ${parseFloat(diffVes) >= 0 ? '+' : ''}Bs ${diffVes}\n\n`;
-      textSummary += `🛍️ *VENTAS TOTALES:* $ ${ventaTotalUsd} USD\n`;
-      textSummary += `📉 *DESCUENTOS:* $ ${descuentosUsd} USD\n\n`;
+      textSummary += `• Dólares (USD): $ ${dineroEnCajaExpected.toFixed(2)}\n`;
+      textSummary += `• Bolívares (VES): Bs ${expectedVes.toFixed(2)}\n\n`;
+      textSummary += `📥 *EFECTIVO FÍSICO DECLARADO:*\n`;
+      textSummary += `• Dólares (USD): $ ${realUsd.toFixed(2)}\n`;
+      textSummary += `• Bolívares (VES): Bs ${realVes.toFixed(2)}\n\n`;
+      textSummary += `⚖️ *DIFERENCIAS AUDITADAS:*\n`;
+      textSummary += `• USD: ${diffUsd >= 0 ? `+$${diffUsd.toFixed(2)} (Sobrante)` : `-$${Math.abs(diffUsd).toFixed(2)} (Faltante)`}\n`;
+      textSummary += `• VES: ${diffVes >= 0 ? `+Bs ${diffVes.toFixed(2)} (Sobrante)` : `-Bs ${Math.abs(diffVes).toFixed(2)} (Faltante)`}\n\n`;
+      textSummary += `🛍️ *VENTAS TOTALES:* $ ${ventaTotalUsd.toFixed(2)} USD\n`;
+      if (descuentosUsd > 0) {
+        textSummary += `📉 *DESCUENTOS:* $ ${descuentosUsd.toFixed(2)} USD\n`;
+      }
+      textSummary += `💰 *UTILIDAD NETA:* $ ${utilidadUsd.toFixed(2)} USD\n\n`;
       textSummary += `*WinterPosAL Cloud System*`;
 
+      // 3. Check if WhatsApp server is configured and connected
       let waSentSuccess = false;
       try {
         const res = await fetch(getApiUrl('/whatsapp/send-cierre'), {
@@ -178,27 +192,40 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
           waSentSuccess = true;
         }
       } catch (err) {
-        console.warn('Error al enviar por API de WhatsApp:', err);
+        console.warn('Error enviando reporte automático por WhatsApp:', err);
       }
 
+      // 4. Handle success or fallback
       if (waSentSuccess) {
-        showAlert('El reporte e imagen del comprobante de cierre fueron reenviados con éxito por WhatsApp al grupo configurado.', 'Reenvío Exitoso', 'success');
+        showAlert(
+          `✅ El comprobante con imagen del cierre de "${usuario}" fue reenviado con éxito por WhatsApp al grupo configurado.`,
+          'Reenvío Exitoso',
+          'success'
+        );
       } else {
+        // Fallback: copy image and/or text to clipboard, open WhatsApp web
         try {
           if (imageBase64) {
             const resBlob = await fetch(imageBase64);
             const blob = await resBlob.blob();
-            await navigator.clipboard.write([
-              new ClipboardItem({ [blob.type]: blob })
-            ]);
+            if (navigator.clipboard && navigator.clipboard.write) {
+              await navigator.clipboard.write([
+                new ClipboardItem({ [blob.type]: blob })
+              ]);
+            }
           } else if (navigator.clipboard && navigator.clipboard.writeText) {
             await navigator.clipboard.writeText(textSummary);
           }
           const encodedText = encodeURIComponent(textSummary);
           window.open(`https://web.whatsapp.com/send?text=${encodedText}`, '_blank');
-          showAlert('La imagen del comprobante de cierre fue copiada al portapapeles. Presione Ctrl+V en WhatsApp Web para adjuntarla.', 'Copiado al Portapapeles', 'info');
+          showAlert(
+            `📋 El servicio de WhatsApp automático no está conectado o configurado en este terminal.\n\n` +
+            `Hemos copiado el comprobante gráfico y el resumen del cierre al portapapeles. Puede pegarlo directamente en el chat de WhatsApp con Ctrl+V.`,
+            'Copiado al Portapapeles',
+            'info'
+          );
         } catch (e: any) {
-          showAlert('Error al preparar el reenvío por WhatsApp.', 'Error', 'error');
+          showAlert('No se pudo completar el reenvío por WhatsApp.', 'Error', 'error');
         }
       }
     } finally {
@@ -2458,23 +2485,28 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         if (!subtotalNetoUsd) subtotalNetoUsd = Math.max(0, ventaTotalUsd / 1.16);
 
         return (
-          <div className="fixed inset-0 bg-slate-950/85 flex items-center justify-center p-4 z-50 font-mono text-slate-800 print:p-0">
-            <div id="cierre-comprobante-card" className="bg-white border border-slate-300 rounded-xl overflow-hidden w-full max-w-4xl shadow-2xl flex flex-col opacity-100 select-text">
+          <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50 font-sans text-slate-800 animate-fade-in print:p-0">
+            <div className="bg-white border border-slate-300 rounded-2xl overflow-hidden w-full max-w-4xl shadow-2xl flex flex-col max-h-[92vh]">
               
-              {/* Blue Header Title Bar */}
-              <div className="bg-winter-header text-white px-5 py-3 flex items-center justify-between">
-                <h3 className="text-sm font-extrabold flex items-center gap-1.5 font-sans">
-                  Cierre de Caja
-                </h3>
+              {/* Sticky Top Header Bar */}
+              <div className="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between flex-shrink-0 shadow-md">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <h3 className="text-sm font-black uppercase tracking-wider font-sans">
+                    Comprobante de Cierre de Caja
+                  </h3>
+                </div>
                 <button 
                   onClick={() => setSelectedCierre(null)} 
-                  className="text-white opacity-70 hover:opacity-100 text-xs font-sans"
+                  className="text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer"
                 >
                   ✕ Cerrar [ESC]
                 </button>
               </div>
 
-              <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6 text-[13px] text-slate-700 leading-relaxed max-h-[75vh] overflow-y-auto bg-slate-50">
+              {/* Scrollable Receipt Body (Clean PNG Capture target) */}
+              <div id="cierre-comprobante-card" className="p-5 sm:p-6 overflow-y-auto flex-1 bg-slate-50 space-y-5 scrollbar-thin">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-[13px] text-slate-700 leading-relaxed">
                 
                 {/* Left Column: Cash Drawer */}
                 <div className="bg-white border border-slate-200 p-5 rounded-lg space-y-3 shadow-sm select-text">
@@ -2876,34 +2908,37 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                     );
                   })()}
                 </div>
-                <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
-                  <label className="flex items-center gap-2 bg-emerald-50 border border-emerald-150 rounded-lg p-2 px-3 text-xs cursor-pointer select-none hover:bg-emerald-100/50 transition-all font-sans mr-auto w-full sm:w-auto">
-                    <input
-                      type="checkbox"
-                      checked={hideZeroLines}
-                      onChange={(e) => setHideZeroLines(e.target.checked)}
-                      className="w-4 h-4 text-emerald-650 rounded border-slate-350 focus:ring-emerald-550"
-                    />
-                    <div className="flex flex-col text-left">
-                      <span className="font-bold text-emerald-900">Solo con data (Ocultar ceros)</span>
-                    </div>
-                  </label>
+              </div>
+            </div>
 
+              {/* Fixed Bottom Action Bar (Outside PNG Capture Card) */}
+              <div className="bg-white border-t border-slate-200 px-5 py-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 flex-shrink-0 shadow-lg">
+                <label className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-xs cursor-pointer select-none hover:bg-emerald-100/70 transition-all font-sans font-bold text-emerald-950 w-full sm:w-auto">
+                  <input
+                    type="checkbox"
+                    checked={hideZeroLines}
+                    onChange={(e) => setHideZeroLines(e.target.checked)}
+                    className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500"
+                  />
+                  <span>Solo con data (Ocultar ceros)</span>
+                </label>
+
+                <div className="flex items-center gap-3 w-full sm:w-auto">
                   <button
                     type="button"
                     onClick={() => handleResendWhatsAppCierre(selectedCierre)}
-                    className="w-full sm:flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-extrabold py-3 px-4 rounded-lg font-sans text-xs uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2"
+                    className="w-full sm:w-auto flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-black py-2.5 px-5 rounded-xl font-sans text-xs uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <MessageCircle className="w-4 h-4" />
-                    REENVIAR POR WHATSAPP
+                    <span>REENVIAR POR WHATSAPP</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setSelectedCierre(null)}
-                    className="w-full sm:w-1/4 bg-slate-800 hover:bg-slate-900 text-white font-extrabold py-3 px-4 rounded-lg font-sans text-xs uppercase tracking-wider transition-all shadow-sm"
+                    className="w-full sm:w-auto bg-slate-800 hover:bg-slate-900 active:scale-[0.98] text-white font-black py-2.5 px-5 rounded-xl font-sans text-xs uppercase tracking-wider transition-all shadow-sm cursor-pointer"
                   >
-                    Cerrar
+                    <span>Cerrar</span>
                   </button>
                 </div>
               </div>
@@ -3955,6 +3990,98 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                 )}
               </div>
 
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* HIDDEN CAPTURE CARD FOR OFFLINE / TABLE ROW CIERRE WHATSAPP RE-SENDS */}
+      {capturingCierre && (() => {
+        const c = capturingCierre;
+        const aperturaUsd = c.aperturaUsd ?? 0;
+        const aperturaVes = c.aperturaVes ?? 0;
+        const ventasEfectivoUsd = c.ventasEfectivoUsd ?? 0;
+        const ventasEfectivoVes = c.ventasEfectivoVes ?? 0;
+        const dineroEnCajaExpected = c.dineroEnCajaExpected ?? (c as any).expectedUsd ?? 0;
+        const expectedVes = c.expectedVes ?? 0;
+        const realUsd = c.realUsd ?? 0;
+        const realVes = c.realVes ?? 0;
+        const diffUsd = realUsd - dineroEnCajaExpected;
+        const diffVes = realVes - expectedVes;
+        const ventasTotalesUsd = c.ventaTotalUsd ?? 0;
+        const descuentosUsd = c.descuentosUsd ?? 0;
+        const ventaBrutaUsd = c.ventaBrutaUsd ?? (ventasTotalesUsd + descuentosUsd);
+        const utilidadTotalCierre = c.utilidadUsd ?? (ventasTotalesUsd - (c.costoTotalUsd ?? 0));
+
+        return (
+          <div id="cierre-capture-card" className="fixed -left-[9999px] top-0 w-[800px] bg-white p-5 border border-slate-200 pointer-events-none select-none font-sans text-slate-800">
+            {/* Header */}
+            <div className="bg-slate-900 text-white px-5 py-3 rounded-xl flex justify-between items-center mb-4">
+              <div>
+                <h3 className="text-base font-black uppercase tracking-wider">Comprobante de Cierre de Caja</h3>
+                <span className="text-xs text-slate-300 font-mono">
+                  Cajero: <strong>{c.usuario?.toUpperCase()}</strong> • Terminal: <strong>{c.terminal || 'CAJA_01'}</strong>
+                </span>
+              </div>
+              <span className="text-xs font-mono font-black bg-slate-800 border border-slate-700 px-3 py-1 rounded-lg">
+                {c.fechaCierre || c.fecha || new Date().toLocaleDateString('es-VE')}
+              </span>
+            </div>
+
+            {/* 2-Column Grid */}
+            <div className="grid grid-cols-2 gap-4 text-xs font-mono mb-4">
+              <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-2">
+                <div className="flex justify-between font-bold pb-1 border-b border-slate-200">
+                  <span>Apertura de Caja:</span>
+                  <span>${aperturaUsd.toFixed(2)} / Bs {aperturaVes.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Ventas en Efectivo ($):</span>
+                  <span className="font-bold text-emerald-700">${ventasEfectivoUsd.toFixed(2)}</span>
+                </div>
+                {ventasEfectivoVes > 0 && (
+                  <div className="flex justify-between">
+                    <span>Ventas en Efectivo (Bs):</span>
+                    <span className="font-bold text-indigo-700">Bs {ventasEfectivoVes.toFixed(2)}</span>
+                  </div>
+                )}
+                <div className="bg-blue-50 border border-blue-200 p-2.5 rounded-lg flex justify-between items-center font-black mt-2">
+                  <span className="text-blue-950 font-sans text-[11px] uppercase">Dinero en Caja (Esperado):</span>
+                  <span className="text-lg text-blue-700">${dineroEnCajaExpected.toFixed(2)}</span>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-2">
+                <div className="flex justify-between font-bold pb-1 border-b border-slate-200">
+                  <span>Venta Bruta:</span>
+                  <span>${ventaBrutaUsd.toFixed(2)}</span>
+                </div>
+                <div className="bg-slate-100 border border-slate-300 p-2.5 rounded-lg flex justify-between items-center font-black">
+                  <span className="text-slate-700 font-sans text-[11px] uppercase">Venta Total:</span>
+                  <span className="text-lg text-slate-900">${ventasTotalesUsd.toFixed(2)}</span>
+                </div>
+                <div className="bg-emerald-100/70 border border-emerald-300 p-2.5 rounded-lg flex justify-between items-center font-black mt-2">
+                  <span className="text-emerald-950 font-sans text-[11px] uppercase">Utilidad Neta Total:</span>
+                  <span className="text-lg text-emerald-800">${utilidadTotalCierre.toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Reconciliation */}
+            <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl">
+              <div className="text-center font-black uppercase text-xs border-b border-slate-200 pb-1.5 mb-2.5">
+                Reconciliación de Efectivo Entregado (Arqueo Físico)
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-xs font-mono font-black">
+                <div className={`p-2.5 rounded-lg border flex justify-between ${diffUsd >= 0 ? 'bg-emerald-100 border-emerald-300 text-emerald-900' : 'bg-rose-100 border-rose-300 text-rose-950'}`}>
+                  <span>Diferencia USD:</span>
+                  <span className="text-sm">{diffUsd >= 0 ? '+' : ''}${diffUsd.toFixed(2)}</span>
+                </div>
+                <div className={`p-2.5 rounded-lg border flex justify-between ${diffVes >= 0 ? 'bg-emerald-100 border-emerald-300 text-emerald-900' : 'bg-rose-100 border-rose-300 text-rose-950'}`}>
+                  <span>Diferencia Bs:</span>
+                  <span className="text-sm">{diffVes >= 0 ? '+' : ''}Bs {diffVes.toFixed(2)}</span>
+                </div>
+              </div>
             </div>
           </div>
         );

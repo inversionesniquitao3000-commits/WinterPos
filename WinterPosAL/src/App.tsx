@@ -2547,107 +2547,107 @@ export default function App() {
 
       </header>
 
-      {/* TABS BAR - WinterPOS Colors */}
-      <nav className="bg-winter-tabBar border-b border-slate-900/40 px-6 py-2 select-none flex flex-wrap gap-1.5 z-10 text-slate-300 flex-shrink-0">
+      {/* TABS BAR - WinterPOS Colors with High-Visibility Typography */}
+      <nav className="bg-winter-tabBar border-b border-slate-900/60 px-4 sm:px-6 py-2 select-none flex flex-wrap items-center gap-2 z-10 text-slate-300 flex-shrink-0 shadow-md">
         {hasModulePermission('caja', 'ver') && (
           <button
             onClick={() => setActiveTab('caja')}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${
               activeTab === 'caja'
-                ? 'tab-grad-caja text-white shadow'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                ? 'tab-grad-caja text-white shadow-md ring-1 ring-white/20'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
             }`}
           >
-            <ShoppingBag className="w-4 h-4" />
-            F1 CAJA
+            <ShoppingBag className="w-5 h-5 flex-shrink-0" />
+            <span>F1 CAJA</span>
           </button>
         )}
 
         {hasModulePermission('inventario', 'ver') && (
           <button
             onClick={() => setActiveTab('inventario')}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${
               activeTab === 'inventario'
-                ? 'tab-grad-inventario text-white shadow'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                ? 'tab-grad-inventario text-white shadow-md ring-1 ring-white/20'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
             }`}
           >
-            <Package className="w-4 h-4" />
-            F2 Inventario
+            <Package className="w-5 h-5 flex-shrink-0" />
+            <span>F2 Inventario</span>
           </button>
         )}
 
         {hasModulePermission('ventas', 'ver') && (
           <button
             onClick={() => setActiveTab('ventas')}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${
               activeTab === 'ventas'
-                ? 'tab-grad-ventas text-white shadow'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                ? 'tab-grad-ventas text-white shadow-md ring-1 ring-white/20'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
             }`}
           >
-            <History className="w-4 h-4" />
-            F3 Ventas
+            <History className="w-5 h-5 flex-shrink-0" />
+            <span>F3 Ventas</span>
           </button>
         )}
 
         {hasModulePermission('clientes', 'ver') && (
           <button
             onClick={() => setActiveTab('clientes')}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${
               activeTab === 'clientes'
-                ? 'tab-grad-clientes text-white shadow'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                ? 'tab-grad-clientes text-white shadow-md ring-1 ring-white/20'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
             }`}
           >
-            <Users className="w-4 h-4" />
-            F4 Clientes
+            <Users className="w-5 h-5 flex-shrink-0" />
+            <span>F4 Clientes</span>
           </button>
         )}
 
         {hasModulePermission('proveedores', 'ver') && (
           <button
             onClick={() => setActiveTab('proveedores')}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${
               activeTab === 'proveedores'
-                ? 'tab-grad-proveedores text-white shadow'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                ? 'tab-grad-proveedores text-white shadow-md ring-1 ring-white/20'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
             }`}
           >
-            <Truck className="w-4 h-4" />
-            F5 Proveedores
+            <Truck className="w-5 h-5 flex-shrink-0" />
+            <span>F5 Proveedores</span>
           </button>
         )}
 
         {hasModulePermission('tasa', 'ver') && (
           <button
             onClick={() => setActiveTab('tasa')}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${
               activeTab === 'tasa'
-                ? 'tab-grad-tasa text-white shadow'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                ? 'tab-grad-tasa text-white shadow-md ring-1 ring-white/20'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
             }`}
           >
-            <TrendingUp className="w-4 h-4" />
-            F9 Tasa
+            <TrendingUp className="w-5 h-5 flex-shrink-0" />
+            <span>F9 Tasa</span>
           </button>
         )}
 
         {hasModulePermission('config', 'ver') && (
           <button
             onClick={() => setActiveTab('config')}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${
               activeTab === 'config'
-                ? 'tab-grad-config text-white shadow'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                ? 'tab-grad-config text-white shadow-md ring-1 ring-white/20'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
             }`}
           >
-            <Settings className="w-4 h-4" />
-            F10 Config.
+            <Settings className="w-5 h-5 flex-shrink-0" />
+            <span>F10 Config.</span>
           </button>
         )}
 
-        {/* Inversiones & Accionistas - Solo Administrador, con protección Master Pass */}
+        {/* Inversiones & Accionistas - Mismo esquema visual unificado */}
         {currentUser && (currentUser.rol?.toLowerCase() === 'administrador' || currentUser.rol?.toLowerCase() === 'admin') && (
           <button
             onClick={() => {
@@ -2657,15 +2657,15 @@ export default function App() {
                 setShowMasterPassModal(true);
               }
             }}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold font-sans rounded-md transition-all ${
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${
               activeTab === 'inversiones'
-                ? 'tab-grad-inversiones text-white shadow'
-                : 'text-amber-400 hover:text-white hover:bg-amber-900/30 border border-amber-700/40 hover:border-amber-500'
+                ? 'tab-grad-inversiones text-white shadow-md ring-1 ring-white/20'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
             }`}
             title="Módulo de Control de Inversiones y Accionistas (Solo Administrador)"
           >
-            <Briefcase className="w-4 h-4" />
-            Inversiones
+            <Briefcase className="w-5 h-5 flex-shrink-0" />
+            <span>Inversiones</span>
           </button>
         )}
       </nav>
