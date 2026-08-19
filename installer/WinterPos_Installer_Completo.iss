@@ -77,6 +77,9 @@ Name: "{group}\WinterPosAL - Modo Depuración (Logs CMD)"; Filename: "{app}\Inic
 [Dirs]
 Name: "{app}"; Permissions: users-full
 Name: "{app}\data"; Permissions: users-full
+Name: "{app}\data\product_images"; Permissions: users-full
+Name: "{app}\backend\data"; Permissions: users-full
+Name: "{app}\backend\data\product_images"; Permissions: users-full
 
 [Run]
 ; Otorgar permisos totales de escritura en la carpeta de instalación (licenciamiento y datos)

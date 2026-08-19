@@ -406,13 +406,26 @@ export function printTicketReceipt(
 // SHARED API HELPER FUNCTIONS
 // ==========================================
 
-function getApiBaseUrl(): string {
+export function getApiBaseUrl(): string {
   const browserHost = window.location.hostname;
   const isRemoteAccess = browserHost !== 'localhost' && browserHost !== '127.0.0.1';
   const lanIP = localStorage.getItem('pos_lan_ip') || '192.168.1.100';
   const dbMode = localStorage.getItem('pos_db_mode') || 'local';
   const host = isRemoteAccess ? browserHost : (dbMode === 'local' ? 'localhost' : lanIP);
   return `http://${host}:5000/api`;
+}
+
+export function formatImageUrl(url: string | undefined | null): string {
+  if (!url || !url.trim()) return '';
+  const trimmed = url.trim();
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:')) {
+    return trimmed;
+  }
+  const cleanPath = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  if (cleanPath.startsWith('/api/')) {
+    return `${getApiBaseUrl()}${cleanPath.substring(4)}`;
+  }
+  return `${getApiBaseUrl()}/ai/images${cleanPath}`;
 }
 
 export function getLocalISODateString(d: any = new Date()): string {

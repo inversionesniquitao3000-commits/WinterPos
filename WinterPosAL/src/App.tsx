@@ -2828,21 +2828,23 @@ export default function App() {
           )}
 
           {activeTab === 'clientes' && (
-            <Clientes
-              clients={clients}
-              currentUser={currentUser}
-              cajaAbierta={cajaAbierta}
-              companyConfig={companyConfig}
-              getApiUrl={getApiUrl}
-              onAddClient={handleAddClient}
-              onAddClientsBulk={handleAddClientsBulk}
-              onRegisterAbono={handleRegisterAbono}
-              onUpdateClient={handleUpdateClient}
-              onDeleteClient={handleDeleteClient}
-              sales={sales}
-              abonos={abonos}
-              tasaDia={tasaDia}
-            />
+            <ErrorBoundary moduleName="Clientes">
+              <Clientes
+                clients={clients}
+                currentUser={currentUser}
+                cajaAbierta={cajaAbierta}
+                companyConfig={companyConfig}
+                getApiUrl={getApiUrl}
+                onAddClient={handleAddClient}
+                onAddClientsBulk={handleAddClientsBulk}
+                onRegisterAbono={handleRegisterAbono}
+                onUpdateClient={handleUpdateClient}
+                onDeleteClient={handleDeleteClient}
+                sales={sales}
+                abonos={abonos}
+                tasaDia={tasaDia}
+              />
+            </ErrorBoundary>
           )}
 
           {activeTab === 'proveedores' && (

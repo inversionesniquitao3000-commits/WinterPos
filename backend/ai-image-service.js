@@ -1,14 +1,54 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const IMAGES_DIR = path.join(__dirname, 'data', 'product_images');
-if (!fs.existsSync(IMAGES_DIR)) {
-  fs.mkdirSync(IMAGES_DIR, { recursive: true });
+function getWritableImagesDirectory() {
+  const candidateDirs = [
+    path.join(__dirname, 'data', 'product_images'),
+    path.resolve(process.cwd(), 'backend', 'data', 'product_images'),
+    path.resolve(process.cwd(), 'data', 'product_images'),
+    path.resolve(__dirname, '..', 'data', 'product_images')
+  ];
+
+  if (process.env.APPDATA) {
+    candidateDirs.push(path.join(process.env.APPDATA, 'WinterPos', 'data', 'product_images'));
+  }
+  if (process.env.LOCALAPPDATA) {
+    candidateDirs.push(path.join(process.env.LOCALAPPDATA, 'WinterPos', 'data', 'product_images'));
+  }
+  try {
+    if (os.homedir()) {
+      candidateDirs.push(path.join(os.homedir(), '.winterpos', 'data', 'product_images'));
+    }
+  } catch (_) {}
+
+  for (const dirPath of candidateDirs) {
+    try {
+      if (!fs.existsSync(dirPath)) {
+        fs.mkdirSync(dirPath, { recursive: true });
+      }
+      const testFile = path.join(dirPath, `.write_test_${Date.now()}.tmp`);
+      fs.writeFileSync(testFile, 'test');
+      fs.unlinkSync(testFile);
+      console.log(`[AI Image Service] Directorio de imágenes verificado y listo: ${dirPath}`);
+      return dirPath;
+    } catch (err) {
+      console.warn(`[AI Image Service] Ruta no escribible (${dirPath}): ${err.message}`);
+    }
+  }
+
+  const fallback = path.resolve('./data/product_images');
+  try {
+    fs.mkdirSync(fallback, { recursive: true });
+  } catch (_) {}
+  return fallback;
 }
+
+const IMAGES_DIR = getWritableImagesDirectory();
 
 // Complete semantic dictionary for supermarket, bodega, hardware, pharmacy & retail
 const KEYWORD_MAP = [

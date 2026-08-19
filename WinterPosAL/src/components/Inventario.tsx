@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { Product, InventoryMovement, PriceAdjustmentHistory, User, CompanyConfig } from '../types';
 import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator, PauseCircle, Play, Trash2, Wand2, Sparkles, ShieldAlert, RotateCcw, BarChart3, TrendingUp, Award, DollarSign, Calendar, X, Image as ImageIcon, Link as LinkIcon, UploadCloud, Check, Loader2 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
-import { getLocalDateStr } from '../utils';
+import { getLocalDateStr, getApiBaseUrl, formatImageUrl } from '../utils';
 import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
 import AsistenteImportacionPDF from './AsistenteImportacionPDF';
 
@@ -127,7 +127,7 @@ export default function Inventario({
   const handleGenerateAiImageForProduct = async (prod: Product) => {
     setIsGeneratingAiImage(true);
     try {
-      const res = await fetch('/api/ai/generate-product-image', {
+      const res = await fetch(`${getApiBaseUrl()}/ai/generate-product-image`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -137,7 +137,14 @@ export default function Inventario({
           saveLocal: true
         })
       });
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error(`Servidor devolvió respuesta no válida (${res.status}). Verifique la instalación del servidor.`);
+      }
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || data.message || `Error HTTP ${res.status}`);
+      }
       if (data.success && data.imageUrl) {
         const updatedProd = { ...prod, imagen_url: data.imageUrl };
         await onUpdateProduct(updatedProd);
@@ -148,7 +155,7 @@ export default function Inventario({
         }
         showAlert('✅ Imagen generada con Inteligencia Artificial y asociada al producto con éxito.', 'Imagen Generada con IA', 'info');
       } else {
-        showAlert('No se pudo generar la imagen para este producto.', 'Error IA', 'warning');
+        showAlert('No se pudo generar la imagen: ' + (data.error || 'Respuesta no exitosa'), 'Error IA', 'warning');
       }
     } catch (err: any) {
       showAlert(`Error conectando con servicio de IA: ${err.message}`, 'Error IA', 'warning');
@@ -175,7 +182,7 @@ export default function Inventario({
         const base64Data = e.target?.result as string;
         if (!base64Data) return;
 
-        const res = await fetch('/api/ai/upload-product-image', {
+        const res = await fetch(`${getApiBaseUrl()}/ai/upload-product-image`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -214,7 +221,7 @@ export default function Inventario({
     if (!trimmed.startsWith('data:image/')) return trimmed;
     try {
       setIsUploadingManualImage(true);
-      const res = await fetch('/api/ai/upload-product-image', {
+      const res = await fetch(`${getApiBaseUrl()}/ai/upload-product-image`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -299,7 +306,7 @@ export default function Inventario({
       if (isBulkAiCancelledRef.current) break;
 
       try {
-        const res = await fetch('/api/ai/generate-product-image', {
+        const res = await fetch(`${getApiBaseUrl()}/ai/generate-product-image`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -309,8 +316,9 @@ export default function Inventario({
             saveLocal: true
           })
         });
-        const data = await res.json();
-        if (data.success && data.imageUrl) {
+        const contentType = res.headers.get('content-type') || '';
+        const data = (contentType.includes('application/json') && res.ok) ? await res.json() : null;
+        if (data && data.success && data.imageUrl) {
           setBulkAiLogs(prev => [{
             id: prod.id,
             description: prod.description,
@@ -3510,7 +3518,7 @@ export default function Inventario({
                         {selectedProduct.imagen_url && (
                           <img 
                             key={`sel-prod-img-${selectedProduct.id}-${selectedProduct.imagen_url}`}
-                            src={selectedProduct.imagen_url} 
+                            src={formatImageUrl(selectedProduct.imagen_url)} 
                             alt={selectedProduct.description} 
                             className="w-full h-full object-cover absolute inset-0 bg-white" 
                             onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
@@ -5204,7 +5212,7 @@ export default function Inventario({
                     {newImageUrl && (
                       <img 
                         key={`new-prod-img-${newImageUrl}`}
-                        src={newImageUrl} 
+                        src={formatImageUrl(newImageUrl)} 
                         alt="Preview" 
                         className="w-full h-full object-cover absolute inset-0 bg-white" 
                         onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
@@ -5252,7 +5260,7 @@ export default function Inventario({
                           }
                           setIsGeneratingAiImage(true);
                           try {
-                            const res = await fetch('/api/ai/generate-product-image', {
+                            const res = await fetch(`${getApiBaseUrl()}/ai/generate-product-image`, {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify({ description: newDesc, category: newCat, barcode: newBarcode, saveLocal: true })
@@ -5554,7 +5562,7 @@ export default function Inventario({
                     {editImageUrl && (
                       <img 
                         key={`edit-prod-img-${editImageUrl}`}
-                        src={editImageUrl} 
+                        src={formatImageUrl(editImageUrl)} 
                         alt="Preview" 
                         className="w-full h-full object-cover absolute inset-0 bg-white" 
                         onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
@@ -5602,7 +5610,7 @@ export default function Inventario({
                           }
                           setIsGeneratingAiImage(true);
                           try {
-                            const res = await fetch('/api/ai/generate-product-image', {
+                            const res = await fetch(`${getApiBaseUrl()}/ai/generate-product-image`, {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify({ description: editDesc, category: editCat, barcode: editBarcode, saveLocal: true })
@@ -8521,7 +8529,7 @@ export default function Inventario({
                   {imageManagerUrlInput && (
                     <img 
                       key={`mgr-prod-img-${imageManagerProduct.id}-${imageManagerUrlInput}`}
-                      src={imageManagerUrlInput} 
+                      src={formatImageUrl(imageManagerUrlInput)} 
                       alt={imageManagerProduct.description} 
                       className="w-full h-full object-cover absolute inset-0 bg-white" 
                       onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
@@ -8872,7 +8880,7 @@ export default function Inventario({
                             {log.imageUrl && (
                               <img 
                                 key={`bulk-ai-img-${log.id}-${log.imageUrl}`}
-                                src={log.imageUrl} 
+                                src={formatImageUrl(log.imageUrl)} 
                                 alt={log.description} 
                                 className={`w-full h-full object-cover absolute inset-0 bg-white transition-all ${isDiscarded ? 'grayscale opacity-75' : ''}`}
                                 onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
@@ -8918,31 +8926,26 @@ export default function Inventario({
                   <button
                     type="button"
                     onClick={() => { isBulkAiCancelledRef.current = true; }}
-                    className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-4 py-2 rounded-lg transition-all flex items-center gap-1.5 shadow"
+                    className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs px-4 py-2 rounded-lg transition-all flex items-center gap-1.5 shadow"
                   >
-                    <PauseCircle className="w-4 h-4" />
-                    <span>Pausar Generación</span>
+                    <PauseCircle className="w-4 h-4" /> Pausar Proceso
                   </button>
                 ) : (
                   <>
-                    {bulkAiLogs.some(l => l.success) ? (
+                    <button
+                      type="button"
+                      onClick={handleStartBulkAiGeneration}
+                      className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs px-5 py-2 rounded-lg transition-all shadow flex items-center gap-1.5"
+                    >
+                      <Sparkles className="w-4 h-4" /> {bulkAiLogs.length > 0 ? 'Re-Generar Fotos' : 'Iniciar Generación Masiva con IA'}
+                    </button>
+                    {bulkAiLogs.filter(l => l.success && l.imageUrl && !l.discarded).length > 0 && (
                       <button
                         type="button"
                         onClick={handleApplyBulkAiSelected}
-                        disabled={bulkAiLogs.filter(l => l.success && !l.discarded).length === 0}
-                        className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-extrabold text-xs px-5 py-2.5 rounded-lg transition-all flex items-center gap-2 shadow-md active:scale-95 cursor-pointer"
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-5 py-2 rounded-lg transition-all shadow flex items-center gap-1.5"
                       >
-                        <CheckCircle2 className="w-4 h-4 text-emerald-200" />
-                        <span>Aplicar Fotos Seleccionadas ({bulkAiLogs.filter(l => l.success && !l.discarded).length})</span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={handleStartBulkAiGeneration}
-                        className="bg-gradient-to-r from-blue-600 via-indigo-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white font-extrabold text-xs px-5 py-2 rounded-lg transition-all flex items-center gap-2 shadow-md active:scale-95"
-                      >
-                        <Sparkles className="w-4 h-4 text-amber-300" />
-                        <span>Iniciar Generación Masiva con IA</span>
+                        <CheckCircle2 className="w-4 h-4" /> Aplicar Fotos Conservadas ({bulkAiLogs.filter(l => l.success && l.imageUrl && !l.discarded).length})
                       </button>
                     )}
                   </>

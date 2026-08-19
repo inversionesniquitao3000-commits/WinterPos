@@ -1,0 +1,10 @@
+{
+  "enabled": false,
+  "method": "WEBHOOK",
+  "webhookUrl": "",
+  "folderId": "",
+  "folderName": "WinterPOS_Backups",
+  "accessToken": "",
+  "lastSync": null,
+  "lastStatus": "PENDING"
+}

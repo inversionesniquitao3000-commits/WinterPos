@@ -43,6 +43,16 @@ const loadPdfJs = (): Promise<any> => {
   });
 };
 
+const safeNum = (val: any): number => {
+  if (val === null || val === undefined) return 0;
+  const n = typeof val === 'number' ? val : parseFloat(String(val));
+  return isNaN(n) ? 0 : n;
+};
+
+const fmtUSD = (val: any): string => {
+  return safeNum(val).toFixed(2);
+};
+
 const DEFAULT_COBRO_CLIENTES_WA_TEMPLATE = `👤 *RECORDATORIO DE PAGO DE CUENTA*
 
 🏬 *{empresa}*
@@ -82,7 +92,7 @@ interface ClientesProps {
 }
 
 export default function Clientes({ 
-  clients, 
+  clients = [], 
   currentUser: _currentUser, 
   cajaAbierta: _cajaAbierta = true,
   companyConfig,
@@ -92,13 +102,14 @@ export default function Clientes({
   onRegisterAbono, 
   onUpdateClient, 
   onDeleteClient,
-  sales,
-  abonos,
+  sales = [],
+  abonos = [],
   tasaDia = 1
 }: ClientesProps) {
   const { showAlert, showConfirm } = useDialog();
   const hasPermission = (action: 'ver' | 'crear' | 'editar' | 'eliminar') => {
-    if (_currentUser.rol.toLowerCase() === 'administrador') return true;
+    if (!_currentUser || !_currentUser.rol) return true;
+    if ((_currentUser.rol || '').toLowerCase() === 'administrador') return true;
     if (!_currentUser.permisos) return true; // fallback to true
     return !!_currentUser.permisos.clientes?.[action];
   };
@@ -222,13 +233,13 @@ export default function Clientes({
     const text = template
       .replace(/{empresa}/g, companyName)
       .replace(/{fecha}/g, dateStr)
-      .replace(/{cliente}/g, c.nombre.toUpperCase())
+      .replace(/{cliente}/g, (c.nombre || '').toUpperCase())
       .replace(/{cedulaRif}/g, c.cedula_rif || 'N/A')
-      .replace(/{saldoPendienteUsd}/g, c.saldo_pendiente.toFixed(2))
+      .replace(/{saldoPendienteUsd}/g, fmtUSD(c.saldo_pendiente))
       .replace(/{saldoPendienteVes}/g, saldoVes)
-      .replace(/{tasaBcv}/g, tasaDia.toFixed(2))
-      .replace(/{limiteCreditoUsd}/g, c.limite_credito.toFixed(2))
-      .replace(/{creditoDisponibleUsd}/g, c.credito_disponible.toFixed(2));
+      .replace(/{tasaBcv}/g, fmtUSD(tasaDia))
+      .replace(/{limiteCreditoUsd}/g, fmtUSD(c.limite_credito))
+      .replace(/{creditoDisponibleUsd}/g, fmtUSD(c.credito_disponible));
 
     const cleanPhone = (c.telefono || '').replace(/[^0-9]/g, '');
     const isPhoneRegistered = cleanPhone.length >= 7 && cleanPhone !== '0';
@@ -345,7 +356,9 @@ export default function Clientes({
 
   // Enhanced Filters for Catálogo
   const baseFiltered = useMemo(() => {
-    return clients.filter(c => {
+    const safeClients = Array.isArray(clients) ? clients : [];
+    return safeClients.filter(c => {
+      if (!c) return false;
       // 1. Text Search (name, doc, phone)
       if (searchTerm.trim()) {
         const term = searchTerm.toLowerCase();
@@ -393,9 +406,9 @@ export default function Clientes({
   }, [baseFiltered, sortField, sortDir]);
 
   // Summary Metrics
-  const totalClients = clients.length;
-  const totalDeuda = clients.reduce((acc, c) => acc + (c.saldo_pendiente || 0), 0);
-  const filteredDeuda = filteredClients.reduce((acc, c) => acc + (c.saldo_pendiente || 0), 0);
+  const totalClients = (Array.isArray(clients) ? clients : []).length;
+  const totalDeuda = (Array.isArray(clients) ? clients : []).reduce((acc, c) => acc + (parseFloat(c?.saldo_pendiente as any) || 0), 0);
+  const filteredDeuda = (filteredClients || []).reduce((acc, c) => acc + (parseFloat(c?.saldo_pendiente as any) || 0), 0);
 
   // Sorting Icon helper
   const SortIcon = ({ field }: { field: SortField }) => {
@@ -416,30 +429,34 @@ export default function Clientes({
   // 1. Ranking Calculation
   const rankingData = useMemo(() => {
     const clientsMap: { [rif: string]: { nombre: string; cedula_rif: string; totalSpent: number; salesCount: number } } = {};
-    
+    const safeClients = Array.isArray(clients) ? clients : [];
+    const safeSales = Array.isArray(sales) ? sales : [];
+
     // Initialize map with catalog clients
-    clients.forEach(c => {
-      clientsMap[c.cedula_rif] = {
-        nombre: c.nombre,
-        cedula_rif: c.cedula_rif,
-        totalSpent: 0,
-        salesCount: 0
-      };
+    safeClients.forEach(c => {
+      if (c && c.cedula_rif) {
+        clientsMap[c.cedula_rif] = {
+          nombre: c.nombre || 'Cliente',
+          cedula_rif: c.cedula_rif,
+          totalSpent: 0,
+          salesCount: 0
+        };
+      }
     });
 
     // Populate from sales
-    sales.forEach(s => {
-      const doc = s.client.cedula_rif;
+    safeSales.forEach(s => {
+      const doc = s?.client?.cedula_rif;
       if (doc) {
         if (!clientsMap[doc]) {
           clientsMap[doc] = {
-            nombre: s.client.nombre || 'Desconocido',
+            nombre: s.client?.nombre || 'Desconocido',
             cedula_rif: doc,
             totalSpent: 0,
             salesCount: 0
           };
         }
-        clientsMap[doc].totalSpent += s.totalUSD;
+        clientsMap[doc].totalSpent += (s.totalUSD || 0);
         clientsMap[doc].salesCount += 1;
       }
     });
@@ -466,21 +483,25 @@ export default function Clientes({
       referencia?: string;
     }[] = [];
     
+    const safeSales = Array.isArray(sales) ? sales : [];
+    const safeAbonos = Array.isArray(abonos) ? abonos : [];
+
     // Extract credit payments from sales (both positive purchases and negative credit returns)
-    sales.forEach(s => {
+    safeSales.forEach(s => {
+      if (!s) return;
       const creditPayment = s.pagos?.find(p => p.metodo === 'CreditoCliente');
       if (creditPayment && (creditPayment.monto !== 0 || (creditPayment as any).montoUSD !== 0)) {
         const rawMonto = (creditPayment as any).montoUSD !== undefined && (creditPayment as any).montoUSD !== 0 
           ? (creditPayment as any).montoUSD 
           : creditPayment.monto;
-        const isDev = s.factura_nro.startsWith('DEV-') || rawMonto < 0;
+        const isDev = (s.factura_nro || '').startsWith('DEV-') || rawMonto < 0;
         list.push({
           tipo: isDev ? 'Devolución' : 'Crédito',
-          fecha: s.fecha,
-          ref: s.factura_nro,
+          fecha: s.fecha || '',
+          ref: s.factura_nro || 'FACT',
           nombre: s.client?.nombre || 'CLIENTE',
           cedula_rif: s.client?.cedula_rif || 'V-00000000',
-          monto: Math.abs(rawMonto),
+          monto: Math.abs(rawMonto || 0),
           metodo: isDev ? 'Devolución / Nota Crédito' : 'Crédito',
           metodoRaw: isDev ? 'Devolucion' : 'Credito'
         });
@@ -488,7 +509,8 @@ export default function Clientes({
     });
 
     // Extract Abonos history
-    abonos.forEach(a => {
+    safeAbonos.forEach(a => {
+      if (!a) return;
       let metodoLabel = 'Efectivo $';
       if (a.metodo_pago === 'EfectivoBs') metodoLabel = 'Efectivo Bs';
       else if (a.metodo_pago === 'TarjetaBs') metodoLabel = 'Tarjeta / Punto Bs';
@@ -497,18 +519,18 @@ export default function Clientes({
 
       list.push({
         tipo: 'Abono',
-        fecha: a.fecha,
-        ref: `ABO-${a.id.toString().substring(7)}`,
-        nombre: a.nombre,
-        cedula_rif: a.cedula_rif,
-        monto: a.monto,
+        fecha: a.fecha || '',
+        ref: `ABO-${(a.id || '').toString().substring(7)}`,
+        nombre: a.nombre || 'CLIENTE',
+        cedula_rif: a.cedula_rif || 'V-00000000',
+        monto: a.monto || 0,
         metodo: metodoLabel,
         metodoRaw: a.metodo_pago || 'Efectivo$',
         referencia: a.referencia
       });
     });
 
-    return list.sort((a, b) => b.fecha.localeCompare(a.fecha));
+    return list.sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
   }, [sales, abonos]);
 
   // Filter credit & abonos by selected client, search term, and apply interactive sorting
@@ -538,15 +560,16 @@ export default function Clientes({
         return creditSortDir === 'asc' ? nA - nB : nB - nA;
       }
       return creditSortDir === 'asc'
-        ? String(va).localeCompare(String(vb))
-        : String(vb).localeCompare(String(va));
+        ? String(va || '').localeCompare(String(vb || ''))
+        : String(vb || '').localeCompare(String(va || ''));
     });
   }, [creditAbonoList, selectedRowClient, searchTerm, creditSortField, creditSortDir]);
 
   // 3. Client sales history list
   const clientSalesHistory = useMemo(() => {
     if (!selectedRowClient) return [];
-    return sales.filter(s => s.client.cedula_rif === selectedRowClient.cedula_rif);
+    const safeSales = Array.isArray(sales) ? sales : [];
+    return safeSales.filter(s => s?.client?.cedula_rif === selectedRowClient.cedula_rif);
   }, [sales, selectedRowClient]);
 
   // Handlers
@@ -1440,10 +1463,10 @@ export default function Clientes({
                                  <span className="text-slate-400 italic text-[10px]">Sin teléfono</span>
                                )}
                              </td>
-                            <td className="px-3 py-2.5 text-center font-mono">${c.limite_credito.toFixed(2)}</td>
-                            <td className="px-3 py-2.5 text-center font-mono text-slate-600">${c.credito_disponible.toFixed(2)}</td>
-                            <td className={`px-3 py-2.5 text-center font-mono font-extrabold ${c.saldo_pendiente > 0.01 ? 'text-red-550' : 'text-slate-400'}`}>
-                              ${c.saldo_pendiente.toFixed(2)}
+                            <td className="px-3 py-2.5 text-center font-mono">${fmtUSD(c.limite_credito)}</td>
+                            <td className="px-3 py-2.5 text-center font-mono text-slate-600">${fmtUSD(c.credito_disponible)}</td>
+                            <td className={`px-3 py-2.5 text-center font-mono font-extrabold ${safeNum(c.saldo_pendiente) > 0.01 ? 'text-red-550' : 'text-slate-400'}`}>
+                              ${fmtUSD(c.saldo_pendiente)}
                             </td>
                             {/* Descuento */}
                             <td className="px-3 py-2 text-center">
@@ -1538,9 +1561,9 @@ export default function Clientes({
                       <div><span className="text-slate-350">Identificación:</span> <span className="font-mono font-bold text-slate-100">{selectedRowClient.cedula_rif}</span></div>
                       <div><span className="text-slate-350">Teléfono:</span> <span className="font-bold text-slate-100">{selectedRowClient.telefono || 'N/A'}</span></div>
                       <div><span className="text-slate-350">Dirección:</span> <span className="font-bold text-slate-100">{selectedRowClient.direccion || 'N/A'}</span></div>
-                      <div><span className="text-slate-350">Límite Crédito:</span> <span className="font-mono font-bold text-sky-300">${selectedRowClient.limite_credito.toFixed(2)} USD</span></div>
-                      <div><span className="text-slate-350">Crédito Disponible:</span> <span className="font-mono font-bold text-emerald-350">${selectedRowClient.credito_disponible.toFixed(2)} USD</span></div>
-                      <div><span className="text-slate-350">Deuda Pendiente:</span> <span className="font-mono font-bold text-red-300">${selectedRowClient.saldo_pendiente.toFixed(2)} USD</span></div>
+                      <div><span className="text-slate-350">Límite Crédito:</span> <span className="font-mono font-bold text-sky-300">${fmtUSD(selectedRowClient.limite_credito)} USD</span></div>
+                      <div><span className="text-slate-350">Crédito Disponible:</span> <span className="font-mono font-bold text-emerald-350">${fmtUSD(selectedRowClient.credito_disponible)} USD</span></div>
+                      <div><span className="text-slate-350">Deuda Pendiente:</span> <span className="font-mono font-bold text-red-300">${fmtUSD(selectedRowClient.saldo_pendiente)} USD</span></div>
                     </div>
                   </div>
 
@@ -1575,10 +1598,10 @@ export default function Clientes({
                                   <tr className="hover:bg-slate-50 transition-colors">
                                     <td className="px-3 py-2.5 font-mono">{s.fecha}</td>
                                     <td className="px-3 py-2.5 font-mono font-bold text-slate-650">{s.factura_nro}</td>
-                                    <td className="px-3 py-2.5 text-right font-mono">${s.subtotal.toFixed(2)}</td>
-                                    <td className="px-3 py-2.5 text-right font-mono text-red-550">-${s.descuento.toFixed(2)}</td>
-                                    <td className="px-3 py-2.5 text-right font-mono font-bold">${s.totalUSD.toFixed(2)}</td>
-                                    <td className="px-3 py-2.5 text-right font-mono">${s.totalVES.toFixed(2)}</td>
+                                    <td className="px-3 py-2.5 text-right font-mono">${fmtUSD(s.subtotal)}</td>
+                                    <td className="px-3 py-2.5 text-right font-mono text-red-550">-${fmtUSD(s.descuento)}</td>
+                                    <td className="px-3 py-2.5 text-right font-mono font-bold">${fmtUSD(s.totalUSD)}</td>
+                                    <td className="px-3 py-2.5 text-right font-mono">${fmtUSD(s.totalVES)}</td>
                                     <td className="px-3 py-2.5 text-center">
                                       <span className={`px-2 py-0.5 rounded-full text-[9px] font-sans font-bold ${s.estatus === 'Anulada' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
                                         {s.estatus || 'Procesada'}
@@ -1614,8 +1637,8 @@ export default function Clientes({
                                                   <td className="py-1.5 font-mono">{item.product.barcode}</td>
                                                   <td className="py-1.5 font-sans uppercase text-[9px]">{item.product.description}</td>
                                                   <td className="py-1.5 text-center font-mono">{item.qty}</td>
-                                                  <td className="py-1.5 text-right font-mono">${item.priceUSD.toFixed(2)}</td>
-                                                  <td className="py-1.5 text-right font-mono font-bold">${item.totalUSD.toFixed(2)}</td>
+                                                  <td className="py-1.5 text-right font-mono">${fmtUSD(item.priceUSD)}</td>
+                                                  <td className="py-1.5 text-right font-mono font-bold">${fmtUSD(item.totalUSD)}</td>
                                                 </tr>
                                               ))}
                                             </tbody>
@@ -1704,9 +1727,9 @@ export default function Clientes({
                             <td className="px-4 py-2.5 text-center font-bold text-slate-600">{posBadge}</td>
                             <td className="px-4 py-2.5 font-sans font-medium uppercase">{r.nombre}</td>
                             <td className="px-4 py-2.5 font-mono">{r.cedula_rif}</td>
-                            <td className="px-4 py-2.5 text-center font-mono font-extrabold text-blue-600">${r.totalSpent.toFixed(2)}</td>
+                            <td className="px-4 py-2.5 text-center font-mono font-extrabold text-blue-600">${fmtUSD(r.totalSpent)}</td>
                             <td className="px-4 py-2.5 text-center font-mono">{r.salesCount}</td>
-                            <td className="px-4 py-2.5 text-center font-mono text-slate-600">${r.avgSale.toFixed(2)}</td>
+                            <td className="px-4 py-2.5 text-center font-mono text-slate-600">${fmtUSD(r.avgSale)}</td>
                           </tr>
                         );
                       })
@@ -1848,7 +1871,7 @@ export default function Clientes({
                             <td className={`px-4 py-2.5 text-right font-mono font-extrabold ${
                               isCredit ? 'text-orange-600' : isDev ? 'text-purple-600' : 'text-emerald-600'
                             }`}>
-                              {isCredit ? '+' : '-'}${item.monto.toFixed(2)}
+                              {isCredit ? '+' : '-'}${fmtUSD(item.monto)}
                             </td>
                           </tr>
                         );
@@ -1877,7 +1900,7 @@ export default function Clientes({
                 <span className="font-extrabold uppercase truncate">{selectedRowClient.nombre}</span>
                 <span className="font-mono text-slate-500 font-bold">{selectedRowClient.cedula_rif}</span>
                 {selectedRowClient.saldo_pendiente > 0.01 && (
-                  <span className="text-red-700 font-black mt-1 font-mono">Deuda: ${selectedRowClient.saldo_pendiente.toFixed(2)}</span>
+                  <span className="text-red-700 font-black mt-1 font-mono">Deuda: ${fmtUSD(selectedRowClient.saldo_pendiente)}</span>
                 )}
               </div>
             )}
@@ -2275,9 +2298,9 @@ export default function Clientes({
                 </div>
               </div>
 
-              {selectedRowClient.saldo_pendiente > 0 && (
+              {safeNum(selectedRowClient.saldo_pendiente) > 0 && (
                 <div className="bg-red-50 text-[10px] text-red-700 p-2.5 rounded border border-red-200 font-sans">
-                  <strong>Nota Importante:</strong> Este cliente posee una deuda de <strong>${selectedRowClient.saldo_pendiente.toFixed(2)} USD</strong>. Si modificas su límite de crédito, el crédito disponible se reajustará automáticamente manteniendo el saldo pendiente actual.
+                  <strong>Nota Importante:</strong> Este cliente posee una deuda de <strong>${fmtUSD(selectedRowClient.saldo_pendiente)} USD</strong>. Si modificas su límite de crédito, el crédito disponible se reajustará automáticamente manteniendo el saldo pendiente actual.
                 </div>
               )}
 
@@ -2338,8 +2361,8 @@ export default function Clientes({
             <div className="text-xs bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-1">
               <div><span className="text-slate-550 font-sans">Cliente:</span> <span className="text-slate-800 font-bold select-text">{selectedRowClient.nombre}</span></div>
               <div><span className="text-slate-550 font-sans">ID/RIF:</span> <span className="text-slate-600 font-bold font-mono">{selectedRowClient.cedula_rif}</span></div>
-              <div><span className="text-slate-550 font-sans">Deuda Total Pendiente:</span> <span className="text-red-500 font-black font-mono">${selectedRowClient.saldo_pendiente.toFixed(2)} USD</span></div>
-              <div><span className="text-slate-550 font-sans">Límite Crédito Otorgado:</span> <span className="text-slate-600 font-mono">${selectedRowClient.limite_credito.toFixed(2)} USD</span></div>
+              <div><span className="text-slate-550 font-sans">Deuda Total Pendiente:</span> <span className="text-red-500 font-black font-mono">${fmtUSD(selectedRowClient.saldo_pendiente)} USD</span></div>
+              <div><span className="text-slate-550 font-sans">Límite Crédito Otorgado:</span> <span className="text-slate-600 font-mono">${fmtUSD(selectedRowClient.limite_credito)} USD</span></div>
             </div>
 
             <form onSubmit={handleSaveAbono} className="space-y-4">
@@ -2350,7 +2373,7 @@ export default function Clientes({
                   step="0.01"
                   min="0.01"
                   required
-                  placeholder={`Ej: ${selectedRowClient.saldo_pendiente.toFixed(2)}`}
+                  placeholder={`Ej: ${fmtUSD(selectedRowClient.saldo_pendiente)}`}
                   value={abonoVal}
                   onChange={(e) => setAbonoVal(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-emerald-700 font-bold font-mono focus:bg-white focus:border-sky-500 focus:outline-none"
@@ -2690,8 +2713,8 @@ export default function Clientes({
                             <td className="p-2 font-mono font-bold">{c.cedula_rif}</td>
                             <td className="p-2 uppercase font-medium">{c.nombre}</td>
                             <td className="p-2 text-center font-mono">{c.telefono || '—'}</td>
-                            <td className="p-2 text-right font-mono font-bold">${c.limite_credito.toFixed(2)}</td>
-                            <td className="p-2 text-right font-mono font-bold text-red-600">${c.saldo_pendiente.toFixed(2)}</td>
+                            <td className="p-2 text-right font-mono font-bold">${fmtUSD(c.limite_credito)}</td>
+                            <td className="p-2 text-right font-mono font-bold text-red-600">${fmtUSD(c.saldo_pendiente)}</td>
                             <td className="p-2 text-center font-mono">{c.porcentaje_descuento}%</td>
                             <td className="p-2 text-center">
                               {c.aplica_precio_costo ? (
@@ -2787,12 +2810,12 @@ export default function Clientes({
                     </div>
                     <span className="text-[10px] text-slate-400 font-mono font-bold block">{c.cedula_rif}</span>
                     <div className="flex items-center gap-2 text-[9.5px] font-mono mt-0.5">
-                      {c.saldo_pendiente > 0.01 ? (
-                        <span className="text-rose-400 font-bold">Deuda: ${c.saldo_pendiente.toFixed(2)}</span>
+                      {safeNum(c.saldo_pendiente) > 0.01 ? (
+                        <span className="text-rose-400 font-bold">Deuda: ${fmtUSD(c.saldo_pendiente)}</span>
                       ) : (
                         <span className="text-emerald-400 font-bold">Al Día ($0.00)</span>
                       )}
-                      <span className="text-slate-400">• Lím: ${c.limite_credito.toFixed(2)}</span>
+                      <span className="text-slate-400">• Lím: ${fmtUSD(c.limite_credito)}</span>
                     </div>
                   </div>
                 </div>

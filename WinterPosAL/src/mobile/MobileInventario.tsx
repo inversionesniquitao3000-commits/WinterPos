@@ -3,6 +3,7 @@ import {
   Package, Search, AlertTriangle, Sparkles, RefreshCw, 
   Image as ImageIcon, X
 } from 'lucide-react';
+import { getApiBaseUrl, formatImageUrl } from '../utils';
 
 interface ProductItem {
   id: number;
@@ -56,7 +57,7 @@ export default function MobileInventario() {
   const handleGenerateAiImage = async (prod: ProductItem) => {
     setGeneratingAiId(prod.id);
     try {
-      const res = await fetch('/api/ai/generate-product-image', {
+      const res = await fetch(`${getApiBaseUrl()}/ai/generate-product-image`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -66,16 +67,19 @@ export default function MobileInventario() {
           saveLocal: true
         })
       });
-      const data = await res.json();
-      if (data.success && data.imageUrl) {
-        // Update product image in backend and state
-        const updated = { ...prod, imagen_url: data.imageUrl };
-        await fetch(`/api/productos/${prod.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(updated)
-        });
-        setProducts(prev => prev.map(p => p.id === prod.id ? { ...p, imagen_url: data.imageUrl } : p));
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
+        const data = await res.json();
+        if (data.success && data.imageUrl) {
+          // Update product image in backend and state
+          const updated = { ...prod, imagen_url: data.imageUrl };
+          await fetch(`${getApiBaseUrl()}/productos/${prod.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updated)
+          });
+          setProducts(prev => prev.map(p => p.id === prod.id ? { ...p, imagen_url: data.imageUrl } : p));
+        }
       }
     } catch (err) {
       console.error('Error generating AI image:', err);
@@ -221,7 +225,7 @@ export default function MobileInventario() {
                   </div>
                   {prod.imagen_url && (
                     <img
-                      src={prod.imagen_url}
+                      src={formatImageUrl(prod.imagen_url)}
                       alt={prod.description}
                       className="w-full h-full object-cover absolute inset-0 bg-slate-900"
                       loading="lazy"

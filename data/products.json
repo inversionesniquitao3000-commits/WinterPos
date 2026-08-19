@@ -1,6 +1,6 @@
 [
   {
-    "id": 1,
+    "id": "1",
     "barcode": "ACEITE-AMA-500",
     "description": "ACEITE AMANECER DE SOYA 500ML",
     "category": "ALIMENTOS",
@@ -11,11 +11,11 @@
     "precio_mayor_usd": 1.5,
     "cantidad_mayorista": 12,
     "exento_impuesto": false,
-    "imagen_url": "",
+    "imagen_url": "/api/ai/images/prod_aceite_amanecer_de_soya__1787145219810.jpg",
     "estado": "Activo"
   },
   {
-    "id": 2,
+    "id": "2",
     "barcode": "ACEITE-AMA-828",
     "description": "ACEITE AMANECER DE SOYA 828ML",
     "category": "ALIMENTOS",
@@ -26,11 +26,11 @@
     "precio_mayor_usd": 3.5,
     "cantidad_mayorista": 12,
     "exento_impuesto": false,
-    "imagen_url": "",
+    "imagen_url": "/api/ai/images/prod_aceite_amanecer_de_soya__1787145245095.jpg",
     "estado": "Activo"
   },
   {
-    "id": 3,
+    "id": "3",
     "barcode": "6900240320576",
     "description": "ABRAZADERA 16-25MM",
     "category": "FERRETERIA",
@@ -41,11 +41,11 @@
     "precio_mayor_usd": 0.03,
     "cantidad_mayorista": 50,
     "exento_impuesto": true,
-    "imagen_url": "",
+    "imagen_url": "/api/ai/images/prod_abrazadera_16_25mm_1787145255207.jpg",
     "estado": "Activo"
   },
   {
-    "id": 4,
+    "id": "4",
     "barcode": "HARINA-PAN-1K",
     "description": "HARINA PAN BLANCA 1KG",
     "category": "ALIMENTOS",
@@ -56,11 +56,11 @@
     "precio_mayor_usd": 1.1,
     "cantidad_mayorista": 20,
     "exento_impuesto": false,
-    "imagen_url": "",
+    "imagen_url": "/api/ai/images/prod_harina_pan_blanca_1kg_1787145259201.jpg",
     "estado": "Activo"
   },
   {
-    "id": 5,
+    "id": "5",
     "barcode": "LECHE-CAMP-1L",
     "description": "LECHE COMPLETA CAMPESTRE 1L",
     "category": "ALIMENTOS",
@@ -71,7 +71,7 @@
     "precio_mayor_usd": 2.45,
     "cantidad_mayorista": 12,
     "exento_impuesto": false,
-    "imagen_url": "",
+    "imagen_url": "/api/ai/images/prod_leche_completa_campestre_1787145262723.jpg",
     "estado": "Activo"
   }
 ]

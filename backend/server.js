@@ -108,10 +108,30 @@ app.post('/api/license/activate', (req, res) => {
   res.json(result);
 });
 
+// Serve product images publicly with CORS headers for all client terminals & browsers (multi-folder fallback)
+app.use('/api/ai/images', (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  next();
+}, express.static(IMAGES_DIR));
+
+app.use('/api/ai/images', express.static(path.join(__dirname, 'data', 'product_images')));
+app.use('/api/ai/images', express.static(path.resolve(process.cwd(), 'backend', 'data', 'product_images')));
+app.use('/api/ai/images', express.static(path.resolve(process.cwd(), 'data', 'product_images')));
+if (process.env.APPDATA) {
+  app.use('/api/ai/images', express.static(path.join(process.env.APPDATA, 'WinterPos', 'data', 'product_images')));
+}
+if (process.env.LOCALAPPDATA) {
+  app.use('/api/ai/images', express.static(path.join(process.env.LOCALAPPDATA, 'WinterPos', 'data', 'product_images')));
+}
+app.use('/api/ai/images', express.static(path.resolve(__dirname, '../data/product_images')));
+
 // Enforce License Validation on all business APIs
 app.use((req, res, next) => {
   if (
     req.path.startsWith('/api/license') ||
+    req.path.startsWith('/api/ai') ||
     req.path === '/api/status' ||
     req.path === '/api/health' ||
     !req.path.startsWith('/api/')
@@ -1795,7 +1815,6 @@ app.delete('/api/cotizaciones-proveedores/:id', async (req, res) => {
 // ==========================================
 // AI PRODUCT IMAGES ENDPOINTS
 // ==========================================
-app.use('/api/ai/images', express.static(IMAGES_DIR));
 
 app.post('/api/ai/generate-product-image', async (req, res) => {
   try {
@@ -1926,6 +1945,11 @@ app.get('*', (req, res, next) => {
     return res.sendFile(indexPath);
   }
   res.status(404).send('WinterPos API backend running. Frontend dist build not found.');
+});
+
+// JSON fallback for any unhandled /api/* routes (prevents HTML 404 responses for API calls)
+app.use('/api/*', (req, res) => {
+  res.status(404).json({ error: `Ruta API no encontrada: ${req.method} ${req.originalUrl}. Verifique la versión instalada.` });
 });
 
 // Helper: Auto-free port if occupied by a previous node process on startup

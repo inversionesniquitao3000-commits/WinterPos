@@ -1,0 +1,233 @@
+{
+  "config": {
+    "rif": "J-41132631",
+    "nombre_comercio": "INVERSIONES NIQUITAO",
+    "direccion": "Caracas, Venezuela",
+    "telefono": "0424-2042877",
+    "correo": "niquitao@correo.com",
+    "moneda_base": "USD",
+    "mensaje_pie_ticket": "Gracias por su compra!",
+    "metodos_pago_activos": [
+      "efectivo_usd",
+      "efectivo_ves",
+      "debito",
+      "pago_movil",
+      "biopago",
+      "credito"
+    ]
+  },
+  "users": [
+    {
+      "id": 1,
+      "usuario": "admin",
+      "nombre": "Administrador",
+      "rol": "ADMINISTRADOR",
+      "estado": "Activo",
+      "clave": "admin",
+      "permisos": {
+        "caja": {
+          "ver": true,
+          "crear": true,
+          "editar": true,
+          "eliminar": true,
+          "admin": true
+        },
+        "inventario": {
+          "ver": true,
+          "crear": true,
+          "editar": true,
+          "eliminar": true,
+          "admin": true
+        },
+        "ventas": {
+          "ver": true,
+          "crear": true,
+          "editar": true,
+          "eliminar": true,
+          "admin": true
+        },
+        "clientes": {
+          "ver": true,
+          "crear": true,
+          "editar": true,
+          "eliminar": true,
+          "admin": true
+        },
+        "tasa": {
+          "ver": true,
+          "crear": true,
+          "editar": true,
+          "eliminar": true,
+          "admin": true
+        },
+        "config": {
+          "ver": true,
+          "crear": true,
+          "editar": true,
+          "eliminar": true,
+          "admin": true
+        }
+      }
+    }
+  ],
+  "roles": [
+    {
+      "id": 1,
+      "nombre": "Administrador",
+      "permisos": {
+        "caja": {
+          "ver": true,
+          "crear": true,
+          "editar": true,
+          "eliminar": true,
+          "admin": true
+        },
+        "inventario": {
+          "ver": true,
+          "crear": true,
+          "editar": true,
+          "eliminar": true,
+          "admin": true
+        },
+        "ventas": {
+          "ver": true,
+          "crear": true,
+          "editar": true,
+          "eliminar": true,
+          "admin": true
+        },
+        "clientes": {
+          "ver": true,
+          "crear": true,
+          "editar": true,
+          "eliminar": true,
+          "admin": true
+        },
+        "tasa": {
+          "ver": true,
+          "crear": true,
+          "editar": true,
+          "eliminar": true,
+          "admin": true
+        },
+        "config": {
+          "ver": true,
+          "crear": true,
+          "editar": true,
+          "eliminar": true,
+          "admin": true
+        }
+      }
+    }
+  ],
+  "products": [
+    {
+      "id": 1,
+      "barcode": "ACEITE-AMA-500",
+      "description": "ACEITE AMANECER DE SOYA 500ML",
+      "category": "ALIMENTOS",
+      "stock_actual": 35,
+      "stock_minimo": 10,
+      "precio_costo_usd": 1,
+      "precio_detalle_usd": 2,
+      "precio_mayor_usd": 1.5,
+      "cantidad_mayorista": 12,
+      "exento_impuesto": false,
+      "imagen_url": "",
+      "estado": "Activo"
+    },
+    {
+      "id": 2,
+      "barcode": "ACEITE-AMA-828",
+      "description": "ACEITE AMANECER DE SOYA 828ML",
+      "category": "ALIMENTOS",
+      "stock_actual": 8,
+      "stock_minimo": 5,
+      "precio_costo_usd": 3.22,
+      "precio_detalle_usd": 4,
+      "precio_mayor_usd": 3.5,
+      "cantidad_mayorista": 12,
+      "exento_impuesto": false,
+      "imagen_url": "",
+      "estado": "Activo"
+    },
+    {
+      "id": 3,
+      "barcode": "6900240320576",
+      "description": "ABRAZADERA 16-25MM",
+      "category": "FERRETERIA",
+      "stock_actual": 150,
+      "stock_minimo": 20,
+      "precio_costo_usd": 0.02,
+      "precio_detalle_usd": 0.04,
+      "precio_mayor_usd": 0.03,
+      "cantidad_mayorista": 50,
+      "exento_impuesto": true,
+      "imagen_url": "",
+      "estado": "Activo"
+    },
+    {
+      "id": 4,
+      "barcode": "HARINA-PAN-1K",
+      "description": "HARINA PAN BLANCA 1KG",
+      "category": "ALIMENTOS",
+      "stock_actual": 85,
+      "stock_minimo": 15,
+      "precio_costo_usd": 1,
+      "precio_detalle_usd": 1.25,
+      "precio_mayor_usd": 1.1,
+      "cantidad_mayorista": 20,
+      "exento_impuesto": false,
+      "imagen_url": "",
+      "estado": "Activo"
+    },
+    {
+      "id": 5,
+      "barcode": "LECHE-CAMP-1L",
+      "description": "LECHE COMPLETA CAMPESTRE 1L",
+      "category": "ALIMENTOS",
+      "stock_actual": 3,
+      "stock_minimo": 10,
+      "precio_costo_usd": 2.1,
+      "precio_detalle_usd": 2.7,
+      "precio_mayor_usd": 2.45,
+      "cantidad_mayorista": 12,
+      "exento_impuesto": false,
+      "imagen_url": "",
+      "estado": "Activo"
+    }
+  ],
+  "clients": [
+    {
+      "id": 1,
+      "cedula_rif": "V-00000000",
+      "nombre": "Consumidor Final",
+      "limite_credito": 0,
+      "credito_disponible": 0,
+      "porcentaje_descuento": 0,
+      "estado": "Activo"
+    }
+  ],
+  "sales": [],
+  "abonos": [],
+  "movements": [],
+  "tasas": [],
+  "cierres": [],
+  "priceHistory": [
+    {
+      "productCode": "51842",
+      "priceType": "Costo",
+      "oldPrice": 1.1,
+      "newPrice": 1.2,
+      "motivo": "Test Motivo",
+      "id": 1784915103949
+    }
+  ],
+  "accionistas": [],
+  "inversiones": [],
+  "proveedores": [],
+  "compras": [],
+  "pagosProveedores": [],
+  "cotizacionesProveedores": [],
+  "timestamp": "2026-08-19T13:02:41.703Z"
+}
