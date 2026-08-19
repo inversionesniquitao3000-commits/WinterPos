@@ -193,6 +193,7 @@ try {
     ALTER TABLE IF EXISTS Movimientos_Caja ADD COLUMN IF NOT EXISTS comision_usd NUMERIC DEFAULT 0;
     ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS a_granel BOOLEAN DEFAULT FALSE;
     ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(50);
+    ALTER TABLE IF EXISTS Productos ALTER COLUMN imagen_url TYPE TEXT;
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS permitir_multisesion BOOLEAN DEFAULT TRUE;
     CREATE TABLE IF NOT EXISTS Gastos_Operativos (
       id SERIAL PRIMARY KEY,
@@ -208,6 +209,7 @@ try {
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS logo_url TEXT DEFAULT '';
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS gdrive_config TEXT;
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS whatsapp_config TEXT;
+    ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS moneda_ticket_default VARCHAR(10) DEFAULT 'USD';
 
     CREATE TABLE IF NOT EXISTS Accionistas (
       id SERIAL PRIMARY KEY,
@@ -464,7 +466,8 @@ export async function getCompanyConfig() {
           metodos_pago_activos: row.metodos_pago_activos,
           permitir_multisesion: row.permitir_multisesion !== false,
           compartir_apertura_caja: row.compartir_apertura_caja !== false,
-          logo_url: row.logo_url || ''
+          logo_url: row.logo_url || '',
+          moneda_ticket_default: row.moneda_ticket_default || 'USD'
         };
         _cachedCompanyConfigTimestamp = now;
         return _cachedCompanyConfig;
@@ -488,7 +491,8 @@ export async function getCompanyConfig() {
     metodos_pago_activos: c.metodos_pago_activos || [],
     permitir_multisesion: c.permitir_multisesion !== false,
     compartir_apertura_caja: c.compartir_apertura_caja !== false,
-    logo_url: c.logo_url || ''
+    logo_url: c.logo_url || '',
+    moneda_ticket_default: c.moneda_ticket_default || 'USD'
   };
   _cachedCompanyConfigTimestamp = now;
   return _cachedCompanyConfig;
@@ -501,20 +505,21 @@ export async function saveCompanyConfig(config) {
       const existing = await pool.query('SELECT id FROM Configuracion_Empresa ORDER BY id DESC LIMIT 1');
       const pMulti = config.permitir_multisesion !== false;
       const cApertura = config.compartir_apertura_caja !== false;
+      const mTicket = config.moneda_ticket_default || 'USD';
       if (existing.rowCount > 0) {
         await pool.query(
           `UPDATE Configuracion_Empresa SET 
             rif = $1, nombre_comercio = $2, direccion = $3, telefono = $4, 
             correo = $5, moneda_base = $6, mensaje_pie_ticket = $7, metodos_pago_activos = $8,
-            permitir_multisesion = $9, compartir_apertura_caja = $10, logo_url = $11
-           WHERE id = $12`,
-          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura, config.logo_url || '', existing.rows[0].id]
+            permitir_multisesion = $9, compartir_apertura_caja = $10, logo_url = $11, moneda_ticket_default = $12
+           WHERE id = $13`,
+          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura, config.logo_url || '', mTicket, existing.rows[0].id]
         );
       } else {
         await pool.query(
-          `INSERT INTO Configuracion_Empresa (rif, nombre_comercio, direccion, telefono, correo, moneda_base, mensaje_pie_ticket, metodos_pago_activos, permitir_multisesion, compartir_apertura_caja, logo_url)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura, config.logo_url || '']
+          `INSERT INTO Configuracion_Empresa (rif, nombre_comercio, direccion, telefono, correo, moneda_base, mensaje_pie_ticket, metodos_pago_activos, permitir_multisesion, compartir_apertura_caja, logo_url, moneda_ticket_default)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura, config.logo_url || '', mTicket]
         );
       }
       return config;
@@ -618,7 +623,23 @@ const defaultWhatsAppConfig = {
 {desgloseGastos}
 
 👥 *MONTO A COBRAR POR ACCIONISTA:*
-{desgloseAccionistas}`
+{desgloseAccionistas}`,
+  cobroClientesMessageTemplate: `👤 *RECORDATORIO DE PAGO DE CUENTA*
+
+🏬 *{empresa}*
+📅 *Fecha:* {fecha}
+👤 *Cliente:* {cliente}
+🆔 *Cédula/RIF:* {cedulaRif}
+
+🚨 *Estimado(a) cliente, le enviamos un cordial saludo para recordarle su estado de cuenta:*
+
+💰 *Monto Adeudado:* *${'{saldoPendienteUsd}'} USD*
+🇻🇪 *Monto en Bolívares (Tasa BCV {tasaBcv}):* *Bs {saldoPendienteVes}*
+
+💳 *Límite de Crédito:* ${'{limiteCreditoUsd}'} USD
+✅ *Crédito Disponible:* ${'{creditoDisponibleUsd}'} USD
+
+🙏 *Agradecemos realizar su abono a la brevedad posible para mantener activo su margen de crédito. ¡Gracias por su preferencia!*`
 };
 
 export async function getWhatsConfigDb() {

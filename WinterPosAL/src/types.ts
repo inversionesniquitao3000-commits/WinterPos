@@ -147,6 +147,7 @@ export interface CompanyConfig {
   compartir_apertura_caja?: boolean;
   tasa_oficial_bcv?: number;
   logo_url?: string;
+  moneda_ticket_default?: 'USD' | 'VES';
 }
 
 export interface Sale {

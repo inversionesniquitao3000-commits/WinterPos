@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Product, InventoryMovement, PriceAdjustmentHistory, User, CompanyConfig } from '../types';
-import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator, PauseCircle, Play, Trash2, Wand2, Sparkles, ShieldAlert, RotateCcw, BarChart3, TrendingUp, Award, DollarSign, Calendar, X } from 'lucide-react';
+import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator, PauseCircle, Play, Trash2, Wand2, Sparkles, ShieldAlert, RotateCcw, BarChart3, TrendingUp, Award, DollarSign, Calendar, X, Image as ImageIcon, Link as LinkIcon, UploadCloud, Check, Loader2 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr } from '../utils';
 import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
@@ -74,6 +74,315 @@ export default function Inventario({
   const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'movimientos' | 'precios' | 'estadisticas'>('catalogo');
   const [selectedMovementDetail, setSelectedMovementDetail] = useState<any>(null);
   const [successMsg, setSuccessMsg] = useState('');
+
+  // AI & Manual Image generation states & handlers
+  const [isGeneratingAiImage, setIsGeneratingAiImage] = useState(false);
+  const [newImageUrl, setNewImageUrl] = useState('');
+  const [editImageUrl, setEditImageUrl] = useState('');
+  const [showImageManagerModal, setShowImageManagerModal] = useState(false);
+  const [imageManagerProduct, setImageManagerProduct] = useState<Product | null>(null);
+  const [imageManagerUrlInput, setImageManagerUrlInput] = useState('');
+  const [isUploadingManualImage, setIsUploadingManualImage] = useState(false);
+
+  // Estados para Generación Masiva con IA
+  const [showBulkAiModal, setShowBulkAiModal] = useState(false);
+  const [bulkAiScope, setBulkAiScope] = useState<'sin_foto' | 'todos' | 'categoria'>('sin_foto');
+  const [selectedBulkCategory, setSelectedBulkCategory] = useState<string>('');
+  const [bulkCategoryNoPhotoOnly, setBulkCategoryNoPhotoOnly] = useState<boolean>(true);
+  const [isBulkAiRunning, setIsBulkAiRunning] = useState(false);
+  const [bulkAiProgress, setBulkAiProgress] = useState({ current: 0, total: 0, percent: 0 });
+  const [bulkAiLogs, setBulkAiLogs] = useState<Array<{ id: number; description: string; barcode: string; imageUrl: string; success: boolean; discarded: boolean }>>([]);
+  const isBulkAiCancelledRef = useRef(false);
+
+  const availableCategories = useMemo(() => {
+    const set = new Set<string>();
+    products.forEach(p => {
+      if (p.category && p.category.trim()) {
+        set.add(p.category.trim().toUpperCase());
+      }
+    });
+    return Array.from(set).sort();
+  }, [products]);
+
+  // Context Menu state for right-click on inventory table rows
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    product: Product;
+  } | null>(null);
+
+  useEffect(() => {
+    const handleCloseContextMenu = () => setContextMenu(null);
+    window.addEventListener('click', handleCloseContextMenu);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('click', handleCloseContextMenu);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  const handleGenerateAiImageForProduct = async (prod: Product) => {
+    setIsGeneratingAiImage(true);
+    try {
+      const res = await fetch('/api/ai/generate-product-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: prod.description,
+          category: prod.category,
+          barcode: prod.barcode,
+          saveLocal: true
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.imageUrl) {
+        const updatedProd = { ...prod, imagen_url: data.imageUrl };
+        await onUpdateProduct(updatedProd);
+        setSelectedProduct(updatedProd);
+        if (imageManagerProduct && imageManagerProduct.id === prod.id) {
+          setImageManagerProduct(updatedProd);
+          setImageManagerUrlInput(data.imageUrl);
+        }
+        showAlert('✅ Imagen generada con Inteligencia Artificial y asociada al producto con éxito.', 'Imagen Generada con IA', 'info');
+      } else {
+        showAlert('No se pudo generar la imagen para este producto.', 'Error IA', 'warning');
+      }
+    } catch (err: any) {
+      showAlert(`Error conectando con servicio de IA: ${err.message}`, 'Error IA', 'warning');
+    } finally {
+      setIsGeneratingAiImage(false);
+    }
+  };
+
+  const handleUploadImageFile = async (file: File, target: 'new' | 'edit' | 'manager', product?: Product) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      showAlert('El archivo seleccionado debe ser una imagen válida (JPG, PNG, WEBP).', 'Formato Inválido', 'warning');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      showAlert('La imagen no debe superar los 5MB de tamaño.', 'Archivo muy grande', 'warning');
+      return;
+    }
+
+    setIsUploadingManualImage(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const base64Data = e.target?.result as string;
+        if (!base64Data) return;
+
+        const res = await fetch('/api/ai/upload-product-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            imageBase64: base64Data,
+            filename: file.name
+          })
+        });
+        const data = await res.json();
+        if (data.success && data.imageUrl) {
+          if (target === 'new') {
+            setNewImageUrl(data.imageUrl);
+          } else if (target === 'edit') {
+            setEditImageUrl(data.imageUrl);
+          } else if (target === 'manager' && product) {
+            const updated = { ...product, imagen_url: data.imageUrl };
+            await onUpdateProduct(updated);
+            setSelectedProduct(updated);
+            setImageManagerProduct(updated);
+            setImageManagerUrlInput(data.imageUrl);
+          }
+          showToast('📸 Foto subida y guardada exitosamente.');
+        } else {
+          showAlert('Error al subir la imagen: ' + (data.error || 'Desconocido'), 'Error', 'warning');
+        }
+        setIsUploadingManualImage(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      setIsUploadingManualImage(false);
+      showAlert('Error al procesar la imagen: ' + err.message, 'Error', 'warning');
+    }
+  };
+
+  const ensureCleanImageUrl = async (rawUrl: string, barcodeName?: string): Promise<string> => {
+    const trimmed = (rawUrl || '').trim();
+    if (!trimmed.startsWith('data:image/')) return trimmed;
+    try {
+      setIsUploadingManualImage(true);
+      const res = await fetch('/api/ai/upload-product-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: trimmed,
+          filename: `${barcodeName || 'manual'}.jpg`
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.imageUrl) {
+        return data.imageUrl;
+      }
+    } catch (_) {
+    } finally {
+      setIsUploadingManualImage(false);
+    }
+    return trimmed;
+  };
+
+  const handleOpenImageManager = (prod: Product) => {
+    setImageManagerProduct(prod);
+    setImageManagerUrlInput(prod.imagen_url || '');
+    setShowImageManagerModal(true);
+  };
+
+  const handleSaveManagerUrl = async () => {
+    if (!imageManagerProduct) return;
+    const finalUrl = await ensureCleanImageUrl(imageManagerUrlInput, imageManagerProduct.barcode);
+    const updated = { ...imageManagerProduct, imagen_url: finalUrl };
+    await onUpdateProduct(updated);
+    setSelectedProduct(updated);
+    setImageManagerProduct(updated);
+    setShowImageManagerModal(false);
+    showToast('✅ Imagen del producto actualizada con éxito.');
+  };
+
+  const handleRemoveManagerImage = async () => {
+    if (!imageManagerProduct) return;
+    const updated = { ...imageManagerProduct, imagen_url: '' };
+    await onUpdateProduct(updated);
+    setSelectedProduct(updated);
+    setImageManagerProduct(updated);
+    setImageManagerUrlInput('');
+    showToast('🗑️ Imagen removida del producto.');
+  };
+
+  const handleStartBulkAiGeneration = async () => {
+    let targetProducts: Product[] = [];
+
+    if (bulkAiScope === 'sin_foto') {
+      targetProducts = products.filter(p => !p.imagen_url || p.imagen_url.trim() === '');
+    } else if (bulkAiScope === 'todos') {
+      targetProducts = products;
+    } else if (bulkAiScope === 'categoria') {
+      if (!selectedBulkCategory) {
+        showAlert('Por favor seleccione una categoría para procesar.', 'Atención', 'warning');
+        return;
+      }
+      targetProducts = products.filter(p => (p.category || '').toUpperCase() === selectedBulkCategory.toUpperCase());
+      if (bulkCategoryNoPhotoOnly) {
+        targetProducts = targetProducts.filter(p => !p.imagen_url || p.imagen_url.trim() === '');
+      }
+    }
+
+    if (targetProducts.length === 0) {
+      showAlert('No hay productos que cumplan con el criterio seleccionado para generar fotos.', 'Sin Productos', 'warning');
+      return;
+    }
+
+    const confirm = await showConfirm(
+      `¿Desea iniciar la generación automática con IA para ${targetProducts.length} productos? Este proceso procesará cada artículo en segundo plano y guardará las imágenes automáticamente.`,
+      'Confirmar Generación Masiva con IA'
+    );
+    if (!confirm) return;
+
+    setIsBulkAiRunning(true);
+    isBulkAiCancelledRef.current = false;
+    setBulkAiProgress({ current: 0, total: targetProducts.length, percent: 0 });
+    setBulkAiLogs([]);
+
+    let processedCount = 0;
+    for (const prod of targetProducts) {
+      if (isBulkAiCancelledRef.current) break;
+
+      try {
+        const res = await fetch('/api/ai/generate-product-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            description: prod.description,
+            category: prod.category,
+            barcode: prod.barcode,
+            saveLocal: true
+          })
+        });
+        const data = await res.json();
+        if (data.success && data.imageUrl) {
+          setBulkAiLogs(prev => [{
+            id: prod.id,
+            description: prod.description,
+            barcode: prod.barcode || '',
+            imageUrl: data.imageUrl,
+            success: true,
+            discarded: false
+          }, ...prev]);
+        } else {
+          setBulkAiLogs(prev => [{
+            id: prod.id,
+            description: prod.description,
+            barcode: prod.barcode || '',
+            imageUrl: '',
+            success: false,
+            discarded: true
+          }, ...prev]);
+        }
+      } catch (_) {
+        setBulkAiLogs(prev => [{
+          id: prod.id,
+          description: prod.description,
+          barcode: prod.barcode || '',
+          imageUrl: '',
+          success: false,
+          discarded: true
+        }, ...prev]);
+      }
+
+      processedCount++;
+      const pct = Math.round((processedCount / targetProducts.length) * 100);
+      setBulkAiProgress({ current: processedCount, total: targetProducts.length, percent: pct });
+    }
+
+    setIsBulkAiRunning(false);
+    if (!isBulkAiCancelledRef.current) {
+      showToast(`🎉 ¡Generación con IA finalizada! Revise las imágenes y haga clic en las que desee descartar antes de aplicar.`);
+    } else {
+      showToast(`⏸️ Proceso pausado. Puede revisar las fotos generadas.`);
+    }
+  };
+
+  const handleToggleDiscardBulkAiItem = (id: number) => {
+    setBulkAiLogs(prev => prev.map(item => item.id === id ? { ...item, discarded: !item.discarded } : item));
+  };
+
+  const handleApplyBulkAiSelected = async () => {
+    const validToApply = bulkAiLogs.filter(l => l.success && l.imageUrl && !l.discarded);
+    if (validToApply.length === 0) {
+      showAlert('No hay fotos seleccionadas para aplicar al catálogo.', 'Sin Selección', 'warning');
+      return;
+    }
+
+    const confirm = await showConfirm(
+      `¿Desea aplicar las ${validToApply.length} fotos conservadas a los productos del catálogo?`,
+      'Confirmar Asignación de Fotos'
+    );
+    if (!confirm) return;
+
+    let updatedCount = 0;
+    for (const log of validToApply) {
+      const prod = products.find(p => p.id === log.id);
+      if (prod) {
+        await onUpdateProduct({ ...prod, imagen_url: log.imageUrl });
+        updatedCount++;
+      }
+    }
+
+    setShowBulkAiModal(false);
+    setBulkAiLogs([]);
+    showToast(`✅ ¡Éxito! Se aplicaron ${updatedCount} fotos al catálogo (${bulkAiLogs.length - updatedCount} descartadas).`);
+  };
 
   // Estados para Carga por Factura
   const [showInvoiceLoadModal, setShowInvoiceLoadModal] = useState(false);
@@ -463,6 +772,16 @@ export default function Inventario({
         return;
       }
 
+      // 0.5. Image Manager & Bulk AI Modals (z-[88])
+      if (showImageManagerModal) {
+        setShowImageManagerModal(false);
+        return;
+      }
+      if (showBulkAiModal) {
+        if (!isBulkAiRunning) setShowBulkAiModal(false);
+        return;
+      }
+
       // 1. Quick Add Category Modal (z-[80])
       if (showQuickAddModal) {
         setShowQuickAddModal(false);
@@ -567,6 +886,9 @@ export default function Inventario({
     showCategoriesModal,
     showBulkModal,
     showEditProdModal,
+    showImageManagerModal,
+    showBulkAiModal,
+    isBulkAiRunning,
     showAdjustModal,
     showPriceModal,
     showCategoryMenu,
@@ -1511,6 +1833,7 @@ export default function Inventario({
     setEditTaxPct((p.porcentaje_impuesto && p.porcentaje_impuesto > 0 ? p.porcentaje_impuesto : 16).toString());
     setEditAGranel(p.a_granel || false);
     setEditVencimiento(p.fecha_vencimiento || '');
+    setEditImageUrl(p.imagen_url || '');
     setShowEditProdModal(true);
   };
 
@@ -1551,6 +1874,8 @@ export default function Inventario({
       return;
     }
 
+    const finalImg = await ensureCleanImageUrl(editImageUrl, finalBarcode);
+
     const updatedProd: Product = {
       ...selectedProduct,
       barcode: finalBarcode,
@@ -1561,6 +1886,7 @@ export default function Inventario({
       cantidad_mayorista: parseInt(editWholesaleQty) || 12,
       exento_impuesto: !editTaxActive,
       porcentaje_impuesto: editTaxActive ? (parseFloat(editTaxPct) || 0) : 0,
+      imagen_url: finalImg,
       a_granel: editAGranel,
       fecha_vencimiento: editVencimiento.trim() !== '' ? editVencimiento.trim() : undefined,
       precio_costo_usd: cost,
@@ -1735,6 +2061,69 @@ export default function Inventario({
     return sortedProducts.slice(start, start + pageSize);
   }, [sortedProducts, currentPage, pageSize]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept arrow keys if user is typing inside an input, textarea, or select
+      const targetTag = (e.target as HTMLElement)?.tagName?.toUpperCase();
+      const isInput = targetTag === 'INPUT' || targetTag === 'TEXTAREA' || targetTag === 'SELECT' || (e.target as HTMLElement)?.isContentEditable;
+      if (isInput) return;
+
+      // Don't intercept arrow keys if any modal is open
+      if (
+        showNewProdModal || showEditProdModal || showBulkAiModal || showBulkStockAdjustModal ||
+        showInvoiceLoadModal || showCatalogAuditModal || showCategoriesModal || showGeneralAdjustModal ||
+        showQuickAddModal || showViolationAssistantModal || showImageManagerModal || showPausedInvoicesModal ||
+        contextMenu !== null
+      ) {
+        return;
+      }
+
+      // Keyboard arrow navigation (ArrowDown / ArrowUp) for inventory catalog table
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (activeSubTab !== 'catalogo' || paginatedProducts.length === 0) return;
+
+        e.preventDefault();
+
+        const currentIndex = paginatedProducts.findIndex(p => p.id === selectedProduct?.id);
+        let nextIndex = 0;
+
+        if (e.key === 'ArrowDown') {
+          if (currentIndex === -1) {
+            nextIndex = 0;
+          } else {
+            nextIndex = Math.min(paginatedProducts.length - 1, currentIndex + 1);
+          }
+        } else if (e.key === 'ArrowUp') {
+          if (currentIndex === -1) {
+            nextIndex = paginatedProducts.length - 1;
+          } else {
+            nextIndex = Math.max(0, currentIndex - 1);
+          }
+        }
+
+        const nextProduct = paginatedProducts[nextIndex];
+        if (nextProduct) {
+          setSelectedProduct(nextProduct);
+          const rowEl = document.getElementById(`inv-prod-row-${nextProduct.id}`);
+          if (rowEl) {
+            rowEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [
+    activeSubTab, paginatedProducts, selectedProduct,
+    showNewProdModal, showEditProdModal, showBulkAiModal, showBulkStockAdjustModal,
+    showInvoiceLoadModal, showCatalogAuditModal, showCategoriesModal, showGeneralAdjustModal,
+    showQuickAddModal, showViolationAssistantModal, showImageManagerModal, showPausedInvoicesModal,
+    contextMenu
+  ]);
+
   const handleOpenAdjust = (prod: Product) => {
     setSelectedProduct(prod);
     setAdjustType('Entrada');
@@ -1809,7 +2198,7 @@ export default function Inventario({
     setSelectedProduct(null);
   };
 
-  const handleCreateProduct = (e: React.FormEvent) => {
+  const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newClave.trim() || !newDesc.trim()) {
       showAlert('Clave del producto y descripción son obligatorios.', 'Campos Requeridos', 'warning');
@@ -1845,6 +2234,8 @@ export default function Inventario({
     const min = newAGranel ? (parseFloat(newMinStock) || 0) : (parseInt(newMinStock) || 0);
     const wholesale = parseInt(newWholesaleQty) || 12;
 
+    const finalImg = await ensureCleanImageUrl(newImageUrl, barcodeVal);
+
     const newProd: Product = {
       id: Date.now(),
       barcode: barcodeVal.toUpperCase(),
@@ -1858,7 +2249,7 @@ export default function Inventario({
       cantidad_mayorista: wholesale,
       exento_impuesto: !newTaxActive,
       porcentaje_impuesto: newTaxActive ? (parseFloat(newTaxPct) || 0) : 0,
-      imagen_url: '',
+      imagen_url: finalImg || '',
       estado: 'Activo',
       a_granel: newAGranel,
       fecha_vencimiento: newVencimiento.trim() !== '' ? newVencimiento.trim() : undefined
@@ -1879,6 +2270,7 @@ export default function Inventario({
     setNewTaxPct('16');
     setNewAGranel(false);
     setNewVencimiento('');
+    setNewImageUrl('');
   };
 
 
@@ -1895,6 +2287,29 @@ export default function Inventario({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const [capturingReportMode, setCapturingReportMode] = useState<'general' | 'faltantes' | null>(null);
+
+  const captureInventarioReportPNG = async (isOnlyFaltantes = false) => {
+    let imageBase64 = '';
+    try {
+      showToast('📸 Generando documento del reporte en formato gráfico para adjuntar...');
+      setCapturingReportMode(isOnlyFaltantes ? 'faltantes' : 'general');
+      await new Promise(resolve => setTimeout(resolve, 400));
+
+      const htmlToImage = await import('html-to-image');
+      const element = document.getElementById('inventario-report-capture-card');
+
+      if (element) {
+        imageBase64 = await htmlToImage.toPng(element, { backgroundColor: '#ffffff', quality: 0.95 });
+      }
+    } catch (err) {
+      console.warn('Error capturando PNG del reporte de inventario:', err);
+    } finally {
+      setCapturingReportMode(null);
+    }
+    return imageBase64;
+  };
 
   const handlePrintReport = () => {
     const printWindow = window.open('', '_blank');
@@ -2105,34 +2520,88 @@ export default function Inventario({
     showToast('✅ Reporte exportado a Excel (CSV) con éxito.');
   };
 
-  // Opción 1: Enviar Reporte General por WhatsApp (Abre PDF + Copia Resumen)
-  const handleSendWhatsAppReport = () => {
+  // Opción 1: Enviar Reporte General por WhatsApp (Directo a Grupo Configurado como Adjunto + Fallback PDF + WhatsApp Web)
+  const handleSendWhatsAppReport = async () => {
     if (sortedProducts.length === 0) {
       showAlert('No hay productos en el listado para compartir por WhatsApp.', 'Sin Datos', 'warning');
       return;
     }
-
-    // 1. Trigger dense PDF print window so user can save PDF
-    handlePrintReport();
 
     const companyName = companyConfig?.nombre_comercio || 'INVERSIONES NIQUITAO 3000 C.A.';
     const totalItems = sortedProducts.length;
     const totalValueVenta = sortedProducts.reduce((acc, p) => acc + p.precio_detalle_usd * (parseFloat(p.stock_actual as any) || 0), 0);
     const totalValueCosto = sortedProducts.reduce((acc, p) => acc + p.precio_costo_usd * (parseFloat(p.stock_actual as any) || 0), 0);
     const dateStr = new Date().toLocaleDateString('es-VE');
+    const timeStr = new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit' });
 
-    let text = `📦 *REPORTE GENERAL DE INVENTARIO (PDF)*\n`;
-    text += `🏢 *${companyName}*\n`;
-    text += `📅 Fecha: ${dateStr}\n`;
-    text += `───────────────\n`;
-    text += `📊 *Resumen Ejecutivo:*\n`;
-    text += `• Total Artículos: ${totalItems}\n`;
-    text += `• Valor Inv. (Detalle): *$${totalValueVenta.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}*\n`;
-    text += `• Valor Inv. (Costo): *$${totalValueCosto.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}*\n`;
     const categoryLabel = selectedCategories.length === 0 ? 'TODAS' : selectedCategories.join(', ');
-    text += `• Filtro Categoría: ${categoryLabel}\n`;
+    const stockFilterLabel = 
+      (filterStock as string) === 'todos' ? 'TODOS' :
+      (filterStock as string) === 'con_existencia' ? 'CON EXISTENCIA (>0)' :
+      (filterStock as string) === 'sin_existencia' ? 'SIN EXISTENCIA (0)' :
+      (filterStock as string) === 'menor_5' ? 'EXISTENCIA ≤ 5' :
+      (filterStock as string) === 'menor_10' ? 'EXISTENCIA ≤ 10' :
+      (filterStock as string) === 'menor_15' ? 'EXISTENCIA ≤ 15' : 'TODOS';
+
+    let text = `📦 *REPORTE GENERAL DE INVENTARIO Y AUDITORÍA*\n`;
+    text += `🏢 *${companyName}*\n`;
+    text += `📅 Generado: ${dateStr} - ${timeStr}\n`;
     text += `───────────────\n`;
-    text += `📎 *Se adjunta documento PDF con la totalidad de los ${totalItems} productos.*`;
+    text += `📊 *RESUMEN EJECUTIVO:*\n`;
+    text += `• Total Artículos: *${totalItems} productos*\n`;
+    text += `• Valor Total (Detalle): *$${totalValueVenta.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}*\n`;
+    text += `• Valor Total (Costo): *$${totalValueCosto.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}*\n`;
+    text += `• Filtro Categoría: ${categoryLabel}\n`;
+    text += `• Filtro Stock: ${stockFilterLabel}\n`;
+    text += `───────────────\n`;
+    text += `📎 *Se adjunta documento gráfico oficial de auditoría de inventario.*`;
+
+    // 1. Capturar Documento Gráfico en Formato Base64
+    const imageBase64 = await captureInventarioReportPNG(false);
+
+    // 2. Intentar Envío Directo al Grupo de WhatsApp Configurado en el Bot Backend
+    try {
+      showToast('🔄 Verificando servicio de WhatsApp Bot...');
+      const statusRes = await fetch('/api/whatsapp/status');
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        
+        if (!statusData.enabled) {
+          showAlert('El servicio de WhatsApp Bot está deshabilitado en F10 Configuración.', 'Bot WhatsApp Deshabilitado', 'warning');
+        } else if (statusData.status !== 'CONNECTED') {
+          showAlert(`El servicio de WhatsApp no está conectado (Estado: ${statusData.status}).\n\nPor favor escanee el código QR en F10 Configuración ➔ INTEGRACIÓN WHATSAPP.`, 'WhatsApp No Vinculado', 'warning');
+        } else {
+          showToast('🚀 Enviando documento del reporte adjunto al grupo de WhatsApp...');
+          const sendRes = await fetch('/api/whatsapp/send-report', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageBase64, textSummary: text })
+          });
+          const sendData = await sendRes.json();
+
+          if (sendRes.ok && sendData.success) {
+            showToast('✅ Reporte General enviado exitosamente ADJUNTO al grupo de WhatsApp.');
+            
+            // Generar también ventana del documento PDF
+            handlePrintReport();
+
+            showAlert(
+              `✅ El reporte general de inventario se guardó automáticamente en formato gráfico y se envió ADJUNTO al grupo de WhatsApp configurado.\n\nTambién se abrió la ventana para imprimir o guardar el PDF físicamente si lo requieres.`,
+              'Envío Automático Exitoso con Adjunto',
+              'success'
+            );
+            return;
+          } else {
+            showAlert(`No se pudo enviar el reporte vía Bot WhatsApp: ${sendData.error || sendData.message || 'Error en el servidor.'}`, 'Fallo en Envío Directo', 'error');
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('Bot de WhatsApp no disponible para envío directo:', err);
+    }
+
+    // 3. FALLBACK A IMPRESIÓN PDF + WHATSAPP WEB si no hay bot directo activo
+    handlePrintReport();
 
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).catch(() => {});
@@ -2140,18 +2609,18 @@ export default function Inventario({
 
     setTimeout(() => {
       showAlert(
-        `📄 Se ha generado la vista preliminar del Reporte PDF para guardarlo en tu equipo.\n\nTambién se copió el resumen al portapapeles. Puedes adjuntar el archivo PDF en WhatsApp Web o presionar Ctrl + V para pegar el resumen.`,
-        'Reporte PDF Generado',
+        `📄 Se ha generado la vista preliminar del Reporte PDF para guardarlo en tu equipo.\n\nComo el bot directo no está activo, se copió el resumen al portapapeles. Puedes adjuntar el archivo guardado en WhatsApp Web o presionar Ctrl + V para pegar el resumen.`,
+        'Reporte PDF Generado (Fallback)',
         'info'
       );
     }, 400);
   };
 
-  // Opción 2: Envío de Lista de Mercancía / Proveedores (soluciona la pantalla blanca de WhatsApp copiando al portapapeles)
-  const handleSendWhatsAppSupplierList = (onlyLowStock = false) => {
+  // Opción 2: Envío de Lista de Mercancía / Faltantes (Envío Directo a Grupo WhatsApp + Fallback a WhatsApp Web)
+  const handleSendWhatsAppSupplierList = async (onlyLowStock = false) => {
     let listToExport = sortedProducts;
     if (onlyLowStock) {
-      listToExport = sortedProducts.filter(p => p.stock_actual <= p.stock_minimo);
+      listToExport = sortedProducts.filter(p => (parseFloat(p.stock_actual as any) || 0) <= (parseFloat(p.stock_minimo as any) || 0));
     }
 
     if (listToExport.length === 0) {
@@ -2167,6 +2636,7 @@ export default function Inventario({
 
     const companyName = companyConfig?.nombre_comercio || 'INVERSIONES NIQUITAO 3000 C.A.';
     const dateStr = new Date().toLocaleDateString('es-VE');
+    const timeStr = new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit' });
 
     // Group products by category
     const grouped: { [category: string]: typeof listToExport } = {};
@@ -2176,9 +2646,9 @@ export default function Inventario({
       grouped[cat].push(p);
     });
 
-    let text = `📝 *LISTA DE MERCANCÍA / PEDIDO A PROVEEDORES ${onlyLowStock ? '(SOLO FALTANTES)' : ''}*\n`;
+    let text = `📝 *REPORTE DE PRODUCTOS FALTANTES ${onlyLowStock ? '(SOLO FALTANTES / BAJO STOCK)' : '(COMPLETO POR CATEGORÍAS)'}*\n`;
     text += `🏢 *${companyName}*\n`;
-    text += `📅 Fecha: ${dateStr}\n`;
+    text += `📅 Fecha: ${dateStr} - ${timeStr}\n`;
     text += `───────────────\n`;
 
     const categoriesList = Object.keys(grouped).sort();
@@ -2186,17 +2656,60 @@ export default function Inventario({
     categoriesList.forEach(cat => {
       text += `\n📌 *CATEGORÍA: ${cat}*\n`;
       grouped[cat].forEach(p => {
-        text += `• ${p.description}\n`;
+        const curStock = formatStockVal(p.stock_actual, p.a_granel);
+        const minStock = formatStockVal(p.stock_minimo, p.a_granel);
+        text += `• ${p.description} *(Existencia: ${curStock} / Mínimo: ${minStock})*\n`;
       });
     });
 
     text += `\n───────────────\n`;
-    text += `_Total de productos en lista: ${listToExport.length}_`;
+    text += `_Total de productos faltantes reportados: ${listToExport.length}_\n`;
+    text += `📎 *Se adjunta documento gráfico detallado con los productos faltantes.*`;
 
-    // Copy to clipboard to handle large data without crashing WhatsApp URL limit
+    // 1. Capturar Documento Gráfico en Formato Base64
+    const imageBase64 = await captureInventarioReportPNG(onlyLowStock);
+
+    // 2. Intentar Envío Directo al Grupo de WhatsApp Configurado en el Bot Backend
+    try {
+      showToast('🔄 Verificando servicio de WhatsApp Bot...');
+      const statusRes = await fetch('/api/whatsapp/status');
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+
+        if (!statusData.enabled) {
+          showAlert('El servicio de WhatsApp Bot está deshabilitado en F10 Configuración.', 'Bot WhatsApp Deshabilitado', 'warning');
+        } else if (statusData.status !== 'CONNECTED') {
+          showAlert(`El servicio de WhatsApp no está conectado (Estado: ${statusData.status}).\n\nPor favor escanee el código QR en F10 Configuración ➔ INTEGRACIÓN WHATSAPP.`, 'WhatsApp No Vinculado', 'warning');
+        } else {
+          showToast('🚀 Enviando documento de faltantes adjunto al grupo de WhatsApp...');
+          const sendRes = await fetch('/api/whatsapp/send-report', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageBase64, textSummary: text })
+          });
+          const sendData = await sendRes.json();
+
+          if (sendRes.ok && sendData.success) {
+            showToast('✅ Reporte de faltantes enviado exitosamente ADJUNTO al grupo de WhatsApp.');
+            showAlert(
+              `✅ El reporte de productos faltantes (${listToExport.length} ítems ordenados por categoría) se guardó automáticamente en formato gráfico y se envió ADJUNTO al grupo de WhatsApp configurado.`,
+              'Envío Automático Exitoso con Adjunto',
+              'success'
+            );
+            return;
+          } else {
+            showAlert(`No se pudo enviar la lista por el Bot de WhatsApp: ${sendData.error || sendData.message || 'Error en el servidor.'}`, 'Fallo en Envío Directo', 'error');
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Bot de WhatsApp no disponible o no configurado, procediendo con fallback a WhatsApp Web:', err);
+    }
+
+    // 3. FALLBACK A WHATSAPP WEB si el bot direct no está conectado o configurado
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(() => {
-        showToast('📋 Lista de mercancía copiada al portapapeles.');
+        showToast('📋 Lista de faltantes copiada al portapapeles.');
       }).catch(() => {});
     }
 
@@ -2204,10 +2717,15 @@ export default function Inventario({
     if (text.length < 1500) {
       const encodedText = encodeURIComponent(text);
       window.open(`https://web.whatsapp.com/send?text=${encodedText}`, '_blank');
+      showAlert(
+        `Se ha abierto WhatsApp Web para enviar la lista de faltantes (${listToExport.length} productos).\n\n(Servicio bot directo no activo o sin grupo. Redirigido a WhatsApp Web).`,
+        'Enviando vía WhatsApp Web',
+        'info'
+      );
     } else {
       window.open('https://web.whatsapp.com/', '_blank');
       showAlert(
-        `La lista contiene ${listToExport.length} productos (${text.length} caracteres).\n\nPara evitar que WhatsApp se quede en pantalla blanca por exceso de datos en la URL, se ha copiado la lista completa automáticamente a tu portapapeles.\n\nEn WhatsApp Web, solo abre el chat de tu proveedor y presiona Ctrl + V para pegar la lista entera.`,
+        `La lista contiene ${listToExport.length} productos faltantes (${text.length} caracteres).\n\nComo el bot directo no está activo y para evitar pantalla blanca en WhatsApp Web por la longitud del texto, la lista se copió automáticamente a tu portapapeles.\n\nEn WhatsApp Web, solo abre el chat o grupo deseado y presiona Ctrl + V para pegar la lista entera ordenada por categoría.`,
         '📋 Lista Copiada al Portapapeles',
         'info'
       );
@@ -2225,18 +2743,131 @@ export default function Inventario({
         </div>
       )}
 
-      {/* HEADER SECTION */}
-      <div>
-        <h1 className="text-xl font-extrabold text-winter-inventarioStart tracking-wider flex items-center gap-2">
-          <Package className="w-5 h-5 text-winter-inventarioStart" />
-          CONTROL DE INVENTARIO Y AUDITORÍA
-        </h1>
-        <p className="text-xs text-slate-500 mt-1 font-sans">
-          Gestión centralizada del stock, mermas de almacén, auditorías de Kardex y registro histórico de precios.
-        </p>
+      {/* HEADER SECTION WITH INTEGRATED METRICS PANEL IN RED AREA */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-extrabold text-winter-inventarioStart tracking-wider flex items-center gap-2">
+            <Package className="w-5 h-5 text-winter-inventarioStart" />
+            CONTROL DE INVENTARIO Y AUDITORÍA
+          </h1>
+          <p className="text-xs text-slate-500 mt-1 font-sans">
+            Gestión centralizada del stock, mermas de almacén, auditorías de Kardex y registro histórico de precios.
+          </p>
+        </div>
+
+        {/* Right side metrics cards placed exactly in the red outline box */}
+        {activeSubTab === 'catalogo' && (() => {
+          const totalP1 = safeProducts.reduce((acc, p) => acc + (p?.precio_detalle_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0);
+          const totalCost = safeProducts.reduce((acc, p) => acc + (p?.precio_costo_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0);
+          const totalUds = safeProducts.reduce((acc, p) => acc + (!p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0);
+          const totalKg = safeProducts.reduce((acc, p) => acc + (p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0);
+
+          const filtP1 = filteredProducts.reduce((acc, p) => acc + (p?.precio_detalle_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0);
+          const filtCost = filteredProducts.reduce((acc, p) => acc + (p?.precio_costo_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0);
+          const filtUds = filteredProducts.reduce((acc, p) => acc + (!p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0);
+          const filtKg = filteredProducts.reduce((acc, p) => acc + (p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0);
+
+          const hasFilters = filteredProducts.length !== safeProducts.length;
+
+          return (
+            <div className="flex flex-col items-end gap-2 font-mono text-xs">
+              {/* FILA 1: TARJETAS DE MÉTRICAS GENERALES */}
+              <div className="flex flex-wrap items-center justify-end gap-2.5">
+                {canViewCost ? (
+                  <>
+                    <div className="bg-white border border-slate-200 rounded-xl px-4 py-2 shadow-2xs flex items-center gap-2.5">
+                      <span className="text-[11px] font-sans font-bold text-slate-500 uppercase tracking-wide">Precio 1 del Inventario:</span>
+                      <span className="font-extrabold text-slate-900 text-base md:text-lg font-mono">
+                        ${totalP1.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+
+                    <div className="bg-white border border-slate-200 rounded-xl px-4 py-2 shadow-2xs flex items-center gap-2.5">
+                      <span className="text-[11px] font-sans font-bold text-slate-500 uppercase tracking-wide">Costo del Inventario:</span>
+                      <span className="font-extrabold text-slate-900 text-base md:text-lg font-mono">
+                        ${totalCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+
+                    <div className="bg-white border border-slate-200 rounded-xl px-4 py-2 shadow-2xs flex items-center gap-2.5">
+                      <span className="text-[11px] font-sans font-bold text-slate-500 uppercase tracking-wide">Total Productos:</span>
+                      <span className="font-extrabold text-slate-900 text-base md:text-lg font-mono">
+                        {safeProducts.length}
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-sans font-normal">
+                        ({totalUds} uds + {totalKg.toFixed(3)} kg)
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="bg-white border border-slate-200 rounded-xl px-4 py-2 shadow-2xs flex items-center gap-2.5">
+                    <span className="text-[11px] font-sans font-bold text-slate-500 uppercase tracking-wide">Total Productos:</span>
+                    <span className="font-extrabold text-slate-900 text-base md:text-lg font-mono">
+                      {safeProducts.length}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-sans font-normal">
+                      ({totalUds} uds + {totalKg.toFixed(3)} kg)
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* FILA 2: TARJETAS DE MÉTRICAS FILTRADAS (HOMOGÉNEAS CON SOMBREADO CELESTE PARA DISTINGUIR ABAJO) */}
+              {hasFilters && (
+                <div className="flex flex-wrap items-center justify-end gap-2.5">
+                  {canViewCost ? (
+                    <>
+                      <div className="bg-sky-50/90 border border-sky-200 rounded-xl px-4 py-1.5 shadow-2xs flex items-center gap-2.5">
+                        <span className="text-[11px] font-sans font-bold text-sky-700 uppercase tracking-wide flex items-center gap-1">
+                          🔍 Precio 1 (Filtrado):
+                        </span>
+                        <span className="font-extrabold text-sky-950 text-base md:text-lg font-mono">
+                          ${filtP1.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+
+                      <div className="bg-sky-50/90 border border-sky-200 rounded-xl px-4 py-1.5 shadow-2xs flex items-center gap-2.5">
+                        <span className="text-[11px] font-sans font-bold text-sky-700 uppercase tracking-wide flex items-center gap-1">
+                          🔍 Costo (Filtrado):
+                        </span>
+                        <span className="font-extrabold text-sky-950 text-base md:text-lg font-mono">
+                          ${filtCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+
+                      <div className="bg-sky-50/90 border border-sky-200 rounded-xl px-4 py-1.5 shadow-2xs flex items-center gap-2.5">
+                        <span className="text-[11px] font-sans font-bold text-sky-700 uppercase tracking-wide flex items-center gap-1">
+                          🎯 Total (Filtrado):
+                        </span>
+                        <span className="font-extrabold text-sky-950 text-base md:text-lg font-mono">
+                          {filteredProducts.length}
+                        </span>
+                        <span className="text-[10px] text-sky-600 font-sans font-normal">
+                          ({filtUds} uds + {filtKg.toFixed(3)} kg)
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="bg-sky-50/90 border border-sky-200 rounded-xl px-4 py-1.5 shadow-2xs flex items-center gap-2.5">
+                      <span className="text-[11px] font-sans font-bold text-sky-700 uppercase tracking-wide flex items-center gap-1">
+                        🎯 Total (Filtrado):
+                      </span>
+                      <span className="font-extrabold text-sky-950 text-base md:text-lg font-mono">
+                        {filteredProducts.length}
+                      </span>
+                      <span className="text-[10px] text-sky-600 font-sans font-normal">
+                        ({filtUds} uds + {filtKg.toFixed(3)} kg)
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
-      {/* TOP TABS NAVIGATION - Aligned Left (Config Module Style) */}
+      {/* TOP TABS NAVIGATION - Aligned Left */}
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-1">
         <button
           onClick={() => setActiveSubTab('catalogo')}
@@ -2284,74 +2915,6 @@ export default function Inventario({
       {/* RENDER ACTIVE PANEL */}
       {activeSubTab === 'catalogo' && (
         <div className="space-y-4">
-          
-          {/* INVENTORY METRICS PANEL */}
-          <div className="bg-white border border-slate-200 rounded-xl py-3 px-4 shadow-sm text-slate-800 font-mono text-xs space-y-2.5">
-            {/* If user is Administrator or has cost viewing permissions, display full financial valuation */}
-            {canViewCost ? (
-              <>
-                {/* General metrics (All products) */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-100 pb-1.5 md:pb-0 md:pr-4">
-                    <span className="text-slate-500 font-sans font-bold">Precio 1 del Inventario :</span>
-                    <span className="font-extrabold text-slate-900 text-sm">
-                      ${safeProducts.reduce((acc, p) => acc + (p?.precio_detalle_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-105 pb-1.5 md:pb-0 md:px-4">
-                    <span className="text-slate-500 font-sans font-bold">Costo del Inventario :</span>
-                    <span className="font-extrabold text-slate-900 text-sm">
-                      ${safeProducts.reduce((acc, p) => acc + (p?.precio_costo_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center md:pl-4">
-                    <span className="text-slate-500 font-sans font-bold">Total Productos :</span>
-                    <span className="font-extrabold text-slate-900 text-sm">
-                      {safeProducts.length} <span className="text-[10px] text-slate-400 font-normal">({safeProducts.reduce((acc, p) => acc + (!p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0)} uds + {safeProducts.reduce((acc, p) => acc + (p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0).toFixed(3)} kg)</span>
-                    </span>
-                  </div>
-                </div>
-                
-                {/* Filtered metrics */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-dashed border-slate-200">
-                  <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-100 pb-1.5 md:pb-0 md:pr-4">
-                    <span className="text-sky-700 font-sans font-bold">Precio 1 (Filtrado) :</span>
-                    <span className="font-extrabold text-sky-850 text-sm">
-                      ${filteredProducts.reduce((acc, p) => acc + (p?.precio_detalle_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-105 pb-1.5 md:pb-0 md:px-4">
-                    <span className="text-sky-700 font-sans font-bold">Costo (Filtrado) :</span>
-                    <span className="font-extrabold text-sky-850 text-sm">
-                      ${filteredProducts.reduce((acc, p) => acc + (p?.precio_costo_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center md:pl-4">
-                    <span className="text-sky-700 font-sans font-bold">Total (Filtrado) :</span>
-                    <span className="font-extrabold text-sky-850 text-sm">
-                      {filteredProducts.length} <span className="text-[10px] text-sky-500 font-normal">({filteredProducts.reduce((acc, p) => acc + (!p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0)} uds + {filteredProducts.reduce((acc, p) => acc + (p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0).toFixed(3)} kg)</span>
-                    </span>
-                  </div>
-                </div>
-              </>
-            ) : (
-              /* Non-admin summary without confidential cost/valuation information */
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="flex justify-between items-center border-b md:border-b-0 md:border-r border-slate-100 pb-1.5 md:pb-0 md:pr-4">
-                  <span className="text-slate-600 font-sans font-bold">Total Productos en Catálogo:</span>
-                  <span className="font-extrabold text-slate-900 text-sm">
-                    {safeProducts.length} <span className="text-[10px] text-slate-500 font-normal">({safeProducts.reduce((acc, p) => acc + (!p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0)} uds + {safeProducts.reduce((acc, p) => acc + (p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0).toFixed(3)} kg)</span>
-                  </span>
-                </div>
-                <div className="flex justify-between items-center md:pl-4">
-                  <span className="text-sky-700 font-sans font-bold">Total Productos Filtrados:</span>
-                  <span className="font-extrabold text-sky-850 text-sm">
-                    {filteredProducts.length} <span className="text-[10px] text-sky-600 font-normal">({filteredProducts.reduce((acc, p) => acc + (!p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0)} uds + {filteredProducts.reduce((acc, p) => acc + (p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0).toFixed(3)} kg)</span>
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
           <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between bg-slate-50 border border-slate-200 rounded-xl py-2 px-4 shadow-sm">
             {/* Search Input */}
             <div className="relative flex-grow max-w-md">
@@ -2363,6 +2926,16 @@ export default function Inventario({
                 placeholder="Buscar por código o descripción..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowDown' && paginatedProducts.length > 0) {
+                    e.preventDefault();
+                    (e.target as HTMLInputElement).blur();
+                    const firstProd = paginatedProducts[0];
+                    setSelectedProduct(firstProd);
+                    const rowEl = document.getElementById(`inv-prod-row-${firstProd.id}`);
+                    if (rowEl) rowEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                  }
+                }}
                 className="w-full bg-white border border-slate-300 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-800 focus:border-winter-inventarioStart font-sans focus:outline-none"
               />
             </div>
@@ -2576,10 +3149,10 @@ export default function Inventario({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             
             {/* Catalog Table */}
-            <div className="lg:col-span-10 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm h-fit">
+            <div className="lg:col-span-10 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col">
               {/* ORDEN COMBINADO BAR */}
               {sortRules.length > 0 && (
                 <div className="bg-sky-50/40 border-b border-slate-200 px-4 py-2 flex flex-wrap items-center gap-2 text-xs font-sans text-slate-700">
@@ -2709,7 +3282,7 @@ export default function Inventario({
                 </div>
               )}
 
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-360px)] min-h-[380px] border-b border-slate-200">
                 <table className="w-full border-collapse text-xs text-left table-fixed min-w-[850px]">
                   <colgroup>
                     <col className="w-[12%]" /> {/* Código */}
@@ -2721,7 +3294,7 @@ export default function Inventario({
                     <col className={canViewCost ? "w-[9%]" : "w-[10%]"} />  {/* P. Detalle */}
                     <col className={canViewCost ? "w-[9%]" : "w-[10%]"} />  {/* P. Mayor */}
                   </colgroup>
-                  <thead className="bg-slate-50 border-b border-slate-200">
+                  <thead className="bg-slate-100 sticky top-0 z-20 border-b border-slate-300 shadow-2xs">
                     <tr className="text-slate-550 border-b border-slate-200">
                       <th className="px-2 py-1.5 font-sans uppercase truncate">Código</th>
                       <th className="px-2 py-1.5 font-sans uppercase">
@@ -2762,23 +3335,52 @@ export default function Inventario({
                         return (
                           <tr 
                             key={p.id} 
-                            onClick={() => setSelectedProduct(selectedProduct?.id === p.id ? null : p)}
-                            className={`hover:bg-slate-50/50 cursor-pointer transition-all border-b border-slate-100 ${
+                            id={`inv-prod-row-${p.id}`}
+                            onClick={() => {
+                              const sel = window.getSelection()?.toString();
+                              if (sel && sel.trim().length > 0) return;
+                              setSelectedProduct(selectedProduct?.id === p.id ? null : p);
+                            }}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setSelectedProduct(p);
+                              const menuWidth = 250;
+                              const menuHeight = 350;
+                              const x = Math.min(e.clientX, window.innerWidth - menuWidth - 15);
+                              const y = Math.min(e.clientY, window.innerHeight - menuHeight - 15);
+                              setContextMenu({ x: Math.max(10, x), y: Math.max(10, y), product: p });
+                            }}
+                            className={`hover:bg-slate-50/50 cursor-pointer transition-all border-b border-slate-100 select-text ${
                               selectedProduct?.id === p.id 
                                 ? 'bg-sky-50 hover:bg-sky-100/70 border-l-4 border-l-winter-inventarioStart' 
                                 : ''
                             }`}
                           >
-                            <td className="px-2 py-1 font-mono font-bold text-slate-450 truncate" title={p.barcode}>{p.barcode}</td>
-                            <td className="px-2 py-1 font-sans select-text break-words">
-                              <div className="font-bold text-slate-850 text-[11px] leading-tight flex items-center gap-1.5 flex-wrap">
-                                <span>{p.description}</span>
+                            <td 
+                              className="px-2 py-1 font-mono font-bold text-slate-800 select-text cursor-text truncate selection:bg-indigo-600 selection:text-white" 
+                              title={p.barcode}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <span className="select-text cursor-text font-mono font-bold text-slate-800 selection:bg-indigo-600 selection:text-white">
+                                {p.barcode}
+                              </span>
+                            </td>
+                            <td 
+                              className="px-2 py-1 font-sans select-text cursor-text break-words selection:bg-indigo-600 selection:text-white"
+                              onClick={(e) => {
+                                const sel = window.getSelection()?.toString();
+                                if (sel && sel.trim().length > 0) e.stopPropagation();
+                              }}
+                            >
+                              <div className="font-bold text-slate-850 text-[11px] leading-tight flex items-center gap-1.5 flex-wrap select-text">
+                                <span className="select-text cursor-text selection:bg-indigo-600 selection:text-white">{p.description}</span>
                                 {p.exento_impuesto === true ? (
-                                  <span className="bg-amber-100 text-amber-900 border border-amber-300 font-extrabold text-[8.5px] px-1 py-0.2 rounded font-mono shadow-2xs" title="Producto Exento de IVA (0%)">
+                                  <span className="bg-amber-100 text-amber-900 border border-amber-300 font-extrabold text-[8.5px] px-1 py-0.2 rounded font-mono shadow-2xs select-none" title="Producto Exento de IVA (0%)">
                                     (E)
                                   </span>
                                 ) : (
-                                  <span className="bg-sky-50 text-sky-800 border border-sky-200 font-bold text-[8px] px-1 py-0.2 rounded font-mono" title="Producto Gravable con IVA">
+                                  <span className="bg-sky-50 text-sky-800 border border-sky-200 font-bold text-[8px] px-1 py-0.2 rounded font-mono select-none" title="Producto Gravable con IVA">
                                     (G)
                                   </span>
                                 )}
@@ -2796,16 +3398,16 @@ export default function Inventario({
                                 </div>
                               )}
                             </td>
-                            <td className="px-2 py-1 font-sans truncate" title={p.category}>{p.category}</td>
-                            <td className="px-2 py-1 text-center font-mono text-slate-500">{formatStockVal(p.stock_minimo, p.a_granel)}</td>
-                            <td className={`px-2 py-1 text-center font-black font-mono ${isLowStock ? 'text-red-500 animate-pulse font-bold' : 'text-slate-800'}`}>
+                            <td className="px-2 py-1 font-sans truncate select-text cursor-text selection:bg-indigo-600 selection:text-white" title={p.category}>{p.category}</td>
+                            <td className="px-2 py-1 text-center font-mono text-slate-500 select-text cursor-text selection:bg-indigo-600 selection:text-white">{formatStockVal(p.stock_minimo, p.a_granel)}</td>
+                            <td className={`px-2 py-1 text-center font-black font-mono select-text cursor-text selection:bg-indigo-600 selection:text-white ${isLowStock ? 'text-red-500 animate-pulse font-bold' : 'text-slate-800'}`}>
                               {formatStockVal(p.stock_actual, p.a_granel)}
                             </td>
                             {canViewCost && (
-                              <td className="px-2 py-1 text-center font-mono text-slate-600">${p.precio_costo_usd.toFixed(2)}</td>
+                              <td className="px-2 py-1 text-center font-mono text-slate-600 select-text cursor-text selection:bg-indigo-600 selection:text-white">${p.precio_costo_usd.toFixed(2)}</td>
                             )}
-                            <td className="px-2 py-1 text-center font-mono text-emerald-600 font-bold">${p.precio_detalle_usd.toFixed(2)}</td>
-                            <td className="px-2 py-1 text-center font-mono text-slate-600">
+                            <td className="px-2 py-1 text-center font-mono text-emerald-600 font-bold select-text cursor-text selection:bg-indigo-600 selection:text-white">${p.precio_detalle_usd.toFixed(2)}</td>
+                            <td className="px-2 py-1 text-center font-mono text-slate-600 select-text cursor-text selection:bg-indigo-600 selection:text-white">
                               ${p.precio_mayor_usd.toFixed(2)}
                               <span className="text-[8px] text-slate-400 block font-sans">x{p.cantidad_mayorista}</span>
                             </td>
@@ -2884,27 +3486,88 @@ export default function Inventario({
               )}
             </div>
 
-            {/* Sidebar Operations Column */}
-            <div className="lg:col-span-2 space-y-3 font-sans text-slate-800">
+            {/* Sidebar Operations Column - Sticky persistent while scrolling products */}
+            <div className="lg:col-span-2 space-y-3 font-sans text-slate-800 sticky top-2 self-start max-h-[calc(100vh-80px)] overflow-y-auto pr-0.5">
               <div className="bg-slate-150 border border-slate-200 rounded-lg p-3 shadow-inner flex flex-col justify-start h-fit">
                 <h4 className="text-[10px] font-sans font-extrabold text-slate-500 uppercase tracking-widest border-b border-slate-200 pb-1.5 mb-3 flex items-center gap-1">
                   <Package className="w-3.5 h-3.5 text-slate-450" />
                   Operaciones
                 </h4>
 
-                {/* Selected Product Preview */}
+                {/* Selected Product Preview with Image & AI Generator */}
                 {selectedProduct && (
-                  <div className="bg-sky-50 border border-sky-200 text-sky-900 text-[10px] p-2 rounded mb-3 font-sans shadow-sm leading-tight flex flex-col gap-0.5">
-                    <span className="font-extrabold uppercase truncate">{selectedProduct.description}</span>
-                    <span className="font-mono text-slate-500 font-bold">{selectedProduct.barcode}</span>
-                    <span className={`font-mono font-black mt-1 ${selectedProduct.stock_actual <= selectedProduct.stock_minimo ? 'text-red-700 animate-pulse' : 'text-slate-700'}`}>
-                      Stock: {formatStockVal(selectedProduct.stock_actual, selectedProduct.a_granel)} {selectedProduct.a_granel ? 'kg' : 'uds'}
-                    </span>
+                  <div className="bg-sky-50 border border-sky-200 text-sky-900 text-[10px] p-2.5 rounded-lg mb-3 font-sans shadow-sm leading-tight flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <div 
+                        onClick={() => handleOpenImageManager(selectedProduct)}
+                        className="w-12 h-12 rounded-lg bg-white border border-slate-200 flex items-center justify-center flex-shrink-0 overflow-hidden relative shadow-inner cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all"
+                        title="Haga clic para gestionar o cambiar la imagen"
+                      >
+                        <div className="text-center">
+                          <ImageIcon className="w-4 h-4 text-slate-300 mx-auto" />
+                          <span className="text-[7.5px] text-slate-400 font-bold block">Sin Foto</span>
+                        </div>
+                        {selectedProduct.imagen_url && (
+                          <img 
+                            key={`sel-prod-img-${selectedProduct.id}-${selectedProduct.imagen_url}`}
+                            src={selectedProduct.imagen_url} 
+                            alt={selectedProduct.description} 
+                            className="w-full h-full object-cover absolute inset-0 bg-white" 
+                            onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
+                            onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
+                          />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <span className="font-extrabold uppercase truncate block text-slate-900">{selectedProduct.description}</span>
+                        <span className="font-mono text-slate-500 font-bold block text-[9.5px]">{selectedProduct.barcode}</span>
+                        <span className={`font-mono font-black block mt-0.5 ${selectedProduct.stock_actual <= selectedProduct.stock_minimo ? 'text-red-700 animate-pulse' : 'text-slate-700'}`}>
+                          Stock: {formatStockVal(selectedProduct.stock_actual, selectedProduct.a_granel)} {selectedProduct.a_granel ? 'kg' : 'uds'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5 mt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenImageManager(selectedProduct)}
+                        className="bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 font-bold py-1 px-1.5 rounded text-[9px] uppercase tracking-wider flex items-center justify-center gap-1 shadow-2xs transition-all active:scale-95"
+                        title="Subir foto desde PC o pegar URL"
+                      >
+                        <ImageIcon className="w-3 h-3 text-blue-600" />
+                        <span>Foto Manual</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isGeneratingAiImage}
+                        onClick={() => handleGenerateAiImageForProduct(selectedProduct)}
+                        className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-black py-1 px-1.5 rounded text-[9px] uppercase tracking-wider flex items-center justify-center gap-1 shadow-xs transition-all active:scale-95 disabled:opacity-50"
+                        title="Generar foto con IA automáticamente"
+                      >
+                        <Sparkles className="w-3 h-3 text-amber-300" />
+                        <span>{isGeneratingAiImage ? 'IA...' : 'Foto IA'}</span>
+                      </button>
+                    </div>
                   </div>
                 )}
 
                 {/* Operations buttons */}
                 <div className="flex flex-col gap-2.5">
+                  {/* BUTTON: GENERADOR MASIVO DE FOTOS CON IA */}
+                  {hasPermission('editar') && (
+                    <button
+                      onClick={() => setShowBulkAiModal(true)}
+                      className="w-full bg-gradient-to-r from-indigo-900 via-blue-900 to-slate-900 hover:from-indigo-800 hover:to-blue-800 text-white border border-indigo-500/60 py-2 px-3 rounded shadow-md flex items-center justify-between font-sans text-[11px] uppercase tracking-wider text-left transition-all active:scale-95"
+                      title="Generar fotos automáticamente con Inteligencia Artificial para los productos del catálogo"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
+                        <span className="font-extrabold text-amber-300">Fotos IA Masivas</span>
+                      </div>
+                      <span className="bg-slate-950 text-emerald-400 px-1.5 py-0.5 rounded-full text-[9px] font-mono font-black border border-indigo-500/40">
+                        {products.filter(p => !p.imagen_url || p.imagen_url.trim() === '').length} sin foto
+                      </span>
+                    </button>
+                  )}
                   {/* BUTTON 1: AGREGAR */}
                   {hasPermission('crear') && (
                     <button
@@ -4513,6 +5176,111 @@ export default function Inventario({
                 </div>
               </div>
 
+              {/* SECCIÓN DE IMAGEN DEL PRODUCTO (MANUAL / IA) */}
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700 uppercase font-sans flex items-center gap-1.5">
+                    <ImageIcon className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Imagen del Producto (Opcional)</span>
+                  </label>
+                  {newImageUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setNewImageUrl('')}
+                      className="text-[10px] text-red-600 hover:text-red-800 font-bold underline"
+                    >
+                      Quitar Imagen
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-3">
+                  {/* Vista Previa */}
+                  <div className="w-16 h-16 rounded-lg bg-white border border-slate-300 flex items-center justify-center flex-shrink-0 overflow-hidden relative shadow-inner">
+                    <div className="text-center p-1">
+                      <ImageIcon className="w-5 h-5 text-slate-300 mx-auto" />
+                      <span className="text-[8px] text-slate-400 font-bold block">Sin Foto</span>
+                    </div>
+                    {newImageUrl && (
+                      <img 
+                        key={`new-prod-img-${newImageUrl}`}
+                        src={newImageUrl} 
+                        alt="Preview" 
+                        className="w-full h-full object-cover absolute inset-0 bg-white" 
+                        onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
+                        onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
+                      />
+                    )}
+                  </div>
+
+                  <div className="flex-1 space-y-1.5">
+                    {/* URL Input */}
+                    <div className="relative flex items-center">
+                      <LinkIcon className="w-3.5 h-3.5 text-slate-400 absolute left-2" />
+                      <input
+                        type="text"
+                        placeholder="Pegar URL de imagen (https://...)"
+                        value={newImageUrl}
+                        onChange={(e) => setNewImageUrl(e.target.value)}
+                        className="w-full bg-white border border-slate-300 rounded pl-7 pr-2 py-1 text-[11px] text-slate-800 focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+
+                    {/* Action buttons: Subir Archivo PC & Generar IA */}
+                    <div className="flex items-center gap-2">
+                      <label className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-[10px] font-bold py-1 px-2 rounded cursor-pointer flex items-center gap-1 transition-all active:scale-95">
+                        <UploadCloud className="w-3 h-3 text-slate-600" />
+                        <span>{isUploadingManualImage ? 'Subiendo...' : 'Subir desde PC'}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleUploadImageFile(file, 'new');
+                          }}
+                        />
+                      </label>
+
+                      <button
+                        type="button"
+                        disabled={isGeneratingAiImage || !newDesc.trim()}
+                        onClick={async () => {
+                          if (!newDesc.trim()) {
+                            showAlert('Escriba una descripción primero para que la IA sepa qué imagen generar.', 'Descripción Requerida', 'warning');
+                            return;
+                          }
+                          setIsGeneratingAiImage(true);
+                          try {
+                            const res = await fetch('/api/ai/generate-product-image', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ description: newDesc, category: newCat, barcode: newBarcode, saveLocal: true })
+                            });
+                            const data = await res.json();
+                            if (data.success && data.imageUrl) {
+                              setNewImageUrl(data.imageUrl);
+                              showToast('✨ Imagen generada con IA para este producto.');
+                            } else {
+                              showAlert('No se pudo generar la imagen para este producto.', 'Error IA', 'warning');
+                            }
+                          } catch (err: any) {
+                            showAlert(`Error: ${err.message}`, 'Error IA', 'warning');
+                          } finally {
+                            setIsGeneratingAiImage(false);
+                          }
+                        }}
+                        className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 text-white text-[10px] font-bold py-1 px-2.5 rounded flex items-center gap-1 shadow-xs transition-all active:scale-95"
+                        title="Generar imagen automáticamente basada en la descripción"
+                      >
+                        <Sparkles className="w-3 h-3 text-amber-300" />
+                        <span>{isGeneratingAiImage ? 'Generando...' : 'Generar con IA'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div className="text-[10px] text-slate-500 font-sans border-t border-slate-200 pt-2">
                 * Nota: El producto recién creado iniciará con stock actual de 0. Para agregar stock físico inicial, use el botón "Stock" del catálogo y justifíquelo en auditoría.
               </div>
@@ -4755,6 +5523,111 @@ export default function Inventario({
                     onChange={(e) => setEditWholesaleQty(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-mono text-center"
                   />
+                </div>
+              </div>
+
+              {/* SECCIÓN DE IMAGEN DEL PRODUCTO (MANUAL / IA) */}
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700 uppercase font-sans flex items-center gap-1.5">
+                    <ImageIcon className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Imagen del Producto</span>
+                  </label>
+                  {editImageUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setEditImageUrl('')}
+                      className="text-[10px] text-red-600 hover:text-red-800 font-bold underline"
+                    >
+                      Quitar Imagen
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-3">
+                  {/* Vista Previa */}
+                  <div className="w-16 h-16 rounded-lg bg-white border border-slate-300 flex items-center justify-center flex-shrink-0 overflow-hidden relative shadow-inner">
+                    <div className="text-center p-1">
+                      <ImageIcon className="w-5 h-5 text-slate-300 mx-auto" />
+                      <span className="text-[8px] text-slate-400 font-bold block">Sin Foto</span>
+                    </div>
+                    {editImageUrl && (
+                      <img 
+                        key={`edit-prod-img-${editImageUrl}`}
+                        src={editImageUrl} 
+                        alt="Preview" 
+                        className="w-full h-full object-cover absolute inset-0 bg-white" 
+                        onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
+                        onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
+                      />
+                    )}
+                  </div>
+
+                  <div className="flex-1 space-y-1.5">
+                    {/* URL Input */}
+                    <div className="relative flex items-center">
+                      <LinkIcon className="w-3.5 h-3.5 text-slate-400 absolute left-2" />
+                      <input
+                        type="text"
+                        placeholder="Pegar URL de imagen (https://...)"
+                        value={editImageUrl}
+                        onChange={(e) => setEditImageUrl(e.target.value)}
+                        className="w-full bg-white border border-slate-300 rounded pl-7 pr-2 py-1 text-[11px] text-slate-800 focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+
+                    {/* Action buttons: Subir Archivo PC & Generar IA */}
+                    <div className="flex items-center gap-2">
+                      <label className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-[10px] font-bold py-1 px-2 rounded cursor-pointer flex items-center gap-1 transition-all active:scale-95">
+                        <UploadCloud className="w-3 h-3 text-slate-600" />
+                        <span>{isUploadingManualImage ? 'Subiendo...' : 'Subir desde PC'}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleUploadImageFile(file, 'edit');
+                          }}
+                        />
+                      </label>
+
+                      <button
+                        type="button"
+                        disabled={isGeneratingAiImage || !editDesc.trim()}
+                        onClick={async () => {
+                          if (!editDesc.trim()) {
+                            showAlert('Escriba una descripción primero para que la IA sepa qué imagen generar.', 'Descripción Requerida', 'warning');
+                            return;
+                          }
+                          setIsGeneratingAiImage(true);
+                          try {
+                            const res = await fetch('/api/ai/generate-product-image', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ description: editDesc, category: editCat, barcode: editBarcode, saveLocal: true })
+                            });
+                            const data = await res.json();
+                            if (data.success && data.imageUrl) {
+                              setEditImageUrl(data.imageUrl);
+                              showToast('✨ Imagen generada con IA para este producto.');
+                            } else {
+                              showAlert('No se pudo generar la imagen para este producto.', 'Error IA', 'warning');
+                            }
+                          } catch (err: any) {
+                            showAlert(`Error: ${err.message}`, 'Error IA', 'warning');
+                          } finally {
+                            setIsGeneratingAiImage(false);
+                          }
+                        }}
+                        className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 text-white text-[10px] font-bold py-1 px-2.5 rounded flex items-center gap-1 shadow-xs transition-all active:scale-95"
+                        title="Generar imagen automáticamente basada en la descripción"
+                      >
+                        <Sparkles className="w-3 h-3 text-amber-300" />
+                        <span>{isGeneratingAiImage ? 'Generando...' : 'Generar con IA'}</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -7598,6 +8471,720 @@ export default function Inventario({
                 showToast('✅ Precios calculados y aplicados correctamente a la factura.');
               }}
             />
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: GESTOR DE IMAGEN INDIVIDUAL (MANUAL / URL / IA) */}
+      {showImageManagerModal && imageManagerProduct && (
+        <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm z-[88] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200 font-sans text-slate-800">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-950 px-6 py-4 flex justify-between items-center text-white">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-indigo-500/20 rounded-xl border border-indigo-400/30">
+                  <ImageIcon className="w-5 h-5 text-indigo-300" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-black uppercase tracking-wider font-mono">
+                    Gestión de Imagen del Producto
+                  </h3>
+                  <p className="text-[11px] text-slate-300 font-medium truncate max-w-xs">
+                    {imageManagerProduct.description}
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setShowImageManagerModal(false)}
+                className="text-white/70 hover:text-white text-lg font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-5 max-h-[80vh] overflow-y-auto">
+              {/* Product Info Bar */}
+              <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs font-mono">
+                <span className="text-slate-500 font-sans">Código: <strong className="text-slate-800">{imageManagerProduct.barcode}</strong></span>
+                <span className="text-slate-500 font-sans">Categoría: <strong className="text-slate-800">{imageManagerProduct.category || 'GENERAL'}</strong></span>
+              </div>
+
+              {/* High-Res Image Preview Card */}
+              <div className="flex flex-col items-center justify-center bg-slate-100 border-2 border-dashed border-slate-300 rounded-xl p-4 relative group">
+                <div className="w-44 h-44 rounded-xl bg-white border border-slate-200 overflow-hidden shadow-md flex items-center justify-center relative">
+                  <div className="text-center p-4">
+                    <ImageIcon className="w-12 h-12 text-slate-300 mx-auto mb-1" />
+                    <span className="text-xs text-slate-400 font-bold block">Sin Imagen Asignada</span>
+                  </div>
+                  {imageManagerUrlInput && (
+                    <img 
+                      key={`mgr-prod-img-${imageManagerProduct.id}-${imageManagerUrlInput}`}
+                      src={imageManagerUrlInput} 
+                      alt={imageManagerProduct.description} 
+                      className="w-full h-full object-cover absolute inset-0 bg-white" 
+                      onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
+                      onError={(e) => {
+                        (e.currentTarget as HTMLElement).style.display = 'none';
+                      }}
+                    />
+                  )}
+                </div>
+
+                {imageManagerUrlInput && (
+                  <button
+                    type="button"
+                    onClick={handleRemoveManagerImage}
+                    className="mt-3 text-xs text-red-600 hover:text-red-800 font-bold flex items-center gap-1 transition-all"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Quitar / Eliminar Foto</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Option 1: Upload from PC */}
+              <div className="space-y-2">
+                <label className="text-xs font-extrabold uppercase tracking-wider text-slate-700 font-mono block">
+                  1. Cargar Foto desde la Computadora (Manual)
+                </label>
+                <label className="w-full bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-xl py-2.5 px-4 text-xs font-bold text-slate-700 flex items-center justify-center gap-2 cursor-pointer shadow-2xs transition-all active:scale-98">
+                  <UploadCloud className="w-4 h-4 text-indigo-600" />
+                  <span>{isUploadingManualImage ? 'Guardando Imagen...' : 'Seleccionar Archivo de Imagen (JPG, PNG, WEBP)'}</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    disabled={isUploadingManualImage}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file && imageManagerProduct) {
+                        handleUploadImageFile(file, 'manager', imageManagerProduct);
+                      }
+                    }}
+                  />
+                </label>
+              </div>
+
+              {/* Option 2: Direct URL */}
+              <div className="space-y-2">
+                <label className="text-xs font-extrabold uppercase tracking-wider text-slate-700 font-mono block">
+                  2. Pegar Enlace Directo de Internet (URL)
+                </label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1 flex items-center">
+                    <LinkIcon className="w-4 h-4 text-slate-400 absolute left-3" />
+                    <input
+                      type="text"
+                      placeholder="https://ejemplo.com/foto-producto.jpg"
+                      value={imageManagerUrlInput}
+                      onChange={(e) => setImageManagerUrlInput(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-800 focus:bg-white focus:border-indigo-600 focus:outline-none font-mono"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSaveManagerUrl}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2 rounded-lg shadow-sm transition-all active:scale-95 flex items-center gap-1"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Guardar</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Option 3: Generate with AI */}
+              <div className="space-y-2 pt-1 border-t border-slate-200">
+                <label className="text-xs font-extrabold uppercase tracking-wider text-slate-700 font-mono block">
+                  3. Generación con Inteligencia Artificial
+                </label>
+                <button
+                  type="button"
+                  disabled={isGeneratingAiImage}
+                  onClick={() => handleGenerateAiImageForProduct(imageManagerProduct)}
+                  className="w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-extrabold py-2.5 px-4 rounded-xl text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-md transition-all active:scale-98 disabled:opacity-50"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+                  <span>{isGeneratingAiImage ? 'Generando Foto con IA...' : 'Generar Foto Fotográfica con IA'}</span>
+                </button>
+                <p className="text-[10px] text-slate-400 text-center font-sans">
+                  La IA detecta automáticamente la descripción y categoría para generar una fotografía hiperrealista en fondo limpio.
+                </p>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="bg-slate-50 px-6 py-3 border-t border-slate-200 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowImageManagerModal(false)}
+                className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs px-5 py-2 rounded-lg transition-all"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: GENERACIÓN MASIVA DE FOTOS CON IA */}
+      {showBulkAiModal && (
+        <div className="fixed inset-0 bg-slate-955/85 backdrop-blur-md z-[88] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-indigo-200 max-w-2xl w-full overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200 font-sans text-slate-800 max-h-[90vh]">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-indigo-950 via-blue-900 to-slate-950 px-6 py-4 flex justify-between items-center text-white">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-indigo-500/20 rounded-xl border border-indigo-400/30">
+                  <Sparkles className="w-5 h-5 text-amber-400 animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-wider font-mono flex items-center gap-2">
+                    Generador Masivo de Fotos con IA
+                  </h3>
+                  <p className="text-[11px] text-indigo-200 font-medium">
+                    Asigna fotos fotográficas automáticas a todo tu inventario en un solo clic
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                disabled={isBulkAiRunning}
+                onClick={() => setShowBulkAiModal(false)}
+                className="text-white/70 hover:text-white text-lg font-bold disabled:opacity-30"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 space-y-5 overflow-y-auto">
+              {/* Summary Badges */}
+              <div className="grid grid-cols-2 gap-3 font-mono">
+                <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 flex items-center justify-between">
+                  <span className="text-xs text-sky-800 font-sans font-bold">Total en Catálogo:</span>
+                  <span className="text-base font-black text-sky-900">{products.length}</span>
+                </div>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center justify-between">
+                  <span className="text-xs text-amber-800 font-sans font-bold">Productos Sin Foto:</span>
+                  <span className="text-base font-black text-amber-900">
+                    {products.filter(p => !p.imagen_url || p.imagen_url.trim() === '').length}
+                  </span>
+                </div>
+              </div>
+
+              {/* Scope Selection */}
+              {!isBulkAiRunning && (
+                <div className="space-y-2">
+                  <label className="text-xs font-extrabold uppercase tracking-wider text-slate-700 font-mono block">
+                    Alcance del Procesamiento
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label className={`border-2 rounded-xl p-3.5 cursor-pointer flex items-start gap-3 transition-all ${
+                      bulkAiScope === 'sin_foto'
+                        ? 'border-indigo-600 bg-indigo-50/50 shadow-sm'
+                        : 'border-slate-200 hover:border-slate-300 bg-white'
+                    }`}>
+                      <input
+                        type="radio"
+                        name="bulkScope"
+                        checked={bulkAiScope === 'sin_foto'}
+                        onChange={() => setBulkAiScope('sin_foto')}
+                        className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <div>
+                        <strong className="text-xs text-slate-900 block font-bold">Solo Productos Sin Foto</strong>
+                        <span className="text-[11px] text-slate-500 block mt-0.5 font-normal">
+                          Procesa únicamente los {products.filter(p => !p.imagen_url || p.imagen_url.trim() === '').length} productos que aún no tienen imagen (Recomendado).
+                        </span>
+                      </div>
+                    </label>
+
+                    <label className={`border-2 rounded-xl p-3.5 cursor-pointer flex items-start gap-3 transition-all ${
+                      bulkAiScope === 'todos'
+                        ? 'border-indigo-600 bg-indigo-50/50 shadow-sm'
+                        : 'border-slate-200 hover:border-slate-300 bg-white'
+                    }`}>
+                      <input
+                        type="radio"
+                        name="bulkScope"
+                        checked={bulkAiScope === 'todos'}
+                        onChange={() => setBulkAiScope('todos')}
+                        className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <div>
+                        <strong className="text-xs text-slate-900 block font-bold">Todos los Productos ({products.length})</strong>
+                        <span className="text-[11px] text-slate-500 block mt-0.5 font-normal">
+                          Regenera y actualiza las imágenes de todo el catálogo completo.
+                        </span>
+                      </div>
+                    </label>
+
+                    {/* OPTION 3: POR CATEGORÍA ESPECÍFICA */}
+                    <label className={`border-2 rounded-xl p-3.5 cursor-pointer flex items-start gap-3 transition-all sm:col-span-2 ${
+                      bulkAiScope === 'categoria'
+                        ? 'border-indigo-600 bg-indigo-50/50 shadow-sm'
+                        : 'border-slate-200 hover:border-slate-300 bg-white'
+                    }`}>
+                      <input
+                        type="radio"
+                        name="bulkScope"
+                        checked={bulkAiScope === 'categoria'}
+                        onChange={() => {
+                          setBulkAiScope('categoria');
+                          if (!selectedBulkCategory && availableCategories.length > 0) {
+                            setSelectedBulkCategory(availableCategories[0]);
+                          }
+                        }}
+                        className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <div className="flex-1">
+                        <strong className="text-xs text-slate-900 block font-bold">Por Categoría Específica</strong>
+                        <span className="text-[11px] text-slate-500 block mt-0.5 font-normal">
+                          Genera o actualiza fotos con IA únicamente para los productos de una categoría del inventario.
+                        </span>
+
+                        {bulkAiScope === 'categoria' && (
+                          <div className="mt-3 space-y-2 bg-white p-3 rounded-xl border border-indigo-200 shadow-xs" onClick={(e) => e.stopPropagation()}>
+                            <label className="text-[10px] font-bold uppercase text-slate-700 block">Seleccionar Categoría:</label>
+                            <select
+                              value={selectedBulkCategory}
+                              onChange={(e) => setSelectedBulkCategory(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-xs px-3 py-2 rounded-lg font-bold outline-none focus:border-indigo-500 shadow-2xs"
+                            >
+                              {availableCategories.map(cat => {
+                                const countTotal = products.filter(p => (p.category || '').toUpperCase() === cat).length;
+                                const countNoImg = products.filter(p => (p.category || '').toUpperCase() === cat && (!p.imagen_url || p.imagen_url.trim() === '')).length;
+                                return (
+                                  <option key={cat} value={cat}>
+                                    {cat} — ({countTotal} productos | {countNoImg} sin foto)
+                                  </option>
+                                );
+                              })}
+                            </select>
+
+                            <label className="flex items-center gap-2 pt-1 cursor-pointer select-none">
+                              <input
+                                type="checkbox"
+                                checked={bulkCategoryNoPhotoOnly}
+                                onChange={(e) => setBulkCategoryNoPhotoOnly(e.target.checked)}
+                                className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                              />
+                              <span className="text-xs text-slate-800 font-bold">
+                                Procesar únicamente productos sin foto en esta categoría
+                              </span>
+                            </label>
+                          </div>
+                        )}
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {/* Progress & Live Processing Bar */}
+              {isBulkAiRunning && (
+                <div className="bg-slate-900 text-white rounded-xl p-4 space-y-3 shadow-lg animate-in fade-in">
+                  <div className="flex justify-between items-center text-xs font-mono">
+                    <span className="text-amber-300 font-bold flex items-center gap-1.5">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Procesando catálogo con IA...
+                    </span>
+                    <span className="font-extrabold text-white">
+                      {bulkAiProgress.current} / {bulkAiProgress.total} ({bulkAiProgress.percent}%)
+                    </span>
+                  </div>
+
+                  {/* Progress bar container */}
+                  <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden p-0.5 border border-slate-700">
+                    <div 
+                      className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400 rounded-full transition-all duration-300"
+                      style={{ width: `${bulkAiProgress.percent}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Live Card Gallery of Generated Items with One-Click Discard */}
+              {bulkAiLogs.length > 0 && (
+                <div className="space-y-2.5">
+                  <div className="flex justify-between items-center bg-slate-100 p-2.5 rounded-xl border border-slate-200">
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-[11px] font-mono font-black uppercase tracking-wider text-slate-700">
+                        Resultados de Fotos ({bulkAiLogs.filter(l => l.success && !l.discarded).length} Conservadas / {bulkAiLogs.filter(l => l.discarded).length} Descartadas):
+                      </h4>
+                      <span className="text-[10px] text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded font-bold font-sans">
+                        💡 Haga clic en cualquier foto para descartarla o conservarla
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setBulkAiLogs(prev => prev.map(i => i.success ? { ...i, discarded: false } : i))}
+                        className="text-[10px] font-bold font-sans text-emerald-700 hover:text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded shadow-2xs hover:bg-emerald-100 transition-all cursor-pointer"
+                      >
+                        ✓ Conservar Todas
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBulkAiLogs(prev => prev.map(i => ({ ...i, discarded: true })))}
+                        className="text-[10px] font-bold font-sans text-red-700 hover:text-red-800 bg-red-50 border border-red-200 px-2 py-0.5 rounded shadow-2xs hover:bg-red-100 transition-all cursor-pointer"
+                      >
+                        ✕ Descartar Todas
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 max-h-64 overflow-y-auto p-1.5 bg-slate-50 border border-slate-200 rounded-xl">
+                    {bulkAiLogs.map((log) => {
+                      const isDiscarded = log.discarded;
+                      return (
+                        <div 
+                          key={log.id} 
+                          onClick={() => log.success && handleToggleDiscardBulkAiItem(log.id)}
+                          className={`bg-white border rounded-xl p-2.5 flex flex-col items-center text-center shadow-xs transition-all relative select-none cursor-pointer group hover:scale-[1.02] ${
+                            isDiscarded 
+                              ? 'border-red-400 bg-red-50/40 opacity-55 ring-1 ring-red-400' 
+                              : 'border-emerald-500 bg-white ring-2 ring-emerald-500/80 shadow-sm'
+                          }`}
+                          title={isDiscarded ? "Haga clic para CONSERVAR esta foto" : "Haga clic para DESCARTAR esta foto"}
+                        >
+                          {/* Badge Corner Status */}
+                          <div className="absolute top-1.5 right-1.5 z-10">
+                            {isDiscarded ? (
+                              <span className="bg-red-600 text-white text-[8px] font-extrabold font-mono px-1.5 py-0.5 rounded-full shadow flex items-center gap-0.5">
+                                ❌ Descartada
+                              </span>
+                            ) : log.success ? (
+                              <span className="bg-emerald-600 text-white text-[8px] font-extrabold font-mono px-1.5 py-0.5 rounded-full shadow flex items-center gap-0.5">
+                                ✓ Conservar
+                              </span>
+                            ) : (
+                              <span className="bg-amber-500 text-slate-950 text-[8px] font-extrabold font-mono px-1.5 py-0.5 rounded-full shadow">
+                                Falló
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="w-20 h-20 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center mb-1.5 flex-shrink-0 relative shadow-inner">
+                            <ImageIcon className="w-6 h-6 text-slate-300" />
+                            {log.imageUrl && (
+                              <img 
+                                key={`bulk-ai-img-${log.id}-${log.imageUrl}`}
+                                src={log.imageUrl} 
+                                alt={log.description} 
+                                className={`w-full h-full object-cover absolute inset-0 bg-white transition-all ${isDiscarded ? 'grayscale opacity-75' : ''}`}
+                                onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
+                                onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
+                              />
+                            )}
+                          </div>
+                          <span className="text-[10px] font-extrabold text-slate-850 uppercase truncate w-full block leading-tight">
+                            {log.description}
+                          </span>
+                          <span className="text-[8.5px] font-mono text-slate-400 block truncate w-full">
+                            {log.barcode}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Info Notice */}
+              <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-xs text-indigo-900 leading-relaxed font-sans flex items-start gap-2.5">
+                <Sparkles className="w-4 h-4 text-indigo-600 flex-shrink-0 mt-0.5" />
+                <span>
+                  <strong>Almacenamiento Local Optimizado:</strong> Las fotos generadas se descargan y almacenan localmente en el servidor, garantizando que el punto de venta (POS) y los celulares carguen las imágenes de forma instantánea sin gastar datos ni depender de conexión a internet.
+                </span>
+              </div>
+            </div>
+
+            {/* Footer Controls */}
+            <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex justify-between items-center">
+              <button
+                type="button"
+                disabled={isBulkAiRunning}
+                onClick={() => setShowBulkAiModal(false)}
+                className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs px-4 py-2 rounded-lg transition-all disabled:opacity-50"
+              >
+                Cerrar
+              </button>
+
+              <div className="flex gap-2">
+                {isBulkAiRunning ? (
+                  <button
+                    type="button"
+                    onClick={() => { isBulkAiCancelledRef.current = true; }}
+                    className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-4 py-2 rounded-lg transition-all flex items-center gap-1.5 shadow"
+                  >
+                    <PauseCircle className="w-4 h-4" />
+                    <span>Pausar Generación</span>
+                  </button>
+                ) : (
+                  <>
+                    {bulkAiLogs.some(l => l.success) ? (
+                      <button
+                        type="button"
+                        onClick={handleApplyBulkAiSelected}
+                        disabled={bulkAiLogs.filter(l => l.success && !l.discarded).length === 0}
+                        className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-extrabold text-xs px-5 py-2.5 rounded-lg transition-all flex items-center gap-2 shadow-md active:scale-95 cursor-pointer"
+                      >
+                        <CheckCircle2 className="w-4 h-4 text-emerald-200" />
+                        <span>Aplicar Fotos Seleccionadas ({bulkAiLogs.filter(l => l.success && !l.discarded).length})</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleStartBulkAiGeneration}
+                        className="bg-gradient-to-r from-blue-600 via-indigo-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white font-extrabold text-xs px-5 py-2 rounded-lg transition-all flex items-center gap-2 shadow-md active:scale-95"
+                      >
+                        <Sparkles className="w-4 h-4 text-amber-300" />
+                        <span>Iniciar Generación Masiva con IA</span>
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MENÚ CONTEXTUAL FLOTANTE (CLIC DERECHO EN PRODUCTO) */}
+      {contextMenu && (
+        <div 
+          onClick={(e) => e.stopPropagation()}
+          style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
+          className="fixed z-[120] w-64 bg-white/95 backdrop-blur-md border border-slate-200 rounded-xl shadow-2xl overflow-hidden py-1 text-slate-700 font-sans text-xs animate-scale-in"
+        >
+          {/* Header con resumen del producto */}
+          <div className="px-3 py-2 bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 text-white flex items-center gap-2.5 border-b border-slate-700">
+            <div className="w-9 h-9 rounded-lg bg-slate-800 flex items-center justify-center overflow-hidden border border-slate-700 flex-shrink-0 relative">
+              {contextMenu.product.imagen_url ? (
+                <img src={contextMenu.product.imagen_url} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <Package className="w-4 h-4 text-slate-400" />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <span className="text-[9px] text-blue-300 font-mono font-bold block truncate">{contextMenu.product.barcode}</span>
+              <span className="text-[11px] font-black text-white block uppercase truncate leading-tight">{contextMenu.product.description}</span>
+              <span className="text-[9px] text-emerald-400 font-mono block mt-0.5">
+                Stock: {formatStockVal(contextMenu.product.stock_actual, contextMenu.product.a_granel)} {contextMenu.product.a_granel ? 'kg' : 'uds'}
+              </span>
+            </div>
+          </div>
+
+          <div className="p-1 space-y-0.5">
+            {/* 1. Modificar Ficha Técnica */}
+            {hasPermission('editar') && (
+              <button
+                type="button"
+                onClick={() => {
+                  const prod = contextMenu.product;
+                  setContextMenu(null);
+                  handleOpenEditProduct(prod);
+                }}
+                className="w-full text-left px-2.5 py-1.5 hover:bg-slate-100 hover:text-slate-900 rounded-lg flex items-center gap-2 font-bold transition-colors"
+              >
+                <Edit className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
+                <span>Modificar Ficha Técnica</span>
+              </button>
+            )}
+
+            {/* 2. Ajustar Precios */}
+            {hasPermission('editar') && (
+              <button
+                type="button"
+                onClick={() => {
+                  const prod = contextMenu.product;
+                  setContextMenu(null);
+                  handleOpenPrices(prod);
+                }}
+                className="w-full text-left px-2.5 py-1.5 hover:bg-amber-50 hover:text-amber-900 rounded-lg flex items-center gap-2 font-bold transition-colors"
+              >
+                <PenTool className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                <span>Ajustar Precios ($ / Bs)</span>
+              </button>
+            )}
+
+            {/* 3. Ajustar Stock */}
+            <button
+              type="button"
+              onClick={() => {
+                const prod = contextMenu.product;
+                setContextMenu(null);
+                handleOpenAdjust(prod);
+              }}
+              className="w-full text-left px-2.5 py-1.5 hover:bg-cyan-50 hover:text-cyan-900 rounded-lg flex items-center gap-2 font-bold transition-colors"
+            >
+              <RefreshCw className="w-3.5 h-3.5 text-cyan-600 flex-shrink-0" />
+              <span>Ajustar Existencia (Stock)</span>
+            </button>
+
+            <div className="border-t border-slate-100 my-1"></div>
+
+            {/* 4. Gestionar Foto Manual */}
+            <button
+              type="button"
+              onClick={() => {
+                const prod = contextMenu.product;
+                setContextMenu(null);
+                handleOpenImageManager(prod);
+              }}
+              className="w-full text-left px-2.5 py-1.5 hover:bg-blue-50 hover:text-blue-900 rounded-lg flex items-center gap-2 font-bold transition-colors"
+            >
+              <ImageIcon className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
+              <span>Gestionar Foto (Subir / URL)</span>
+            </button>
+
+            {/* 5. Generar Foto con IA */}
+            <button
+              type="button"
+              onClick={() => {
+                const prod = contextMenu.product;
+                setContextMenu(null);
+                handleGenerateAiImageForProduct(prod);
+              }}
+              className="w-full text-left px-2.5 py-1.5 hover:bg-indigo-50 hover:text-indigo-900 rounded-lg flex items-center gap-2 font-bold transition-colors"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+              <span>Generar Foto con IA</span>
+            </button>
+
+            {/* 6. Eliminar Producto */}
+            {hasPermission('eliminar') && (
+              <>
+                <div className="border-t border-slate-100 my-1"></div>
+                <button
+                  type="button"
+                  disabled={contextMenu.product.stock_actual > 0}
+                  onClick={() => {
+                    setSelectedProduct(contextMenu.product);
+                    setContextMenu(null);
+                    handleDeleteProductClick();
+                  }}
+                  className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 font-bold transition-colors ${
+                    contextMenu.product.stock_actual > 0 
+                      ? 'opacity-40 cursor-not-allowed text-slate-400' 
+                      : 'hover:bg-rose-50 text-rose-600 hover:text-rose-700'
+                  }`}
+                  title={contextMenu.product.stock_actual > 0 ? "Solo se puede eliminar con existencia 0" : "Eliminar producto"}
+                >
+                  <Minus className="w-3.5 h-3.5 text-rose-600 flex-shrink-0" />
+                  <span>Eliminar Producto</span>
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* HIDDEN CAPTURE CONTAINER FOR ATTACHED WHATSAPP REPORT DOCUMENT */}
+      {capturingReportMode && (
+        <div className="fixed top-0 left-[-9999px] z-[-50] opacity-100 pointer-events-none">
+          <div
+            id="inventario-report-capture-card"
+            className="w-[850px] bg-white p-6 text-slate-900 font-sans shadow-none rounded-none border border-slate-300"
+          >
+            {/* Header */}
+            <div className="border-b-2 border-slate-900 pb-3 mb-4 flex justify-between items-start">
+              <div>
+                <h1 className="text-xl font-extrabold text-slate-900 tracking-wide uppercase">
+                  {companyConfig?.nombre_comercio || 'INVERSIONES NIQUITAO 3000 C.A.'}
+                </h1>
+                <p className="text-xs text-slate-600 font-medium mt-0.5">
+                  RIF: {companyConfig?.rif || 'J-411332631'} | Teléfono: {companyConfig?.telefono || '0412-5515172'}
+                </p>
+                <p className="text-xs font-bold text-indigo-700 mt-1 uppercase">
+                  {capturingReportMode === 'faltantes' ? '⚠️ REPORTE DE PRODUCTOS FALTANTES (BAJO STOCK / AGOTADOS)' : '📋 REPORTE GENERAL DE INVENTARIO Y AUDITORÍA'}
+                </p>
+              </div>
+              <div className="text-right">
+                <span className="bg-slate-900 text-white font-mono font-bold text-xs px-2.5 py-1 rounded">
+                  ESTACIÓN: {localStorage.getItem('pos_terminal_name') || 'CAJA_01'}
+                </span>
+                <p className="text-[10px] text-slate-500 font-mono mt-1">
+                  Generado: {new Date().toLocaleString('es-VE')}
+                </p>
+              </div>
+            </div>
+
+            {/* KPI Summary Row */}
+            <div className="grid grid-cols-4 gap-3 bg-slate-50 border border-slate-200 rounded-lg p-3 mb-4 font-mono text-xs">
+              <div>
+                <span className="text-[10px] text-slate-500 font-sans font-bold uppercase block">Artículos Reportados:</span>
+                <strong className="text-slate-900 text-sm font-extrabold">
+                  {capturingReportMode === 'faltantes' 
+                    ? sortedProducts.filter(p => (parseFloat(p.stock_actual as any) || 0) <= (parseFloat(p.stock_minimo as any) || 0)).length 
+                    : sortedProducts.length} productos
+                </strong>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-500 font-sans font-bold uppercase block">Valor Total (Detalle):</span>
+                <strong className="text-emerald-700 text-sm font-extrabold">
+                  ${(capturingReportMode === 'faltantes'
+                    ? sortedProducts.filter(p => (parseFloat(p.stock_actual as any) || 0) <= (parseFloat(p.stock_minimo as any) || 0))
+                    : sortedProducts
+                  ).reduce((acc, p) => acc + p.precio_detalle_usd * (parseFloat(p.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </strong>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-500 font-sans font-bold uppercase block">Valor Total (Costo):</span>
+                <strong className="text-slate-900 text-sm font-extrabold">
+                  ${(capturingReportMode === 'faltantes'
+                    ? sortedProducts.filter(p => (parseFloat(p.stock_actual as any) || 0) <= (parseFloat(p.stock_minimo as any) || 0))
+                    : sortedProducts
+                  ).reduce((acc, p) => acc + p.precio_costo_usd * (parseFloat(p.stock_actual as any) || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </strong>
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-500 font-sans font-bold uppercase block">Filtro Aplicado:</span>
+                <strong className="text-slate-800 text-[11px] font-sans truncate block">
+                  {selectedCategories.length === 0 ? 'TODAS LAS CATEGORÍAS' : selectedCategories.join(', ')}
+                </strong>
+              </div>
+            </div>
+
+            {/* Table of items */}
+            <table className="w-full text-left font-mono text-[10px] border-collapse">
+              <thead>
+                <tr className="bg-slate-800 text-white font-sans uppercase text-[9px] border-b border-slate-900">
+                  <th className="p-1.5 w-28">Código</th>
+                  <th className="p-1.5">Descripción</th>
+                  <th className="p-1.5 w-32">Categoría</th>
+                  <th className="p-1.5 w-16 text-right">Mínimo</th>
+                  <th className="p-1.5 w-16 text-right">Existencia</th>
+                  <th className="p-1.5 w-20 text-right">P. Detalle</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(capturingReportMode === 'faltantes'
+                  ? sortedProducts.filter(p => (parseFloat(p.stock_actual as any) || 0) <= (parseFloat(p.stock_minimo as any) || 0))
+                  : sortedProducts
+                ).slice(0, 100).map((p, idx) => (
+                  <tr key={p.id || idx} className="border-b border-slate-200">
+                    <td className="p-1.5 text-slate-600 font-bold">{p.barcode}</td>
+                    <td className="p-1.5 font-bold text-slate-900">{p.description}</td>
+                    <td className="p-1.5 text-slate-500 font-sans">{p.category}</td>
+                    <td className="p-1.5 text-right text-slate-600">{formatStockVal(p.stock_minimo, p.a_granel)}</td>
+                    <td className={`p-1.5 text-right font-extrabold ${p.stock_actual <= p.stock_minimo ? 'text-red-600' : 'text-slate-900'}`}>
+                      {formatStockVal(p.stock_actual, p.a_granel)}
+                    </td>
+                    <td className="p-1.5 text-right text-emerald-700 font-extrabold">${p.precio_detalle_usd.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {/* Footer */}
+            <div className="mt-4 pt-2 border-t border-slate-200 text-center text-[9px] text-slate-400 font-mono flex justify-between items-center">
+              <span>*** WinterPOS AL System - Documento Oficial de Auditoría ***</span>
+              <span>Página 1 de 1</span>
+            </div>
           </div>
         </div>
       )}

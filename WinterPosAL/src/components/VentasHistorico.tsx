@@ -54,6 +54,27 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
   const [editSalidaUsd, setEditSalidaUsd] = useState('');
   const [editSalidaVes, setEditSalidaVes] = useState('');
 
+  // Context Menu state for right-click on transactions or cierres
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    type: 'sale' | 'cierre';
+    data: any;
+  } | null>(null);
+
+  useEffect(() => {
+    const handleCloseContextMenu = () => setContextMenu(null);
+    window.addEventListener('click', handleCloseContextMenu);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('click', handleCloseContextMenu);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
 
   const handleHeaderMouseDown = (e: React.MouseEvent) => {
@@ -1746,6 +1767,17 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                           key={sale.factura_nro} 
                           id={`sale-row-${sale.factura_nro}`}
                           onClick={() => setSelectedSaleRow(sale)}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            setSelectedSaleRow(sale);
+                            const menuWidth = 280;
+                            const menuHeight = 260;
+                            const clickX = e.clientX;
+                            const clickY = e.clientY;
+                            const x = clickX + menuWidth > window.innerWidth ? Math.max(10, window.innerWidth - menuWidth - 15) : clickX;
+                            const y = clickY + menuHeight > window.innerHeight ? Math.max(10, window.innerHeight - menuHeight - 15) : clickY;
+                            setContextMenu({ x, y, type: 'sale', data: sale });
+                          }}
                           className={`transition-all cursor-pointer ${rowBg}`}
                         >
                           <td className="px-2 py-1 text-center" onClick={(e) => e.stopPropagation()}>
@@ -2131,6 +2163,17 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                           key={c.id} 
                           onClick={() => setSelectedCierreRow(c)}
                           onDoubleClick={() => setSelectedCierre(c)}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            setSelectedCierreRow(c);
+                            const menuWidth = 290;
+                            const menuHeight = 310;
+                            const clickX = e.clientX;
+                            const clickY = e.clientY;
+                            const x = clickX + menuWidth > window.innerWidth ? Math.max(10, window.innerWidth - menuWidth - 15) : clickX;
+                            const y = clickY + menuHeight > window.innerHeight ? Math.max(10, window.innerHeight - menuHeight - 15) : clickY;
+                            setContextMenu({ x, y, type: 'cierre', data: c });
+                          }}
                           className={`cursor-pointer transition-all ${
                             isSelected 
                               ? 'bg-blue-50/80 border-l-4 border-emerald-500 font-medium text-slate-900 shadow-sm' 
@@ -4095,6 +4138,233 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
             <h4 className="font-extrabold text-slate-800 text-sm uppercase">Reenviando por WhatsApp</h4>
             <p className="text-xs text-slate-600 font-mono leading-relaxed">{sendingProgressMsg}</p>
           </div>
+        </div>
+      )}
+
+      {/* MENÚ CONTEXTUAL FLOTANTE (CLIC DERECHO EN FACTURAS O CIERRES) */}
+      {contextMenu && (
+        <div 
+          onClick={(e) => e.stopPropagation()}
+          style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
+          className="fixed z-[120] w-72 bg-white/95 backdrop-blur-md border border-slate-200 rounded-xl shadow-2xl overflow-hidden py-1 text-slate-700 font-sans text-xs animate-scale-in select-none"
+        >
+          {contextMenu.type === 'sale' && (() => {
+            const sale = contextMenu.data as Sale;
+            const isDev = sale.factura_nro?.startsWith('DEV-');
+
+            return (
+              <>
+                {/* Header Factura */}
+                <div className="px-3 py-2 bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 text-white flex items-center gap-2.5 border-b border-slate-700">
+                  <div className="w-9 h-9 rounded-lg bg-slate-800 flex items-center justify-center overflow-hidden border border-slate-700 flex-shrink-0">
+                    <ShoppingCart className="w-4 h-4 text-emerald-400" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-mono font-black text-white truncate">{sale.factura_nro}</span>
+                      {sale.tipo_documento === 'NOTA_ENTREGA' ? (
+                        <span className="text-[8px] bg-slate-700 text-slate-200 px-1 py-0.2 rounded font-sans font-bold">NOTA</span>
+                      ) : (
+                        <span className="text-[8px] bg-emerald-700 text-emerald-100 px-1 py-0.2 rounded font-sans font-bold">FISCAL</span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-slate-300 font-medium block truncate uppercase">{sale.client?.nombre || 'PUBLICO GENERAL'}</span>
+                    <span className="text-[9.5px] text-emerald-300 font-mono font-bold block mt-0.5">
+                      ${Math.abs(sale.totalUSD || 0).toFixed(2)} USD • {formatBs(Math.abs(sale.totalVES || 0))}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-1 space-y-0.5">
+                  {/* 1. Ver Detalles / Comprobante */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setContextMenu(null);
+                      setSelectedSale(sale);
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-emerald-50 hover:text-emerald-900 rounded-lg flex items-center gap-2 font-bold transition-colors cursor-pointer"
+                  >
+                    <Eye className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                    <span>Ver Detalles / Comprobante</span>
+                  </button>
+
+                  {/* 2. Reenviar por WhatsApp */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setContextMenu(null);
+                      handleResendWhatsAppSale(sale);
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-green-50 hover:text-green-900 rounded-lg flex items-center gap-2 font-bold transition-colors cursor-pointer"
+                  >
+                    <MessageCircle className="w-3.5 h-3.5 text-green-600 flex-shrink-0" />
+                    <span>Reenviar por WhatsApp</span>
+                  </button>
+
+                  {/* 3. Reimprimir Ticket */}
+                  <button
+                    type="button"
+                    disabled={isDev}
+                    onClick={() => {
+                      setContextMenu(null);
+                      onReprintTicket(sale);
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 font-bold transition-colors ${
+                      isDev ? 'opacity-40 cursor-not-allowed text-slate-400' : 'hover:bg-blue-50 hover:text-blue-900 text-slate-700 cursor-pointer'
+                    }`}
+                  >
+                    <Printer className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
+                    <span>Reimprimir Ticket ($ / Bs)</span>
+                  </button>
+
+                  <div className="border-t border-slate-100 my-1"></div>
+
+                  {/* 4. Libro de Ventas SENIAT */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setContextMenu(null);
+                      handleDownloadLibroVentasFiscalPDF();
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-slate-100 hover:text-slate-900 rounded-lg flex items-center gap-2 font-bold transition-colors text-slate-600 cursor-pointer"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
+                    <span>Libro de Ventas SENIAT</span>
+                  </button>
+                </div>
+              </>
+            );
+          })()}
+
+          {contextMenu.type === 'cierre' && (() => {
+            const c = contextMenu.data as CierreCaja;
+            const fecha = c.fechaCierre || c.fechaApertura || c.fecha || 'N/A';
+            const ventaTotal = (c.ventaTotalUsd || 0).toFixed(2);
+            const isAbierta = c.status === 'Abierta' || !c.fechaCierre;
+
+            return (
+              <>
+                {/* Header Cierre */}
+                <div className="px-3 py-2 bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 text-white flex items-center gap-2.5 border-b border-slate-700">
+                  <div className="w-9 h-9 rounded-lg bg-slate-800 flex items-center justify-center overflow-hidden border border-slate-700 flex-shrink-0">
+                    <History className="w-4 h-4 text-sky-400" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-mono font-black text-white truncate">{fecha}</span>
+                      {isAbierta ? (
+                        <span className="text-[8px] bg-emerald-600 text-white px-1 py-0.2 rounded font-sans font-bold">ABIERTO</span>
+                      ) : (
+                        <span className="text-[8px] bg-slate-700 text-slate-300 px-1 py-0.2 rounded font-sans font-bold">CERRADO</span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-slate-300 font-medium block truncate uppercase">
+                      Cajero: {c.usuario} {c.terminal ? `(${c.terminal})` : ''}
+                    </span>
+                    <span className="text-[9.5px] text-emerald-300 font-mono font-bold block mt-0.5">
+                      Ventas: ${ventaTotal} USD
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-1 space-y-0.5">
+                  {/* 1. Ver Detalles / Comprobante */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setContextMenu(null);
+                      setSelectedCierre(c);
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-emerald-50 hover:text-emerald-900 rounded-lg flex items-center gap-2 font-bold transition-colors cursor-pointer"
+                  >
+                    <Eye className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                    <span>Ver Comprobante / Arqueo</span>
+                  </button>
+
+                  {/* 2. Reenviar por WhatsApp */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setContextMenu(null);
+                      handleResendWhatsAppCierre(c);
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-green-50 hover:text-green-900 rounded-lg flex items-center gap-2 font-bold transition-colors cursor-pointer"
+                  >
+                    <MessageCircle className="w-3.5 h-3.5 text-green-600 flex-shrink-0" />
+                    <span>Reenviar por WhatsApp</span>
+                  </button>
+
+                  {/* 3. Ver Facturas del Cierre */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setContextMenu(null);
+                      setCierreInvoicesModal(c);
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-blue-50 hover:text-blue-900 rounded-lg flex items-center gap-2 font-bold transition-colors cursor-pointer"
+                  >
+                    <ShoppingCart className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
+                    <span>Ver Facturas del Cierre</span>
+                  </button>
+
+                  {/* 4. Reporte General en PDF */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setContextMenu(null);
+                      handleDownloadCierresReport();
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-slate-100 hover:text-slate-900 rounded-lg flex items-center gap-2 font-bold transition-colors text-slate-700 cursor-pointer"
+                  >
+                    <FileDown className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
+                    <span>Reporte General en PDF</span>
+                  </button>
+
+                  {isAdmin && (
+                    <>
+                      <div className="border-t border-slate-100 my-1"></div>
+
+                      {/* 5. Editar Cierre */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setContextMenu(null);
+                          handleStartEditCierre(c);
+                        }}
+                        className="w-full text-left px-2.5 py-1.5 hover:bg-amber-50 hover:text-amber-900 rounded-lg flex items-center gap-2 font-bold transition-colors cursor-pointer"
+                      >
+                        <Edit className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                        <span>Editar / Corregir Cierre</span>
+                      </button>
+
+                      {/* 6. Eliminar Cierre */}
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setContextMenu(null);
+                          const confirmDelete = window.confirm('¿Está seguro de eliminar este cierre de caja de forma permanente? Esta acción no se puede deshacer.');
+                          if (confirmDelete) {
+                            const ok = await onDeleteCierre(c.id);
+                            if (ok) {
+                              setSelectedCierreRow(null);
+                              showAlert('Cierre de caja eliminado exitosamente.', 'Operación Completada', 'success');
+                            } else {
+                              showAlert('No se pudo eliminar el cierre de caja.', 'Error', 'error');
+                            }
+                          }
+                        }}
+                        className="w-full text-left px-2.5 py-1.5 hover:bg-rose-50 text-rose-600 hover:text-rose-700 rounded-lg flex items-center gap-2 font-bold transition-colors cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-rose-600 flex-shrink-0" />
+                        <span>Eliminar Cierre</span>
+                      </button>
+                    </>
+                  )}
+                </div>
+              </>
+            );
+          })()}
         </div>
       )}
 

@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS Configuracion_Empresa (
     compartir_apertura_caja BOOLEAN DEFAULT TRUE,
     master_pass VARCHAR(255) DEFAULT '1234',
     gdrive_config TEXT,
-    whatsapp_config TEXT
+    whatsapp_config TEXT,
+    moneda_ticket_default VARCHAR(10) DEFAULT 'USD'
 );
 
 -- ==========================================
@@ -92,7 +93,7 @@ CREATE TABLE IF NOT EXISTS Productos (
     porcentaje_impuesto NUMERIC DEFAULT 0,
     a_granel BOOLEAN DEFAULT FALSE,
     fecha_vencimiento VARCHAR(50),
-    imagen_url VARCHAR(512),
+    imagen_url TEXT,
     estado VARCHAR(10) DEFAULT 'Activo' CHECK (estado IN ('Activo', 'Inactivo'))
 );
 

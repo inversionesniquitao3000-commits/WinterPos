@@ -6,7 +6,7 @@ import {
   Calculator, CheckCircle2, Ticket,
   Clock, ListOrdered, Plus, AlertCircle, DollarSign, RotateCcw, Printer,
   Calendar, Lock, Coins, RefreshCw, ShieldCheck, FileText,
-  Banknote, Eye, LogOut, X
+  Banknote, Eye, LogOut, X, Image as ImageIcon, ZoomIn
 } from 'lucide-react';
 import { formatNumberToWordsUSD, printTicketReceipt, formatBs } from '../utils';
 import { useDialog } from '../hooks/useDialog';
@@ -148,6 +148,20 @@ export default function CajaPOS({
   const [cierreRealEur, setCierreRealEur] = useState('0');
   const [hasEurInShift, setHasEurInShift] = useState(false);
   const [cierreResult, setCierreResult] = useState<CierreCaja | null>(null);
+
+  // Product Image Zoom State
+  const [zoomedProduct, setZoomedProduct] = useState<Product | null>(null);
+
+  useEffect(() => {
+    if (!zoomedProduct) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setZoomedProduct(null);
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [zoomedProduct]);
 
   // Manual movements state
   const [showMovementsModal, setShowMovementsModal] = useState(false);
@@ -1172,6 +1186,7 @@ export default function CajaPOS({
   // Generated Ticket Modal state
   const [showTicketModal, setShowTicketModal] = useState(false);
   const [printedTicketData, setPrintedTicketData] = useState<any>(null);
+  const [ticketCurrency, setTicketCurrency] = useState<'USD' | 'VES'>('USD');
 
   // Search input ref and auto-focus handlers
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -2031,10 +2046,12 @@ export default function CajaPOS({
 
       setShowCheckoutModal(false);
       if (shouldPrint) {
+        const defaultCur = companyConfig?.moneda_ticket_default || 'USD';
         setPrintedTicketData(finalSaleForTicket as any);
+        setTicketCurrency(defaultCur);
         setShowTicketModal(true);
         setTimeout(() => {
-          printTicketReceipt(finalSaleForTicket, companyConfig, currentUser, selectedSeller);
+          printTicketReceipt(finalSaleForTicket, companyConfig, currentUser, selectedSeller, defaultCur);
         }, 300);
       }
 
@@ -2895,12 +2912,12 @@ export default function CajaPOS({
       {/* LEFT TERMINAL AREA: PRODUCTS SELECTION & SALE TABLE */}
       <div className="xl:col-span-3 space-y-4 flex flex-col h-[calc(100vh-180px)]">
         
-        {/* INPUTS HEADER STACK - Light Mode with Fiscal Switch */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3.5 bg-white p-3.5 border border-slate-200 rounded-xl shadow-sm">
+        {/* INPUTS HEADER STACK - Light Mode with 12-Column Responsive Proportions */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-2.5 bg-white p-2.5 sm:p-3 border border-slate-200 rounded-xl shadow-sm items-end">
           
-          {/* SEARCH PRODUCT SELECTOR */}
-          <div className="space-y-1">
-            <label className="text-[10px] text-slate-500 font-sans block">Buscar Producto (F6)</label>
+          {/* SEARCH PRODUCT SELECTOR (4 Cols - 33.3% Width) */}
+          <div className="md:col-span-1 lg:col-span-4 space-y-1">
+            <label className="text-[10px] text-slate-500 font-sans block font-semibold">Buscar Producto (F6)</label>
             <div className="relative">
               <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-slate-400 pointer-events-none" />
               <input
@@ -2959,14 +2976,14 @@ export default function CajaPOS({
                     }
                   }
                 }}
-                className="w-full bg-slate-50 border border-slate-350 rounded p-2 pl-9 outline-none text-slate-800 focus:bg-white focus:border-winter-blueBtn font-sans"
+                className="w-full h-[38px] bg-slate-50 border border-slate-350 rounded-lg p-2 pl-9 text-xs outline-none text-slate-800 focus:bg-white focus:border-winter-blueBtn font-sans"
               />
               
               {/* Autocomplete Dropdown - Light Styled */}
               {searchProdTerm && searchSuggestions.length > 0 && (
                 <div 
                   ref={searchDropdownRef}
-                  className="absolute left-0 right-0 top-11 bg-white border border-slate-250 rounded max-h-48 overflow-y-auto z-40 shadow-2xl divide-y divide-slate-100"
+                  className="absolute left-0 right-0 top-11 bg-white border border-slate-250 rounded-lg max-h-48 overflow-y-auto z-40 shadow-2xl divide-y divide-slate-100"
                 >
                   {searchSuggestions.map((p, idx) => {
                     const hasStock = p.stock_actual > 0;
@@ -3024,8 +3041,8 @@ export default function CajaPOS({
             </div>
           </div>
 
-          {/* SEARCHABLE CLIENT SELECTOR WITH LIVE SEARCH & QUICK (+) BUTTON */}
-          <div className="space-y-1 relative" ref={clientDropdownRef}>
+          {/* SEARCHABLE CLIENT SELECTOR (4 Cols - 33.3% Width) */}
+          <div className="md:col-span-1 lg:col-span-4 space-y-1 relative" ref={clientDropdownRef}>
             <label className="text-[10px] text-slate-500 font-sans block font-semibold">Cliente Facturación</label>
             <div className="flex items-center gap-1.5">
               <div className="relative flex-grow">
@@ -3071,7 +3088,7 @@ export default function CajaPOS({
                       setClientSelectedIndex(-1);
                     }
                   }}
-                  className={`w-full border rounded p-2.5 pr-8 text-slate-800 text-xs font-sans font-bold outline-none focus:bg-white focus:border-winter-blueBtn transition-all ${
+                  className={`w-full h-[38px] border rounded-lg p-2 pr-7 text-slate-800 text-xs font-sans font-bold outline-none focus:bg-white focus:border-winter-blueBtn transition-all ${
                     selectedClient.aplica_precio_costo ? 'bg-amber-50 border-amber-400 text-amber-900' : 'bg-slate-50 border-slate-350'
                   }`}
                 />
@@ -3085,7 +3102,7 @@ export default function CajaPOS({
                       setClientSelectedIndex(-1);
                     }
                   }}
-                  className="absolute right-2.5 top-3 text-slate-400 hover:text-slate-600 font-sans font-bold text-[10px]"
+                  className="absolute right-2 top-2.5 text-slate-400 hover:text-slate-600 font-sans font-bold text-[10px]"
                 >
                   ▼
                 </button>
@@ -3155,67 +3172,69 @@ export default function CajaPOS({
                   if (!quickDoc || quickDoc.trim() === '') setQuickDoc('V-');
                   setShowQuickClientModal(true);
                 }}
-                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-base px-3.5 py-2.5 rounded-lg shadow-sm transition-all flex items-center justify-center flex-shrink-0"
+                className="h-[38px] w-[38px] bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-base rounded-lg shadow-sm transition-all flex items-center justify-center flex-shrink-0"
                 title="Registrar Nuevo Cliente (+)"
               >
                 +
               </button>
             </div>
             {selectedClient.aplica_precio_costo && (
-              <div className="flex items-center gap-1.5 bg-amber-100 border border-amber-300 rounded px-2 py-1 mt-1">
-                <span className="text-amber-700 text-[10px] font-bold font-sans">⚠ CLIENTE A PRECIO COSTO — Todos los productos se facturan al costo de inventario</span>
+              <div className="flex items-center gap-1.5 bg-amber-100 border border-amber-300 rounded px-2 py-0.5 mt-1">
+                <span className="text-amber-700 text-[9.5px] font-bold font-sans">⚠ CLIENTE A PRECIO COSTO — Facturación al costo</span>
               </div>
             )}
           </div>
 
-          {/* VENDEDOR SELECTOR */}
-          <div className="space-y-1">
-            <label className="text-[10px] text-slate-500 font-sans block">Vendedor Asignado (Bloqueado)</label>
+          {/* VENDEDOR SELECTOR (2 Cols - 16.6% Width) */}
+          <div className="md:col-span-1 lg:col-span-2 space-y-1">
+            <label className="text-[10px] text-slate-500 font-sans block font-semibold truncate" title="Vendedor Asignado">
+              Vendedor Asignado
+            </label>
             <select
               value={selectedSeller}
               disabled={true}
               onChange={(e) => setSelectedSeller(e.target.value)}
-              className="w-full bg-slate-100 border border-slate-300 rounded p-2.5 text-slate-500 outline-none cursor-not-allowed font-sans font-bold"
+              className="w-full h-[38px] bg-slate-100 border border-slate-300 rounded-lg px-2 text-slate-600 text-xs font-sans font-bold outline-none cursor-not-allowed truncate"
             >
               <option value={currentUser.nombre}>{currentUser.nombre}</option>
             </select>
           </div>
 
-          {/* SELECTOR TIPO DE COMPROBANTE: FACTURA FISCAL vs NOTA DE ENTREGA */}
-          <div className="space-y-1">
-            <label className="text-[10px] text-slate-500 font-sans block font-semibold flex items-center justify-between">
-              <span>Tipo de Comprobante</span>
+          {/* SELECTOR TIPO DE COMPROBANTE (2 Cols - 16.6% Width) */}
+          <div className="md:col-span-1 lg:col-span-2 space-y-1">
+            <label className="text-[10px] text-slate-500 font-sans block font-semibold flex items-center justify-between truncate">
+              <span>Comprobante</span>
               {!canEmitNoFiscal && (
-                <span className="text-[9px] text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded font-mono font-bold">🔒 Solo Fiscal</span>
+                <span className="text-[8px] text-amber-700 bg-amber-100 px-1 rounded font-mono font-bold">Solo Fiscal</span>
               )}
             </label>
-            <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-300 gap-1 h-[42px] items-center">
+            <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-300 gap-0.5 h-[38px] items-center">
               <button
                 type="button"
                 onClick={() => handleSelectTipoDoc('FACTURA_FISCAL')}
-                className={`flex-1 h-full rounded-md font-extrabold text-[11px] font-sans transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                className={`flex-1 h-full rounded-md font-bold text-[10px] font-sans transition-all flex items-center justify-center gap-1 cursor-pointer truncate px-1 ${
                   tipoDocumento === 'FACTURA_FISCAL'
-                    ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-500'
+                    ? 'bg-emerald-600 text-white shadow-xs ring-1 ring-emerald-500'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
                 }`}
                 title="Emite Factura Fiscal Homologada por el SENIAT"
               >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>Fiscal SENIAT</span>
+                <ShieldCheck className="w-3 h-3 flex-shrink-0" />
+                <span className="truncate">Fiscal</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => handleSelectTipoDoc('NOTA_ENTREGA')}
-                className={`flex-1 h-full rounded-md font-extrabold text-[11px] font-sans transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                className={`flex-1 h-full rounded-md font-bold text-[10px] font-sans transition-all flex items-center justify-center gap-1 cursor-pointer truncate px-1 ${
                   tipoDocumento === 'NOTA_ENTREGA'
-                    ? 'bg-blue-600 text-white shadow-sm ring-1 ring-blue-500'
+                    ? 'bg-blue-600 text-white shadow-xs ring-1 ring-blue-500'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
                 }`}
                 title={canEmitNoFiscal ? "Emite Nota de Entrega / Comprobante de Control Interno" : "No autorizado para emitir notas de entrega"}
               >
-                <FileText className="w-3.5 h-3.5" />
-                <span>Nota Entrega</span>
+                <FileText className="w-3 h-3 flex-shrink-0" />
+                <span className="truncate">Nota Entrega</span>
               </button>
             </div>
           </div>
@@ -3357,6 +3376,75 @@ export default function CajaPOS({
       {/* RIGHT SIDEBAR: FINANCIALS & CONTROL BUTTONS */}
       <div className="space-y-2.5 flex flex-col xl:h-[calc(100vh-180px)] xl:overflow-y-auto pr-1 pb-1">
         
+        {/* PRODUCT VISUAL PREVIEW CARD (Selected or Active Item in Cart) */}
+        {(() => {
+          const activeItem = (selectedItemIndex >= 0 && saleItems[selectedItemIndex]) 
+            ? saleItems[selectedItemIndex].product 
+            : (saleItems.length > 0 ? saleItems[saleItems.length - 1].product : null);
+
+          if (!activeItem) return null;
+
+          return (
+            <div 
+              onClick={() => activeItem.imagen_url && setZoomedProduct(activeItem)}
+              className={`bg-white border border-blue-200 rounded-xl p-3 shadow-sm flex items-center gap-3 bg-gradient-to-r from-blue-50/40 to-white transition-all ${
+                activeItem.imagen_url ? 'cursor-pointer hover:border-blue-400 hover:shadow-md group' : ''
+              }`}
+              title={activeItem.imagen_url ? "Haga clic para ver la imagen ampliada en grande" : undefined}
+            >
+              <div className="w-14 h-14 rounded-lg bg-slate-100 border border-slate-200 flex-shrink-0 flex items-center justify-center overflow-hidden relative shadow-inner group-hover:ring-2 group-hover:ring-blue-400 transition-all">
+                <div className="text-slate-400 text-center text-[9px] font-bold">
+                  <ImageIcon className="w-5 h-5 mx-auto text-slate-300 mb-0.5" />
+                  Sin Foto
+                </div>
+                {activeItem.imagen_url && (
+                  <>
+                    <img 
+                      key={`pos-item-img-${activeItem.id}-${activeItem.imagen_url}`}
+                      src={activeItem.imagen_url} 
+                      alt={activeItem.description} 
+                      className="w-full h-full object-cover absolute inset-0 bg-white group-hover:scale-105 transition-transform" 
+                      onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
+                      onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
+                    />
+                    <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white">
+                      <ZoomIn className="w-4 h-4" />
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[9.5px] text-slate-400 font-mono font-bold block">{activeItem.barcode || 'S/C'}</span>
+                  {activeItem.imagen_url && (
+                    <span className="text-[8.5px] text-blue-600 font-bold bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200 flex items-center gap-0.5 opacity-80 group-hover:opacity-100">
+                      <ZoomIn className="w-2.5 h-2.5" /> Ver Grande
+                    </span>
+                  )}
+                </div>
+                <h4 className="text-xs font-black text-slate-900 truncate leading-tight mt-0.5">{activeItem.description}</h4>
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase">Detal:</span>
+                    <span className="text-xs font-black text-emerald-600 font-mono">${activeItem.precio_detalle_usd.toFixed(2)}</span>
+                    <span className="text-[9.5px] font-extrabold text-slate-500 font-mono">({formatBs(activeItem.precio_detalle_usd * tasaDia)})</span>
+                  </div>
+
+                  <div className="flex items-baseline gap-1 pl-1 border-l border-slate-200">
+                    <span className="text-[9px] font-bold text-blue-600 uppercase">Mayor:</span>
+                    <span className="text-xs font-black text-blue-700 font-mono">${activeItem.precio_mayor_usd.toFixed(2)}</span>
+                    <span className="text-[8.5px] font-bold text-blue-700 font-mono bg-blue-50 px-1 py-0.2 rounded border border-blue-200">≥{activeItem.cantidad_mayorista || 12}</span>
+                  </div>
+
+                  <span className="text-[9px] text-slate-500 ml-auto bg-slate-100 px-1.5 py-0.5 rounded font-bold font-mono">
+                    Stock: {formatStockVal(activeItem.stock_actual, activeItem.a_granel)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* TOTALS CARD - Light Mode */}
         <div className="bg-white border border-slate-200 rounded-xl p-3.5 space-y-2.5 shadow-sm">
           <div className="flex justify-between items-center text-[10.5px] border-b border-slate-100 pb-1.5">
@@ -4929,139 +5017,229 @@ export default function CajaPOS({
         );
       })()}
 
-      {/* MODAL: TICKET FISCAL PRINT PREVIEW - Light Styled */}
+      {/* GENERATED TICKET MODAL */}
       {showTicketModal && printedTicketData && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-slate-900">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden w-full max-w-sm shadow-2xl p-6 space-y-4">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-mono text-slate-800">
+          <div className="bg-slate-900 border border-slate-750 rounded-2xl overflow-hidden w-full max-w-md shadow-2xl p-5 space-y-4">
             
-            <div className="max-h-[60vh] overflow-y-auto bg-white p-5 rounded font-mono text-[10px] space-y-3">
-              
-              {/* Commerce info */}
-              <div className="text-center">
-                <h4 className="font-extrabold text-sm uppercase">{companyConfig.nombre_comercio}</h4>
-                <p className="font-bold">RIF: {companyConfig.rif}</p>
-                <p className="text-[9px] mt-0.5">{companyConfig.direccion}</p>
-                <p>Telf: {companyConfig.telefono}</p>
-              </div>
-
-              <p className="text-center select-none text-slate-400">----------------------------------------</p>
-
-              {/* Metadata */}
-              <div className="space-y-0.5">
-                <div>FACTURA: {printedTicketData.factura_nro}</div>
-                <div>FECHA: {new Date().toLocaleDateString()}</div>
-                <div>HORA: {new Date().toLocaleTimeString()}</div>
-                <div>CAJERO: {currentUser.nombre.toUpperCase()}</div>
-                <div>VENDEDOR: {selectedSeller.toUpperCase()}</div>
-                <div>CLIENTE: {printedTicketData.client.nombre.toUpperCase()}</div>
-                <div>ID/RIF: {printedTicketData.client.cedula_rif}</div>
-              </div>
-
-              <p className="text-center select-none text-slate-400">----------------------------------------</p>
-
-              {/* Items */}
-              <div className="space-y-1">
-                <div className="flex font-bold justify-between">
-                  <span className="w-1/2">CONCEPTO</span>
-                  <span className="w-1/12 text-center">CT</span>
-                  <span className="w-1/4 text-right">P.UN</span>
-                  <span className="w-1/6 text-right">TOTAL</span>
-                </div>
-                {printedTicketData.items.map((item: any) => {
-                  const isBulk = item.product?.a_granel || item.a_granel;
-                  const rawQty = parseFloat(item.qty || '0');
-                  const qtyDisplay = (isBulk || (rawQty % 1 !== 0))
-                    ? (rawQty % 1 === 0 ? rawQty.toString() : rawQty.toFixed(3))
-                    : Math.round(rawQty).toString();
-                  const isExempt = item.product?.exento_impuesto === true || item.exento_impuesto === true || (item.product?.porcentaje_impuesto !== undefined && item.product?.porcentaje_impuesto === 0);
-                  const taxLabel = isExempt ? ' (E)' : ' (G)';
-
-                  return (
-                    <div key={item.product?.id || item.productCode || item.code} className="flex justify-between">
-                      <span className="w-1/2 overflow-hidden truncate">{item.product?.description || item.description}{taxLabel}</span>
-                      <span className="w-1/12 text-center">{qtyDisplay}</span>
-                      <span className="w-1/4 text-right">${item.priceUSD.toFixed(2)}</span>
-                      <span className="w-1/6 text-right">${item.totalUSD.toFixed(2)}</span>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <p className="text-center select-none text-slate-400">----------------------------------------</p>
-
-              {/* Summary */}
-              <div className="text-right space-y-1 text-[11px]">
-                <div className="flex justify-between">
-                  <span>SUBTOTAL USD:</span>
-                  <span>${printedTicketData.subtotal.toFixed(2)}</span>
-                </div>
-                {printedTicketData.exento_usd > 0 && (
-                  <div className="flex justify-between text-slate-700">
-                    <span>MONTO EXENTO (E):</span>
-                    <span>${printedTicketData.exento_usd.toFixed(2)}</span>
-                  </div>
-                )}
-                {printedTicketData.iva > 0 && (
-                  <div className="flex justify-between text-slate-700">
-                    <span>IVA (16%) USD:</span>
-                    <span>${printedTicketData.iva.toFixed(2)}</span>
-                  </div>
-                )}
-                {printedTicketData.descuento > 0 && (
-                  <div className="flex justify-between text-red-500">
-                    <span>DESCUENTO:</span>
-                    <span>-${printedTicketData.descuento.toFixed(2)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between font-extrabold text-sm border-t border-slate-300 pt-1">
-                  <span>TOTAL USD:</span>
-                  <span>${printedTicketData.totalUSD.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between text-slate-600 font-bold border-t border-dashed border-slate-350 pt-1">
-                  <span>TOTAL VES:</span>
-                  <span>Bs {printedTicketData.totalVES.toFixed(2)}</span>
-                </div>
-              </div>
-
-              <p className="text-center select-none text-slate-400">----------------------------------------</p>
-
-              {/* Payments & Change */}
-              <div className="space-y-0.5">
-                <span className="font-bold block">MEDIOS DE PAGO LIQUIDADOS:</span>
-                {printedTicketData.pagos.map((p: any, idx: number) => (
-                  <div key={idx} className="flex justify-between">
-                    <span>{p.metodo} {p.bancoEmisor ? `(${p.bancoEmisor})` : ''} {p.reference ? `Ref:${p.reference}` : ''}:</span>
-                    <span>{p.metodo.endsWith('$') || p.metodo.includes('Credito') ? `$${p.monto.toFixed(2)}` : `Bs ${p.monto.toFixed(2)}`}</span>
-                  </div>
-                ))}
-                
-                {printedTicketData.vueltoVES > 0 && (
-                  <div className="flex justify-between font-bold border-t border-slate-300 pt-1 text-[11px]">
-                    <span>CAMBIO ENTREGADO VES:</span>
-                    <span>Bs {printedTicketData.vueltoVES.toFixed(2)}</span>
-                  </div>
-                )}
-              </div>
-
-              <p className="text-center select-none text-slate-400">----------------------------------------</p>
-
-              <div className="text-center text-[9px] italic leading-relaxed text-slate-500 font-sans">
-                {companyConfig.mensaje_pie_ticket}
-              </div>
-
-              <div className="text-center text-[7px] text-slate-400 font-sans">
-                WINTERPOS - DOCUMENTO DIGITAL DE CAJA
+            {/* Currency Selector Toggle */}
+            <div className="bg-slate-950 p-2 rounded-xl border border-slate-800 flex items-center justify-between">
+              <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-slate-400">
+                Moneda Ticket:
+              </span>
+              <div className="flex bg-slate-900 p-0.5 rounded-lg border border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setTicketCurrency('USD')}
+                  className={`px-3 py-1 text-[11px] font-extrabold font-sans rounded-md transition-all ${
+                    ticketCurrency === 'USD'
+                      ? 'bg-emerald-600 text-white shadow'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  💵 $ (USD)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTicketCurrency('VES')}
+                  className={`px-3 py-1 text-[11px] font-extrabold font-sans rounded-md transition-all ${
+                    ticketCurrency === 'VES'
+                      ? 'bg-blue-600 text-white shadow'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  🇻🇪 Bs (VES)
+                </button>
               </div>
             </div>
 
+            {/* Receipt Preview Body */}
+            {(() => {
+              const isVES = ticketCurrency === 'VES';
+              const tasaVenta = (printedTicketData.totalUSD > 0 && printedTicketData.totalVES > 0)
+                ? (printedTicketData.totalVES / printedTicketData.totalUSD)
+                : (companyConfig?.tasa_oficial_bcv || 1);
+
+              return (
+                <div className="max-h-[65vh] overflow-y-auto bg-white p-5 rounded-xl font-mono text-[10px] space-y-3 shadow-inner">
+                  
+                  {/* Commerce info */}
+                  <div className="text-center">
+                    <h4 className="font-extrabold text-sm uppercase">{companyConfig.nombre_comercio}</h4>
+                    <p className="font-bold">RIF: {companyConfig.rif}</p>
+                    <p className="text-[9px] mt-0.5">{companyConfig.direccion}</p>
+                    <p>Telf: {companyConfig.telefono}</p>
+                  </div>
+
+                  <p className="text-center select-none text-slate-400">----------------------------------------</p>
+
+                  {/* Metadata */}
+                  <div className="space-y-0.5">
+                    <div>FACTURA: {printedTicketData.factura_nro}</div>
+                    <div>FECHA: {new Date().toLocaleDateString()}</div>
+                    <div>HORA: {new Date().toLocaleTimeString()}</div>
+                    <div>CAJERO: {currentUser.nombre.toUpperCase()}</div>
+                    <div>VENDEDOR: {selectedSeller.toUpperCase()}</div>
+                    <div>CLIENTE: {printedTicketData.client.nombre.toUpperCase()}</div>
+                    <div>ID/RIF: {printedTicketData.client.cedula_rif}</div>
+                  </div>
+
+                  <p className="text-center select-none text-slate-400">----------------------------------------</p>
+
+                  {/* Header Items */}
+                  <div className="flex font-bold justify-between text-slate-500 text-[9px] border-b border-slate-200 pb-1">
+                    <span>DESCRIPCIÓN / CANT x PRECIO</span>
+                    <span>TOTAL</span>
+                  </div>
+
+                  {/* Items List - Two-line High Clarity Format */}
+                  <div className="space-y-2 py-1">
+                    {printedTicketData.items.map((item: any) => {
+                      const isBulk = item.product?.a_granel || item.a_granel;
+                      const rawQty = parseFloat(item.qty || '0');
+                      const qtyDisplay = (isBulk || (rawQty % 1 !== 0))
+                        ? (rawQty % 1 === 0 ? rawQty.toString() : rawQty.toFixed(3))
+                        : Math.round(rawQty).toString();
+                      const isExempt = item.product?.exento_impuesto === true || item.exento_impuesto === true || (item.product?.porcentaje_impuesto !== undefined && item.product?.porcentaje_impuesto === 0);
+                      const taxLabel = isExempt ? ' (E)' : ' (G)';
+
+                      const priceNumUSD = item.priceUSD ? item.priceUSD : (item.precioUSD ? item.precioUSD : 0);
+                      const totalNumUSD = item.totalUSD ? item.totalUSD : (priceNumUSD * rawQty);
+
+                      const priceDisplay = isVES 
+                        ? formatBs(priceNumUSD * tasaVenta) 
+                        : `$${priceNumUSD.toFixed(2)}`;
+                      const totalDisplay = isVES 
+                        ? formatBs(totalNumUSD * tasaVenta) 
+                        : `$${totalNumUSD.toFixed(2)}`;
+
+                      return (
+                        <div key={item.product?.id || item.productCode || item.code} className="border-b border-dashed border-slate-150 pb-1.5 last:border-none last:pb-0">
+                          <div className="font-bold text-slate-900 break-words text-[11px] leading-tight uppercase">
+                            {item.product?.description || item.description}
+                            <span className={isExempt ? "text-amber-700 font-extrabold text-[9px] ml-1" : "text-sky-700 font-bold text-[9px] ml-1"}>
+                              {taxLabel}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center text-[10.5px] mt-0.5 pl-2 text-slate-650">
+                            <span className="font-mono text-slate-600">
+                              <span className="font-bold text-slate-850">{qtyDisplay}</span> x {priceDisplay}
+                            </span>
+                            <span className="font-black text-slate-900 font-mono">
+                              {totalDisplay}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <p className="text-center select-none text-slate-400">----------------------------------------</p>
+
+                  {/* Summary */}
+                  {isVES ? (
+                    <div className="text-right space-y-1 text-[11px]">
+                      <div className="flex justify-between">
+                        <span>SUBTOTAL VES:</span>
+                        <span>{formatBs(printedTicketData.subtotal * tasaVenta)}</span>
+                      </div>
+                      {printedTicketData.exento_usd > 0 && (
+                        <div className="flex justify-between text-slate-700">
+                          <span>MONTO EXENTO (E):</span>
+                          <span>{formatBs(printedTicketData.exento_usd * tasaVenta)}</span>
+                        </div>
+                      )}
+                      {printedTicketData.descuento > 0 && (
+                        <div className="flex justify-between text-red-500">
+                          <span>DESCUENTO:</span>
+                          <span>-{formatBs(printedTicketData.descuento * tasaVenta)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between font-extrabold text-sm border-t border-slate-300 pt-1 text-slate-900">
+                        <span>TOTAL VES:</span>
+                        <span>{formatBs(printedTicketData.totalVES || (printedTicketData.totalUSD * tasaVenta))}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-500 font-bold border-t border-dashed border-slate-300 pt-1 text-[10px]">
+                        <span>REF TOTAL USD:</span>
+                        <span>${printedTicketData.totalUSD.toFixed(2)} (Tasa: {formatBs(tasaVenta)})</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-right space-y-1 text-[11px]">
+                      <div className="flex justify-between">
+                        <span>SUBTOTAL USD:</span>
+                        <span>${printedTicketData.subtotal.toFixed(2)}</span>
+                      </div>
+                      {printedTicketData.exento_usd > 0 && (
+                        <div className="flex justify-between text-slate-700">
+                          <span>MONTO EXENTO (E):</span>
+                          <span>${printedTicketData.exento_usd.toFixed(2)}</span>
+                        </div>
+                      )}
+                      {printedTicketData.iva > 0 && (
+                        <div className="flex justify-between text-slate-700">
+                          <span>IVA (16%) USD:</span>
+                          <span>${printedTicketData.iva.toFixed(2)}</span>
+                        </div>
+                      )}
+                      {printedTicketData.descuento > 0 && (
+                        <div className="flex justify-between text-red-500">
+                          <span>DESCUENTO:</span>
+                          <span>-${printedTicketData.descuento.toFixed(2)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between font-extrabold text-sm border-t border-slate-300 pt-1">
+                        <span>TOTAL USD:</span>
+                        <span>${printedTicketData.totalUSD.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-600 font-bold border-t border-dashed border-slate-350 pt-1">
+                        <span>TOTAL VES:</span>
+                        <span>{formatBs(printedTicketData.totalVES)}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="text-center select-none text-slate-400">----------------------------------------</p>
+
+                  {/* Payments & Change */}
+                  <div className="space-y-0.5">
+                    <span className="font-bold block">MEDIOS DE PAGO LIQUIDADOS:</span>
+                    {printedTicketData.pagos.map((p: any, idx: number) => (
+                      <div key={idx} className="flex justify-between">
+                        <span>{p.metodo} {p.bancoEmisor ? `(${p.bancoEmisor})` : ''} {p.reference ? `Ref:${p.reference}` : ''}:</span>
+                        <span>{p.metodo.endsWith('$') || p.metodo.includes('Credito') ? `$${p.monto.toFixed(2)}` : formatBs(p.montoVES || p.monto)}</span>
+                      </div>
+                    ))}
+                    
+                    {printedTicketData.vueltoVES > 0 && (
+                      <div className="flex justify-between font-bold border-t border-slate-300 pt-1 text-[11px]">
+                        <span>CAMBIO ENTREGADO VES:</span>
+                        <span>{formatBs(printedTicketData.vueltoVES)}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <p className="text-center select-none text-slate-400">----------------------------------------</p>
+
+                  <div className="text-center text-[9px] italic leading-relaxed text-slate-500 font-sans">
+                    {companyConfig.mensaje_pie_ticket}
+                  </div>
+
+                  <div className="text-center text-[7px] text-slate-400 font-sans">
+                    WINTERPOS - DOCUMENTO DIGITAL DE CAJA
+                  </div>
+                </div>
+              );
+            })()}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
               <button
-                onClick={() => printTicketReceipt(printedTicketData, companyConfig, currentUser, selectedSeller)}
+                onClick={() => printTicketReceipt(printedTicketData, companyConfig, currentUser, selectedSeller, ticketCurrency)}
                 className="w-full bg-sky-600 hover:bg-sky-500 text-white py-3 rounded-lg font-bold font-sans text-xs tracking-wider transition-all flex items-center justify-center gap-1.5 shadow active:scale-95"
                 title="Abrir diálogo de impresión para enviar a la impresora de ticket o elegir otra"
               >
                 <Printer className="w-4 h-4" />
-                IMPRIMIR TICKET
+                IMPRIMIR TICKET ({ticketCurrency === 'VES' ? 'Bs' : '$'})
               </button>
               <button
                 onClick={() => { setShowTicketModal(false); setPrintedTicketData(null); }}
@@ -6879,6 +7057,106 @@ export default function CajaPOS({
         companyConfig={companyConfig}
         onProcessOperation={handleProcessDivisaOperation}
       />
+
+      {/* MODAL: ZOOM / VISTA PREVIA EN GRANDE DEL PRODUCTO */}
+      {zoomedProduct && (
+        <div 
+          onClick={() => setZoomedProduct(null)}
+          className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-fade-in cursor-zoom-out"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-2xl max-w-lg w-full flex flex-col cursor-default transform transition-all animate-scale-in"
+          >
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 text-white px-5 py-3.5 flex justify-between items-center border-b border-slate-700">
+              <div className="min-w-0 flex-1 pr-3">
+                <span className="text-[10px] text-blue-300 font-mono font-bold block">{zoomedProduct.barcode || 'SIN CÓDIGO'}</span>
+                <h3 className="text-sm font-black uppercase truncate text-white">{zoomedProduct.description}</h3>
+              </div>
+              <button 
+                onClick={() => setZoomedProduct(null)}
+                className="w-8 h-8 rounded-full bg-slate-800 hover:bg-rose-600 text-white flex items-center justify-center transition-colors text-sm font-bold flex-shrink-0"
+                title="Cerrar vista previa (Esc)"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Large Image Canvas */}
+            <div className="p-6 bg-slate-100/70 flex items-center justify-center min-h-[320px] max-h-[60vh] overflow-hidden relative">
+              {zoomedProduct.imagen_url ? (
+                <img 
+                  src={zoomedProduct.imagen_url} 
+                  alt={zoomedProduct.description} 
+                  className="max-h-[50vh] max-w-full object-contain rounded-xl shadow-lg bg-white p-2 border border-slate-200"
+                />
+              ) : (
+                <div className="text-center text-slate-400 p-8">
+                  <ImageIcon className="w-16 h-16 mx-auto mb-2 text-slate-300" />
+                  <span className="text-sm font-bold">Sin Imagen</span>
+                </div>
+              )}
+            </div>
+
+            {/* Footer with Price Details (Detal & Mayor) & Stock */}
+            <div className="bg-slate-50 border-t border-slate-200 p-4 font-sans">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {/* 1. PRECIO DETALLE */}
+                <div className="bg-white border border-emerald-200 rounded-xl p-2.5 shadow-2xs">
+                  <span className="text-[9.5px] text-emerald-800 uppercase font-extrabold flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                    Precio Detal (P1)
+                  </span>
+                  <div className="mt-1">
+                    <span className="text-lg font-black text-emerald-600 font-mono block leading-tight">
+                      ${zoomedProduct.precio_detalle_usd.toFixed(2)}
+                    </span>
+                    <span className="text-[10.5px] font-bold text-slate-600 font-mono">
+                      {formatBs(zoomedProduct.precio_detalle_usd * tasaDia)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 2. PRECIO AL MAYOR */}
+                <div className="bg-white border border-blue-200 rounded-xl p-2.5 shadow-2xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9.5px] text-blue-800 uppercase font-extrabold flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                      Precio Mayor (P2)
+                    </span>
+                    <span className="text-[8.5px] font-extrabold bg-blue-50 text-blue-700 border border-blue-200 px-1 py-0.2 rounded font-mono">
+                      ≥ {zoomedProduct.cantidad_mayorista || 12} {zoomedProduct.a_granel ? 'kg' : 'uds'}
+                    </span>
+                  </div>
+                  <div className="mt-1">
+                    <span className="text-lg font-black text-blue-700 font-mono block leading-tight">
+                      ${zoomedProduct.precio_mayor_usd.toFixed(2)}
+                    </span>
+                    <span className="text-[10.5px] font-bold text-slate-600 font-mono">
+                      {formatBs(zoomedProduct.precio_mayor_usd * tasaDia)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 3. STOCK ACTUAL */}
+                <div className="bg-white border border-slate-200 rounded-xl p-2.5 shadow-2xs flex flex-col justify-between">
+                  <span className="text-[9.5px] text-slate-500 uppercase font-bold">Stock Disponible</span>
+                  <div className="mt-1">
+                    <span className={`text-sm font-mono font-black px-2 py-0.5 rounded-lg border inline-block ${
+                      zoomedProduct.stock_actual <= zoomedProduct.stock_minimo 
+                        ? 'bg-rose-50 border-rose-200 text-rose-700 animate-pulse' 
+                        : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    }`}>
+                      {formatStockVal(zoomedProduct.stock_actual, zoomedProduct.a_granel)} {zoomedProduct.a_granel ? 'kg' : 'uds'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

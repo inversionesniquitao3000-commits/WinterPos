@@ -112,7 +112,8 @@ export function printTicketReceipt(
   ticketData: any,
   companyConfig: any,
   currentUser: any,
-  selectedSeller?: string
+  selectedSeller?: string,
+  currency?: 'USD' | 'VES'
 ) {
   if (!ticketData) return;
   const printWindow = window.open('', '_blank', 'width=400,height=600');
@@ -120,6 +121,15 @@ export function printTicketReceipt(
     alert('⚠️ El navegador bloqueó la ventana emergente de impresión. Por favor permita las ventanas emergentes (popups) para la aplicación.');
     return;
   }
+
+  const activeCurrency: 'USD' | 'VES' = currency || companyConfig?.moneda_ticket_default || 'USD';
+  const isVES = activeCurrency === 'VES';
+
+  const totalUSD = ticketData.totalUSD || 0;
+  const totalVES = ticketData.totalVES || 0;
+  const tasaVenta = (totalUSD > 0 && totalVES > 0)
+    ? (totalVES / totalUSD)
+    : (companyConfig?.tasa_oficial_bcv || 1);
 
   let grossTaxable = 0;
   let grossExempt = 0;
@@ -131,39 +141,51 @@ export function printTicketReceipt(
       ? (rawQty % 1 === 0 ? rawQty.toString() : rawQty.toFixed(3))
       : Math.round(rawQty).toString();
     const desc = item.product?.description || item.description || 'Producto';
-    const priceNum = item.priceUSD ? item.priceUSD : (item.precioUSD ? item.precioUSD : 0);
-    const totalNum = item.totalUSD ? item.totalUSD : (priceNum * rawQty);
-    const price = priceNum.toFixed(2);
-    const total = totalNum.toFixed(2);
+    const priceNumUSD = item.priceUSD ? item.priceUSD : (item.precioUSD ? item.precioUSD : 0);
+    const totalNumUSD = item.totalUSD ? item.totalUSD : (priceNumUSD * rawQty);
 
     const isExempt = item.product?.exento_impuesto === true || item.exento_impuesto === true || (item.product?.porcentaje_impuesto !== undefined && item.product?.porcentaje_impuesto === 0);
     if (isExempt) {
-      grossExempt += totalNum;
+      grossExempt += totalNumUSD;
     } else {
-      grossTaxable += totalNum;
+      grossTaxable += totalNumUSD;
     }
 
     const taxLabel = isExempt ? '(E)' : '(G)';
 
+    let priceDisplay = '';
+    let totalDisplay = '';
+
+    if (isVES) {
+      const priceNumVES = priceNumUSD * tasaVenta;
+      const totalNumVES = totalNumUSD * tasaVenta;
+      priceDisplay = formatBs(priceNumVES);
+      totalDisplay = formatBs(totalNumVES);
+    } else {
+      priceDisplay = `$${priceNumUSD.toFixed(2)}`;
+      totalDisplay = `$${totalNumUSD.toFixed(2)}`;
+    }
+
     return `
-      <tr>
-        <td style="text-align: left; padding: 2px 0; word-break: break-word; font-size: 10px;">${desc} ${taxLabel}</td>
-        <td style="text-align: center; padding: 2px 0; font-size: 10px;">${qtyDisplay}</td>
-        <td style="text-align: right; padding: 2px 0; font-size: 10px;">$${price}</td>
-        <td style="text-align: right; padding: 2px 0; font-size: 10px;">$${total}</td>
-      </tr>
+      <div style="margin-bottom: 4px; padding-bottom: 2px; border-bottom: 1px dashed #eee;">
+        <div style="font-weight: bold; font-size: 10px; text-transform: uppercase; word-break: break-word; line-height: 1.2;">${desc} ${taxLabel}</div>
+        <div style="display: flex; justify-content: space-between; font-size: 9.5px; margin-top: 1px; padding-left: 4px;">
+          <span>${qtyDisplay} x ${priceDisplay}</span>
+          <span style="font-weight: bold;">${totalDisplay}</span>
+        </div>
+      </div>
     `;
   }).join('');
 
-  const rawSubtotal = ticketData.subtotal ?? ticketData.totalUSD ?? (grossTaxable + grossExempt);
-  const discountVal = parseFloat(ticketData.descuento || '0');
-  const discountFactor = rawSubtotal > 0 ? (1 - (discountVal / rawSubtotal)) : 1;
+  const rawSubtotalUSD = ticketData.subtotal ?? ticketData.totalUSD ?? (grossTaxable + grossExempt);
+  const discountValUSD = parseFloat(ticketData.descuento || '0');
+  const discountFactor = rawSubtotalUSD > 0 ? (1 - (discountValUSD / rawSubtotalUSD)) : 1;
 
-  const netTaxable = grossTaxable * discountFactor;
-  const netExempt = grossExempt * discountFactor;
+  const netTaxableUSD = grossTaxable * discountFactor;
+  const netExemptUSD = grossExempt * discountFactor;
 
-  const baseImponible = netTaxable > 0 ? netTaxable / 1.16 : 0;
-  const ivaCalculado = netTaxable > 0 ? netTaxable - baseImponible : 0;
+  const baseImponibleUSD = netTaxableUSD > 0 ? netTaxableUSD / 1.16 : 0;
+  const ivaCalculadoUSD = netTaxableUSD > 0 ? netTaxableUSD - baseImponibleUSD : 0;
 
   const pagosHtml = (ticketData.pagos || []).map((p: any) => {
     const bankStr = p.bancoEmisor || p.banco ? ` (${p.bancoEmisor || p.banco})` : '';
@@ -185,6 +207,82 @@ export function printTicketReceipt(
   const sellerName = selectedSeller || ticketData.vendedor || cashierName;
   const fechaStr = ticketData.fecha || `${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
 
+  const totalsHtml = isVES ? `
+    <div class="text-right">
+      <div class="row-flex">
+        <span>SUBTOTAL VES:</span>
+        <span>${formatBs(rawSubtotalUSD * tasaVenta)}</span>
+      </div>
+      ${discountValUSD > 0 ? `
+        <div class="row-flex">
+          <span>DESCUENTO:</span>
+          <span>-${formatBs(discountValUSD * tasaVenta)}</span>
+        </div>
+      ` : ''}
+      ${grossTaxable > 0 ? `
+        <div class="row-flex">
+          <span>BASE IMPONIBLE (G 16%):</span>
+          <span>${formatBs(baseImponibleUSD * tasaVenta)}</span>
+        </div>
+        <div class="row-flex">
+          <span>IVA (16%):</span>
+          <span>${formatBs(ivaCalculadoUSD * tasaVenta)}</span>
+        </div>
+      ` : ''}
+      ${netExemptUSD > 0 ? `
+        <div class="row-flex">
+          <span>MONTO EXENTO (E):</span>
+          <span>${formatBs(netExemptUSD * tasaVenta)}</span>
+        </div>
+      ` : ''}
+      <div class="bold row-flex" style="font-size: 12px; margin-top: 3px; border-top: 1.5px solid #000; padding-top: 3px;">
+        <span>TOTAL VES:</span>
+        <span>${formatBs(totalVES || (rawSubtotalUSD * tasaVenta))}</span>
+      </div>
+      <div class="row-flex" style="margin-top: 2px; font-size: 9px; color: #444; border-top: 1px dashed #ccc; padding-top: 2px;">
+        <span>REF TOTAL USD:</span>
+        <span>$${totalUSD.toFixed(2)} (Tasa: ${formatBs(tasaVenta)})</span>
+      </div>
+    </div>
+  ` : `
+    <div class="text-right">
+      <div class="row-flex">
+        <span>SUBTOTAL USD:</span>
+        <span>$${rawSubtotalUSD.toFixed(2)}</span>
+      </div>
+      ${discountValUSD > 0 ? `
+        <div class="row-flex">
+          <span>DESCUENTO:</span>
+          <span>-$${discountValUSD.toFixed(2)}</span>
+        </div>
+      ` : ''}
+      ${grossTaxable > 0 ? `
+        <div class="row-flex">
+          <span>BASE IMPONIBLE (G 16%):</span>
+          <span>$${baseImponibleUSD.toFixed(2)}</span>
+        </div>
+        <div class="row-flex">
+          <span>IVA (16%):</span>
+          <span>$${ivaCalculadoUSD.toFixed(2)}</span>
+        </div>
+      ` : ''}
+      ${netExemptUSD > 0 ? `
+        <div class="row-flex">
+          <span>MONTO EXENTO (E):</span>
+          <span>$${netExemptUSD.toFixed(2)}</span>
+        </div>
+      ` : ''}
+      <div class="bold row-flex" style="font-size: 12px; margin-top: 3px; border-top: 1.5px solid #000; padding-top: 3px;">
+        <span>TOTAL USD:</span>
+        <span>$${totalUSD.toFixed(2)}</span>
+      </div>
+      <div class="bold row-flex" style="margin-top: 2px;">
+        <span>TOTAL VES:</span>
+        <span>${formatBs(totalVES || 0)}</span>
+      </div>
+    </div>
+  `;
+
   const htmlContent = `
     <!DOCTYPE html>
     <html>
@@ -198,7 +296,7 @@ export function printTicketReceipt(
           }
           body {
             font-family: 'Courier New', Courier, monospace;
-            font-size: 10.5px;
+            font-size: 10px;
             color: #000;
             background: #fff;
             margin: 0;
@@ -212,15 +310,6 @@ export function printTicketReceipt(
           .divider {
             border-top: 1px dashed #000;
             margin: 5px 0;
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 10px;
-          }
-          th {
-            border-bottom: 1px solid #000;
-            padding: 2px 0;
           }
           .row-flex {
             display: flex;
@@ -261,58 +350,19 @@ export function printTicketReceipt(
 
         <div class="divider"></div>
 
-        <table>
-          <thead>
-            <tr>
-              <th style="text-align: left; width: 45%;">CONCEPTO</th>
-              <th style="text-align: center; width: 15%;">CT</th>
-              <th style="text-align: right; width: 20%;">P.UN</th>
-              <th style="text-align: right; width: 20%;">TOTAL</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${itemsHtml}
-          </tbody>
-        </table>
+        <div style="font-size: 9px; font-weight: bold; margin-bottom: 3px; color: #555;">
+          <span>DESCRIPCIÓN / CANT x PRECIO</span>
+          <span style="float: right;">TOTAL</span>
+        </div>
+        <div class="divider" style="margin: 2px 0 4px 0;"></div>
+
+        <div class="items-list">
+          ${itemsHtml}
+        </div>
 
         <div class="divider"></div>
 
-        <div class="text-right">
-          <div class="row-flex">
-            <span>SUBTOTAL USD:</span>
-            <span>$${rawSubtotal.toFixed(2)}</span>
-          </div>
-          ${discountVal > 0 ? `
-            <div class="row-flex">
-              <span>DESCUENTO:</span>
-              <span>-$${discountVal.toFixed(2)}</span>
-            </div>
-          ` : ''}
-          ${grossTaxable > 0 ? `
-            <div class="row-flex">
-              <span>BASE IMPONIBLE (G 16%):</span>
-              <span>$${baseImponible.toFixed(2)}</span>
-            </div>
-            <div class="row-flex">
-              <span>IVA (16%):</span>
-              <span>$${ivaCalculado.toFixed(2)}</span>
-            </div>
-          ` : ''}
-          ${netExempt > 0 ? `
-            <div class="row-flex">
-              <span>MONTO EXENTO (E):</span>
-              <span>$${netExempt.toFixed(2)}</span>
-            </div>
-          ` : ''}
-          <div class="bold row-flex" style="font-size: 11.5px; margin-top: 3px; border-top: 1px solid #000; padding-top: 2px;">
-            <span>TOTAL USD:</span>
-            <span>$${(ticketData.totalUSD || 0).toFixed(2)}</span>
-          </div>
-          <div class="bold row-flex" style="margin-top: 2px;">
-            <span>TOTAL VES:</span>
-            <span>${formatBs(ticketData.totalVES || 0)}</span>
-          </div>
-        </div>
+        ${totalsHtml}
 
         <div class="divider"></div>
 

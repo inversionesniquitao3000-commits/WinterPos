@@ -43,6 +43,23 @@ const loadPdfJs = (): Promise<any> => {
   });
 };
 
+const DEFAULT_COBRO_CLIENTES_WA_TEMPLATE = `👤 *RECORDATORIO DE PAGO DE CUENTA*
+
+🏬 *{empresa}*
+📅 *Fecha:* {fecha}
+👤 *Cliente:* {cliente}
+🆔 *Cédula/RIF:* {cedulaRif}
+
+🚨 *Estimado(a) cliente, le enviamos un cordial saludo para recordarle su estado de cuenta:*
+
+💰 *Monto Adeudado:* *${'{saldoPendienteUsd}'} USD*
+🇻🇪 *Monto en Bolívares (Tasa BCV {tasaBcv}):* *Bs {saldoPendienteVes}*
+
+💳 *Límite de Crédito:* ${'{limiteCreditoUsd}'} USD
+✅ *Crédito Disponible:* ${'{creditoDisponibleUsd}'} USD
+
+🙏 *Agradecemos realizar su abono a la brevedad posible para mantener activo su margen de crédito. ¡Gracias por su preferencia!*`;
+
 interface ClientesProps {
   clients: Client[];
   currentUser: User;
@@ -132,6 +149,133 @@ export default function Clientes({
   const [newAddress, setNewAddress] = useState('');
   const [newCreditLimit, setNewCreditLimit] = useState('0');
   const [newDiscount, setNewDiscount] = useState('0');
+
+  // Context Menu state for right-click on client rows or movements
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    type: 'client' | 'credit_movement' | 'invoice';
+    data: any;
+  } | null>(null);
+
+  // Clear all filters and selection
+  const handleClearFilters = () => {
+    setSearchTerm('');
+    setDebtFilterMode('all');
+    setCostoFilterMode('all');
+    setSelectedRowClient(null);
+  };
+
+  useEffect(() => {
+    const handleCloseContextMenu = () => setContextMenu(null);
+    window.addEventListener('click', handleCloseContextMenu);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const targetTag = (e.target as HTMLElement)?.tagName;
+      const isTyping = targetTag === 'INPUT' || targetTag === 'TEXTAREA' || targetTag === 'SELECT';
+
+      if (e.key === 'Escape') {
+        setContextMenu(null);
+        setShowAddModal(false);
+        setShowEditModal(false);
+        setShowAbonoModal(false);
+        setShowBulkModal(false);
+        if (isTyping && targetTag === 'INPUT') {
+          (e.target as HTMLInputElement).blur();
+        }
+      } else if ((e.key === 'l' || e.key === 'L') && !isTyping && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        e.preventDefault();
+        handleClearFilters();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('click', handleCloseContextMenu);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  // Send WhatsApp Payment Reminder / Account Balance to Single Client
+  const handleSendWhatsAppSingleClient = async (c: Client) => {
+    const dateStr = new Date().toLocaleString('es-VE');
+    const companyName = companyConfig?.nombre_comercio || 'INVERSIONES NIQUITAO 3000 C.A.';
+    
+    // Fetch custom WhatsApp template from backend config
+    let template = '';
+    try {
+      const res = await fetch('/api/whatsapp/status');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.config && data.config.cobroClientesMessageTemplate) {
+          template = data.config.cobroClientesMessageTemplate;
+        }
+      }
+    } catch (_) {}
+
+    if (!template.trim()) {
+      template = DEFAULT_COBRO_CLIENTES_WA_TEMPLATE;
+    }
+
+    const saldoVes = tasaDia > 1 
+      ? (c.saldo_pendiente * tasaDia).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : '0.00';
+
+    const text = template
+      .replace(/{empresa}/g, companyName)
+      .replace(/{fecha}/g, dateStr)
+      .replace(/{cliente}/g, c.nombre.toUpperCase())
+      .replace(/{cedulaRif}/g, c.cedula_rif || 'N/A')
+      .replace(/{saldoPendienteUsd}/g, c.saldo_pendiente.toFixed(2))
+      .replace(/{saldoPendienteVes}/g, saldoVes)
+      .replace(/{tasaBcv}/g, tasaDia.toFixed(2))
+      .replace(/{limiteCreditoUsd}/g, c.limite_credito.toFixed(2))
+      .replace(/{creditoDisponibleUsd}/g, c.credito_disponible.toFixed(2));
+
+    const cleanPhone = (c.telefono || '').replace(/[^0-9]/g, '');
+    const isPhoneRegistered = cleanPhone.length >= 7 && cleanPhone !== '0';
+
+    if (!isPhoneRegistered) {
+      const editNow = await showConfirm(
+        `El cliente "${c.nombre}" no tiene un número de teléfono válido registrado en el sistema.\n\n¿Desea modificar la ficha del cliente para registrar su número telefónico ahora?`,
+        'Número No Registrado'
+      );
+      if (editNow) {
+        setSelectedRowClient(c);
+        handleOpenEdit();
+      }
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/whatsapp/send-direct', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: c.telefono,
+          textMessage: text
+        })
+      });
+      const data = await res.json();
+      if (res.ok && (data.success || data.simulated)) {
+        showAlert(
+          `✅ Recordatorio de pago enviado DIRECTAMENTE por WhatsApp a ${c.nombre} (${c.telefono}).${data.simulated ? ' (Modo simulación activo)' : ''}`,
+          'WhatsApp Enviado Con Éxito',
+          'success'
+        );
+      } else {
+        throw new Error(data.error || 'Servicio bot de WhatsApp desconectado');
+      }
+    } catch (err: any) {
+      console.warn('Fallback a WhatsApp Web:', err?.message);
+      const fallbackWeb = await showConfirm(
+        `El envío directo vía Bot reportó: ${err?.message || 'Bot no conectado'}.\n\n¿Desea abrir WhatsApp Web en el navegador para enviarlo directamente a ${c.telefono}?`,
+        'Servidor Bot WhatsApp'
+      );
+      if (fallbackWeb) {
+        const fullPhone = cleanPhone.startsWith('58') ? cleanPhone : (cleanPhone.startsWith('0') ? `58${cleanPhone.slice(1)}` : `58${cleanPhone}`);
+        window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(text)}`, '_blank');
+      }
+    }
+  };
 
   const [editName, setEditName] = useState('');
   const [editDoc, setEditDoc] = useState('');
@@ -1160,18 +1304,14 @@ export default function Clientes({
           </select>
 
           {/* Botón Limpiar Filtros */}
-          {(searchTerm.trim() || debtFilterMode !== 'all' || costoFilterMode !== 'all') && (
+          {(searchTerm.trim() || debtFilterMode !== 'all' || costoFilterMode !== 'all' || selectedRowClient) && (
             <button
-              onClick={() => {
-                setSearchTerm('');
-                setDebtFilterMode('all');
-                setCostoFilterMode('all');
-              }}
-              className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs px-2 py-1.5 rounded font-sans font-bold flex items-center gap-1 transition-all"
-              title="Restablecer filtros a valores por defecto"
+              onClick={handleClearFilters}
+              className="bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-900 text-xs px-2.5 py-1.5 rounded font-sans font-bold flex items-center gap-1.5 transition-all shadow-xs active:scale-95 cursor-pointer"
+              title="Restablecer filtros y selección a valores por defecto (Tecla L)"
             >
-              <X className="w-3.5 h-3.5" />
-              <span>Limpiar</span>
+              <X className="w-3.5 h-3.5 text-amber-700" />
+              <span>Limpiar [L]</span>
             </button>
           )}
         </div>
@@ -1205,50 +1345,50 @@ export default function Clientes({
           
           {/* TAB 1: CATÁLOGO */}
           {activeSubTab === 'catalogo' && (
-            <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm animate-fade-in">
-              <div className="overflow-x-auto">
+            <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm animate-fade-in flex flex-col">
+              <div className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-270px)] min-h-[480px]">
                 <table className="w-full border-collapse text-[11px] text-left">
-                  <thead className="bg-slate-600 text-white border-b border-slate-700">
+                  <thead className="sticky top-0 z-10 bg-slate-700 text-white border-b border-slate-800 shadow-xs">
                     <tr>
-                      <th className="px-3 py-2 cursor-pointer select-none font-sans uppercase font-bold" onClick={() => handleSort('nombre')}>
+                      <th className="sticky top-0 z-10 bg-slate-700 px-3 py-2.5 cursor-pointer select-none font-sans uppercase font-bold text-white" onClick={() => handleSort('nombre')}>
                         <div className="flex items-center gap-1">
                           <span>Nombre / Razón Social</span>
                           <SortIcon field="nombre" />
                         </div>
                       </th>
-                      <th className="px-3 py-2 cursor-pointer select-none font-sans uppercase font-bold" onClick={() => handleSort('cedula_rif')}>
+                      <th className="sticky top-0 z-10 bg-slate-700 px-3 py-2.5 cursor-pointer select-none font-sans uppercase font-bold text-white" onClick={() => handleSort('cedula_rif')}>
                         <div className="flex items-center gap-1">
                           <span>RFC / Cédula</span>
                           <SortIcon field="cedula_rif" />
                         </div>
                       </th>
-                      <th className="px-3 py-2 cursor-pointer select-none font-sans uppercase font-bold" onClick={() => handleSort('telefono')}>
+                      <th className="sticky top-0 z-10 bg-slate-700 px-3 py-2.5 cursor-pointer select-none font-sans uppercase font-bold text-white" onClick={() => handleSort('telefono')}>
                         <div className="flex items-center gap-1">
                           <span>Teléfono</span>
                           <SortIcon field="telefono" />
                         </div>
                       </th>
-                      <th className="px-3 py-2 cursor-pointer select-none font-sans uppercase font-bold text-center" onClick={() => handleSort('limite_credito')}>
+                      <th className="sticky top-0 z-10 bg-slate-700 px-3 py-2.5 cursor-pointer select-none font-sans uppercase font-bold text-center text-white" onClick={() => handleSort('limite_credito')}>
                         <div className="flex items-center justify-center gap-1">
                           <span>Límite Crédito</span>
                           <SortIcon field="limite_credito" />
                         </div>
                       </th>
-                      <th className="px-3 py-2 cursor-pointer select-none font-sans uppercase font-bold text-center" onClick={() => handleSort('credito_disponible')}>
+                      <th className="sticky top-0 z-10 bg-slate-700 px-3 py-2.5 cursor-pointer select-none font-sans uppercase font-bold text-center text-white" onClick={() => handleSort('credito_disponible')}>
                         <div className="flex items-center justify-center gap-1">
                           <span>Crédito Disponible</span>
                           <SortIcon field="credito_disponible" />
                         </div>
                       </th>
-                      <th className="px-3 py-2 cursor-pointer select-none font-sans uppercase font-bold text-center" onClick={() => handleSort('saldo_pendiente')}>
+                      <th className="sticky top-0 z-10 bg-slate-700 px-3 py-2.5 cursor-pointer select-none font-sans uppercase font-bold text-center text-white" onClick={() => handleSort('saldo_pendiente')}>
                         <div className="flex items-center justify-center gap-1">
                           <span>Saldo Pendiente</span>
                           <SortIcon field="saldo_pendiente" />
                         </div>
                       </th>
-                      <th className="px-3 py-2 text-center font-sans uppercase font-bold">% Desc.</th>
-                      <th className="px-3 py-2 text-center font-sans uppercase font-bold">P. Costo</th>
-                      <th className="px-3 py-2 text-center font-sans uppercase font-bold w-40">Ver Detalle</th>
+                      <th className="sticky top-0 z-10 bg-slate-700 px-3 py-2.5 text-center font-sans uppercase font-bold text-white">% Desc.</th>
+                      <th className="sticky top-0 z-10 bg-slate-700 px-3 py-2.5 text-center font-sans uppercase font-bold text-white">P. Costo</th>
+                      <th className="sticky top-0 z-10 bg-slate-700 px-3 py-2.5 text-center font-sans uppercase font-bold w-40 text-white">Ver Detalle</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -1265,11 +1405,41 @@ export default function Clientes({
                           <tr 
                             key={c.id} 
                             onClick={() => setSelectedRowClient(isSelected ? null : c)}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              setSelectedRowClient(c);
+                              const menuWidth = 280;
+                              const menuHeight = 290;
+                              const clickX = e.clientX;
+                              const clickY = e.clientY;
+                              const x = clickX + menuWidth > window.innerWidth ? Math.max(10, window.innerWidth - menuWidth - 15) : clickX;
+                              const y = clickY + menuHeight > window.innerHeight ? Math.max(10, window.innerHeight - menuHeight - 15) : clickY;
+                              setContextMenu({ x, y, type: 'client', data: c });
+                            }}
                             className={`cursor-pointer transition-colors ${isSelected ? 'bg-sky-50 hover:bg-sky-100 border-l-4 border-sky-500 font-semibold text-sky-950 shadow-inner' : 'hover:bg-slate-50'}`}
                           >
                             <td className="px-3 py-2.5 font-sans font-medium uppercase">{c.nombre}</td>
                             <td className="px-3 py-2.5 font-mono font-bold text-slate-500">{c.cedula_rif}</td>
-                            <td className="px-3 py-2.5 font-sans">{c.telefono || 'N/A'}</td>
+                            <td className="px-3 py-2.5 font-sans">
+                               {c.telefono && c.telefono.trim() !== '' && c.telefono.trim() !== '0' ? (
+                                 <div className="flex items-center gap-1.5">
+                                   <span className="font-mono text-slate-700 font-bold">{c.telefono}</span>
+                                   <button
+                                     type="button"
+                                     onClick={(e) => {
+                                       e.stopPropagation();
+                                       handleSendWhatsAppSingleClient(c);
+                                     }}
+                                     className="p-1 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-600 hover:text-emerald-800 transition-all border border-emerald-200 shadow-2xs active:scale-95 cursor-pointer"
+                                     title={`Enviar recordatorio de pago por WhatsApp a ${c.nombre}`}
+                                   >
+                                     <MessageCircle className="w-3.5 h-3.5 fill-emerald-600 text-emerald-600" />
+                                   </button>
+                                 </div>
+                               ) : (
+                                 <span className="text-slate-400 italic text-[10px]">Sin teléfono</span>
+                               )}
+                             </td>
                             <td className="px-3 py-2.5 text-center font-mono">${c.limite_credito.toFixed(2)}</td>
                             <td className="px-3 py-2.5 text-center font-mono text-slate-600">${c.credito_disponible.toFixed(2)}</td>
                             <td className={`px-3 py-2.5 text-center font-mono font-extrabold ${c.saldo_pendiente > 0.01 ? 'text-red-550' : 'text-slate-400'}`}>
@@ -1299,33 +1469,45 @@ export default function Clientes({
                             </td>
                             {/* NEW NAVIGATION BUTTONS IN ROW TO DIRECTLY GO TO SUBMODULES */}
                             <td className="px-3 py-2">
-                              <div className="flex justify-center gap-1.5">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedRowClient(c);
-                                    setActiveSubTab('historial');
-                                  }}
-                                  className="bg-slate-50 hover:bg-sky-100 hover:text-sky-700 text-slate-650 px-2 py-0.5 rounded border border-slate-300 hover:border-sky-300 font-sans font-bold transition-all flex items-center gap-0.5 text-[9px] shadow-sm active:scale-95"
-                                  title="Ir a Historial Detalle de este cliente"
-                                >
-                                  <FileText className="w-3 h-3 text-sky-650" />
-                                  <span>Historial</span>
-                                </button>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedRowClient(c);
-                                    setActiveSubTab('creditos');
-                                  }}
-                                  className="bg-slate-50 hover:bg-emerald-100 hover:text-emerald-700 text-slate-650 px-2 py-0.5 rounded border border-slate-300 hover:border-emerald-300 font-sans font-bold transition-all flex items-center gap-0.5 text-[9px] shadow-sm active:scale-95"
-                                  title="Ir a Créditos y Abonos de este cliente"
-                                >
-                                  <DollarSign className="w-3 h-3 text-emerald-600" />
-                                  <span>Créditos</span>
-                                </button>
-                              </div>
-                            </td>
+                               <div className="flex justify-center gap-1.5">
+                                 <button
+                                   onClick={(e) => {
+                                     e.stopPropagation();
+                                     handleSendWhatsAppSingleClient(c);
+                                   }}
+                                   className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded border border-emerald-300 font-sans font-bold transition-all flex items-center gap-1 text-[9px] shadow-2xs active:scale-95 cursor-pointer"
+                                   title="Enviar recordatorio de pago vía WhatsApp"
+                                 >
+                                   <MessageCircle className="w-3 h-3 text-emerald-600" />
+                                   <span>WhatsApp</span>
+                                 </button>
+
+                                 <button
+                                   onClick={(e) => {
+                                     e.stopPropagation();
+                                     setSelectedRowClient(c);
+                                     setActiveSubTab('historial');
+                                   }}
+                                   className="bg-slate-50 hover:bg-sky-100 hover:text-sky-700 text-slate-650 px-2 py-0.5 rounded border border-slate-300 hover:border-sky-300 font-sans font-bold transition-all flex items-center gap-0.5 text-[9px] shadow-sm active:scale-95 cursor-pointer"
+                                   title="Ir a Historial Detalle de este cliente"
+                                 >
+                                   <FileText className="w-3 h-3 text-sky-650" />
+                                   <span>Historial</span>
+                                 </button>
+                                 <button
+                                   onClick={(e) => {
+                                     e.stopPropagation();
+                                     setSelectedRowClient(c);
+                                     setActiveSubTab('creditos');
+                                   }}
+                                   className="bg-slate-50 hover:bg-amber-100 hover:text-amber-700 text-slate-650 px-2 py-0.5 rounded border border-slate-300 hover:border-amber-300 font-sans font-bold transition-all flex items-center gap-0.5 text-[9px] shadow-sm active:scale-95 cursor-pointer"
+                                   title="Ir a Créditos / Abonos de este cliente"
+                                 >
+                                   <DollarSign className="w-3 h-3 text-amber-650" />
+                                   <span>Créditos</span>
+                                 </button>
+                               </div>
+                             </td>
                           </tr>
                         );
                       })
@@ -1457,21 +1639,21 @@ export default function Clientes({
 
           {/* TAB 3: MOVIMIENTOS POR RANKING */}
           {activeSubTab === 'ranking' && (
-            <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm animate-fade-in">
-              <div className="p-3 bg-slate-600 text-white font-sans uppercase font-bold text-xs tracking-wider flex items-center gap-1.5">
+            <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm animate-fade-in flex flex-col">
+              <div className="p-3 bg-slate-700 text-white font-sans uppercase font-bold text-xs tracking-wider flex items-center gap-1.5 shadow-xs">
                 <TrendingUp className="w-4 h-4 text-sky-400" />
                 Ranking de Clientes por Volumen de Compras ($ USD)
               </div>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-270px)] min-h-[480px]">
                 <table className="w-full border-collapse text-[11px] text-left">
-                  <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+                  <thead className="sticky top-0 z-10 bg-slate-100 text-slate-700 border-b border-slate-300 shadow-xs">
                     <tr>
-                      <th className="px-4 py-2 text-center font-sans uppercase w-16">Posición</th>
-                      <th className="px-4 py-2 font-sans uppercase">Nombre / Razón Social</th>
-                      <th className="px-4 py-2 font-sans uppercase">Identificación (ID)</th>
-                      <th className="px-4 py-2 text-center font-sans uppercase">Compras Totales</th>
-                      <th className="px-4 py-2 text-center font-sans uppercase">Transacciones</th>
-                      <th className="px-4 py-2 text-center font-sans uppercase">Compra Promedio</th>
+                      <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2.5 text-center font-sans uppercase w-16">Posición</th>
+                      <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2.5 font-sans uppercase">Nombre / Razón Social</th>
+                      <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2.5 font-sans uppercase">Identificación (ID)</th>
+                      <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2.5 text-center font-sans uppercase">Compras Totales</th>
+                      <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2.5 text-center font-sans uppercase">Transacciones</th>
+                      <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2.5 text-center font-sans uppercase">Compra Promedio</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -1496,8 +1678,29 @@ export default function Clientes({
                           trClass = "bg-amber-100/10 hover:bg-amber-100/20 font-semibold";
                         }
 
+                        const clientObj = clients.find(c => c.cedula_rif === r.cedula_rif);
+
                         return (
-                          <tr key={r.cedula_rif} className={trClass}>
+                          <tr 
+                            key={r.cedula_rif} 
+                            onClick={() => {
+                              if (clientObj) setSelectedRowClient(clientObj);
+                            }}
+                            onContextMenu={(e) => {
+                              if (clientObj) {
+                                e.preventDefault();
+                                setSelectedRowClient(clientObj);
+                                const menuWidth = 280;
+                                const menuHeight = 290;
+                                const clickX = e.clientX;
+                                const clickY = e.clientY;
+                                const x = clickX + menuWidth > window.innerWidth ? Math.max(10, window.innerWidth - menuWidth - 15) : clickX;
+                                const y = clickY + menuHeight > window.innerHeight ? Math.max(10, window.innerHeight - menuHeight - 15) : clickY;
+                                setContextMenu({ x, y, type: 'client', data: clientObj });
+                              }
+                            }}
+                            className={`${trClass} cursor-pointer transition-colors`}
+                          >
                             <td className="px-4 py-2.5 text-center font-bold text-slate-600">{posBadge}</td>
                             <td className="px-4 py-2.5 font-sans font-medium uppercase">{r.nombre}</td>
                             <td className="px-4 py-2.5 font-mono">{r.cedula_rif}</td>
@@ -1516,54 +1719,54 @@ export default function Clientes({
 
           {/* TAB 4: CRÉDITOS / ABONOS TIMELINE */}
           {activeSubTab === 'creditos' && (
-            <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm animate-fade-in">
-              <div className="p-3 bg-slate-600 text-white font-sans uppercase font-bold text-xs tracking-wider flex items-center justify-between gap-1.5">
+            <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm animate-fade-in flex flex-col">
+              <div className="p-3 bg-slate-700 text-white font-sans uppercase font-bold text-xs tracking-wider flex items-center justify-between gap-1.5 shadow-xs">
                 <span className="flex items-center gap-1.5">
                   <DollarSign className="w-4 h-4 text-sky-400" />
                   Movimientos de Cuentas: Créditos Otorgados y Abonos Recibidos
                 </span>
-                <span className="text-[10px] bg-slate-700 px-2 py-0.5 rounded font-mono text-slate-200 lowercase">
+                <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded font-mono text-slate-200 lowercase">
                   {selectedRowClient ? `filtrado por: ${selectedRowClient.nombre.substring(0, 15)}...` : 'vista general (todos)'}
                 </span>
               </div>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-270px)] min-h-[480px]">
                 <table className="w-full border-collapse text-[11px] text-left">
-                  <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+                  <thead className="sticky top-0 z-10 bg-slate-100 text-slate-700 border-b border-slate-300 shadow-xs">
                     <tr>
-                      <th className="px-4 py-2 font-sans uppercase w-28 cursor-pointer select-none" onClick={() => handleCreditSort('tipo')}>
+                      <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2.5 font-sans uppercase w-28 cursor-pointer select-none" onClick={() => handleCreditSort('tipo')}>
                         <div className="flex items-center gap-1">
                           <span>Tipo Movimiento</span>
                           <CreditSortIcon field="tipo" />
                         </div>
                       </th>
-                      <th className="px-4 py-2 font-sans uppercase cursor-pointer select-none" onClick={() => handleCreditSort('fecha')}>
+                      <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2.5 font-sans uppercase cursor-pointer select-none" onClick={() => handleCreditSort('fecha')}>
                         <div className="flex items-center gap-1">
                           <span>Fecha / Hora</span>
                           <CreditSortIcon field="fecha" />
                         </div>
                       </th>
-                      <th className="px-4 py-2 font-sans uppercase cursor-pointer select-none" onClick={() => handleCreditSort('ref')}>
+                      <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2.5 font-sans uppercase cursor-pointer select-none" onClick={() => handleCreditSort('ref')}>
                         <div className="flex items-center gap-1">
                           <span>Referencia / Factura</span>
                           <CreditSortIcon field="ref" />
                         </div>
                       </th>
-                      <th className="px-4 py-2 font-sans uppercase cursor-pointer select-none" onClick={() => handleCreditSort('nombre')}>
+                      <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2.5 font-sans uppercase cursor-pointer select-none" onClick={() => handleCreditSort('nombre')}>
                         <div className="flex items-center gap-1">
                           <span>Cliente</span>
                           <CreditSortIcon field="nombre" />
                         </div>
                       </th>
-                      <th className="px-4 py-2 font-sans uppercase cursor-pointer select-none" onClick={() => handleCreditSort('cedula_rif')}>
+                      <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2.5 font-sans uppercase cursor-pointer select-none" onClick={() => handleCreditSort('cedula_rif')}>
                         <div className="flex items-center gap-1">
                           <span>Identificación (ID)</span>
                           <CreditSortIcon field="cedula_rif" />
                         </div>
                       </th>
-                      <th className="px-4 py-2 font-sans uppercase select-none">
+                      <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2.5 font-sans uppercase select-none">
                         <span>Forma de Pago</span>
                       </th>
-                      <th className="px-4 py-2 text-right font-sans uppercase cursor-pointer select-none" onClick={() => handleCreditSort('monto')}>
+                      <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2.5 text-right font-sans uppercase cursor-pointer select-none" onClick={() => handleCreditSort('monto')}>
                         <div className="flex items-center justify-end gap-1">
                           <span>Monto ($ USD)</span>
                           <CreditSortIcon field="monto" />
@@ -1582,8 +1785,27 @@ export default function Clientes({
                       filteredCreditAbonoList.map((item, idx) => {
                         const isCredit = item.tipo === 'Crédito';
                         const isDev = item.tipo === 'Devolución';
+                        const clientObj = clients.find(c => c.cedula_rif === item.cedula_rif);
+
                         return (
-                          <tr key={idx} className="hover:bg-slate-55 transition-colors">
+                          <tr 
+                            key={idx} 
+                            onClick={() => {
+                              if (clientObj) setSelectedRowClient(clientObj);
+                            }}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              if (clientObj) setSelectedRowClient(clientObj);
+                              const menuWidth = 280;
+                              const menuHeight = 290;
+                              const clickX = e.clientX;
+                              const clickY = e.clientY;
+                              const x = clickX + menuWidth > window.innerWidth ? Math.max(10, window.innerWidth - menuWidth - 15) : clickX;
+                              const y = clickY + menuHeight > window.innerHeight ? Math.max(10, window.innerHeight - menuHeight - 15) : clickY;
+                              setContextMenu({ x, y, type: 'credit_movement', data: { item, client: clientObj } });
+                            }}
+                            className="hover:bg-slate-55 transition-colors cursor-pointer"
+                          >
                             <td className="px-4 py-2.5">
                               <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-sans font-bold flex items-center w-fit gap-1 ${
                                 isCredit ? 'bg-orange-100 text-orange-850' : 
@@ -1641,7 +1863,7 @@ export default function Clientes({
         </div>
 
         {/* RIGHT COLUMN: ACTION BUTTONS PANEL */}
-        <div className="lg:col-span-2 space-y-3">
+        <div className="lg:col-span-2 space-y-3 sticky top-2 self-start">
           
           <div className="bg-slate-150 border border-slate-200 rounded-lg p-3 shadow-inner flex flex-col justify-start h-fit">
             <h4 className="text-[10px] font-sans font-extrabold text-slate-500 uppercase tracking-widest border-b border-slate-200 pb-1.5 mb-3 flex items-center gap-1">
@@ -1765,16 +1987,34 @@ export default function Clientes({
                     <span>Exportar Excel</span>
                   </button>
 
-                  {/* REPORT BUTTON 3: WHATSAPP */}
-                  <button
-                    onClick={handleSendWhatsAppReport}
-                    disabled={isSendingWhatsAppReport}
-                    className="w-full bg-[#128C7E] hover:bg-[#075E54] disabled:opacity-50 text-white border border-[#075E54] py-2 px-2.5 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[10.5px] uppercase tracking-wider text-left transition-all active:scale-95"
-                    title="Enviar resumen de cartera y deudores vía WhatsApp"
-                  >
-                    <MessageCircle className="w-3.5 h-3.5 text-emerald-200 bg-[#075E54]/60 rounded p-0.5" />
-                    <span>{isSendingWhatsAppReport ? 'Enviando...' : 'Enviar WhatsApp'}</span>
-                  </button>
+                  {/* REPORT BUTTON 3: WHATSAPP (CON RECONOCIMIENTO DE CLIENTE SELECCIONADO) */}
+                  {selectedRowClient ? (
+                    <button
+                      onClick={() => handleSendWhatsAppSingleClient(selectedRowClient)}
+                      className="w-full bg-[#128C7E] hover:bg-[#075E54] text-white border border-[#075E54] py-2 px-2.5 rounded shadow-sm flex items-center justify-between font-sans font-bold text-[10.5px] uppercase tracking-wider text-left transition-all active:scale-95 cursor-pointer"
+                      title={`Enviar recordatorio de pago vía WhatsApp a ${selectedRowClient.nombre}`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <MessageCircle className="w-3.5 h-3.5 text-emerald-200 bg-[#075E54]/60 rounded p-0.5 flex-shrink-0" />
+                        <div className="truncate text-left">
+                          <span className="block truncate font-extrabold text-white">WhatsApp Recordatorio</span>
+                          <span className="block text-[8.5px] font-mono text-emerald-200 font-normal truncate">
+                            {selectedRowClient.telefono && selectedRowClient.telefono.trim() !== '0' ? selectedRowClient.telefono : '⚠️ Sin teléfono'}
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleSendWhatsAppReport}
+                      disabled={isSendingWhatsAppReport}
+                      className="w-full bg-[#128C7E] hover:bg-[#075E54] disabled:opacity-50 text-white border border-[#075E54] py-2 px-2.5 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[10.5px] uppercase tracking-wider text-left transition-all active:scale-95 cursor-pointer"
+                      title="Enviar resumen general de cartera y deudores vía WhatsApp"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5 text-emerald-200 bg-[#075E54]/60 rounded p-0.5" />
+                      <span>{isSendingWhatsAppReport ? 'Enviando...' : 'Enviar WhatsApp'}</span>
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -2519,6 +2759,277 @@ export default function Clientes({
             </div>
 
           </div>
+        </div>
+      )}
+
+      {/* MENÚ CONTEXTUAL FLOTANTE (CLIC DERECHO EN CLIENTE O MOVIMIENTO) */}
+      {contextMenu && (
+        <div 
+          onClick={(e) => e.stopPropagation()}
+          style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
+          className="fixed z-[120] w-72 bg-white/95 backdrop-blur-md border border-slate-200 rounded-xl shadow-2xl overflow-hidden py-1 text-slate-700 font-sans text-xs animate-scale-in select-none"
+        >
+          {contextMenu.type === 'client' && (() => {
+            const c = contextMenu.data as Client;
+            return (
+              <>
+                {/* Header Cliente */}
+                <div className="px-3 py-2 bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 text-white flex items-center gap-2.5 border-b border-slate-700">
+                  <div className="w-9 h-9 rounded-lg bg-slate-800 flex items-center justify-center overflow-hidden border border-slate-700 flex-shrink-0">
+                    <Users className="w-4 h-4 text-sky-400" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-bold text-white truncate uppercase">{c.nombre}</span>
+                      {c.aplica_precio_costo && (
+                        <span className="text-[8px] bg-amber-500 text-slate-900 px-1 py-0.2 rounded font-sans font-black">COSTO</span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-mono font-bold block">{c.cedula_rif}</span>
+                    <div className="flex items-center gap-2 text-[9.5px] font-mono mt-0.5">
+                      {c.saldo_pendiente > 0.01 ? (
+                        <span className="text-rose-400 font-bold">Deuda: ${c.saldo_pendiente.toFixed(2)}</span>
+                      ) : (
+                        <span className="text-emerald-400 font-bold">Al Día ($0.00)</span>
+                      )}
+                      <span className="text-slate-400">• Lím: ${c.limite_credito.toFixed(2)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-1 space-y-0.5">
+                  {/* 1. Modificar Cliente */}
+                  {hasPermission('editar') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setContextMenu(null);
+                        setSelectedRowClient(c);
+                        handleOpenEdit();
+                      }}
+                      className="w-full text-left px-2.5 py-1.5 hover:bg-cyan-50 hover:text-cyan-900 rounded-lg flex items-center gap-2 font-bold transition-colors cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5 text-cyan-600 flex-shrink-0" />
+                      <span>Modificar Datos del Cliente</span>
+                    </button>
+                  )}
+
+                  {/* 2. Registrar Abono */}
+                  {hasPermission('editar') && (
+                    <button
+                      type="button"
+                      disabled={c.saldo_pendiente <= 0.01}
+                      onClick={() => {
+                        setContextMenu(null);
+                        setSelectedRowClient(c);
+                        handleOpenAbono();
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 font-bold transition-colors ${
+                        c.saldo_pendiente <= 0.01
+                          ? 'opacity-40 cursor-not-allowed text-slate-400'
+                          : 'hover:bg-amber-50 hover:text-amber-900 text-slate-700 cursor-pointer'
+                      }`}
+                    >
+                      <DollarSign className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                      <span>Registrar Abono / Pago</span>
+                    </button>
+                  )}
+
+                  {/* 3. Ver Historial Detalle */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setContextMenu(null);
+                      setSelectedRowClient(c);
+                      setActiveSubTab('historial');
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-blue-50 hover:text-blue-900 rounded-lg flex items-center gap-2 font-bold transition-colors cursor-pointer"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
+                    <span>Ver Historial Transaccional</span>
+                  </button>
+
+                  {/* 4. Ver Créditos y Abonos */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setContextMenu(null);
+                      setSelectedRowClient(c);
+                      setActiveSubTab('creditos');
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-emerald-50 hover:text-emerald-900 rounded-lg flex items-center gap-2 font-bold transition-colors cursor-pointer"
+                  >
+                    <TrendingUp className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                    <span>Ver Créditos / Cuenta por Cobrar</span>
+                  </button>
+
+                  {/* 5. Enviar Estado de Cuenta por WhatsApp */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setContextMenu(null);
+                      handleSendWhatsAppSingleClient(c);
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-green-50 hover:text-green-900 rounded-lg flex items-center gap-2 font-bold transition-colors cursor-pointer"
+                  >
+                    <MessageCircle className="w-3.5 h-3.5 text-green-600 flex-shrink-0" />
+                    <span>Enviar Estado de Cuenta (WhatsApp)</span>
+                  </button>
+
+                  {/* 6. Eliminar Cliente */}
+                  {hasPermission('eliminar') && (
+                    <>
+                      <div className="border-t border-slate-100 my-1"></div>
+                      <button
+                        type="button"
+                        disabled={c.saldo_pendiente > 0.01}
+                        onClick={() => {
+                          setContextMenu(null);
+                          setSelectedRowClient(c);
+                          handleDeleteClick();
+                        }}
+                        className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 font-bold transition-colors ${
+                          c.saldo_pendiente > 0.01
+                            ? 'opacity-40 cursor-not-allowed text-slate-400'
+                            : 'hover:bg-rose-50 text-rose-600 hover:text-rose-700 cursor-pointer'
+                        }`}
+                        title={c.saldo_pendiente > 0.01 ? "No se puede eliminar un cliente con deuda" : "Eliminar cliente"}
+                      >
+                        <MinusCircle className="w-3.5 h-3.5 text-rose-600 flex-shrink-0" />
+                        <span>Eliminar Cliente</span>
+                      </button>
+                    </>
+                  )}
+                </div>
+              </>
+            );
+          })()}
+
+          {contextMenu.type === 'credit_movement' && (() => {
+            const { item, client } = contextMenu.data;
+            const isCredit = item.tipo === 'Crédito';
+            const isDev = item.tipo === 'Devolución';
+
+            return (
+              <>
+                {/* Header Movimiento */}
+                <div className="px-3 py-2 bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 text-white flex items-center gap-2.5 border-b border-slate-700">
+                  <div className="w-9 h-9 rounded-lg bg-slate-800 flex items-center justify-center overflow-hidden border border-slate-700 flex-shrink-0">
+                    <DollarSign className="w-4 h-4 text-emerald-400" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-bold text-white truncate uppercase">{item.nombre}</span>
+                      <span className={`text-[8px] px-1 py-0.2 rounded font-sans font-bold ${
+                        isCredit ? 'bg-orange-600 text-white' : isDev ? 'bg-purple-600 text-white' : 'bg-emerald-600 text-white'
+                      }`}>
+                        {item.tipo}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-mono font-bold block">{item.ref} • {item.fecha}</span>
+                    <span className={`text-[9.5px] font-mono font-extrabold block mt-0.5 ${
+                      isCredit ? 'text-orange-400' : isDev ? 'text-purple-400' : 'text-emerald-400'
+                    }`}>
+                      {isCredit ? '+' : '-'}${item.monto.toFixed(2)} USD
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-1 space-y-0.5">
+                  {/* 1. Ver Ficha / Seleccionar Cliente */}
+                  {client && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setContextMenu(null);
+                        setSelectedRowClient(client);
+                        setActiveSubTab('catalogo');
+                      }}
+                      className="w-full text-left px-2.5 py-1.5 hover:bg-sky-50 hover:text-sky-900 rounded-lg flex items-center gap-2 font-bold transition-colors cursor-pointer"
+                    >
+                      <Users className="w-3.5 h-3.5 text-sky-600 flex-shrink-0" />
+                      <span>Ver Ficha en Catálogo</span>
+                    </button>
+                  )}
+
+                  {/* 2. Registrar Abono */}
+                  {client && client.saldo_pendiente > 0.01 && hasPermission('editar') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setContextMenu(null);
+                        setSelectedRowClient(client);
+                        handleOpenAbono();
+                      }}
+                      className="w-full text-left px-2.5 py-1.5 hover:bg-amber-50 hover:text-amber-900 rounded-lg flex items-center gap-2 font-bold transition-colors cursor-pointer"
+                    >
+                      <DollarSign className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                      <span>Registrar Nuevo Abono</span>
+                    </button>
+                  )}
+
+                  {/* 3. Ver Historial Transaccional */}
+                  {client && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setContextMenu(null);
+                        setSelectedRowClient(client);
+                        setActiveSubTab('historial');
+                      }}
+                      className="w-full text-left px-2.5 py-1.5 hover:bg-blue-50 hover:text-blue-900 rounded-lg flex items-center gap-2 font-bold transition-colors cursor-pointer"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
+                      <span>Ver Historial de Facturas</span>
+                    </button>
+                  )}
+
+                  {/* 4. Enviar Estado de Cuenta por WhatsApp */}
+                  {client && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setContextMenu(null);
+                        handleSendWhatsAppSingleClient(client);
+                      }}
+                      className="w-full text-left px-2.5 py-1.5 hover:bg-green-50 hover:text-green-900 rounded-lg flex items-center gap-2 font-bold transition-colors cursor-pointer"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5 text-green-600 flex-shrink-0" />
+                      <span>Enviar Estado de Cuenta (WhatsApp)</span>
+                    </button>
+                  )}
+
+                  <div className="border-t border-slate-100 my-1"></div>
+
+                  {/* 5. Descargar Reporte PDF */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setContextMenu(null);
+                      handleDownloadReport();
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-slate-100 hover:text-slate-900 rounded-lg flex items-center gap-2 font-bold transition-colors text-slate-700 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
+                    <span>Descargar Reporte PDF</span>
+                  </button>
+
+                  {/* 6. Exportar Excel */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setContextMenu(null);
+                      handleExportExcel();
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 hover:bg-emerald-50 hover:text-emerald-900 rounded-lg flex items-center gap-2 font-bold transition-colors text-slate-700 cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                    <span>Exportar Movimientos a Excel</span>
+                  </button>
+                </div>
+              </>
+            );
+          })()}
         </div>
       )}
 

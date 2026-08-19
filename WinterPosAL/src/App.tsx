@@ -28,9 +28,12 @@ import LicenciaModal from './components/LicenciaModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import { MasterPassModal } from './components/MasterPassModal';
 import { InversionesModulo } from './components/InversionesModulo';
+import MobileApp from './mobile/MobileApp';
+import ManualAccesoMovilModal from './components/ManualAccesoMovilModal';
 import { 
   ShoppingBag, Package, Users, Truck,
-  TrendingUp, Settings, LogOut, Globe, Cpu, History, Printer, CheckCircle2, ShieldCheck, Briefcase
+  TrendingUp, Settings, LogOut, Globe, Cpu, History, Printer, CheckCircle2, ShieldCheck, Briefcase,
+  Smartphone, QrCode
 } from 'lucide-react';
 import { printTicketReceipt, formatBs, formatUSD } from './utils';
 
@@ -250,6 +253,15 @@ export default function App() {
   const [showMasterPassModal, setShowMasterPassModal] = useState(false);
   const [inversionesUnlocked, setInversionesUnlocked] = useState(false);
   const [inversionesSubTab, setInversionesSubTab] = useState<'matriz' | 'historial' | 'utilidades' | 'accionistas'>('matriz');
+
+  // Mobile mode detection (screen size < 768px or query parameter ?mode=mobile)
+  const [isMobileMode, setIsMobileMode] = useState<boolean>(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('mode') === 'mobile') return true;
+    if (params.get('mode') === 'desktop') return false;
+    return window.innerWidth < 768;
+  });
+  const [showManualAccesoModal, setShowManualAccesoModal] = useState(false);
 
   // Debounced Sync to localStorage (avoids blocking the UI thread on large catalogs)
   useEffect(() => {
@@ -2385,12 +2397,16 @@ export default function App() {
 
   const hasModulePermission = (modulo: string, accion: 'ver' | 'crear' | 'editar' | 'eliminar' = 'ver') => {
     if (!currentUser) return false;
-    if (currentUser.rol.toLowerCase() === 'administrador') return true;
-    if (!currentUser.permisos) return true; // fallback to true if no permissions specified
+    const isUserAdmin = currentUser.rol?.toLowerCase() === 'administrador' || currentUser.rol?.toLowerCase() === 'admin';
+    if (isUserAdmin) return true;
+    if (!currentUser.permisos) return false;
     return !!currentUser.permisos[modulo]?.[accion];
   };
 
+  const [reprintCurrency, setReprintCurrency] = useState<'USD' | 'VES'>('USD');
+
   const handleReprint = (sale: Sale) => {
+    setReprintCurrency(companyConfig?.moneda_ticket_default || 'USD');
     setReprintSale(sale);
   };
 
@@ -2401,11 +2417,23 @@ export default function App() {
       if (e.key === 'F9') {
         e.preventDefault();
         setShowLicenseModalManually(prev => !prev);
+      } else if (e.key === 'Escape') {
+        if (reprintSale) {
+          setReprintSale(null);
+        }
+        if (showLicenseModalManually) {
+          setShowLicenseModalManually(false);
+        }
       }
     };
     window.addEventListener('keydown', handleGlobalF9);
     return () => window.removeEventListener('keydown', handleGlobalF9);
-  }, []);
+  }, [reprintSale, showLicenseModalManually]);
+
+  // Render Mobile Executive App directly if on mobile device or ?mode=mobile (solo si tiene permiso movil)
+  if (isMobileMode && hasModulePermission('movil', 'ver')) {
+    return <MobileApp onSwitchToDesktop={() => setIsMobileMode(false)} />;
+  }
 
   const isLicenseBlocking = licenseStatus && !licenseStatus.isValid;
 
@@ -2667,6 +2695,29 @@ export default function App() {
             <Briefcase className="w-5 h-5 flex-shrink-0" />
             <span>Inversiones</span>
           </button>
+        )}
+
+        {/* Mobile View & QR Connector Buttons (Solo Administrador o Permiso Habilitado) */}
+        {hasModulePermission('movil', 'ver') && (
+          <>
+            <button
+              onClick={() => setIsMobileMode(true)}
+              className="flex items-center gap-1.5 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-black font-sans rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-md transition-all active:scale-95 ml-auto cursor-pointer"
+              title="Ver versión de Control Gerencial Móvil (Optimizado para Smartphones y Tablets)"
+            >
+              <Smartphone className="w-4 h-4" />
+              <span>Vista Móvil</span>
+            </button>
+
+            <button
+              onClick={() => setShowManualAccesoModal(true)}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold font-sans rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 shadow-sm transition-all active:scale-95 cursor-pointer"
+              title="Ver Código QR e instrucciones para conectar tu teléfono"
+            >
+              <QrCode className="w-4 h-4 text-emerald-400" />
+              <span>Conectar Celular</span>
+            </button>
+          </>
         )}
       </nav>
 
@@ -2935,127 +2986,222 @@ export default function App() {
         <span>SISTEMA WINTERPOS-AL v4.1.0</span>
       </footer>
 
-      {/* REPRINT TICKET MODAL */}
+      {/* MODAL DE REIMPRESIÓN DE TICKET */}
       {reprintSale && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-slate-900">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden w-full max-w-sm shadow-2xl p-6 space-y-4">
+        <div 
+          onClick={() => setReprintSale(null)}
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-mono text-slate-800"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-slate-900 border border-slate-750 rounded-2xl overflow-hidden w-full max-w-md shadow-2xl p-5 space-y-4"
+          >
             
-            <div className="max-h-[60vh] overflow-y-auto bg-white p-5 rounded text-[10px] space-y-3">
-              
-              {/* Commerce info */}
-              <div className="text-center">
-                <h4 className="font-extrabold text-sm uppercase">{companyConfig.nombre_comercio}</h4>
-                <p className="font-bold">RIF: {companyConfig.rif}</p>
-                <p className="text-[9px] mt-0.5">{companyConfig.direccion}</p>
-                <p>Telf: {companyConfig.telefono}</p>
+            {/* Currency Selector Toggle */}
+            <div className="bg-slate-950 p-2 rounded-xl border border-slate-800 flex items-center justify-between">
+              <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-slate-400">
+                Moneda Ticket:
+              </span>
+              <div className="flex bg-slate-900 p-0.5 rounded-lg border border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setReprintCurrency('USD')}
+                  className={`px-3 py-1 text-[11px] font-extrabold font-sans rounded-md transition-all ${
+                    reprintCurrency === 'USD'
+                      ? 'bg-emerald-600 text-white shadow'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  💵 $ (USD)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReprintCurrency('VES')}
+                  className={`px-3 py-1 text-[11px] font-extrabold font-sans rounded-md transition-all ${
+                    reprintCurrency === 'VES'
+                      ? 'bg-blue-600 text-white shadow'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  🇻🇪 Bs (VES)
+                </button>
               </div>
-
-              <p className="text-center select-none text-slate-400">----------------------------------------</p>
-
-              {/* Metadata */}
-              <div className="space-y-0.5">
-                <div>FACTURA: {reprintSale.factura_nro} (REIMPRESIÓN)</div>
-                <div>FECHA: {reprintSale.fecha}</div>
-                <div>CAJERO: {reprintSale.usuario.toUpperCase()}</div>
-                <div>CLIENTE: {reprintSale.client.nombre.toUpperCase()}</div>
-                <div>ID/RIF: {reprintSale.client.cedula_rif}</div>
-              </div>
-
-              <p className="text-center select-none text-slate-400">----------------------------------------</p>
-
-              {/* Items */}
-              <div className="space-y-1">
-                <div className="flex font-bold justify-between">
-                  <span className="w-1/2">CONCEPTO</span>
-                  <span className="w-1/12 text-center">CT</span>
-                  <span className="w-1/4 text-right">P.UN</span>
-                  <span className="w-1/6 text-right">TOTAL</span>
-                </div>
-                {reprintSale.items.map((item: any, idx: number) => {
-                  const isBulk = item.product?.a_granel || item.a_granel;
-                  const rawQty = parseFloat(item.qty || '0');
-                  const qtyDisplay = (isBulk || (rawQty % 1 !== 0))
-                    ? (rawQty % 1 === 0 ? rawQty.toString() : rawQty.toFixed(3))
-                    : Math.round(rawQty).toString();
-                  const isExempt = item.product?.exento_impuesto === true || item.exento_impuesto === true || (item.product?.porcentaje_impuesto !== undefined && item.product?.porcentaje_impuesto === 0);
-                  const taxLabel = isExempt ? ' (E)' : ' (G)';
-
-                  return (
-                    <div key={idx} className="flex justify-between">
-                      <span className="w-1/2 overflow-hidden truncate">{item.product?.description || item.description}{taxLabel}</span>
-                      <span className="w-1/12 text-center">{qtyDisplay}</span>
-                      <span className="w-1/4 text-right">${item.priceUSD.toFixed(2)}</span>
-                      <span className="w-1/6 text-right">${item.totalUSD.toFixed(2)}</span>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <p className="text-center select-none text-slate-400">----------------------------------------</p>
-
-              {/* Summary */}
-              <div className="text-right space-y-1 text-[11px]">
-                <div className="flex justify-between">
-                  <span>SUBTOTAL USD:</span>
-                  <span>${reprintSale.subtotal.toFixed(2)}</span>
-                </div>
-                {((reprintSale.exento_usd ?? 0) > 0) && (
-                  <div className="flex justify-between text-slate-700">
-                    <span>MONTO EXENTO (E):</span>
-                    <span>${(reprintSale.exento_usd || 0).toFixed(2)}</span>
-                  </div>
-                )}
-                {reprintSale.descuento > 0 && (
-                  <div className="flex justify-between text-red-500">
-                    <span>DESCUENTO:</span>
-                    <span>-${reprintSale.descuento.toFixed(2)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between font-extrabold text-sm border-t border-slate-300 pt-1">
-                  <span>TOTAL USD:</span>
-                  <span>${reprintSale.totalUSD.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between text-slate-600 font-bold border-t border-dashed border-slate-350 pt-1">
-                  <span>TOTAL VES:</span>
-                  <span>{formatBs(reprintSale.totalVES)}</span>
-                </div>
-              </div>
-
-              <p className="text-center select-none text-slate-400">----------------------------------------</p>
-
-              {/* Payments & Change */}
-              <div className="space-y-0.5">
-                <span className="font-bold block">MEDIOS DE PAGO LIQUIDADOS:</span>
-                {reprintSale.pagos.map((p, idx) => (
-                  <div key={idx} className="flex justify-between">
-                    <span>{p.metodo} {p.bancoEmisor ? `(${p.bancoEmisor})` : ''} {p.reference ? `Ref:${p.reference}` : ''}:</span>
-                    <span>{p.metodo.endsWith('$') || p.metodo.includes('Credito') ? `$${p.monto.toFixed(2)}` : formatBs(p.montoVES || p.monto)}</span>
-                  </div>
-                ))}
-                {reprintSale.vueltoVES > 0 && (
-                  <div className="flex justify-between font-bold border-t border-slate-300 pt-1 text-[11px]">
-                    <span>CAMBIO VES:</span>
-                    <span>{formatBs(reprintSale.vueltoVES)}</span>
-                  </div>
-                )}
-              </div>
-
-              <p className="text-center select-none text-slate-400">----------------------------------------</p>
-
-              <div className="text-center text-[9px] italic leading-relaxed text-slate-500">
-                {companyConfig.mensaje_pie_ticket}
-              </div>
-
             </div>
+
+            {/* Receipt Preview Body */}
+            {(() => {
+              const isVES = reprintCurrency === 'VES';
+              const tasaVenta = (reprintSale.totalUSD > 0 && reprintSale.totalVES > 0)
+                ? (reprintSale.totalVES / reprintSale.totalUSD)
+                : (companyConfig?.tasa_oficial_bcv || 1);
+
+              return (
+                <div className="bg-white border border-slate-250 rounded-xl p-5 shadow-inner space-y-3 text-[10px] text-slate-900 max-h-[65vh] overflow-y-auto">
+                  {/* Commerce info */}
+                  <div className="text-center">
+                    <h4 className="font-extrabold text-sm uppercase">{companyConfig.nombre_comercio}</h4>
+                    <p className="font-bold">RIF: {companyConfig.rif}</p>
+                    <p className="text-[9px] mt-0.5">{companyConfig.direccion}</p>
+                    <p>Telf: {companyConfig.telefono}</p>
+                  </div>
+
+                  <p className="text-center select-none text-slate-400">----------------------------------------</p>
+
+                  {/* Metadata */}
+                  <div className="space-y-0.5">
+                    <div>FACTURA: {reprintSale.factura_nro} (REIMPRESIÓN)</div>
+                    <div>FECHA: {reprintSale.fecha}</div>
+                    <div>CAJERO: {reprintSale.usuario.toUpperCase()}</div>
+                    <div>CLIENTE: {reprintSale.client.nombre.toUpperCase()}</div>
+                    <div>ID/RIF: {reprintSale.client.cedula_rif}</div>
+                  </div>
+
+                  <p className="text-center select-none text-slate-400">----------------------------------------</p>
+
+                  {/* Header Items */}
+                  <div className="flex font-bold justify-between text-slate-500 text-[9px] border-b border-slate-200 pb-1">
+                    <span>DESCRIPCIÓN / CANT x PRECIO</span>
+                    <span>TOTAL</span>
+                  </div>
+
+                  {/* Items List - Two-line High Clarity Format */}
+                  <div className="space-y-2 py-1">
+                    {reprintSale.items.map((item: any, idx: number) => {
+                      const isBulk = item.product?.a_granel || item.a_granel;
+                      const rawQty = parseFloat(item.qty || '0');
+                      const qtyDisplay = (isBulk || (rawQty % 1 !== 0))
+                        ? (rawQty % 1 === 0 ? rawQty.toString() : rawQty.toFixed(3))
+                        : Math.round(rawQty).toString();
+                      const isExempt = item.product?.exento_impuesto === true || item.exento_impuesto === true || (item.product?.porcentaje_impuesto !== undefined && item.product?.porcentaje_impuesto === 0);
+                      const taxLabel = isExempt ? ' (E)' : ' (G)';
+
+                      const priceNumUSD = item.priceUSD ? item.priceUSD : (item.precioUSD ? item.precioUSD : 0);
+                      const totalNumUSD = item.totalUSD ? item.totalUSD : (priceNumUSD * rawQty);
+
+                      const priceDisplay = isVES 
+                        ? formatBs(priceNumUSD * tasaVenta)
+                        : `$${priceNumUSD.toFixed(2)}`;
+                      const totalDisplay = isVES 
+                        ? formatBs(totalNumUSD * tasaVenta)
+                        : `$${totalNumUSD.toFixed(2)}`;
+
+                      return (
+                        <div key={idx} className="border-b border-dashed border-slate-150 pb-1.5 last:border-none last:pb-0">
+                          <div className="font-bold text-slate-900 break-words text-[11px] leading-tight uppercase">
+                            {item.product?.description || item.description}
+                            <span className={isExempt ? "text-amber-700 font-extrabold text-[9px] ml-1" : "text-sky-700 font-bold text-[9px] ml-1"}>
+                              {taxLabel}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center text-[10.5px] mt-0.5 pl-2 text-slate-650">
+                            <span className="font-mono text-slate-600">
+                              <span className="font-bold text-slate-850">{qtyDisplay}</span> x {priceDisplay}
+                            </span>
+                            <span className="font-black text-slate-900 font-mono">
+                              {totalDisplay}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <p className="text-center select-none text-slate-400">----------------------------------------</p>
+
+                  {/* Summary */}
+                  {isVES ? (
+                    <div className="text-right space-y-1 text-[11px]">
+                      <div className="flex justify-between">
+                        <span>SUBTOTAL VES:</span>
+                        <span>{formatBs(reprintSale.subtotal * tasaVenta)}</span>
+                      </div>
+                      {((reprintSale.exento_usd ?? 0) > 0) && (
+                        <div className="flex justify-between text-slate-700">
+                          <span>MONTO EXENTO (E):</span>
+                          <span>{formatBs((reprintSale.exento_usd || 0) * tasaVenta)}</span>
+                        </div>
+                      )}
+                      {reprintSale.descuento > 0 && (
+                        <div className="flex justify-between text-red-500">
+                          <span>DESCUENTO:</span>
+                          <span>-{formatBs(reprintSale.descuento * tasaVenta)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between font-extrabold text-sm border-t border-slate-300 pt-1 text-slate-900">
+                        <span>TOTAL VES:</span>
+                        <span>{formatBs(reprintSale.totalVES || (reprintSale.totalUSD * tasaVenta))}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-500 font-bold border-t border-dashed border-slate-300 pt-1 text-[10px]">
+                        <span>REF TOTAL USD:</span>
+                        <span>${reprintSale.totalUSD.toFixed(2)} (Tasa: {formatBs(tasaVenta)})</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-right space-y-1 text-[11px]">
+                      <div className="flex justify-between">
+                        <span>SUBTOTAL USD:</span>
+                        <span>${reprintSale.subtotal.toFixed(2)}</span>
+                      </div>
+                      {((reprintSale.exento_usd ?? 0) > 0) && (
+                        <div className="flex justify-between text-slate-700">
+                          <span>MONTO EXENTO (E):</span>
+                          <span>${(reprintSale.exento_usd || 0).toFixed(2)}</span>
+                        </div>
+                      )}
+                      {reprintSale.descuento > 0 && (
+                        <div className="flex justify-between text-red-500">
+                          <span>DESCUENTO:</span>
+                          <span>-${reprintSale.descuento.toFixed(2)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between font-extrabold text-sm border-t border-slate-300 pt-1">
+                        <span>TOTAL USD:</span>
+                        <span>${reprintSale.totalUSD.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between text-slate-600 font-bold border-t border-dashed border-slate-350 pt-1">
+                        <span>TOTAL VES:</span>
+                        <span>{formatBs(reprintSale.totalVES)}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="text-center select-none text-slate-400">----------------------------------------</p>
+
+                  {/* Payments & Change */}
+                  <div className="space-y-0.5">
+                    <span className="font-bold block">MEDIOS DE PAGO LIQUIDADOS:</span>
+                    {reprintSale.pagos.map((p, idx) => (
+                      <div key={idx} className="flex justify-between">
+                        <span>{p.metodo} {p.bancoEmisor ? `(${p.bancoEmisor})` : ''} {p.reference ? `Ref:${p.reference}` : ''}:</span>
+                        <span>{p.metodo.endsWith('$') || p.metodo.includes('Credito') ? `$${p.monto.toFixed(2)}` : formatBs(p.montoVES || p.monto)}</span>
+                      </div>
+                    ))}
+                    {reprintSale.vueltoVES > 0 && (
+                      <div className="flex justify-between font-bold border-t border-slate-300 pt-1 text-[11px]">
+                        <span>CAMBIO VES:</span>
+                        <span>{formatBs(reprintSale.vueltoVES)}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <p className="text-center select-none text-slate-400">----------------------------------------</p>
+
+                  <div className="text-center text-[9px] italic leading-relaxed text-slate-500">
+                    {companyConfig.mensaje_pie_ticket}
+                  </div>
+
+                </div>
+              );
+            })()}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
               <button
-                onClick={() => printTicketReceipt(reprintSale, companyConfig, currentUser, (reprintSale as any)?.vendedor || reprintSale.usuario)}
+                onClick={() => printTicketReceipt(reprintSale, companyConfig, currentUser, (reprintSale as any)?.vendedor || reprintSale.usuario, reprintCurrency)}
                 className="w-full bg-sky-600 hover:bg-sky-500 text-white py-3 rounded-lg font-bold font-sans text-xs tracking-wider transition-all flex items-center justify-center gap-1.5 shadow active:scale-95"
                 title="Imprimir copia de ticket en la impresora"
               >
                 <Printer className="w-4 h-4" />
-                IMPRIMIR TICKET
+                IMPRIMIR TICKET ({reprintCurrency === 'VES' ? 'Bs' : '$'})
               </button>
               <button
                 onClick={() => setReprintSale(null)}
@@ -3126,6 +3272,13 @@ export default function App() {
           setInversionesUnlocked(true);
           setActiveTab('inversiones');
         }}
+      />
+
+      {/* MODAL GUÍA DE ACCESO MÓVIL Y CÓDIGO QR */}
+      <ManualAccesoMovilModal
+        isOpen={showManualAccesoModal}
+        onClose={() => setShowManualAccesoModal(false)}
+        lanIp={lanIP}
       />
 
     </div>

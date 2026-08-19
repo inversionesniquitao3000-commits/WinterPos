@@ -4,11 +4,42 @@ import {
   Edit, FileText, 
   CheckCircle2,
   MessageCircle, X, Trash2, ShoppingCart, 
-  FileSpreadsheet, AlertTriangle, TrendingUp
+  FileSpreadsheet, AlertTriangle, TrendingUp,
+  Pause, Play
 } from 'lucide-react';
 import { Proveedor, Compra, CompraDetalleItem, PagoProveedor, CotizacionProveedor, Product, User, CompanyConfig } from '../types';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalISODateString } from '../utils';
+
+export interface PausedCompraDraft {
+  id: string;
+  timestamp: string;
+  compraProveedorId: number | string;
+  proveedorNombre?: string;
+  compraNumeroFactura: string;
+  compraFechaEmision: string;
+  compraFechaVencimiento: string;
+  compraCondicion: 'Contado' | 'Credito';
+  compraMetodoContado: 'Efectivo$' | 'EfectivoBs' | 'TransferenciaVES' | 'PagoMovil' | 'Zelle';
+  compraAfectaCaja: boolean;
+  compraObservaciones: string;
+  compraItems: CompraDetalleItem[];
+  compraTasaMode: 'dolar_bcv' | 'euro_bcv' | 'manual';
+  compraCustomTasa: string;
+  totalUSD: number;
+}
+
+export interface PausedCotizacionDraft {
+  id: string;
+  timestamp: string;
+  cotProveedorId: number | string;
+  proveedorNombre?: string;
+  cotNumero: string;
+  cotFechaVigencia: string;
+  cotItems: any[];
+  cotNotas: string;
+  totalUSD: number;
+}
 
 // Dynamic loader for XLSX (SheetJS)
 const loadXlsx = (): Promise<any> => {
@@ -112,6 +143,25 @@ export default function Proveedores({
   const [showNewCompraModal, setShowNewCompraModal] = useState(false);
   const [showAbonoModal, setShowAbonoModal] = useState(false);
   const [showNewCotizacionModal, setShowNewCotizacionModal] = useState(false);
+  const [showPausedComprasModal, setShowPausedComprasModal] = useState(false);
+  const [showPausedCotizacionesModal, setShowPausedCotizacionesModal] = useState(false);
+
+  // Paused drafts state with localStorage persistence
+  const [pausedCompras, setPausedCompras] = useState<PausedCompraDraft[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('winterpos_paused_compras') || '[]');
+    } catch {
+      return [];
+    }
+  });
+
+  const [pausedCotizaciones, setPausedCotizaciones] = useState<PausedCotizacionDraft[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('winterpos_paused_cotizaciones') || '[]');
+    } catch {
+      return [];
+    }
+  });
 
   // Loading state
   const [isActionLoading, setIsActionLoading] = useState(false);
@@ -124,6 +174,8 @@ export default function Proveedores({
         setShowNewCompraModal(false);
         setShowAbonoModal(false);
         setShowNewCotizacionModal(false);
+        setShowPausedComprasModal(false);
+        setShowPausedCotizacionesModal(false);
         setSelectedCompraDetail(null);
         setIsProdSearchOpen(false);
         setIsCotProdSearchOpen(false);
@@ -578,6 +630,81 @@ export default function Proveedores({
     }
   };
 
+  // --- PAUSE / HOLD MANAGEMENT FOR COMPRAS ---
+  const handlePauseCurrentCompra = () => {
+    if (!compraProveedorId && !compraNumeroFactura.trim() && compraItems.length === 0) {
+      showAlert('No hay datos en la recepción para pausar.', 'Atención', 'warning');
+      return;
+    }
+
+    const provObj = proveedores.find(p => p.id === Number(compraProveedorId));
+    const newDraft: PausedCompraDraft = {
+      id: `COMPRA-PAUSE-${Date.now()}`,
+      timestamp: new Date().toLocaleString('es-VE'),
+      compraProveedorId,
+      proveedorNombre: provObj ? `${provObj.razon_social} (${provObj.rif})` : 'Proveedor sin asignar',
+      compraNumeroFactura: compraNumeroFactura.trim().toUpperCase() || 'S/N',
+      compraFechaEmision,
+      compraFechaVencimiento,
+      compraCondicion,
+      compraMetodoContado,
+      compraAfectaCaja,
+      compraObservaciones,
+      compraItems: [...compraItems],
+      compraTasaMode,
+      compraCustomTasa,
+      totalUSD: totalCompraUSD
+    };
+
+    const updated = [newDraft, ...pausedCompras];
+    setPausedCompras(updated);
+    try {
+      localStorage.setItem('winterpos_paused_compras', JSON.stringify(updated));
+    } catch (_) {}
+
+    // Reset current form
+    setCompraProveedorId('');
+    setCompraNumeroFactura('');
+    setCompraItems([]);
+    setCompraObservaciones('');
+    handleClearSelectedProduct();
+    setShowNewCompraModal(false);
+    showAlert(`Recepción de compra guardada en pausa como borrador (${newDraft.compraItems.length} ítems). Puede retomarla en cualquier momento.`, 'Recepción en Pausa', 'success');
+  };
+
+  const handleResumePausedCompra = (draft: PausedCompraDraft) => {
+    setCompraProveedorId(draft.compraProveedorId);
+    setCompraNumeroFactura(draft.compraNumeroFactura === 'S/N' ? '' : draft.compraNumeroFactura);
+    setCompraFechaEmision(draft.compraFechaEmision || getLocalISODateString().split(' ')[0]);
+    setCompraFechaVencimiento(draft.compraFechaVencimiento || '');
+    setCompraCondicion(draft.compraCondicion || 'Contado');
+    setCompraMetodoContado(draft.compraMetodoContado || 'Efectivo$');
+    setCompraAfectaCaja(draft.compraAfectaCaja ?? false);
+    setCompraObservaciones(draft.compraObservaciones || '');
+    setCompraItems(draft.compraItems || []);
+    if (draft.compraTasaMode) setCompraTasaMode(draft.compraTasaMode);
+    if (draft.compraCustomTasa) setCompraCustomTasa(draft.compraCustomTasa);
+
+    // Remove from paused list
+    const updated = pausedCompras.filter(p => p.id !== draft.id);
+    setPausedCompras(updated);
+    try {
+      localStorage.setItem('winterpos_paused_compras', JSON.stringify(updated));
+    } catch (_) {}
+
+    setShowPausedComprasModal(false);
+    setShowNewCompraModal(true);
+    handleClearSelectedProduct();
+  };
+
+  const handleDeletePausedCompra = (id: string) => {
+    const updated = pausedCompras.filter(p => p.id !== id);
+    setPausedCompras(updated);
+    try {
+      localStorage.setItem('winterpos_paused_compras', JSON.stringify(updated));
+    } catch (_) {}
+  };
+
   // --- ABONO / PAGO A PROVEEDOR (CXP) ---
   const handleOpenAbonoModal = (prov?: Proveedor, comp?: Compra) => {
     if (prov) {
@@ -724,6 +851,68 @@ export default function Proveedores({
     } finally {
       setIsActionLoading(false);
     }
+  };
+
+  // --- PAUSE / HOLD MANAGEMENT FOR COTIZACIONES ---
+  const handlePauseCurrentCotizacion = () => {
+    if (!cotProveedorId && !cotNumero.trim() && cotItems.length === 0) {
+      showAlert('No hay datos en la cotización para pausar.', 'Atención', 'warning');
+      return;
+    }
+
+    const provObj = proveedores.find(p => p.id === Number(cotProveedorId));
+    const totalCotUSD = cotItems.reduce((acc, i) => acc + (i.total_usd || 0), 0);
+    const newDraft: PausedCotizacionDraft = {
+      id: `COT-PAUSE-${Date.now()}`,
+      timestamp: new Date().toLocaleString('es-VE'),
+      cotProveedorId,
+      proveedorNombre: provObj ? `${provObj.razon_social} (${provObj.rif})` : 'Proveedor sin asignar',
+      cotNumero: cotNumero.trim() || 'S/N',
+      cotFechaVigencia,
+      cotItems: [...cotItems],
+      cotNotas,
+      totalUSD: totalCotUSD
+    };
+
+    const updated = [newDraft, ...pausedCotizaciones];
+    setPausedCotizaciones(updated);
+    try {
+      localStorage.setItem('winterpos_paused_cotizaciones', JSON.stringify(updated));
+    } catch (_) {}
+
+    // Reset current form
+    setCotProveedorId('');
+    setCotNumero('');
+    setCotItems([]);
+    setCotNotas('');
+    setShowNewCotizacionModal(false);
+    showAlert(`Cotización guardada en pausa como borrador (${newDraft.cotItems.length} productos). Puede retomarla en cualquier momento.`, 'Cotización en Pausa', 'success');
+  };
+
+  const handleResumePausedCotizacion = (draft: PausedCotizacionDraft) => {
+    setCotProveedorId(draft.cotProveedorId);
+    setCotNumero(draft.cotNumero === 'S/N' ? '' : draft.cotNumero);
+    setCotFechaVigencia(draft.cotFechaVigencia || '');
+    setCotItems(draft.cotItems || []);
+    setCotNotas(draft.cotNotas || '');
+
+    // Remove from paused list
+    const updated = pausedCotizaciones.filter(p => p.id !== draft.id);
+    setPausedCotizaciones(updated);
+    try {
+      localStorage.setItem('winterpos_paused_cotizaciones', JSON.stringify(updated));
+    } catch (_) {}
+
+    setShowPausedCotizacionesModal(false);
+    setShowNewCotizacionModal(true);
+  };
+
+  const handleDeletePausedCotizacion = (id: string) => {
+    const updated = pausedCotizaciones.filter(p => p.id !== id);
+    setPausedCotizaciones(updated);
+    try {
+      localStorage.setItem('winterpos_paused_cotizaciones', JSON.stringify(updated));
+    } catch (_) {}
   };
 
   // Convert Quotation into Purchase automatically
@@ -1001,16 +1190,30 @@ export default function Proveedores({
           )}
 
           {activeSubTab === 'compras' && (
-            <button
-              onClick={() => {
-                setShowNewCompraModal(true);
-                handleClearSelectedProduct();
-              }}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-lg transition-all shadow-xs flex items-center gap-1.5"
-            >
-              <Plus className="w-4 h-4" />
-              Nueva Recepción de Compra
-            </button>
+            <div className="flex items-center gap-2">
+              {pausedCompras.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowPausedComprasModal(true)}
+                  className="bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-900 font-extrabold text-xs px-3.5 py-2 rounded-lg transition-all shadow-xs flex items-center gap-1.5 border border-amber-600 animate-pulse cursor-pointer"
+                  title="Ver y retomar recepciones de compra en pausa"
+                >
+                  <Pause className="w-3.5 h-3.5 fill-slate-900" />
+                  <span>En Pausa ({pausedCompras.length})</span>
+                </button>
+              )}
+
+              <button
+                onClick={() => {
+                  setShowNewCompraModal(true);
+                  handleClearSelectedProduct();
+                }}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-lg transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                Nueva Recepción de Compra
+              </button>
+            </div>
           )}
 
           {activeSubTab === 'cxp' && (
@@ -1024,13 +1227,27 @@ export default function Proveedores({
           )}
 
           {activeSubTab === 'cotizaciones' && (
-            <button
-              onClick={() => setShowNewCotizacionModal(true)}
-              className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-4 py-2 rounded-lg transition-all shadow-xs flex items-center gap-1.5"
-            >
-              <Plus className="w-4 h-4" />
-              Cargar Presupuesto / Cotización
-            </button>
+            <div className="flex items-center gap-2">
+              {pausedCotizaciones.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowPausedCotizacionesModal(true)}
+                  className="bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-900 font-extrabold text-xs px-3.5 py-2 rounded-lg transition-all shadow-xs flex items-center gap-1.5 border border-amber-600 animate-pulse cursor-pointer"
+                  title="Ver y retomar cotizaciones en pausa"
+                >
+                  <Pause className="w-3.5 h-3.5 fill-slate-900" />
+                  <span>En Pausa ({pausedCotizaciones.length})</span>
+                </button>
+              )}
+
+              <button
+                onClick={() => setShowNewCotizacionModal(true)}
+                className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-4 py-2 rounded-lg transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                Cargar Presupuesto / Cotización
+              </button>
+            </div>
           )}
         </div>
 
@@ -2079,18 +2296,30 @@ export default function Proveedores({
                 </div>
               </div>
 
-              <div className="flex gap-2 pt-2 border-t border-slate-200">
+              <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-slate-200">
                 <button
                   type="button"
                   onClick={() => setShowNewCompraModal(false)}
-                  className="w-1/2 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-lg text-xs font-bold transition-all"
+                  className="w-full sm:w-1/3 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-lg text-xs font-bold transition-all cursor-pointer"
                 >
                   Cancelar (ESC)
                 </button>
+
+                <button
+                  type="button"
+                  onClick={handlePauseCurrentCompra}
+                  disabled={!compraProveedorId && !compraNumeroFactura.trim() && compraItems.length === 0}
+                  className="w-full sm:w-1/3 bg-amber-500 hover:bg-amber-600 text-slate-900 py-3 rounded-lg text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40"
+                  title="Guardar borrador y pausar para continuar más tarde"
+                >
+                  <Pause className="w-4 h-4 fill-slate-900" />
+                  <span>Pausar Recepción</span>
+                </button>
+
                 <button
                   type="submit"
                   disabled={isActionLoading || compraItems.length === 0}
-                  className="w-1/2 bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-lg text-xs font-bold transition-all shadow-xs active:scale-95 disabled:opacity-50"
+                  className="w-full sm:w-1/3 bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-lg text-xs font-bold transition-all shadow-xs active:scale-95 disabled:opacity-50 cursor-pointer"
                 >
                   {isActionLoading ? 'Procesando...' : 'GUARDAR Y AUMENTAR STOCK'}
                 </button>
@@ -2463,23 +2692,281 @@ export default function Proveedores({
                 </table>
               </div>
 
-              <div className="flex gap-2 pt-2 border-t border-slate-200">
+              <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-slate-200">
                 <button
                   type="button"
                   onClick={() => setShowNewCotizacionModal(false)}
-                  className="w-1/2 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-lg text-xs font-bold transition-all"
+                  className="w-full sm:w-1/3 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer"
                 >
                   Cancelar (ESC)
                 </button>
+
+                <button
+                  type="button"
+                  onClick={handlePauseCurrentCotizacion}
+                  disabled={!cotProveedorId && !cotNumero.trim() && cotItems.length === 0}
+                  className="w-full sm:w-1/3 bg-amber-500 hover:bg-amber-600 text-slate-900 py-2.5 rounded-lg text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40"
+                  title="Guardar borrador y pausar para continuar más tarde"
+                >
+                  <Pause className="w-4 h-4 fill-slate-900" />
+                  <span>Pausar Cotización</span>
+                </button>
+
                 <button
                   type="submit"
                   disabled={isActionLoading || cotItems.length === 0}
-                  className="w-1/2 bg-amber-600 hover:bg-amber-700 text-white py-2.5 rounded-lg text-xs font-bold transition-all shadow-xs active:scale-95 disabled:opacity-50"
+                  className="w-full sm:w-1/3 bg-amber-600 hover:bg-amber-700 text-white py-2.5 rounded-lg text-xs font-bold transition-all shadow-xs active:scale-95 disabled:opacity-50 cursor-pointer"
                 >
                   {isActionLoading ? 'Guardando...' : 'GUARDAR COTIZACIÓN'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: RECEPCIONES DE COMPRA EN PAUSA (BORRADORES) */}
+      {/* ========================================================================= */}
+      {showPausedComprasModal && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in font-sans">
+          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden w-full max-w-2xl max-h-[85vh] shadow-2xl flex flex-col text-slate-800 text-left">
+            <div className="p-4 sm:p-5 border-b border-slate-200 flex justify-between items-center bg-amber-50">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-400/50 flex items-center justify-center text-amber-700">
+                  <Pause className="w-5 h-5 fill-amber-700" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    Recepciones de Compra en Pausa
+                  </h3>
+                  <p className="text-xs text-slate-600">
+                    Seleccione una recepción guardada para retomar su carga o eliminarla.
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowPausedComprasModal(false)} 
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-amber-100 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3">
+              {pausedCompras.length === 0 ? (
+                <div className="text-center py-12 text-slate-400 space-y-2">
+                  <Pause className="w-12 h-12 text-slate-300 mx-auto" />
+                  <p className="text-sm font-bold">No hay recepciones de compra en pausa.</p>
+                  <p className="text-xs text-slate-500">
+                    Al cargar una nueva recepción de compra, puede presionar "Pausar Recepción" para guardarla y continuar más tarde.
+                  </p>
+                </div>
+              ) : (
+                pausedCompras.map((draft) => (
+                  <div 
+                    key={draft.id} 
+                    className="p-4 bg-slate-50 hover:bg-amber-50/40 border border-slate-200 hover:border-amber-300 rounded-xl transition-all shadow-xs space-y-2.5"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-extrabold text-sm text-slate-900 uppercase">
+                            {draft.proveedorNombre || 'Proveedor sin asignar'}
+                          </span>
+                          <span className="bg-slate-200 text-slate-700 font-mono text-[10px] font-bold px-2 py-0.5 rounded">
+                            Factura: {draft.compraNumeroFactura || 'S/N'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
+                          <span>📅 Pausado: {draft.timestamp}</span>
+                          <span>•</span>
+                          <span>Condición: <strong>{draft.compraCondicion}</strong></span>
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        <span className="text-base font-black font-mono text-emerald-700 block">
+                          ${draft.totalUSD.toFixed(2)} USD
+                        </span>
+                        <span className="text-[11px] text-slate-500 font-mono">
+                          {draft.compraItems.length} {draft.compraItems.length === 1 ? 'producto' : 'productos'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Preview Items */}
+                    {draft.compraItems.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-200/80">
+                        {draft.compraItems.slice(0, 4).map((it, i) => (
+                          <span key={i} className="text-[10px] bg-white border border-slate-200 text-slate-700 px-2 py-0.5 rounded-md font-sans truncate max-w-[200px]">
+                            {it.cantidad}x {it.descripcion}
+                          </span>
+                        ))}
+                        {draft.compraItems.length > 4 && (
+                          <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-md font-bold">
+                            +{draft.compraItems.length - 4} más
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Action buttons */}
+                    <div className="flex items-center justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePausedCompra(draft.id)}
+                        className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Descartar</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleResumePausedCompra(draft)}
+                        className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs px-4 py-1.5 rounded-lg transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Play className="w-3.5 h-3.5 fill-white" />
+                        <span>Retomar Recepción</span>
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowPausedComprasModal(false)}
+                className="bg-slate-800 hover:bg-slate-900 text-white px-5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              >
+                Cerrar (ESC)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: COTIZACIONES EN PAUSA (BORRADORES) */}
+      {/* ========================================================================= */}
+      {showPausedCotizacionesModal && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in font-sans">
+          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden w-full max-w-2xl max-h-[85vh] shadow-2xl flex flex-col text-slate-800 text-left">
+            <div className="p-4 sm:p-5 border-b border-slate-200 flex justify-between items-center bg-amber-50">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-400/50 flex items-center justify-center text-amber-700">
+                  <Pause className="w-5 h-5 fill-amber-700" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    Cotizaciones / Presupuestos en Pausa
+                  </h3>
+                  <p className="text-xs text-slate-600">
+                    Seleccione una cotización guardada para continuar su edición o eliminarla.
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowPausedCotizacionesModal(false)} 
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-amber-100 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3">
+              {pausedCotizaciones.length === 0 ? (
+                <div className="text-center py-12 text-slate-400 space-y-2">
+                  <Pause className="w-12 h-12 text-slate-300 mx-auto" />
+                  <p className="text-sm font-bold">No hay cotizaciones en pausa.</p>
+                  <p className="text-xs text-slate-500">
+                    Al cargar un presupuesto o cotización, puede presionar "Pausar Cotización" para retomarla después.
+                  </p>
+                </div>
+              ) : (
+                pausedCotizaciones.map((draft) => (
+                  <div 
+                    key={draft.id} 
+                    className="p-4 bg-slate-50 hover:bg-amber-50/40 border border-slate-200 hover:border-amber-300 rounded-xl transition-all shadow-xs space-y-2.5"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-extrabold text-sm text-slate-900 uppercase">
+                            {draft.proveedorNombre || 'Proveedor sin asignar'}
+                          </span>
+                          <span className="bg-slate-200 text-slate-700 font-mono text-[10px] font-bold px-2 py-0.5 rounded">
+                            N°: {draft.cotNumero || 'S/N'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-500 mt-0.5">
+                          <span>📅 Pausado: {draft.timestamp}</span>
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        <span className="text-base font-black font-mono text-amber-700 block">
+                          ${draft.totalUSD.toFixed(2)} USD
+                        </span>
+                        <span className="text-[11px] text-slate-500 font-mono">
+                          {draft.cotItems.length} {draft.cotItems.length === 1 ? 'producto' : 'productos'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Preview Items */}
+                    {draft.cotItems.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1 border-t border-slate-200/80">
+                        {draft.cotItems.slice(0, 4).map((it, i) => (
+                          <span key={i} className="text-[10px] bg-white border border-slate-200 text-slate-700 px-2 py-0.5 rounded-md font-sans truncate max-w-[200px]">
+                            {it.cantidad}x {it.descripcion}
+                          </span>
+                        ))}
+                        {draft.cotItems.length > 4 && (
+                          <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-md font-bold">
+                            +{draft.cotItems.length - 4} más
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Action buttons */}
+                    <div className="flex items-center justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePausedCotizacion(draft.id)}
+                        className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Descartar</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleResumePausedCotizacion(draft)}
+                        className="bg-amber-600 hover:bg-amber-700 active:scale-95 text-white font-bold text-xs px-4 py-1.5 rounded-lg transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Play className="w-3.5 h-3.5 fill-white" />
+                        <span>Retomar Cotización</span>
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowPausedCotizacionesModal(false)}
+                className="bg-slate-800 hover:bg-slate-900 text-white px-5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              >
+                Cerrar (ESC)
+              </button>
+            </div>
           </div>
         </div>
       )}

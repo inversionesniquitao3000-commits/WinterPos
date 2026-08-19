@@ -22,12 +22,14 @@ import {
 
 import { 
   initWhatsAppClient, getWhatsAppStatus, saveWhatsAppConfig, sendCierreReport,
-  unlockWhatsAppSession, resetWhatsAppSession, logoutWhatsAppSession
+  sendDirectWhatsAppMessage, unlockWhatsAppSession, resetWhatsAppSession, logoutWhatsAppSession
 } from './whatsapp-service.js';
 
 import { verifyLicense, activateLicense, registerTerminalActivity } from './license-manager.js';
 import { processFiscalSale, emitReporteX, emitReporteZ, checkFiscalStatus } from './fiscal-service.js';
 import { getDriveConfig, saveDriveConfig, uploadBackupToGoogleDrive } from './gdrive-service.js';
+import { getManagerKPIs, getManagerCajasLive, getManagerInventoryAlerts, getManagerFinancialSummary } from './manager-service.js';
+import { generateProductImage, saveUploadedImageBase64, IMAGES_DIR } from './ai-image-service.js';
 
 import path from 'path';
 import fs from 'fs';
@@ -1493,6 +1495,21 @@ app.post(['/api/whatsapp/send-cierre', '/api/whatsapp/send-report'], async (req,
   }
 });
 
+app.post(['/api/whatsapp/send-direct', '/api/whatsapp/send-single'], async (req, res) => {
+  try {
+    const { phone, textMessage, text, imageBase64 } = req.body;
+    const targetMsg = textMessage || text;
+    if (!phone || !targetMsg) {
+      return res.status(400).json({ error: 'Se requieren el número de teléfono y el mensaje para enviar.' });
+    }
+    const result = await sendDirectWhatsAppMessage(phone, targetMsg, imageBase64);
+    res.json(result);
+  } catch (err) {
+    console.error('Error en /api/whatsapp/send-direct:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // -------------------------------------------------------------
 // MASTER PASS & INVERSIONES DE ACCIONISTAS ENDPOINTS
 // -------------------------------------------------------------
@@ -1771,6 +1788,132 @@ app.delete('/api/cotizaciones-proveedores/:id', async (req, res) => {
     await deleteCotizacionProveedor(id);
     res.json({ success: true });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// AI PRODUCT IMAGES ENDPOINTS
+// ==========================================
+app.use('/api/ai/images', express.static(IMAGES_DIR));
+
+app.post('/api/ai/generate-product-image', async (req, res) => {
+  try {
+    const { description, category, barcode, saveLocal } = req.body || {};
+    const result = await generateProductImage(description, category, barcode, saveLocal !== false);
+    res.json(result);
+  } catch (err) {
+    console.error('Error generando imagen con IA:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Manual Image Upload from PC (Base64 file)
+app.post('/api/ai/upload-product-image', (req, res) => {
+  try {
+    const { imageBase64, filename } = req.body || {};
+    if (!imageBase64) {
+      return res.status(400).json({ success: false, error: 'imageBase64 es requerido.' });
+    }
+    const result = saveUploadedImageBase64(imageBase64, filename || 'product.jpg');
+    res.json(result);
+  } catch (err) {
+    console.error('Error subiendo imagen:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Bulk AI Image Generation for multiple products
+app.post('/api/ai/generate-bulk-images', async (req, res) => {
+  try {
+    const { products: itemsToProcess } = req.body || {};
+    if (!Array.isArray(itemsToProcess) || itemsToProcess.length === 0) {
+      return res.status(400).json({ success: false, error: 'Lista de productos requerida.' });
+    }
+
+    const results = [];
+    // Process items sequentially with intelligent multi-tier barcode & text lookup
+    for (const item of itemsToProcess) {
+      try {
+        const genRes = await generateProductImage(item.description, item.category, item.barcode, true);
+        results.push({
+          id: item.id,
+          description: item.description,
+          barcode: item.barcode,
+          imageUrl: genRes.imageUrl,
+          source: genRes.source,
+          success: genRes.success
+        });
+      } catch (err) {
+        results.push({
+          id: item.id,
+          description: item.description,
+          barcode: item.barcode,
+          imageUrl: '',
+          success: false,
+          error: err.message
+        });
+      }
+    }
+
+    res.json({ success: true, count: results.length, results });
+  } catch (err) {
+    console.error('Error en generación masiva:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ==========================================
+// MANAGER MOBILE DASHBOARD & KPIS ENDPOINTS
+// ==========================================
+app.get('/api/manager/kpis', async (req, res) => {
+  try {
+    const kpis = await getManagerKPIs();
+    res.json(kpis);
+  } catch (err) {
+    console.error('Error en /api/manager/kpis:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/manager/cajas-live', async (req, res) => {
+  try {
+    const data = await getManagerCajasLive();
+    res.json(data);
+  } catch (err) {
+    console.error('Error en /api/manager/cajas-live:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/manager/inventory-alerts', async (req, res) => {
+  try {
+    const data = await getManagerInventoryAlerts();
+    res.json(data);
+  } catch (err) {
+    console.error('Error en /api/manager/inventory-alerts:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/manager/financial-summary', async (req, res) => {
+  try {
+    const data = await getManagerFinancialSummary();
+    res.json(data);
+  } catch (err) {
+    console.error('Error en /api/manager/financial-summary:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/manager/whatsapp-report-now', async (req, res) => {
+  try {
+    const kpis = await getManagerKPIs();
+    const text = `📊 *RESUMEN GERENCIAL AL MOMENTO*\n🏢 *${kpis.company.name}*\n📅 Fecha: ${kpis.today}\n\n💵 *Ventas Totales:* $${kpis.kpis.totalVentasUSD} (${kpis.kpis.totalVentasVES} Bs)\n📈 *Utilidad Estimada:* $${kpis.kpis.utilidadBrutaUSD} (${kpis.kpis.margenPorcentaje}%)\n🎫 *Tickets Emitidos:* ${kpis.kpis.totalTickets} (Promedio: $${kpis.kpis.ticketPromedioUSD})\n🏪 *Cajas Abiertas:* ${kpis.kpis.cajasAbiertasCount}\n💳 *CxC Clientes:* $${kpis.kpis.totalCxC_USD}\n\n_Generado automáticamente desde WinterPos Mobile Executive_`;
+    const sendRes = await sendCierreReport('', text);
+    res.json({ success: true, message: 'Reporte gerencial enviado exitosamente a WhatsApp', sendRes });
+  } catch (err) {
+    console.error('Error enviando reporte gerencial a WhatsApp:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

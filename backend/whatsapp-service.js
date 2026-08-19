@@ -198,7 +198,23 @@ const defaultConfig = {
 {desgloseGastos}
 
 👥 *MONTO A COBRAR POR ACCIONISTA:*
-{desgloseAccionistas}`
+{desgloseAccionistas}`,
+  cobroClientesMessageTemplate: `👤 *RECORDATORIO DE PAGO DE CUENTA*
+
+🏬 *{empresa}*
+📅 *Fecha:* {fecha}
+👤 *Cliente:* {cliente}
+🆔 *Cédula/RIF:* {cedulaRif}
+
+🚨 *Estimado(a) cliente, le enviamos un cordial saludo para recordarle su estado de cuenta:*
+
+💰 *Monto Adeudado:* *${'{saldoPendienteUsd}'} USD*
+🇻🇪 *Monto en Bolívares (Tasa BCV {tasaBcv}):* *Bs {saldoPendienteVes}*
+
+💳 *Límite de Crédito:* ${'{limiteCreditoUsd}'} USD
+✅ *Crédito Disponible:* ${'{creditoDisponibleUsd}'} USD
+
+🙏 *Agradecemos realizar su abono a la brevedad posible para mantener activo su margen de crédito. ¡Gracias por su preferencia!*`
 };
 
 // Global WhatsApp client state
@@ -634,38 +650,24 @@ async function ensureWWebJSInjected(c) {
 // Send Report Endpoint handler
 export async function sendCierreReport(imageBase64, textSummary) {
   const config = await getWhatsAppConfig();
-  if (!config.enabled || !config.groupId) {
-    throw new Error('Servicio de WhatsApp deshabilitado o sin grupo de destino configurado.');
-  }
-
-  console.log(`[WhatsApp] Intentando enviar reporte al grupo: ${config.groupId}`);
-
-  if (isMockMode) {
-    // Simulate sending log
-    console.log('[WhatsApp Mock] --- MENSAJE SIMULADO ENVIADO ---');
-    console.log(`[WhatsApp Mock] Grupo ID: ${config.groupId}`);
-    console.log(`[WhatsApp Mock] Mensaje:\n${textSummary}`);
-    if (imageBase64) console.log('[WhatsApp Mock] Imagen base64 adjuntada con éxito.');
-    console.log('[WhatsApp Mock] ---------------------------------');
-    return { success: true, simulated: true };
+  if (!config.enabled) {
+    throw new Error('El servicio de WhatsApp está deshabilitado en F10 Configuración.');
   }
 
   if (connectionStatus !== 'CONNECTED' || !client) {
-    throw new Error('El cliente de WhatsApp no está conectado o listo.');
+    throw new Error('El cliente de WhatsApp no está conectado o listo en el sistema.');
   }
 
-  try {
-    const { default: pkg } = await import('whatsapp-web.js');
-    const { MessageMedia } = pkg;
+  let target = (config.groupId || '').trim();
 
-    // Clean group ID format if it is a link
-    let target = config.groupId.trim();
+  // Handle group link join or auto-detection if groupId is empty or a link
+  if (!target || target.includes('chat.whatsapp.com')) {
     if (target.includes('chat.whatsapp.com')) {
       const urlParts = target.split('/');
       const lastPart = urlParts[urlParts.length - 1];
       const inviteCode = lastPart.split('?')[0];
       try {
-        console.log(`[WhatsApp] Intentando unir al grupo usando código: ${inviteCode}`);
+        console.log(`[WhatsApp] Intentando unirse al grupo usando código: ${inviteCode}`);
         const groupId = await client.acceptInvite(inviteCode);
         if (groupId) {
           target = groupId;
@@ -673,32 +675,82 @@ export async function sendCierreReport(imageBase64, textSummary) {
           await saveWhatsAppConfig(config);
         }
       } catch (errInvite) {
-        console.warn('[WhatsApp] No se pudo unir automáticamente al grupo:', errInvite.message || errInvite);
+        console.warn('[WhatsApp] No se pudo unir por código de invitación (posiblemente ya es miembro):', errInvite.message || errInvite);
       }
     }
 
-    if (!target.includes('@')) {
-      if (target.includes('-') || target.length > 15) {
-        target = `${target}@g.us`;
-      } else {
-        let cleanNum = target.replace(/[^0-9]/g, '');
-        if (cleanNum.startsWith('0')) {
-          cleanNum = '58' + cleanNum.substring(1);
-        } else if (cleanNum.length === 10 && (cleanNum.startsWith('412') || cleanNum.startsWith('414') || cleanNum.startsWith('424') || cleanNum.startsWith('416') || cleanNum.startsWith('426'))) {
-          cleanNum = '58' + cleanNum;
+    if (!target || target.includes('chat.whatsapp.com')) {
+      try {
+        console.log('[WhatsApp] Auto-detectando grupo desde los chats activos del bot...');
+        const chats = await client.getChats();
+        const groups = chats.filter(c => c.isGroup);
+        if (groups.length > 0) {
+          const matched = groups.find(g => config.groupName && g.name.toLowerCase().includes(config.groupName.toLowerCase())) || groups[0];
+          target = matched.id._serialized;
+          config.groupId = target;
+          await saveWhatsAppConfig(config);
+          console.log(`[WhatsApp] Grupo auto-detectado asignado: ${target} (${matched.name})`);
         }
-        target = `${cleanNum}@c.us`;
+      } catch (getChatsErr) {
+        console.warn('[WhatsApp] Error obteniendo lista de chats para auto-detección:', getChatsErr.message || getChatsErr);
       }
     }
+  }
 
-    // Ensure WWebJS injected before evaluate
+  if (!target || target.includes('chat.whatsapp.com')) {
+    throw new Error('Sin grupo de WhatsApp configurado. Ingrese el ID del grupo en F10 Configuración.');
+  }
+
+  if (!target.includes('@')) {
+    if (target.includes('-') || target.length > 15) {
+      target = `${target}@g.us`;
+    } else {
+      let cleanNum = target.replace(/[^0-9]/g, '');
+      if (cleanNum.startsWith('0')) {
+        cleanNum = '58' + cleanNum.substring(1);
+      } else if (cleanNum.length === 10 && (cleanNum.startsWith('412') || cleanNum.startsWith('414') || cleanNum.startsWith('424') || cleanNum.startsWith('416') || cleanNum.startsWith('426'))) {
+        cleanNum = '58' + cleanNum;
+      }
+      target = `${cleanNum}@c.us`;
+    }
+  }
+
+  console.log(`[WhatsApp] Intentando enviar reporte al objetivo: ${target}`);
+
+  if (isMockMode) {
+    console.log('[WhatsApp Mock] --- MENSAJE SIMULADO ENVIADO ---');
+    console.log(`[WhatsApp Mock] Objetivo: ${target}`);
+    console.log(`[WhatsApp Mock] Mensaje:\n${textSummary}`);
+    if (imageBase64) console.log('[WhatsApp Mock] Imagen base64 adjuntada con éxito.');
+    console.log('[WhatsApp Mock] ---------------------------------');
+    return { success: true, simulated: true };
+  }
+
+  try {
+    const { default: pkg } = await import('whatsapp-web.js');
+    const { MessageMedia } = pkg;
+
     await ensureWWebJSInjected(client);
 
     try {
       if (imageBase64 && typeof imageBase64 === 'string' && imageBase64.length > 50) {
-        const base64Data = imageBase64.replace(/^data:image\/[a-z]+;base64,/, "");
-        const media = new MessageMedia('image/png', base64Data, `reporte_${Date.now()}.png`);
-        await client.sendMessage(target, media, { caption: textSummary });
+        const base64Data = imageBase64.split(';base64,').pop().trim();
+        const isPdf = imageBase64.startsWith('data:application/pdf');
+        const mediaType = isPdf ? 'application/pdf' : 'image/png';
+        const fileName = isPdf ? `reporte_${Date.now()}.pdf` : `reporte_${Date.now()}.png`;
+
+        console.log(`[WhatsApp] Enviando documento adjunto (${mediaType}, ${base64Data.length} chars) a ${target}`);
+        const media = new MessageMedia(mediaType, base64Data, fileName);
+        
+        try {
+          await client.sendMessage(target, media, { caption: textSummary });
+        } catch (captionErr) {
+          console.warn('[WhatsApp] Falló envío con caption combinado, enviando media y texto secuencialmente:', captionErr.message || captionErr);
+          await client.sendMessage(target, media);
+          if (textSummary) {
+            await client.sendMessage(target, textSummary);
+          }
+        }
       } else {
         await client.sendMessage(target, textSummary);
       }
@@ -709,8 +761,11 @@ export async function sendCierreReport(imageBase64, textSummary) {
         await ensureWWebJSInjected(client);
         await new Promise(r => setTimeout(r, 800));
         if (imageBase64 && typeof imageBase64 === 'string' && imageBase64.length > 50) {
-          const base64Data = imageBase64.replace(/^data:image\/[a-z]+;base64,/, "");
-          const media = new MessageMedia('image/png', base64Data, `reporte_${Date.now()}.png`);
+          const base64Data = imageBase64.split(';base64,').pop().trim();
+          const isPdf = imageBase64.startsWith('data:application/pdf');
+          const mediaType = isPdf ? 'application/pdf' : 'image/png';
+          const fileName = isPdf ? `reporte_${Date.now()}.pdf` : `reporte_${Date.now()}.png`;
+          const media = new MessageMedia(mediaType, base64Data, fileName);
           await client.sendMessage(target, media, { caption: textSummary });
         } else {
           await client.sendMessage(target, textSummary);
@@ -720,7 +775,7 @@ export async function sendCierreReport(imageBase64, textSummary) {
       }
     }
 
-    console.log('[WhatsApp] Mensaje enviado con éxito a WhatsApp.');
+    console.log('[WhatsApp] Mensaje y documento adjunto enviados con éxito a WhatsApp.');
     return { success: true };
   } catch (err) {
     console.error('[WhatsApp] Error al enviar mensaje:', err.message);
@@ -751,3 +806,61 @@ export async function sendCierreReport(imageBase64, textSummary) {
     throw err;
   }
 }
+
+// Send Direct WhatsApp Message to a specific Phone Number
+export async function sendDirectWhatsAppMessage(phone, textMessage, imageBase64 = null) {
+  const config = await getWhatsAppConfig();
+  if (!config.enabled) {
+    throw new Error('El servicio de bot WhatsApp está deshabilitado en F10 Configuración.');
+  }
+
+  if (!phone || typeof phone !== 'string' || phone.trim() === '') {
+    throw new Error('Número de teléfono no válido.');
+  }
+
+  let cleanNum = phone.replace(/[^0-9]/g, '');
+  if (cleanNum.startsWith('0')) {
+    cleanNum = '58' + cleanNum.substring(1);
+  } else if (cleanNum.length === 10 && (cleanNum.startsWith('412') || cleanNum.startsWith('414') || cleanNum.startsWith('424') || cleanNum.startsWith('416') || cleanNum.startsWith('426'))) {
+    cleanNum = '58' + cleanNum;
+  } else if (!cleanNum.startsWith('58') && cleanNum.length === 10) {
+    cleanNum = '58' + cleanNum;
+  }
+
+  const target = `${cleanNum}@c.us`;
+
+  console.log(`[WhatsApp Direct] Intentando enviar mensaje a ${target}...`);
+
+  if (isMockMode) {
+    console.log('[WhatsApp Direct Mock] --- MENSAJE DIRECTO SIMULADO ---');
+    console.log(`[WhatsApp Direct Mock] Destino: ${target}`);
+    console.log(`[WhatsApp Direct Mock] Mensaje:\n${textMessage}`);
+    console.log('[WhatsApp Direct Mock] -------------------------------');
+    return { success: true, simulated: true, targetPhone: cleanNum };
+  }
+
+  if (connectionStatus !== 'CONNECTED' || !client) {
+    throw new Error('El bot de WhatsApp del servidor no está conectado. Escanee el código QR en F10 Configuración.');
+  }
+
+  const { default: pkg } = await import('whatsapp-web.js');
+  const { MessageMedia } = pkg;
+
+  await ensureWWebJSInjected(client);
+
+  try {
+    if (imageBase64 && typeof imageBase64 === 'string' && imageBase64.length > 50) {
+      const base64Data = imageBase64.replace(/^data:image\/[a-z]+;base64,/, "");
+      const media = new MessageMedia('image/png', base64Data, `recordatorio_${Date.now()}.png`);
+      await client.sendMessage(target, media, { caption: textMessage });
+    } else {
+      await client.sendMessage(target, textMessage);
+    }
+    console.log(`[WhatsApp Direct] Mensaje enviado con éxito a ${target}`);
+    return { success: true, targetPhone: cleanNum };
+  } catch (sendErr) {
+    console.error(`[WhatsApp Direct] Error al enviar a ${target}:`, sendErr.message);
+    throw sendErr;
+  }
+}
+

@@ -27,7 +27,8 @@ const MODULOS_PERMISOS = [
   { id: 'clientes', label: 'F4 Clientes' },
   { id: 'proveedores', label: 'F5 Proveedores & Compras' },
   { id: 'tasa', label: 'F9 Tasa de Cambio' },
-  { id: 'config', label: 'F10 Configuración' }
+  { id: 'config', label: 'F10 Configuración' },
+  { id: 'movil', label: '📱 Acceso y Control Móvil' }
 ];
 
 const ACCIONES_PERMISOS = [
@@ -86,6 +87,13 @@ const MODULE_GUIDES_MAP: Record<string, { title: string; ver: string; crear: str
     crear: 'Crear nuevos Usuarios y Perfiles de Rol',
     editar: 'Modificar RIF, Nombre, Impresoras, Básculas e Integración WhatsApp',
     eliminar: 'Desconectar sesiones activas en red y borrar perfiles/usuarios'
+  },
+  movil: {
+    title: 'ACCESO Y CONTROL MÓVIL',
+    ver: 'Ver botones Vista Móvil y Conectar Celular en el encabezado',
+    crear: 'Generar códigos QR de sincronización para smartphones',
+    editar: 'Permitir comandos gerenciales desde el teléfono',
+    eliminar: 'Desconectar sesiones móviles sincronizadas'
   }
 };
 
@@ -127,6 +135,23 @@ const DEFAULT_UTILIDADES_WA_TEMPLATE = `💼 *REPORTE DE UTILIDADES Y GASTOS OPE
 
 👥 *MONTO A COBRAR POR ACCIONISTA:*
 {desgloseAccionistas}`;
+
+const DEFAULT_COBRO_CLIENTES_WA_TEMPLATE = `👤 *RECORDATORIO DE PAGO DE CUENTA*
+
+🏬 *{empresa}*
+📅 *Fecha:* {fecha}
+👤 *Cliente:* {cliente}
+🆔 *Cédula/RIF:* {cedulaRif}
+
+🚨 *Estimado(a) cliente, le enviamos un cordial saludo para recordarle su estado de cuenta:*
+
+💰 *Monto Adeudado:* *${'{saldoPendienteUsd}'} USD*
+🇻🇪 *Monto en Bolívares (Tasa BCV {tasaBcv}):* *Bs {saldoPendienteVes}*
+
+💳 *Límite de Crédito:* ${'{limiteCreditoUsd}'} USD
+✅ *Crédito Disponible:* ${'{creditoDisponibleUsd}'} USD
+
+🙏 *Agradecemos realizar su abono a la brevedad posible para mantener activo su margen de crédito. ¡Gracias por su preferencia!*`;
 
 export default function ConfiguracionEmpresa({ 
   config, 
@@ -261,9 +286,10 @@ export default function ConfiguracionEmpresa({
     groupId: '',
     groupName: 'Grupo de Cierres POS',
     messageTemplate: '',
-    utilidadesMessageTemplate: ''
+    utilidadesMessageTemplate: '',
+    cobroClientesMessageTemplate: ''
   });
-  const [waTemplateTab, setWaTemplateTab] = useState<'cierre' | 'utilidades'>('cierre');
+  const [waTemplateTab, setWaTemplateTab] = useState<'cierre' | 'utilidades' | 'cobro_clientes'>('cierre');
   const [waStatus, setWaStatus] = useState<any>({
     status: 'DISCONNECTED',
     qr: '',
@@ -286,14 +312,16 @@ export default function ConfiguracionEmpresa({
   const [formData, setFormData] = useState<CompanyConfig>(() => ({
     ...config,
     permitir_multisesion: config.permitir_multisesion !== false,
-    compartir_apertura_caja: config.compartir_apertura_caja !== false
+    compartir_apertura_caja: config.compartir_apertura_caja !== false,
+    moneda_ticket_default: config.moneda_ticket_default || 'USD'
   }));
 
   useEffect(() => {
     setFormData({
       ...config,
       permitir_multisesion: config.permitir_multisesion !== false,
-      compartir_apertura_caja: config.compartir_apertura_caja !== false
+      compartir_apertura_caja: config.compartir_apertura_caja !== false,
+      moneda_ticket_default: config.moneda_ticket_default || 'USD'
     });
   }, [config]);
 
@@ -465,7 +493,8 @@ export default function ConfiguracionEmpresa({
           setWaConfig({
             ...data.config,
             messageTemplate: data.config.messageTemplate || DEFAULT_WA_TEMPLATE,
-            utilidadesMessageTemplate: data.config.utilidadesMessageTemplate || DEFAULT_UTILIDADES_WA_TEMPLATE
+            utilidadesMessageTemplate: data.config.utilidadesMessageTemplate || DEFAULT_UTILIDADES_WA_TEMPLATE,
+            cobroClientesMessageTemplate: data.config.cobroClientesMessageTemplate || DEFAULT_COBRO_CLIENTES_WA_TEMPLATE
           });
         }
       }
@@ -1339,7 +1368,13 @@ export default function ConfiguracionEmpresa({
       .replace(/{diffUsd}/g, '+$0.00 (Sobrante)')
       .replace(/{diffVes}/g, '+Bs 0.00 (Sobrante)')
       .replace(/{ventaTotalUsd}/g, '350.50')
-      .replace(/{descuentosUsd}/g, '10.00');
+      .replace(/{descuentosUsd}/g, '10.00')
+      .replace(/{cliente}/g, 'CARLOS RODRÍGUEZ')
+      .replace(/{cedulaRif}/g, 'V-18492048')
+      .replace(/{saldoPendienteUsd}/g, '45.00')
+      .replace(/{saldoPendienteVes}/g, '3.915,00')
+      .replace(/{limiteCreditoUsd}/g, '200.00')
+      .replace(/{creditoDisponibleUsd}/g, '155.00');
   };
 
   const formatWhatsAppMessage = (text: string) => {
@@ -1601,6 +1636,43 @@ export default function ConfiguracionEmpresa({
                 </div>
               </div>
 
+              {/* MONEDA PREDETERMINADA DEL TICKET */}
+              <div className="border-t border-slate-100 pt-4">
+                <label className="text-xs text-slate-700 font-bold block mb-1.5 font-sans flex items-center gap-1.5">
+                  <span>🧾 Moneda Predeterminada del Ticket</span>
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, moneda_ticket_default: 'USD' }))}
+                    className={`py-2.5 px-3 rounded-lg border text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                      (formData.moneda_ticket_default || 'USD') === 'USD'
+                        ? 'bg-emerald-50 border-emerald-500 text-emerald-800 shadow-xs ring-2 ring-emerald-400 font-black'
+                        : 'bg-slate-50 border-slate-300 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span className="text-sm">💵</span>
+                    <span>Dólares ($ USD) [Default]</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, moneda_ticket_default: 'VES' }))}
+                    className={`py-2.5 px-3 rounded-lg border text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                      formData.moneda_ticket_default === 'VES'
+                        ? 'bg-blue-50 border-blue-500 text-blue-800 shadow-xs ring-2 ring-blue-400 font-black'
+                        : 'bg-slate-50 border-slate-300 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span className="text-sm">🇻🇪</span>
+                    <span>Bolívares (Bs VES)</span>
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-400 font-sans mt-1.5 leading-relaxed">
+                  Establece la moneda en que se calcularán y detallarán los precios por defecto al imprimir o cobrar tickets. Podrás alternar entre $ y Bs en cualquier momento desde la ventana de impresión.
+                </p>
+              </div>
+
               <div className="border-t border-slate-100 pt-4">
                 <label className="text-xs text-slate-500 block mb-1 font-sans">Mensaje de Pie de Factura / Ticket</label>
                 <textarea
@@ -1621,53 +1693,166 @@ export default function ConfiguracionEmpresa({
             </form>
 
             <div className="xl:col-span-2 space-y-4">
-              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest block font-sans">
-                Vista Previa de Ticket Fiscal Digital
-              </h3>
-              <div className="bg-white border border-slate-250 rounded-xl p-5 shadow-sm max-w-sm mx-auto space-y-3 font-mono text-[9px] text-slate-900 select-none">
-                <div className="text-center">
-                  <h4 className="font-extrabold text-sm uppercase tracking-wide">{formData.nombre_comercio || 'NOMBRE COMERCIO'}</h4>
-                  <p className="font-bold">RIF: {formData.rif || 'G-00000000-0'}</p>
-                  <p className="text-[8px] mt-0.5">{formData.direccion || 'DIRECCIÓN COMERCIAL'}</p>
-                  <p>Telf: {formData.telefono || '0000-0000000'}</p>
-                </div>
-                <p className="text-center text-slate-300">----------------------------------------</p>
-                <div className="space-y-0.5 text-slate-655 text-left">
-                  <div>FACTURA: FAC-000458</div>
-                  <div>FECHA: {new Date().toLocaleDateString()}</div>
-                  <div>HORA: {new Date().toLocaleTimeString()}</div>
-                  <div>CAJERO: OPERADOR DEMO</div>
-                  <div>VENDEDOR: VENDEDOR AUXILIAR</div>
-                  <div>CLIENTE: CONSUMIDOR FINAL</div>
-                  <div>ID/RIF: V-00000000</div>
-                </div>
-                <p className="text-center text-slate-300">----------------------------------------</p>
-                <div className="space-y-1">
-                  <div className="flex font-bold justify-between text-slate-700">
-                    <span className="w-1/2">CONCEPTO</span>
-                    <span className="w-1/12 text-center">CT</span>
-                    <span className="w-1/4 text-right">P.UN</span>
-                    <span className="w-1/6 text-right">TOTAL</span>
-                  </div>
-                  <div className="flex justify-between text-slate-655">
-                    <span className="w-1/2 truncate">HARINA DE MAÍZ PAN 1KG</span>
-                    <span className="w-1/12 text-center">2</span>
-                    <span className="w-1/4 text-right">$1.20</span>
-                    <span className="w-1/6 text-right">$2.40</span>
-                  </div>
-                </div>
-                <p className="text-center text-slate-300">----------------------------------------</p>
-                <div className="text-right space-y-0.5 text-[10px] text-slate-800">
-                  <div className="flex justify-between font-extrabold text-sm border-t border-slate-200 pt-1 text-slate-900">
-                    <span>TOTAL USD:</span>
-                    <span>$2.40</span>
-                  </div>
-                </div>
-                <p className="text-center text-slate-300">----------------------------------------</p>
-                <div className="text-center text-[8px] italic leading-relaxed text-slate-500">
-                  {formData.mensaje_pie_ticket || 'Gracias por su compra.'}
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest block font-sans">
+                  Vista Previa de Ticket Fiscal Digital
+                </h3>
+
+                {/* Currency Indicator Badge */}
+                <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg text-[10px] font-sans font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, moneda_ticket_default: 'USD' }))}
+                    className={`px-2 py-0.5 rounded transition-all ${
+                      (formData.moneda_ticket_default || 'USD') === 'USD'
+                        ? 'bg-emerald-600 text-white shadow-2xs font-extrabold'
+                        : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    💵 USD ($)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, moneda_ticket_default: 'VES' }))}
+                    className={`px-2 py-0.5 rounded transition-all ${
+                      formData.moneda_ticket_default === 'VES'
+                        ? 'bg-blue-600 text-white shadow-2xs font-extrabold'
+                        : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    🇻🇪 VES (Bs)
+                  </button>
                 </div>
               </div>
+
+              {/* Thermal Ticket Container */}
+              {(() => {
+                const isBs = formData.moneda_ticket_default === 'VES';
+                const rate = config?.tasa_oficial_bcv || 87.00;
+
+                const sampleProducts = [
+                  { desc: 'HARINA DE MAÍZ PAN 1KG', qty: 2, priceUSD: 1.20 },
+                  { desc: 'ACEITE AMANECER SOYA 500ML', qty: 1, priceUSD: 2.50 },
+                  { desc: 'REFRESCO COCA-COLA 2L', qty: 2, priceUSD: 2.00 },
+                  { desc: 'GALLETAS CLUB SOCIAL PAQ', qty: 3, priceUSD: 0.60 }
+                ];
+
+                const totalUSD = sampleProducts.reduce((acc, p) => acc + (p.qty * p.priceUSD), 0);
+                const totalVES = totalUSD * rate;
+                const totalUnits = sampleProducts.reduce((acc, p) => acc + p.qty, 0);
+
+                return (
+                  <div className="bg-white border border-slate-300 rounded-xl p-5 shadow-md max-w-sm mx-auto space-y-2.5 font-mono text-[9.5px] text-slate-900 select-none relative overflow-hidden">
+                    {/* Header Logo & Merchant Info */}
+                    <div className="text-center space-y-1">
+                      {formData.logo_url && (
+                        <div className="flex justify-center mb-1.5">
+                          <img src={formData.logo_url} alt="Logo" className="max-h-12 max-w-[140px] object-contain" />
+                        </div>
+                      )}
+                      <h4 className="font-extrabold text-sm uppercase tracking-wide leading-tight text-slate-950">
+                        {formData.nombre_comercio || 'INVERSIONES NIQUITAO 3000 C.A.'}
+                      </h4>
+                      <p className="font-bold text-[10px]">RIF: {formData.rif || 'J-411332631'}</p>
+                      <p className="text-[8.5px] text-slate-600 leading-tight">{formData.direccion || 'Caracas, Venezuela'}</p>
+                      <p className="text-[8.5px] text-slate-600">Telf: {formData.telefono || '0412-5515172'}</p>
+                    </div>
+
+                    <div className="border-t border-dashed border-slate-300 my-1"></div>
+
+                    {/* Metadata */}
+                    <div className="space-y-0.5 text-slate-700 text-left text-[9px] leading-tight">
+                      <div className="flex justify-between font-bold">
+                        <span>DOCUMENTO: FACTURA FISCAL</span>
+                        <span>Nº: FAC-000458</span>
+                      </div>
+                      <div>FECHA: {new Date().toLocaleDateString('es-VE')} - HORA: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                      <div>CAJERO: OPERADOR DEMO</div>
+                      <div>VENDEDOR: VENDEDOR AUXILIAR</div>
+                      <div className="truncate">CLIENTE: CONSUMIDOR FINAL</div>
+                      <div>ID/RIF: V-00000000</div>
+                    </div>
+
+                    <div className="border-t border-dashed border-slate-300 my-1"></div>
+
+                    {/* 4 Sample Products Table */}
+                    <div className="space-y-1.5">
+                      <div className="flex font-bold justify-between text-slate-900 border-b border-slate-200 pb-1 text-[9px]">
+                        <span className="w-5/12 text-left">DESCRIPCIÓN</span>
+                        <span className="w-1/12 text-center">CT</span>
+                        <span className="w-3/12 text-right">P.UNIT ({isBs ? 'Bs' : '$'})</span>
+                        <span className="w-3/12 text-right">TOTAL ({isBs ? 'Bs' : '$'})</span>
+                      </div>
+
+                      {sampleProducts.map((p, idx) => {
+                        const itemTotalUSD = p.qty * p.priceUSD;
+                        const itemUnitVal = isBs ? (p.priceUSD * rate).toFixed(2) : p.priceUSD.toFixed(2);
+                        const itemTotalVal = isBs ? (itemTotalUSD * rate).toFixed(2) : itemTotalUSD.toFixed(2);
+
+                        return (
+                          <div key={idx} className="flex justify-between text-slate-800 text-[9px] leading-tight py-0.5 border-b border-slate-100">
+                            <span className="w-5/12 truncate font-medium">{p.desc}</span>
+                            <span className="w-1/12 text-center font-bold">{p.qty}</span>
+                            <span className="w-3/12 text-right">{isBs ? `Bs ${itemUnitVal}` : `$${itemUnitVal}`}</span>
+                            <span className="w-3/12 text-right font-bold">{isBs ? `Bs ${itemTotalVal}` : `$${itemTotalVal}`}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="border-t border-dashed border-slate-300 my-1"></div>
+
+                    {/* Items count & Totals */}
+                    <div className="space-y-1 text-slate-900">
+                      <div className="flex justify-between text-[8.5px] text-slate-500 font-sans">
+                        <span>Ítems: {sampleProducts.length} | Unidades: {totalUnits}</span>
+                        <span>Tasa BCV: {rate.toFixed(2)} Bs/$</span>
+                      </div>
+
+                      {isBs ? (
+                        <>
+                          <div className="flex justify-between text-[9px] text-slate-600">
+                            <span>SUBTOTAL (VES):</span>
+                            <span>Bs {totalVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          </div>
+                          <div className="flex justify-between font-extrabold text-sm border-t border-slate-300 pt-1 text-slate-950">
+                            <span>TOTAL A PAGAR (VES):</span>
+                            <span>Bs {totalVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          </div>
+                          <div className="text-right text-[8.5px] text-slate-500 font-sans italic">
+                            (Ref. Dólares: ${totalUSD.toFixed(2)} USD)
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex justify-between text-[9px] text-slate-600">
+                            <span>SUBTOTAL (USD):</span>
+                            <span>${totalUSD.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between font-extrabold text-sm border-t border-slate-300 pt-1 text-slate-950">
+                            <span>TOTAL A PAGAR (USD):</span>
+                            <span>${totalUSD.toFixed(2)}</span>
+                          </div>
+                          <div className="text-right text-[8.5px] text-slate-500 font-sans italic">
+                            (Equivalente BCV: Bs {totalVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="border-t border-dashed border-slate-300 my-1"></div>
+
+                    {/* Footer Message */}
+                    <div className="text-center text-[8.5px] italic leading-relaxed text-slate-600 font-sans px-2">
+                      {formData.mensaje_pie_ticket || '¡Gracias por su compra! Vuelva pronto.'}
+                    </div>
+
+                    <div className="text-center text-[7.5px] text-slate-400 font-mono pt-1">
+                      *** WinterPOS AL System ***
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}
@@ -3624,6 +3809,17 @@ export default function ConfiguracionEmpresa({
                       >
                         💼 Plantilla Distribución Utilidades
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => setWaTemplateTab('cobro_clientes')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold font-sans transition-all flex items-center gap-1.5 ${
+                          waTemplateTab === 'cobro_clientes'
+                            ? 'bg-amber-600 text-white shadow-sm'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        👤 Plantilla Cobro a Clientes
+                      </button>
                     </div>
 
                     {waTemplateTab === 'cierre' ? (
@@ -3656,7 +3852,7 @@ export default function ConfiguracionEmpresa({
                           </div>
                         </div>
                       </>
-                    ) : (
+                    ) : waTemplateTab === 'utilidades' ? (
                       <>
                         <div className="flex flex-col gap-1.5">
                           <label className="text-[10px] font-bold font-sans uppercase text-slate-500 tracking-wide">Plantilla del Reporte de Utilidades y Gastos</label>
@@ -3687,13 +3883,41 @@ export default function ConfiguracionEmpresa({
                           </div>
                         </div>
                       </>
+                    ) : (
+                      <>
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] font-bold font-sans uppercase text-slate-500 tracking-wide">Plantilla del Recordatorio de Cobro a Clientes</label>
+                          <textarea
+                            value={waConfig.cobroClientesMessageTemplate || ''}
+                            onChange={(e) => setWaConfig(prev => ({ ...prev, cobroClientesMessageTemplate: e.target.value }))}
+                            disabled={!waConfig.enabled}
+                            rows={14}
+                            className="bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 focus:bg-white focus:border-indigo-500 focus:outline-none font-mono w-full disabled:opacity-50"
+                            placeholder="Escriba la plantilla del recordatorio de pago a clientes..."
+                          />
+                        </div>
+                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+                          <span className="text-[9px] font-bold text-slate-600 uppercase font-sans tracking-wide block">Variables Disponibles (Recordatorio de Cobro a Clientes)</span>
+                          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[9.5px] font-sans text-slate-500">
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-amber-700 font-mono font-bold">{'{empresa}'}</code>: Nombre del comercio</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-amber-700 font-mono font-bold">{'{fecha}'}</code>: Fecha y hora</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-amber-700 font-mono font-bold">{'{cliente}'}</code>: Nombre del cliente</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-amber-700 font-mono font-bold">{'{cedulaRif}'}</code>: Cédula o RIF</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-amber-700 font-mono font-bold">{'{saldoPendienteUsd}'}</code>: Saldo adeudado USD</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-amber-700 font-mono font-bold">{'{saldoPendienteVes}'}</code>: Saldo adeudado Bs</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-amber-700 font-mono font-bold">{'{tasaBcv}'}</code>: Tasa oficial de cambio</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-amber-700 font-mono font-bold">{'{limiteCreditoUsd}'}</code>: Límite de crédito $</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-amber-700 font-mono font-bold">{'{creditoDisponibleUsd}'}</code>: Crédito disponible $</div>
+                          </div>
+                        </div>
+                      </>
                     )}
                   </div>
 
                   {/* Live Preview */}
                   <div className="lg:col-span-2 flex flex-col">
                     <span className="text-[10px] font-bold font-sans uppercase text-slate-500 tracking-wide mb-1.5">
-                      Vista Previa ({waTemplateTab === 'cierre' ? 'Cierre de Caja' : 'Distribución Utilidades'})
+                      Vista Previa ({waTemplateTab === 'cierre' ? 'Cierre de Caja' : waTemplateTab === 'utilidades' ? 'Distribución Utilidades' : 'Cobro a Clientes'})
                     </span>
                     <div className="flex-grow border border-slate-200 rounded-xl overflow-hidden shadow-md flex flex-col min-h-[450px]" style={{ backgroundColor: '#efeae2' }}>
                       {/* Header preview bubble */}
@@ -3710,14 +3934,16 @@ export default function ConfiguracionEmpresa({
                       {/* Chat Messages */}
                       <div className="p-3 flex-grow flex flex-col justify-start space-y-3 overflow-y-auto max-h-[400px]">
                         {/* Image preview mock */}
-                        <div className="bg-[#d9fdd3] p-1.5 rounded-lg shadow-sm border border-emerald-100/50 self-start max-w-[90%] flex flex-col">
-                          <div className="bg-slate-100/80 rounded flex items-center justify-center h-28 w-full text-slate-400 font-sans text-[10px] gap-1.5 flex-shrink-0">
+                        {waTemplateTab !== 'cobro_clientes' && (
+                          <div className="bg-slate-100/80 rounded flex items-center justify-center h-20 w-full text-slate-400 font-sans text-[10px] gap-1.5 flex-shrink-0">
                             🖼️ <span>[{waTemplateTab === 'cierre' ? 'Imagen del Cierre y Arqueo' : 'Imagen del Reporte de Utilidades'}]</span>
                           </div>
-                          { (waTemplateTab === 'cierre' ? waConfig.messageTemplate : waConfig.utilidadesMessageTemplate) ? (
+                        )}
+                        <div className="bg-[#d9fdd3] p-1.5 rounded-lg shadow-sm border border-emerald-100/50 self-start max-w-[95%] flex flex-col">
+                          { (waTemplateTab === 'cierre' ? waConfig.messageTemplate : waTemplateTab === 'utilidades' ? waConfig.utilidadesMessageTemplate : waConfig.cobroClientesMessageTemplate) ? (
                             <div 
                               className="p-2 text-slate-800 text-[10px] font-sans text-left leading-relaxed break-all select-text whitespace-pre-wrap"
-                              dangerouslySetInnerHTML={{ __html: formatWhatsAppMessage(getTemplatePreview(waTemplateTab === 'cierre' ? waConfig.messageTemplate : (waConfig.utilidadesMessageTemplate || ''))) }}
+                              dangerouslySetInnerHTML={{ __html: formatWhatsAppMessage(getTemplatePreview(waTemplateTab === 'cierre' ? waConfig.messageTemplate : waTemplateTab === 'utilidades' ? (waConfig.utilidadesMessageTemplate || '') : (waConfig.cobroClientesMessageTemplate || ''))) }}
                             />
                           ) : (
                             <span className="p-2 text-slate-400 italic text-[10px] font-sans text-left">
