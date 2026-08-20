@@ -2416,12 +2416,12 @@ export default function ConfiguracionEmpresa({
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({ currentPass: mpCurrentPass, newPass: mpNewPass })
                         });
-                        const data = await res.json();
+                        const data = await res.json().catch(() => ({ success: false, message: 'Error al interpretar respuesta del servidor.' }));
                         if (res.ok && data.success) {
                           setMpMessage({ type: 'success', text: 'Clave Master Pass actualizada exitosamente.' });
                           setMpCurrentPass(''); setMpNewPass(''); setMpConfirmPass('');
                         } else {
-                          setMpMessage({ type: 'error', text: data.message || 'No se pudo actualizar la clave.' });
+                          setMpMessage({ type: 'error', text: data.message || data.error || 'No se pudo actualizar la clave.' });
                         }
                       } catch {
                         setMpMessage({ type: 'error', text: 'Error de conexión con el servidor.' });

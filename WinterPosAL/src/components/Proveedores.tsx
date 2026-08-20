@@ -1876,14 +1876,23 @@ export default function Proveedores({
 
                 <div>
                   <label className="text-[11px] font-bold uppercase text-slate-600 block mb-1">N° Factura / Control *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="FAC-00123"
-                    value={compraNumeroFactura}
-                    onChange={e => setCompraNumeroFactura(e.target.value)}
-                    className="w-full bg-white border border-slate-300 text-slate-800 px-3 py-2 rounded-lg text-xs font-mono uppercase focus:border-emerald-500 focus:outline-none"
-                  />
+                  <div className="relative flex items-center">
+                    <span className="absolute left-3 text-slate-400 font-mono font-bold text-xs pointer-events-none select-none">
+                      N°
+                    </span>
+                    <input
+                      type="text"
+                      required
+                      maxLength={10}
+                      placeholder="00012345"
+                      value={compraNumeroFactura}
+                      onChange={e => {
+                        const val = e.target.value.replace(/[^a-zA-Z0-9-]/g, '').toUpperCase().slice(0, 10);
+                        setCompraNumeroFactura(val);
+                      }}
+                      className="w-full bg-white border border-slate-300 text-slate-800 pl-9 pr-3 py-2 rounded-lg text-xs font-mono font-bold uppercase focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 focus:outline-none shadow-xs"
+                    />
+                  </div>
                 </div>
 
                 <div>

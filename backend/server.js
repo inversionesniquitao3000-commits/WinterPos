@@ -4,8 +4,8 @@ import dotenv from 'dotenv';
 import os from 'os';
 import {
   getCompanyConfig, saveCompanyConfig, getUsers, getProducts, saveProduct,
-  updateProductStock, updateProductPrices, updateProductPricesBulk, getClients, saveClient, registerAbono,
-  getTasaHistory, saveTasa, clearTasaHistory, getMovements, saveMovement, getPriceHistory, savePriceHistory,
+  updateProductStock, updateProductStockBulk, updateProductPrices, updateProductPricesBulk, getClients, saveClient, registerAbono,
+  getTasaHistory, saveTasa, clearTasaHistory, getMovements, saveMovement, saveMovementsBulk, getPriceHistory, savePriceHistory,
   getSales, saveSale, getCierres, abrirCaja, cerrarCaja, getCajaEstado, registrarCajaMovimiento, updateCierre, deleteCierre,
   getOpenCajas, forceCloseCaja,
   updateClient, deleteClient, getAbonos, deleteProduct, updateProduct, saveProductsBulk, saveClientsBulk,
@@ -17,6 +17,7 @@ import {
   getCompras, saveCompra,
   getPagosProveedores, savePagoProveedor,
   getCotizacionesProveedores, saveCotizacionProveedor, deleteCotizacionProveedor,
+  saveSalidaInventario, getSalidasPausadas, saveSalidasPausadas,
   getLastInvoiceNumber, getSyncSummary
 } from './db-store.js';
 
@@ -261,6 +262,12 @@ app.post('/api/productos/stock', async (req, res) => {
   res.json({ success });
 });
 
+app.post('/api/productos/stock/bulk', async (req, res) => {
+  const updates = req.body;
+  const success = await updateProductStockBulk(updates);
+  res.json({ success });
+});
+
 app.post('/api/productos/precios', async (req, res) => {
   const { id, cost, detail, mayor } = req.body;
   const success = await updateProductPrices(id, { cost, detail, mayor });
@@ -404,6 +411,40 @@ app.get('/api/movements', async (req, res) => {
 app.post('/api/movements', async (req, res) => {
   const saved = await saveMovement(req.body);
   res.json(saved);
+});
+
+app.post('/api/movements/bulk', async (req, res) => {
+  const saved = await saveMovementsBulk(req.body);
+  res.json({ success: true, count: saved.length, movements: saved });
+});
+
+// SALIDA DE INVENTARIO (MERMAS, REVERSIÓN, USO INTERNO)
+app.post('/api/inventario/salida', async (req, res) => {
+  try {
+    const result = await saveSalidaInventario(req.body);
+    res.json(result);
+  } catch (err) {
+    console.error('Error procesando salida de inventario:', err.message);
+    res.status(500).json({ success: false, message: err.message, error: err.message });
+  }
+});
+
+app.get('/api/inventario/salidas-pausadas', async (req, res) => {
+  try {
+    const list = await getSalidasPausadas();
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/inventario/salidas-pausadas', async (req, res) => {
+  try {
+    const list = await saveSalidasPausadas(req.body);
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/price-history', async (req, res) => {
@@ -1549,13 +1590,13 @@ app.post('/api/config/master-pass', async (req, res) => {
     if (!isValid) {
       return res.status(401).json({ success: false, message: 'La clave Master Pass actual es incorrecta.' });
     }
-    if (!newPass || newPass.trim().length === 0) {
+    if (!newPass || String(newPass).trim().length === 0) {
       return res.status(400).json({ success: false, message: 'La nueva clave Master Pass no puede estar vacía.' });
     }
-    await saveMasterPass(newPass.trim());
+    await saveMasterPass(String(newPass).trim());
     res.json({ success: true, message: 'Clave Master Pass actualizada exitosamente.' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, message: err.message || 'Error al actualizar clave en el servidor.', error: err.message });
   }
 });
 
@@ -1569,7 +1610,7 @@ app.post('/api/config/verify-master-pass', async (req, res) => {
       res.status(401).json({ success: false, message: 'Clave Master Pass incorrecta.' });
     }
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, message: err.message || 'Error al verificar la clave.', error: err.message });
   }
 });
 

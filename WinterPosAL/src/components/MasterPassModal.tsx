@@ -1,14 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Lock, Eye, EyeOff, ShieldCheck, X, KeyRound } from 'lucide-react';
-
-function getApiBaseUrl(): string {
-  const browserHost = window.location.hostname;
-  const isRemoteAccess = browserHost !== 'localhost' && browserHost !== '127.0.0.1';
-  const lanIP = localStorage.getItem('pos_lan_ip') || '192.168.1.100';
-  const dbMode = localStorage.getItem('pos_db_mode') || 'local';
-  const host = isRemoteAccess ? browserHost : (dbMode === 'local' ? 'localhost' : lanIP);
-  return `http://${host}:5000/api`;
-}
+import { getApiBaseUrl } from '../utils';
 
 interface MasterPassModalProps {
   isOpen: boolean;
@@ -66,7 +58,7 @@ export const MasterPassModal: React.FC<MasterPassModalProps> = ({
         setPass('');
         onSuccess();
       } else {
-        setErrorMsg(data.message || 'Clave Master Pass incorrecta.');
+        setErrorMsg(data.message || data.error || 'Clave Master Pass incorrecta.');
       }
     } catch (err: any) {
       setErrorMsg('Error de conexión con el servidor.');

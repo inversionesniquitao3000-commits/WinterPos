@@ -35,7 +35,7 @@ import {
   TrendingUp, Settings, LogOut, Globe, Cpu, History, Printer, CheckCircle2, ShieldCheck, Briefcase,
   Smartphone, QrCode
 } from 'lucide-react';
-import { printTicketReceipt, formatBs, formatUSD } from './utils';
+import { printTicketReceipt, formatBs, formatUSD, getApiBaseUrl } from './utils';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -373,40 +373,30 @@ export default function App() {
       
       let ip = localStorage.getItem('pos_lan_ip');
       
-      try {
-        const host = isLocalHost ? 'localhost' : window.location.hostname;
-        const res = await fetch(`http://${host}:5000/api/status`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.localIp) {
-            // If local server or stale default, replace with real detected IP
-            if (!ip || mode === 'local' || ip === '192.168.11.40' || ip === '192.168.1.100') {
+      if (mode === 'local') {
+        try {
+          const res = await fetch(`http://localhost:5000/api/status`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.localIp && !ip) {
               ip = data.localIp;
               localStorage.setItem('pos_lan_ip', data.localIp);
             }
           }
-        }
-      } catch (_) {}
+        } catch (_) {}
+      }
 
-      const fallbackIp = !isLocalHost
-        ? window.location.hostname
-        : (ip || '127.0.0.1');
-
-      setLanIP(ip || fallbackIp);
+      setLanIP(ip || (mode === 'remote' ? window.location.hostname : '127.0.0.1'));
       setDbMode(mode);
     };
 
     updateNetworkSettings();
     const timer = setInterval(updateNetworkSettings, 10000);
     return () => clearInterval(timer);
-  }, [currentUser]);
+  }, []);
 
   const getApiUrl = (path: string) => {
-    // Auto-detect: if browser is accessed via a LAN IP (not localhost), use that same IP for API
-    const browserHost = window.location.hostname;
-    const isRemoteAccess = browserHost !== 'localhost' && browserHost !== '127.0.0.1';
-    const host = isRemoteAccess ? browserHost : (dbMode === 'local' ? 'localhost' : lanIP);
-    return `http://${host}:5000/api${path}`;
+    return `${getApiBaseUrl()}${path}`;
   };
 
   const postApiData = async (path: string, body: any) => {
@@ -1461,12 +1451,12 @@ export default function App() {
         setPriceHistory(prev => [...prev, ...newPriceLogs]);
       }
 
-      // Save stocks
-      await Promise.all(updates.map(update => {
+      // Save stocks in bulk
+      const stockUpdates = updates.map(update => {
         const prod = updatedProducts.find(p => p.id === update.prodId);
-        if (!prod) return Promise.resolve();
-        return postApiData('/productos/stock', { id: update.prodId, stock_actual: prod.stock_actual });
-      }));
+        return { prodId: update.prodId, stock_actual: prod ? prod.stock_actual : update.qty };
+      });
+      await postApiData('/productos/stock/bulk', stockUpdates);
 
       // Save prices in bulk using existing endpoint
       const priceUpdates = updates.map(update => ({
@@ -1480,8 +1470,8 @@ export default function App() {
         historyLogs: newPriceLogs
       });
 
-      // Save movements
-      await Promise.all(newMovements.map(mov => postApiData('/movements', mov)));
+      // Save movements in bulk
+      await postApiData('/movements/bulk', newMovements);
 
       return true;
     } catch (err) {

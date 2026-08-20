@@ -408,10 +408,15 @@ export function printTicketReceipt(
 
 export function getApiBaseUrl(): string {
   const browserHost = window.location.hostname;
-  const isRemoteAccess = browserHost !== 'localhost' && browserHost !== '127.0.0.1';
-  const lanIP = localStorage.getItem('pos_lan_ip') || '192.168.1.100';
-  const dbMode = localStorage.getItem('pos_db_mode') || 'local';
-  const host = isRemoteAccess ? browserHost : (dbMode === 'local' ? 'localhost' : lanIP);
+  const isLocalHost = browserHost === 'localhost' || browserHost === '127.0.0.1';
+  const savedIp = localStorage.getItem('pos_lan_ip');
+  const dbMode = localStorage.getItem('pos_db_mode') || (isLocalHost ? 'local' : 'remote');
+
+  if (dbMode === 'remote' && savedIp) {
+    return `http://${savedIp}:5000/api`;
+  }
+  
+  const host = isLocalHost ? 'localhost' : browserHost;
   return `http://${host}:5000/api`;
 }
 

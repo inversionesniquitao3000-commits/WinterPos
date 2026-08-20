@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Product, InventoryMovement, PriceAdjustmentHistory, User, CompanyConfig } from '../types';
-import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator, PauseCircle, Play, Trash2, Wand2, Sparkles, ShieldAlert, RotateCcw, BarChart3, TrendingUp, Award, DollarSign, Calendar, X, Image as ImageIcon, Link as LinkIcon, UploadCloud, Check, Loader2 } from 'lucide-react';
+import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator, PauseCircle, Play, Trash2, Wand2, Sparkles, ShieldAlert, RotateCcw, BarChart3, TrendingUp, Award, DollarSign, Calendar, X, Image as ImageIcon, Link as LinkIcon, UploadCloud, Check, Loader2, Building2 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr, getApiBaseUrl, formatImageUrl } from '../utils';
 import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
@@ -55,7 +55,7 @@ export default function Inventario({
   onUpdateProductPricesBulk,
   onDeleteProduct,
   onUpdateProduct,
-  onUpdateProductStockBulk
+  onUpdateProductStockBulk: _onUpdateProductStockBulk
 }: InventarioProps) {
   const { showAlert, showConfirm } = useDialog();
   const hasPermission = (action: 'ver' | 'crear' | 'editar' | 'eliminar') => {
@@ -395,6 +395,10 @@ export default function Inventario({
   // Estados para Carga por Factura
   const [showInvoiceLoadModal, setShowInvoiceLoadModal] = useState(false);
   const [invoiceNumber, setInvoiceNumber] = useState('');
+  const [invoiceProveedorId, setInvoiceProveedorId] = useState<number | string>(1);
+  const [proveedoresList, setProveedoresList] = useState<{ id: number; razon_social: string; rif?: string }[]>([]);
+  const [proveedorSearchTerm, setProveedorSearchTerm] = useState('');
+  const [showProveedorDropdown, setShowProveedorDropdown] = useState(false);
   const [invoiceProducts, setInvoiceProducts] = useState<{
     product: Product;
     qty: number;
@@ -404,6 +408,77 @@ export default function Inventario({
   }[]>([]);
   const [invoiceSearchTerm, setInvoiceSearchTerm] = useState('');
   const [invoiceAuxItemIndex, setInvoiceAuxItemIndex] = useState<number | null>(null);
+  const [isProcessingInvoiceLoad, setIsProcessingInvoiceLoad] = useState(false);
+
+  useEffect(() => {
+    if (showInvoiceLoadModal) {
+      fetch(`${getApiBaseUrl()}/proveedores`)
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data)) {
+            setProveedoresList(data);
+            const ocasional = data.find(p => String(p.id) === '1' || (p.razon_social || '').toUpperCase().includes('OCASIONAL')) || data[0];
+            if (ocasional) {
+              setInvoiceProveedorId(ocasional.id);
+              setProveedorSearchTerm(ocasional.razon_social);
+            }
+          }
+        })
+        .catch(() => {});
+    }
+  }, [showInvoiceLoadModal]);
+
+  const filteredInvoiceSearchProducts = useMemo(() => {
+    if (!showInvoiceLoadModal) return [];
+    const term = invoiceSearchTerm.trim().toLowerCase();
+    if (!term) {
+      return products.slice(0, 35);
+    }
+
+    const matches: Product[] = [];
+    for (let i = 0; i < products.length; i++) {
+      const p = products[i];
+      const desc = (p.description || '').toLowerCase();
+      const code = (p.barcode || '').toLowerCase();
+      const idStr = p.id ? p.id.toString() : '';
+
+      if (code === term || code.startsWith(term) || code.includes(term) || desc.includes(term) || idStr === term) {
+        matches.push(p);
+        if (matches.length >= 80) break;
+      }
+    }
+
+    return matches.sort((a, b) => {
+      const aCode = (a.barcode || '').toLowerCase();
+      const bCode = (b.barcode || '').toLowerCase();
+      const aId = a.id ? a.id.toString() : '';
+      const bId = b.id ? b.id.toString() : '';
+
+      // 1. Exact match by barcode, key, or ID
+      const aExact = aCode === term || aId === term ? 1 : 0;
+      const bExact = bCode === term || bId === term ? 1 : 0;
+      if (aExact !== bExact) return bExact - aExact;
+
+      // 2. Barcode or key starts with search term
+      const aCodeStarts = aCode.startsWith(term) ? 1 : 0;
+      const bCodeStarts = bCode.startsWith(term) ? 1 : 0;
+      if (aCodeStarts !== bCodeStarts) return bCodeStarts - aCodeStarts;
+
+      // 3. Products with stock first
+      const aStock = typeof a.stock_actual === 'number' ? a.stock_actual : (parseFloat(a.stock_actual as any) || 0);
+      const bStock = typeof b.stock_actual === 'number' ? b.stock_actual : (parseFloat(b.stock_actual as any) || 0);
+      const aHasStock = aStock > 0 ? 1 : 0;
+      const bHasStock = bStock > 0 ? 1 : 0;
+      if (aHasStock !== bHasStock) return bHasStock - aHasStock;
+
+      // 4. Description starts with search term
+      const aDescStarts = (a.description || '').toLowerCase().startsWith(term) ? 1 : 0;
+      const bDescStarts = (b.description || '').toLowerCase().startsWith(term) ? 1 : 0;
+      if (aDescStarts !== bDescStarts) return bDescStarts - aDescStarts;
+
+      return (a.description || '').localeCompare(b.description || '');
+    }).slice(0, 35);
+  }, [products, invoiceSearchTerm, showInvoiceLoadModal]);
 
   // Cargas de Factura Pausadas (En Espera)
   interface PausedInvoice {
@@ -457,6 +532,333 @@ export default function Inventario({
   }>({});
   const [isSavingAuditCorrections, setIsSavingAuditCorrections] = useState(false);
   const [auditSaveProgress, setAuditSaveProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
+
+  // Estados para Salida de Inventario (Mermas, Daños, Errores y Reversiones)
+  interface SalidaItem {
+    producto_id: number;
+    codigo: string;
+    descripcion: string;
+    stock_actual: number;
+    cantidad_sacar: number;
+    costo_unitario_usd: number;
+    motivo_especifico: string;
+  }
+
+  interface PausedSalida {
+    id: string;
+    fecha: string;
+    usuario_nombre: string;
+    motivo: string;
+    origen: 'manual' | 'factura';
+    factura_id?: number | null;
+    numero_factura?: string;
+    observaciones: string;
+    items: SalidaItem[];
+  }
+
+  const [showSalidaModal, setShowSalidaModal] = useState(false);
+  const [showPausedSalidasModal, setShowPausedSalidasModal] = useState(false);
+  const [salidasPausadas, setSalidasPausadas] = useState<PausedSalida[]>(() => {
+    try {
+      const saved = localStorage.getItem('pos_paused_salidas');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [salidaMotivo, setSalidaMotivo] = useState('Merma / Daño / Vencimiento');
+  const [salidaModo, setSalidaModo] = useState<'manual' | 'factura'>('manual');
+  const [salidaObservaciones, setSalidaObservaciones] = useState('');
+  const [salidaSearchTerm, setSalidaSearchTerm] = useState('');
+  const [salidaSelectedInvoiceId, setSalidaSelectedInvoiceId] = useState<string>('');
+  const [salidaItems, setSalidaItems] = useState<SalidaItem[]>([]);
+  const [salidaEditingDraftId, setSalidaEditingDraftId] = useState<string | null>(null);
+  const [isProcessingSalida, setIsProcessingSalida] = useState(false);
+  const [comprasHistory, setComprasHistory] = useState<any[]>([]);
+
+  const [salidaInvoiceSearch, setSalidaInvoiceSearch] = useState('');
+  const [salidaInvoiceDateFilter, setSalidaInvoiceDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
+
+  const [localMovements, setLocalMovements] = useState<InventoryMovement[]>([]);
+
+  useEffect(() => {
+    if (Array.isArray(movements) && movements.length > 0) {
+      setLocalMovements(movements);
+    }
+  }, [movements]);
+
+  const refreshKardexMovements = async () => {
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/movements`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setLocalMovements(data);
+        }
+      }
+    } catch (e) {
+      console.error('Error refrescando Kardex:', e);
+    }
+  };
+
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (invoiceAuxItemIndex !== null) { setInvoiceAuxItemIndex(null); return; }
+        if (showPausedSalidasModal) { setShowPausedSalidasModal(false); return; }
+        if (showPausedInvoicesModal) { setShowPausedInvoicesModal(false); return; }
+        if (showInvoiceLoadModal) { setShowInvoiceLoadModal(false); return; }
+        if (showSalidaModal) { setShowSalidaModal(false); return; }
+      }
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [showSalidaModal, showInvoiceLoadModal, showPausedSalidasModal, showPausedInvoicesModal, invoiceAuxItemIndex]);
+
+  const filteredSalidaSearchProducts = useMemo(() => {
+    if (!showSalidaModal || salidaModo !== 'manual') return [];
+    const term = salidaSearchTerm.trim().toLowerCase();
+    if (!term) return [];
+
+    const matches: Product[] = [];
+    for (let i = 0; i < products.length; i++) {
+      const p = products[i];
+      const desc = (p.description || '').toLowerCase();
+      const code = (p.barcode || '').toLowerCase();
+      const idStr = p.id ? p.id.toString() : '';
+
+      if (code === term || code.startsWith(term) || code.includes(term) || desc.includes(term) || idStr === term) {
+        matches.push(p);
+        if (matches.length >= 80) break;
+      }
+    }
+
+    return matches.sort((a, b) => {
+      const aCode = (a.barcode || '').toLowerCase();
+      const bCode = (b.barcode || '').toLowerCase();
+      const aId = a.id ? a.id.toString() : '';
+      const bId = b.id ? b.id.toString() : '';
+
+      // 1. Exact match by barcode, key, or ID
+      const aExact = aCode === term || aId === term ? 1 : 0;
+      const bExact = bCode === term || bId === term ? 1 : 0;
+      if (aExact !== bExact) return bExact - aExact;
+
+      // 2. Barcode or key starts with search term
+      const aCodeStarts = aCode.startsWith(term) ? 1 : 0;
+      const bCodeStarts = bCode.startsWith(term) ? 1 : 0;
+      if (aCodeStarts !== bCodeStarts) return bCodeStarts - aCodeStarts;
+
+      // 3. Products with stock first
+      const aStock = typeof a.stock_actual === 'number' ? a.stock_actual : (parseFloat(a.stock_actual as any) || 0);
+      const bStock = typeof b.stock_actual === 'number' ? b.stock_actual : (parseFloat(b.stock_actual as any) || 0);
+      const aHasStock = aStock > 0 ? 1 : 0;
+      const bHasStock = bStock > 0 ? 1 : 0;
+      if (aHasStock !== bHasStock) return bHasStock - aHasStock;
+
+      // 4. Description starts with search term
+      const aDescStarts = (a.description || '').toLowerCase().startsWith(term) ? 1 : 0;
+      const bDescStarts = (b.description || '').toLowerCase().startsWith(term) ? 1 : 0;
+      if (aDescStarts !== bDescStarts) return bDescStarts - aDescStarts;
+
+      return (a.description || '').localeCompare(b.description || '');
+    }).slice(0, 25);
+  }, [products, salidaSearchTerm, showSalidaModal, salidaModo]);
+
+  useEffect(() => {
+    localStorage.setItem('pos_paused_salidas', JSON.stringify(salidasPausadas));
+  }, [salidasPausadas]);
+
+  useEffect(() => {
+    fetch(`${getApiBaseUrl()}/inventario/salidas-pausadas`)
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          setSalidasPausadas(data);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const syncPausedSalidas = (newList: PausedSalida[]) => {
+    setSalidasPausadas(newList);
+    localStorage.setItem('pos_paused_salidas', JSON.stringify(newList));
+    fetch(`${getApiBaseUrl()}/inventario/salidas-pausadas`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newList)
+    }).catch(() => {});
+  };
+
+  const loadComprasHistory = async () => {
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/compras`);
+      if (res.ok) {
+        const data = await res.json();
+        setComprasHistory(Array.isArray(data) ? data : []);
+      }
+    } catch (e) {
+      console.error('Error cargando compras:', e);
+    }
+  };
+
+  const combinedInvoices = useMemo(() => {
+    return (comprasHistory || [])
+      .filter(c => c && c.numero_factura && Array.isArray(c.items) && c.items.length > 0)
+      .map(c => ({
+        ...c,
+        numero_factura: String(c.numero_factura).trim()
+      }));
+  }, [comprasHistory]);
+
+  const filteredInvoicesForSalida = useMemo(() => {
+    let list = combinedInvoices || [];
+
+    const term = salidaInvoiceSearch.trim().toLowerCase();
+    if (term) {
+      const filtered = list.filter(c =>
+        String(c.numero_factura || '').toLowerCase().includes(term) ||
+        String(c.proveedor_nombre || '').toLowerCase().includes(term) ||
+        String(c.observaciones || '').toLowerCase().includes(term) ||
+        (Array.isArray(c.items) && c.items.some((it: any) =>
+          String(it.codigo || '').toLowerCase().includes(term) ||
+          String(it.descripcion || '').toLowerCase().includes(term) ||
+          String(it.product?.barcode || '').toLowerCase().includes(term) ||
+          String(it.product?.description || '').toLowerCase().includes(term)
+        ))
+      );
+      return filtered.sort((a, b) => String(b.fecha_emision || '').localeCompare(String(a.fecha_emision || '')));
+    }
+
+    const todayStr = getLocalDateStr();
+    if (salidaInvoiceDateFilter === 'today') {
+      list = list.filter(c => String(c.fecha_emision || '').startsWith(todayStr));
+    } else if (salidaInvoiceDateFilter === 'week') {
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      const weekAgoStr = weekAgo.toISOString().split('T')[0];
+      list = list.filter(c => String(c.fecha_emision || '') >= weekAgoStr);
+    } else if (salidaInvoiceDateFilter === 'month') {
+      const monthStart = todayStr.slice(0, 7);
+      list = list.filter(c => String(c.fecha_emision || '').startsWith(monthStart));
+    }
+
+    return list.sort((a, b) => {
+      const dateA = String(a.fecha_emision || '');
+      const dateB = String(b.fecha_emision || '');
+      return dateB.localeCompare(dateA);
+    }).slice(0, 30);
+  }, [combinedInvoices, salidaInvoiceSearch, salidaInvoiceDateFilter]);
+
+  const openSalidaModal = () => {
+    setSalidaMotivo('Merma / Daño / Vencimiento');
+    setSalidaModo('manual');
+    setSalidaObservaciones('');
+    setSalidaSearchTerm('');
+    setSalidaSelectedInvoiceId('');
+    setSalidaItems([]);
+    setSalidaEditingDraftId(null);
+    setShowSalidaModal(true);
+    loadComprasHistory();
+  };
+
+  const handlePauseSalida = () => {
+    if (salidaItems.length === 0) {
+      showAlert('Advertencia', 'Agregue al menos un producto a la salida antes de pausar.');
+      return;
+    }
+    const draftId = salidaEditingDraftId || `PAUSE-${Date.now()}`;
+    const selectedComp = comprasHistory.find(c => String(c.id) === String(salidaSelectedInvoiceId));
+
+    const newDraft: PausedSalida = {
+      id: draftId,
+      fecha: getLocalDateStr(),
+      usuario_nombre: _currentUser?.nombre || 'OPERADOR',
+      motivo: salidaMotivo,
+      origen: salidaModo,
+      factura_id: selectedComp ? selectedComp.id : null,
+      numero_factura: selectedComp ? selectedComp.numero_factura : '',
+      observaciones: salidaObservaciones,
+      items: salidaItems
+    };
+
+    const updated = salidasPausadas.filter(s => s.id !== draftId);
+    updated.unshift(newDraft);
+    syncPausedSalidas(updated);
+
+    setShowSalidaModal(false);
+    showAlert('Salida Pausada', 'La salida de inventario ha sido guardada en borrador. Puedes retomarla en cualquier momento desde "Salidas en Espera".');
+  };
+
+  const handleProcessSalida = async () => {
+    if (salidaItems.length === 0) {
+      showAlert('Advertencia', 'No hay productos seleccionados para realizar la salida de inventario.');
+      return;
+    }
+
+    const invalidQty = salidaItems.some(i => !i.cantidad_sacar || i.cantidad_sacar <= 0);
+    if (invalidQty) {
+      showAlert('Error en cantidades', 'Todos los productos deben tener una cantidad a sacar mayor a 0.');
+      return;
+    }
+
+    const selectedComp = (combinedInvoices || []).find(c => String(c.id) === String(salidaSelectedInvoiceId) || String(c.numero_factura || '').toUpperCase() === String(salidaSelectedInvoiceId || '').toUpperCase()) || comprasHistory.find(c => String(c.id) === String(salidaSelectedInvoiceId));
+    const isFullInvoiceReversal = salidaModo === 'factura' && selectedComp && salidaItems.length === (selectedComp.items?.length || 0);
+
+    const invoiceNumToUse = selectedComp ? selectedComp.numero_factura : (salidaSelectedInvoiceId ? String(salidaSelectedInvoiceId) : '');
+    const confirmMsg = `¿Está seguro de procesar la salida de inventario?\n\n- Total Productos: ${salidaItems.length}\n- Motivo: ${salidaMotivo}\n${invoiceNumToUse ? `- Factura Ref: ${invoiceNumToUse}\n` : ''}`;
+
+    const ok = await showConfirm('Confirmar Salida de Inventario', confirmMsg);
+    if (!ok) return;
+
+    setIsProcessingSalida(true);
+    try {
+      const payload = {
+        usuario_id: _currentUser?.id || 1,
+        usuario_nombre: _currentUser?.nombre || 'ADMINISTRADOR',
+        motivo: salidaMotivo,
+        origen: salidaModo,
+        factura_id: selectedComp ? selectedComp.id : null,
+        numero_factura: invoiceNumToUse,
+        observaciones: salidaObservaciones,
+        items: salidaItems,
+        anular_factura_completa: isFullInvoiceReversal
+      };
+
+      const res = await fetch(`${getApiBaseUrl()}/inventario/salida`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (salidaEditingDraftId) {
+          const updated = salidasPausadas.filter(s => s.id !== salidaEditingDraftId);
+          syncPausedSalidas(updated);
+        }
+
+        salidaItems.forEach(item => {
+          const p = products.find(prod => prod.id === item.producto_id);
+          if (p) {
+            const qtyNum = item.cantidad_sacar || 0;
+            p.stock_actual = Math.max(0, (parseFloat(p.stock_actual as any) || 0) - qtyNum);
+          }
+        });
+
+        await refreshKardexMovements();
+        setShowSalidaModal(false);
+        showAlert('Salida Exitosa', `Se procesó la salida de inventario exitosamente (${data.count || salidaItems.length} ítems descontados).`);
+      } else {
+        showAlert('Error', data.message || data.error || 'No se pudo procesar la salida de inventario.');
+      }
+    } catch (err: any) {
+      showAlert('Error de Conexión', 'No se pudo conectar con el servidor para procesar la salida.');
+    } finally {
+      setIsProcessingSalida(false);
+    }
+  };
 
   const catalogAuditIssues = useMemo(() => {
     return products.map(p => {
@@ -905,7 +1307,7 @@ export default function Inventario({
   ]);
 
   const safeProducts = useMemo(() => Array.isArray(products) ? products : [], [products]);
-  const safeMovements = useMemo(() => Array.isArray(movements) ? movements : [], [movements]);
+  const safeMovements = useMemo(() => Array.isArray(localMovements) && localMovements.length > 0 ? localMovements : (Array.isArray(movements) ? movements : []), [localMovements, movements]);
   const safePriceHistory = useMemo(() => Array.isArray(priceHistory) ? priceHistory : [], [priceHistory]);
 
   const effectiveBcvRate = useMemo(() => {
@@ -1137,13 +1539,14 @@ export default function Inventario({
     }> = {};
 
     filteredMovements.forEach(m => {
-      const dateMin = m.date ? m.date.substring(0, 16) : '';
-      const groupKey = `${dateMin}_${m.motivo}_${m.usuario}_${m.type}`;
+      const dateMin = m.date ? m.date.replace('T', ' ').substring(0, 16) : '';
+      const cleanMotivo = (m.motivo || '').trim();
+      const groupKey = `${dateMin}_${cleanMotivo}_${m.usuario}_${m.type}`;
       if (!groups[groupKey]) {
         groups[groupKey] = {
           key: groupKey,
-          date: m.date,
-          motivo: m.motivo,
+          date: dateMin || m.date,
+          motivo: cleanMotivo,
           usuario: m.usuario,
           type: m.type,
           totalItems: 0,
@@ -3626,6 +4029,41 @@ export default function Inventario({
                     </button>
                   )}
 
+                  {/* BUTTON: SALIDA DE INVENTARIO (MERMAS, DAÑOS, REVERSIÓN) */}
+                  {hasPermission('editar') && (
+                    <button
+                      onClick={openSalidaModal}
+                      className="w-full bg-rose-600 hover:bg-rose-700 text-white border border-rose-700 py-2 px-3 rounded shadow-sm flex items-center justify-between font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all active:scale-95"
+                      title="Registrar merma, daño, vencimiento o reversión de factura de proveedor"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Minus className="w-4 h-4 bg-rose-700/50 rounded-full p-0.5" />
+                        <span>Salida de Inventario</span>
+                      </div>
+                      {salidasPausadas.length > 0 && (
+                        <span className="bg-amber-400 text-slate-950 text-[9px] px-1.5 py-0.2 rounded-full font-mono font-black" title={`${salidasPausadas.length} salida(s) pausada(s)`}>
+                          {salidasPausadas.length} pausada(s)
+                        </span>
+                      )}
+                    </button>
+                  )}
+
+                  {/* BUTTON: SALIDAS EN ESPERA (PAUSADAS) */}
+                  {hasPermission('editar') && salidasPausadas.length > 0 && (
+                    <button
+                      onClick={() => setShowPausedSalidasModal(true)}
+                      className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 border border-amber-600 py-2 px-3 rounded shadow flex items-center justify-between font-sans font-extrabold text-[11px] uppercase tracking-wider text-left transition-all active:scale-95"
+                    >
+                      <div className="flex items-center gap-2">
+                        <PauseCircle className="w-4 h-4 text-slate-950" />
+                        <span>Salidas en Espera</span>
+                      </div>
+                      <span className="bg-slate-950 text-amber-400 px-1.5 py-0.5 rounded-full text-[10px] font-mono font-black">
+                        {salidasPausadas.length}
+                      </span>
+                    </button>
+                  )}
+
                   {/* BUTTON: AUDITORÍA DE CATÁLOGO Y PRECIOS */}
                   {hasPermission('editar') && (
                     <button
@@ -3961,8 +4399,8 @@ export default function Inventario({
                               {m.type}
                             </span>
                           </td>
-                          <td className={`px-4 py-2.5 text-right font-black font-mono ${m.qty > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {formatKardexVal(m.qty, true)}
+                          <td className={`px-4 py-2.5 text-right font-black font-mono ${m.type === 'Salida' || m.type === 'Merma' ? 'text-red-600' : (m.qty > 0 ? 'text-green-600' : 'text-red-600')}`}>
+                            {m.type === 'Salida' || m.type === 'Merma' ? `-${Math.abs(m.qty)}` : formatKardexVal(m.qty, true)}
                           </td>
                           <td className="px-4 py-2.5 text-right font-mono text-slate-450">{formatKardexVal(m.stock_anterior)}</td>
                           <td className="px-4 py-2.5 text-right font-mono text-slate-600">{formatKardexVal(m.stock_posterior)}</td>
@@ -4021,8 +4459,8 @@ export default function Inventario({
                           </td>
                           <td className="px-4 py-2.5 text-slate-655 italic font-sans font-bold">{g.motivo}</td>
                           <td className="px-4 py-2.5 text-right font-mono font-bold text-slate-600">{g.totalItems}</td>
-                          <td className={`px-4 py-2.5 text-right font-black font-mono ${g.totalQty > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {g.totalQty > 0 ? `+${g.totalQty}` : g.totalQty}
+                          <td className={`px-4 py-2.5 text-right font-black font-mono ${g.type === 'Salida' || g.type === 'Merma' ? 'text-red-600' : (g.totalQty > 0 ? 'text-green-600' : 'text-red-600')}`}>
+                            {g.type === 'Salida' || g.type === 'Merma' ? `-${Math.abs(g.totalQty)}` : (g.totalQty > 0 ? `+${g.totalQty}` : g.totalQty)}
                           </td>
                           <td className="px-4 py-2.5 font-sans">{g.usuario}</td>
                           <td className="px-4 py-2.5 text-center">
@@ -8015,103 +8453,847 @@ export default function Inventario({
         );
       })()}
 
+      {/* SALIDA DE INVENTARIO MODAL (MERMAS, DAÑOS, REVERSIÓN) */}
+      {showSalidaModal && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[50] flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-5xl w-full h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-rose-700 via-rose-600 to-rose-700 px-6 py-4 flex justify-between items-center text-white">
+              <div className="flex items-center gap-3">
+                <div className="p-1.5 bg-white/20 rounded-lg">
+                  <Minus className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold uppercase tracking-wider font-mono flex items-center gap-2">
+                    Salida de Inventario (Mermas, Errores y Reversiones)
+                  </h3>
+                  <p className="text-[11px] text-rose-100 font-sans">
+                    Descontar productos del stock por merma, daño, vencimiento o reversión de compra a proveedor.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                {salidasPausadas.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSalidaModal(false);
+                      setShowPausedSalidasModal(true);
+                    }}
+                    className="bg-amber-400 hover:bg-amber-300 text-slate-950 text-[10px] font-extrabold px-3 py-1.5 rounded-full font-mono flex items-center gap-1 shadow transition-all active:scale-95"
+                    title="Ver salidas pausadas en espera"
+                  >
+                    <PauseCircle className="w-4 h-4" />
+                    <span>En Espera ({salidasPausadas.length})</span>
+                  </button>
+                )}
+                <button 
+                  onClick={() => setShowSalidaModal(false)}
+                  className="text-white/80 hover:text-white text-lg font-bold focus:outline-none"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Controls Bar: Motivo, Modo, Observaciones */}
+            <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 space-y-3 font-sans">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Selector de Motivo Principal */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                    Motivo General de Salida:
+                  </label>
+                  <select
+                    value={salidaMotivo}
+                    onChange={(e) => setSalidaMotivo(e.target.value)}
+                    className="w-full border border-slate-300 focus:border-rose-500 rounded-lg px-3 py-2 text-xs font-bold text-slate-800 outline-none bg-white"
+                  >
+                    <option value="Merma / Daño / Vencimiento">⚠️ Merma / Daño / Vencimiento</option>
+                    <option value="Uso Interno / Consumo">🏢 Uso Interno / Consumo del Negocio</option>
+                    <option value="Error de Carga Manual">✏️ Ajuste por Error de Carga Manual</option>
+                    <option value="Reversión de Carga por Factura">📄 Reversión / Anulación Factura Proveedor</option>
+                  </select>
+                </div>
+
+                {/* Tabs de Modo de Selección */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                    Método de Selección:
+                  </label>
+                  <div className="flex bg-slate-200 p-1 rounded-lg">
+                    <button
+                      type="button"
+                      onClick={() => setSalidaModo('manual')}
+                      className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-1.5 ${
+                        salidaModo === 'manual'
+                          ? 'bg-rose-600 text-white shadow'
+                          : 'text-slate-700 hover:text-slate-900'
+                      }`}
+                    >
+                      <Search className="w-3.5 h-3.5" />
+                      <span>Uno a Uno</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSalidaModo('factura');
+                        loadComprasHistory();
+                      }}
+                      className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-1.5 ${
+                        salidaModo === 'factura'
+                          ? 'bg-rose-600 text-white shadow'
+                          : 'text-slate-700 hover:text-slate-900'
+                      }`}
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>Por Factura</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Observaciones generales */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                    Observaciones / Detalles:
+                  </label>
+                  <input
+                    type="text"
+                    value={salidaObservaciones}
+                    onChange={(e) => setSalidaObservaciones(e.target.value)}
+                    placeholder="Ej. Paquete dañado al descargar..."
+                    className="w-full border border-slate-300 focus:border-rose-500 rounded-lg px-3 py-2 text-xs text-slate-800 outline-none bg-white"
+                  />
+                </div>
+              </div>
+
+              {/* Mode Specific Controls */}
+              {salidaModo === 'manual' ? (
+                /* Búsqueda Uno a Uno */
+                <div className="relative">
+                  <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                    Buscar Producto para Agregar a la Salida:
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={salidaSearchTerm}
+                      onChange={(e) => setSalidaSearchTerm(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && filteredSalidaSearchProducts.length > 0) {
+                          e.preventDefault();
+                          const p = filteredSalidaSearchProducts[0];
+                          const exists = salidaItems.some(i => i.producto_id === p.id);
+                          if (exists) {
+                            showAlert('Producto Ya Agregado', `El producto "${p.description}" ya se encuentra agregado en la lista de salida.`);
+                            showToast(`⚠️ "${p.description}" ya está en la lista.`);
+                          } else {
+                            setSalidaItems(prev => [
+                              ...prev,
+                              {
+                                producto_id: p.id,
+                                codigo: p.barcode || 'S/C',
+                                descripcion: p.description,
+                                stock_actual: p.stock_actual,
+                                cantidad_sacar: 1,
+                                costo_unitario_usd: parseFloat(p.precio_costo_usd as any) || 0,
+                                motivo_especifico: salidaMotivo
+                              }
+                            ]);
+                            setSalidaSearchTerm('');
+                          }
+                        }
+                      }}
+                      placeholder="Buscar por código, clave o descripción (Enter para añadir)..."
+                      className="w-full border border-slate-300 focus:border-rose-500 rounded-lg pl-9 pr-4 py-2 text-xs text-slate-800 outline-none bg-white font-mono font-bold shadow-xs"
+                    />
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  </div>
+
+                  {/* Autocomplete dropdown */}
+                  {salidaSearchTerm.trim().length > 0 && (
+                    <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-300 rounded-xl shadow-2xl max-h-60 overflow-y-auto z-20 font-sans text-xs divide-y divide-slate-100">
+                      {filteredSalidaSearchProducts.length === 0 ? (
+                        <div className="p-4 text-center text-slate-400 italic">No se encontró ningún producto.</div>
+                      ) : (
+                        filteredSalidaSearchProducts.map(p => {
+                          const isAdded = salidaItems.some(i => i.producto_id === p.id);
+                          const currentStk = typeof p.stock_actual === 'number' ? p.stock_actual : (parseFloat(p.stock_actual as any) || 0);
+
+                          return (
+                            <div
+                              key={p.id}
+                              onClick={() => {
+                                if (isAdded) {
+                                  showAlert('Producto Ya Agregado', `El producto "${p.description}" ya se encuentra agregado en la lista de salida.`);
+                                  showToast(`⚠️ "${p.description}" ya está en la lista.`);
+                                } else {
+                                  setSalidaItems(prev => [
+                                    ...prev,
+                                    {
+                                      producto_id: p.id,
+                                      codigo: p.barcode || 'S/C',
+                                      descripcion: p.description,
+                                      stock_actual: p.stock_actual,
+                                      cantidad_sacar: 1,
+                                      costo_unitario_usd: parseFloat(p.precio_costo_usd as any) || 0,
+                                      motivo_especifico: salidaMotivo
+                                    }
+                                  ]);
+                                  setSalidaSearchTerm('');
+                                }
+                              }}
+                              className="p-3 hover:bg-rose-50/60 cursor-pointer flex justify-between items-center transition-colors font-sans"
+                            >
+                              <div className="space-y-0.5">
+                                <div className="font-extrabold text-slate-900 text-xs">
+                                  {p.description}
+                                </div>
+                                <span className="font-mono text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">
+                                  {p.barcode || 'S/C'}
+                                </span>
+                              </div>
+                              <div className="text-right flex items-center gap-3">
+                                <span className={`font-mono text-[10px] px-2 py-0.5 rounded font-bold ${
+                                  currentStk > 0 
+                                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' 
+                                    : 'bg-rose-50 text-rose-700 border border-rose-200'
+                                }`}>
+                                  Stock: {formatStockVal(currentStk, p.a_granel)}
+                                </span>
+                                <span className="text-emerald-700 font-mono font-black text-xs">${(parseFloat(p.precio_costo_usd as any) || 0).toFixed(2)}</span>
+                                {isAdded && (
+                                  <span className="bg-amber-100 text-amber-900 border border-amber-300 font-extrabold text-[10px] px-2 py-0.5 rounded-full">
+                                    Agregado ✓
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Selección por Factura de Proveedor */
+                <div className="bg-amber-50/80 border border-amber-300 p-4 rounded-xl space-y-3 font-sans">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-200/80 pb-2">
+                    <label className="text-[11px] font-extrabold text-amber-950 uppercase tracking-wider flex items-center gap-1.5 font-mono">
+                      <Layers className="w-4 h-4 text-amber-700" />
+                      <span>Seleccionar Factura de Compra Registrada:</span>
+                    </label>
+                    
+                    {/* Filtros Rápidos por Fecha */}
+                    <div className="flex items-center gap-1 bg-amber-100/70 p-1 rounded-lg border border-amber-200">
+                      <span className="text-[10px] font-mono font-bold text-amber-800 px-1">Fecha:</span>
+                      {(['all', 'today', 'week', 'month'] as const).map((filterKey) => {
+                        const labels = { all: 'Todas', today: 'Hoy', week: '7 Días', month: 'Este Mes' };
+                        return (
+                          <button
+                            key={filterKey}
+                            type="button"
+                            onClick={() => setSalidaInvoiceDateFilter(filterKey)}
+                            className={`px-2 py-0.5 text-[10px] font-bold rounded-md transition-all ${
+                              salidaInvoiceDateFilter === filterKey
+                                ? 'bg-amber-600 text-white shadow-xs'
+                                : 'text-amber-900 hover:bg-amber-200/60'
+                            }`}
+                          >
+                            {labels[filterKey]}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Buscador + Selector */}
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+                    <div className="md:col-span-4 relative">
+                      <Search className="w-3.5 h-3.5 text-amber-600 absolute left-3 top-2.5" />
+                      <input
+                        type="text"
+                        placeholder="Buscar por N° de factura (Ej: FAC-258)..."
+                        value={salidaInvoiceSearch}
+                        onChange={(e) => setSalidaInvoiceSearch(e.target.value)}
+                        className="w-full bg-white border border-amber-300 focus:border-rose-500 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-800 outline-none font-mono font-bold shadow-xs"
+                      />
+                    </div>
+
+                    <div className="md:col-span-8 flex items-center gap-2">
+                      <select
+                        value={salidaSelectedInvoiceId}
+                        onChange={(e) => {
+                          const invId = e.target.value;
+                          setSalidaSelectedInvoiceId(invId);
+                          const comp = combinedInvoices.find(c => String(c.id) === String(invId) || String(c.numero_factura).toUpperCase() === String(invId).toUpperCase());
+                          if (comp && Array.isArray(comp.items)) {
+                            const itemsFromInv: SalidaItem[] = comp.items.map((it: any) => {
+                              const targetProd = products.find(p => p.id === (it.producto_id || it.id) || (p.barcode && String(p.barcode).toLowerCase() === String(it.codigo).toLowerCase()));
+                              const realBarcode = targetProd?.barcode || it.codigo || it.product?.barcode || it.barcode || 'S/C';
+                              const realDesc = targetProd?.description || it.descripcion || it.product?.description || it.description || 'PRODUCTO';
+                              const realStock = typeof targetProd?.stock_actual === 'number' ? targetProd.stock_actual : (parseFloat(it.product?.stock_actual || it.stock_actual || 0));
+
+                              return {
+                                producto_id: targetProd?.id || it.producto_id || it.id,
+                                codigo: realBarcode,
+                                descripcion: realDesc,
+                                stock_actual: realStock,
+                                cantidad_sacar: parseFloat(it.cantidad || it.qty || 1),
+                                costo_unitario_usd: parseFloat(it.costo_unitario_usd || it.precio_costo_usd || targetProd?.precio_costo_usd || 0),
+                                motivo_especifico: `Reversión Factura #${comp.numero_factura}`
+                              };
+                            });
+                            setSalidaItems(itemsFromInv);
+                          } else {
+                            setSalidaItems([]);
+                          }
+                        }}
+                        className="w-full border border-amber-300 focus:border-rose-500 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-800 outline-none bg-white font-mono shadow-xs truncate"
+                      >
+                        <option value="">-- Seleccionar Factura ({filteredInvoicesForSalida.length} recientes) --</option>
+                        {filteredInvoicesForSalida.map(c => (
+                          <option key={c.id} value={c.id}>
+                            🏢 {c.proveedor_nombre || 'PROVEEDOR'} | Factura #{c.numero_factura} | Fecha: {c.fecha_emision ? String(c.fecha_emision).slice(0, 10) : 'S/F'} | Total: ${parseFloat(c.total_usd || 0).toFixed(2)} ({c.items?.length || 0} ítems)
+                          </option>
+                        ))}
+                      </select>
+
+                      {salidaSelectedInvoiceId && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const comp = combinedInvoices.find(c => String(c.id) === String(salidaSelectedInvoiceId) || String(c.numero_factura).toUpperCase() === String(salidaSelectedInvoiceId).toUpperCase());
+                            if (comp && Array.isArray(comp.items)) {
+                              const itemsFromInv: SalidaItem[] = comp.items.map((it: any) => {
+                                const targetProd = products.find(p => p.id === (it.producto_id || it.id) || (p.barcode && String(p.barcode).toLowerCase() === String(it.codigo).toLowerCase()));
+                                const realBarcode = targetProd?.barcode || it.codigo || it.product?.barcode || it.barcode || 'S/C';
+                                const realDesc = targetProd?.description || it.descripcion || it.product?.description || it.description || 'PRODUCTO';
+                                const realStock = typeof targetProd?.stock_actual === 'number' ? targetProd.stock_actual : (parseFloat(it.product?.stock_actual || it.stock_actual || 0));
+
+                                return {
+                                  producto_id: targetProd?.id || it.producto_id || it.id,
+                                  codigo: realBarcode,
+                                  descripcion: realDesc,
+                                  stock_actual: realStock,
+                                  cantidad_sacar: parseFloat(it.cantidad || it.qty || 1),
+                                  costo_unitario_usd: parseFloat(it.costo_unitario_usd || it.precio_costo_usd || targetProd?.precio_costo_usd || 0),
+                                  motivo_especifico: `Reversión Total Factura #${comp.numero_factura}`
+                                };
+                              });
+                              setSalidaItems(itemsFromInv);
+                              showAlert('Factura Completa Cargada', `Se cargaron los ${itemsFromInv.length} productos de la factura #${comp.numero_factura} para reversión total de inventario.`);
+                            }
+                          }}
+                          className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs font-sans flex items-center gap-1.5 shadow transition-all active:scale-95 whitespace-nowrap flex-shrink-0"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Cargar Factura Completa</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Table of selected items to remove */}
+            <div className="flex-1 overflow-y-auto p-6 font-sans">
+              <div className="flex justify-between items-center mb-3">
+                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                  <span>Productos a Descontar del Inventario ({salidaItems.length}):</span>
+                </h4>
+                {salidaItems.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSalidaItems([])}
+                    className="text-xs text-rose-600 hover:text-rose-800 font-bold flex items-center gap-1"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Limpiar Lista
+                  </button>
+                )}
+              </div>
+
+              {salidaItems.length === 0 ? (
+                <div className="text-center py-16 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50 text-slate-400 space-y-2">
+                  <Minus className="w-10 h-10 mx-auto text-slate-300" />
+                  <p className="text-sm font-bold">No hay productos agregados para salida</p>
+                  <p className="text-xs text-slate-400">
+                    {salidaModo === 'manual'
+                      ? 'Busque un producto por código o descripción en el campo superior para agregarlo.'
+                      : 'Seleccione una factura de compra para importar sus productos.'}
+                  </p>
+                </div>
+              ) : (
+                <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                  <table className="w-full text-left text-xs font-sans">
+                    <thead className="bg-slate-800 text-white font-bold text-[11px] uppercase tracking-wider">
+                      <tr>
+                        <th className="p-3 text-center w-12">#</th>
+                        <th className="p-3 w-32">Código</th>
+                        <th className="p-3">Descripción</th>
+                        <th className="p-3 text-right w-28">Stock Actual</th>
+                        <th className="p-3 text-center w-36">Cant. a Sacar</th>
+                        <th className="p-3 text-right w-28">Costo ($)</th>
+                        <th className="p-3 text-right w-28">Subtotal ($)</th>
+                        <th className="p-3 text-center w-12">Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 bg-white font-mono text-xs">
+                      {salidaItems.map((item, idx) => {
+                        const subtotal = (item.cantidad_sacar || 0) * (item.costo_unitario_usd || 0);
+                        const isExceeding = item.cantidad_sacar > item.stock_actual;
+
+                        return (
+                          <tr key={idx} className={`hover:bg-slate-50 transition-colors ${isExceeding ? 'bg-amber-50/60' : ''}`}>
+                            <td className="p-3 text-center font-bold text-slate-400">{idx + 1}</td>
+                            <td className="p-3 font-bold text-slate-700 font-mono">
+                              <span className="bg-slate-100 border border-slate-200 text-slate-800 px-2 py-0.5 rounded text-[11px]">
+                                {item.codigo || 'S/C'}
+                              </span>
+                            </td>
+                            <td className="p-3 font-bold text-slate-900 font-sans">
+                              {item.descripcion}
+                              {isExceeding && (
+                                <span className="ml-2 bg-amber-500 text-slate-950 font-bold px-1.5 py-0.5 rounded text-[10px] font-sans">
+                                  ⚠️ Supera el stock actual ({item.stock_actual})
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-3 text-right font-mono text-slate-700 font-bold">
+                              <span className={`px-2 py-0.5 rounded text-[10.5px] font-extrabold ${
+                                item.stock_actual > 0 
+                                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' 
+                                  : 'bg-rose-50 text-rose-700 border border-rose-200'
+                              }`}>
+                                {item.stock_actual}
+                              </span>
+                            </td>
+                            <td className="p-3">
+                              <input
+                                type="number"
+                                step="any"
+                                min="0.001"
+                                value={item.cantidad_sacar || ''}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 0;
+                                  const updated = [...salidaItems];
+                                  updated[idx].cantidad_sacar = val;
+                                  setSalidaItems(updated);
+                                }}
+                                className="w-full border border-rose-300 focus:border-rose-600 focus:ring-1 focus:ring-rose-500 rounded px-2 py-1 text-center font-bold font-mono text-xs text-rose-900 bg-rose-50/50"
+                              />
+                            </td>
+                            <td className="p-3 text-right text-slate-700 font-bold">${(item.costo_unitario_usd || 0).toFixed(2)}</td>
+                            <td className="p-3 text-right text-rose-700 font-black">${subtotal.toFixed(2)}</td>
+                            <td className="p-3 text-center">
+                              <button
+                                type="button"
+                                onClick={() => setSalidaItems(salidaItems.filter((_, i) => i !== idx))}
+                                className="text-slate-400 hover:text-rose-600 p-1 rounded transition-colors"
+                                title="Quitar de la lista"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Footer summary bar and action buttons */}
+            <div className="bg-slate-900 text-white p-4 flex flex-col md:flex-row items-center justify-between gap-4 font-sans border-t border-slate-800">
+              <div className="flex items-center gap-6 text-xs">
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Total Ítems:</span>
+                  <strong className="text-base text-amber-400 font-mono">{salidaItems.length}</strong>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Unidades a Sacar:</span>
+                  <strong className="text-base text-white font-mono">
+                    {salidaItems.reduce((acc, curr) => acc + (parseFloat(curr.cantidad_sacar as any) || 0), 0)}
+                  </strong>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Valor Total Pérdida/Ajuste:</span>
+                  <strong className="text-base text-rose-400 font-mono">
+                    ${salidaItems.reduce((acc, curr) => acc + ((parseFloat(curr.cantidad_sacar as any) || 0) * (parseFloat(curr.costo_unitario_usd as any) || 0)), 0).toFixed(2)}
+                  </strong>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 w-full md:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowSalidaModal(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-bold text-xs uppercase tracking-wide transition-all"
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handlePauseSalida}
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold rounded-lg text-xs uppercase tracking-wide flex items-center gap-1.5 shadow transition-all active:scale-95"
+                >
+                  <PauseCircle className="w-4 h-4" />
+                  <span>Pausar Salida</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isProcessingSalida || salidaItems.length === 0}
+                  onClick={handleProcessSalida}
+                  className="px-6 py-2 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-700 disabled:text-slate-500 text-white font-extrabold rounded-lg text-xs uppercase tracking-wide flex items-center gap-1.5 shadow-lg shadow-rose-950/40 transition-all active:scale-95"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>{isProcessingSalida ? 'Procesando...' : 'Procesar Salida'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SALIDAS EN ESPERA (PAUSADAS) MODAL */}
+      {showPausedSalidasModal && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[55] flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200 font-sans">
+            {/* Header */}
+            <div className="bg-slate-900 text-white px-6 py-4 flex justify-between items-center border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <PauseCircle className="w-5 h-5 text-amber-400" />
+                <h3 className="text-sm font-extrabold uppercase tracking-wider font-mono">
+                  Salidas de Inventario en Espera ({salidasPausadas.length})
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowPausedSalidasModal(false)}
+                className="text-slate-400 hover:text-white text-base focus:outline-none"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Content list */}
+            <div className="p-6 overflow-y-auto space-y-3 flex-1 bg-slate-50">
+              {salidasPausadas.length === 0 ? (
+                <div className="text-center py-12 text-slate-400 space-y-2">
+                  <PauseCircle className="w-10 h-10 mx-auto text-slate-300" />
+                  <p className="text-sm font-bold">No hay salidas pausadas en espera</p>
+                </div>
+              ) : (
+                salidasPausadas.map(p => {
+                  const totalUnits = (p.items || []).reduce((acc, curr) => acc + (parseFloat(curr.cantidad_sacar as any) || 0), 0);
+                  const totalCost = (p.items || []).reduce((acc, curr) => acc + ((parseFloat(curr.cantidad_sacar as any) || 0) * (parseFloat(curr.costo_unitario_usd as any) || 0)), 0);
+
+                  return (
+                    <div key={p.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4 hover:border-amber-400 transition-colors">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="bg-amber-100 text-amber-800 text-[10px] font-black px-2 py-0.5 rounded uppercase font-mono">
+                            {p.motivo}
+                          </span>
+                          {p.numero_factura && (
+                            <span className="bg-slate-100 text-slate-700 text-[10px] font-mono px-2 py-0.5 rounded border border-slate-300">
+                              Factura #{p.numero_factura}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs font-bold text-slate-800">
+                          {p.items?.length || 0} productos ({totalUnits} unidades) — <span className="text-rose-600 font-mono font-extrabold">${totalCost.toFixed(2)}</span>
+                        </p>
+                        <p className="text-[11px] text-slate-500 font-mono">
+                          Pausado el {p.fecha} por {p.usuario_nombre} {p.observaciones ? `(${p.observaciones})` : ''}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 self-end md:self-center">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSalidaMotivo(p.motivo || 'Merma / Daño / Vencimiento');
+                            setSalidaModo(p.origen || 'manual');
+                            setSalidaObservaciones(p.observaciones || '');
+                            setSalidaSelectedInvoiceId(p.factura_id ? String(p.factura_id) : '');
+                            setSalidaItems(p.items || []);
+                            setSalidaEditingDraftId(p.id);
+
+                            setShowPausedSalidasModal(false);
+                            setShowSalidaModal(true);
+                            loadComprasHistory();
+                          }}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 shadow transition-all active:scale-95"
+                        >
+                          <Play className="w-3.5 h-3.5 fill-current" />
+                          <span>Retomar</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = salidasPausadas.filter(s => s.id !== p.id);
+                            syncPausedSalidas(updated);
+                          }}
+                          className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all"
+                          title="Eliminar borrador"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="bg-slate-100 border-t border-slate-200 px-6 py-3 text-right">
+              <button
+                type="button"
+                onClick={() => setShowPausedSalidasModal(false)}
+                className="bg-slate-700 hover:bg-slate-800 text-white font-bold px-4 py-2 rounded-lg text-xs uppercase"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* CARGA POR FACTURA MODAL */}
       {showInvoiceLoadModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[50] flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-5xl w-full h-[85vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[50] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-6xl w-full h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200 font-sans">
             {/* Header */}
-            <div className="bg-gradient-to-r from-emerald-600 to-emerald-700 px-6 py-4 flex justify-between items-center text-white">
+            <div className="bg-gradient-to-r from-emerald-700 via-emerald-800 to-teal-900 px-6 py-3.5 flex justify-between items-center text-white shadow-md">
               <div className="flex items-center gap-3">
-                <h3 className="text-sm font-extrabold uppercase tracking-wider font-mono flex items-center gap-2">
-                  <Layers className="w-4 h-4 bg-emerald-700/50 rounded-full p-0.5" />
-                  Carga de Mercancía por Factura
-                </h3>
+                <div className="p-2 bg-emerald-600/50 rounded-xl border border-emerald-400/30 shadow-inner">
+                  <Layers className="w-5 h-5 text-emerald-200" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-black uppercase tracking-wider font-mono flex items-center gap-2 text-white">
+                    Carga de Mercancía por Factura
+                  </h3>
+                  <p className="text-[10px] text-emerald-200/80 font-sans font-medium">Recepción e ingreso de stock de mercancía con precios de costo y venta</p>
+                </div>
                 {pausedInvoices.length > 0 && (
                   <button
                     type="button"
                     onClick={() => setShowPausedInvoicesModal(true)}
-                    className="bg-amber-400 hover:bg-amber-300 text-slate-950 text-[10px] font-extrabold px-2.5 py-1 rounded-full font-mono flex items-center gap-1 shadow transition-all active:scale-95"
+                    className="ml-3 bg-amber-400 hover:bg-amber-300 text-slate-950 text-[10px] font-extrabold px-3 py-1 rounded-full font-mono flex items-center gap-1.5 shadow-md transition-all active:scale-95 border border-amber-300"
                     title="Ver otras cargas en espera"
                   >
-                    <PauseCircle className="w-3.5 h-3.5" />
+                    <PauseCircle className="w-3.5 h-3.5 text-slate-950" />
                     <span>Cargas en Espera: {pausedInvoices.length}</span>
                   </button>
                 )}
               </div>
               <button 
                 onClick={() => setShowInvoiceLoadModal(false)}
-                className="text-white/80 hover:text-white text-base focus:outline-none"
+                className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-all focus:outline-none"
               >
                 ✕
               </button>
             </div>
 
-            {/* Factura Input Row */}
-            <div className="bg-slate-50 border-b border-slate-200 px-6 py-3 flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <label className="text-[10px] uppercase tracking-wider text-slate-550 font-extrabold font-mono whitespace-nowrap">Número de Factura:</label>
-                <input
-                  type="text"
-                  placeholder="Ej: FAC-12345..."
-                  value={invoiceNumber}
-                  onChange={(e) => setInvoiceNumber(e.target.value)}
-                  className="bg-white border border-slate-300 rounded px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-600 font-sans font-bold w-64 shadow-sm"
-                />
+            {/* Factura & Proveedor Input Row */}
+            <div className="bg-slate-100/80 border-b border-slate-200 px-6 py-3 flex items-center justify-between gap-4 flex-wrap">
+              <div className="flex items-center gap-5 flex-wrap">
+                {/* Selector de Proveedor con Buscador Interactivo y Ancho Ampliado */}
+                <div className="flex items-center gap-2 relative">
+                  <label className="text-[11px] uppercase tracking-wider text-slate-700 font-extrabold font-mono flex items-center gap-1.5 shrink-0">
+                    <Building2 className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>Proveedor:</span>
+                  </label>
+                  
+                  <div className="relative w-80">
+                    <input
+                      type="text"
+                      value={proveedorSearchTerm}
+                      onFocus={() => {
+                        setProveedorSearchTerm('');
+                        setShowProveedorDropdown(true);
+                      }}
+                      onClick={() => {
+                        setProveedorSearchTerm('');
+                        setShowProveedorDropdown(true);
+                      }}
+                      onChange={(e) => {
+                        setProveedorSearchTerm(e.target.value);
+                        setShowProveedorDropdown(true);
+                      }}
+                      placeholder="Escriba para buscar proveedor..."
+                      className="w-full bg-white border-2 border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-200 rounded-lg pl-3 pr-8 py-1.5 text-xs text-slate-900 focus:outline-none font-sans font-bold shadow-sm cursor-text"
+                    />
+                    <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
+
+                    {showProveedorDropdown && (
+                      <>
+                        <div 
+                          className="fixed inset-0 z-40" 
+                          onClick={() => {
+                            setShowProveedorDropdown(false);
+                            const sel = proveedoresList.find(p => String(p.id) === String(invoiceProveedorId));
+                            if (sel) {
+                              setProveedorSearchTerm(sel.razon_social);
+                            }
+                          }} 
+                        />
+                        <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 max-h-56 overflow-y-auto divide-y divide-slate-100">
+                          {proveedoresList
+                            .filter(p => 
+                              (p.razon_social || '').toLowerCase().includes(proveedorSearchTerm.toLowerCase()) ||
+                              (p.rif || '').toLowerCase().includes(proveedorSearchTerm.toLowerCase())
+                            )
+                            .map(p => (
+                              <div
+                                key={p.id}
+                                onClick={() => {
+                                  setInvoiceProveedorId(p.id);
+                                  setProveedorSearchTerm(p.razon_social);
+                                  setShowProveedorDropdown(false);
+                                }}
+                                className={`px-3 py-2 text-xs font-sans cursor-pointer flex items-center justify-between transition-colors ${
+                                  String(invoiceProveedorId) === String(p.id) ? 'bg-emerald-50 text-emerald-900 font-extrabold' : 'hover:bg-slate-50 text-slate-700 font-medium'
+                                }`}
+                              >
+                                <span>🏢 {p.razon_social}</span>
+                                {p.rif && <span className="text-[10px] text-slate-400 font-mono font-normal">({p.rif})</span>}
+                              </div>
+                            ))}
+                          {proveedoresList.filter(p => 
+                            (p.razon_social || '').toLowerCase().includes(proveedorSearchTerm.toLowerCase()) ||
+                            (p.rif || '').toLowerCase().includes(proveedorSearchTerm.toLowerCase())
+                          ).length === 0 && (
+                            <div className="px-3 py-3 text-xs text-slate-400 italic text-center">
+                              No se encontraron proveedores
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Número de Factura */}
+                <div className="flex items-center gap-2">
+                  <label className="text-[11px] uppercase tracking-wider text-slate-700 font-extrabold font-mono flex items-center gap-1.5">
+                    <Tag className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>N° Factura:</span>
+                  </label>
+                  
+                  {/* Clean N° Container with max 10 chars limit */}
+                  <div className="relative flex items-center">
+                    <span className="absolute left-3 text-slate-400 font-mono font-bold text-xs pointer-events-none select-none">
+                      N°
+                    </span>
+                    <input
+                      type="text"
+                      maxLength={10}
+                      placeholder="00012345"
+                      value={invoiceNumber}
+                      onChange={(e) => {
+                        const cleanVal = e.target.value.replace(/[^a-zA-Z0-9-]/g, '').toUpperCase().slice(0, 10);
+                        setInvoiceNumber(cleanVal);
+                      }}
+                      className="bg-white border-2 border-slate-300 focus-within:border-emerald-600 focus-within:ring-2 focus-within:ring-emerald-200 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-900 focus:outline-none font-mono font-black w-36 uppercase tracking-wider shadow-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="text-[11px] font-mono text-slate-500 font-bold bg-white border border-slate-200 px-3 py-1 rounded-lg">
+                Ítems en Factura: <span className="text-emerald-700 font-black">{invoiceProducts.length}</span>
               </div>
             </div>
 
             {/* Content columns */}
-            <div className="flex-1 flex overflow-hidden min-h-0">
-              {/* Left Column: Product Search */}
-              <div className="w-2/5 p-4 border-r border-slate-200 flex flex-col overflow-hidden min-h-0">
-                <label className="text-[10px] uppercase tracking-wider text-slate-450 font-extrabold font-mono block mb-2">Buscador de Productos</label>
+            <div className="flex-1 flex overflow-hidden min-h-0 bg-slate-50">
+              {/* Left Column: Product Search (38% width) */}
+              <div className="w-[38%] p-4 border-r border-slate-200 flex flex-col overflow-hidden min-h-0 bg-white">
+                <div className="flex justify-between items-center mb-2">
+                  <label className="text-[10px] uppercase tracking-wider text-slate-500 font-extrabold font-mono flex items-center gap-1">
+                    <Search className="w-3 h-3 text-emerald-600" />
+                    Buscador de Productos
+                  </label>
+                  <span className="text-[9px] text-slate-400 font-mono">Presione Enter ↵ para añadir</span>
+                </div>
+                
                 <div className="flex gap-2 mb-3">
                   <div className="relative flex-grow">
-                    <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 pointer-events-none text-slate-455">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 pointer-events-none text-slate-400">
                       <Search className="w-3.5 h-3.5" />
                     </span>
                     <input
                       type="text"
-                      placeholder="Buscar por código o descripción..."
+                      placeholder="Buscar por código, clave o descripción..."
                       value={invoiceSearchTerm}
                       onChange={(e) => setInvoiceSearchTerm(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5 pl-8 text-xs text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white font-sans"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && filteredInvoiceSearchProducts.length > 0) {
+                          e.preventDefault();
+                          const firstProd = filteredInvoiceSearchProducts[0];
+                          const isAdded = invoiceProducts.some(item => item.product.id === firstProd.id);
+                          if (!isAdded) {
+                            setInvoiceProducts(prev => [
+                              ...prev,
+                              {
+                                product: firstProd,
+                                qty: 1,
+                                precio_costo_usd: firstProd.precio_costo_usd,
+                                precio_detalle_usd: firstProd.precio_detalle_usd,
+                                precio_mayor_usd: firstProd.precio_mayor_usd
+                              }
+                            ]);
+                            setInvoiceSearchTerm('');
+                          } else {
+                            showAlert('Producto Ya Agregado', `El producto "${firstProd.description}" ya se encuentra en la lista de carga de esta factura.`);
+                            showToast(`⚠️ "${firstProd.description}" ya está en la lista.`);
+                            setInvoiceSearchTerm('');
+                          }
+                        }
+                      }}
+                      className="w-full bg-slate-50 border border-slate-300 focus:border-emerald-600 focus:bg-white rounded-lg px-2.5 py-1.5 pl-8 text-xs text-slate-800 focus:outline-none font-sans font-bold shadow-xs transition-all"
                     />
+                    {invoiceSearchTerm && (
+                      <button
+                        type="button"
+                        onClick={() => setInvoiceSearchTerm('')}
+                        className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 text-xs"
+                      >
+                        ✕
+                      </button>
+                    )}
                   </div>
                   <button
                     type="button"
                     onClick={() => setShowNewProdModal(true)}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded text-[10px] font-sans uppercase flex items-center gap-1 shadow flex-shrink-0 active:scale-95 transition-all"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-lg text-[10px] font-sans uppercase flex items-center gap-1 shadow flex-shrink-0 active:scale-95 transition-all"
                     title="Registrar un nuevo producto en la base de datos"
                   >
-                    <Plus className="w-3.5 h-3.5 bg-emerald-750/50 rounded-full p-0.5" />
+                    <Plus className="w-3.5 h-3.5 bg-emerald-700/50 rounded-full p-0.5" />
                     <span>Nuevo</span>
                   </button>
                 </div>
 
-                {/* Filter products */}
-                <div className="flex-grow overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-lg bg-white min-h-0">
+                {/* Filter products list */}
+                <div className="flex-grow overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-xl bg-white min-h-0 shadow-xs">
                   {(() => {
-                    const filtered = products
-                      .filter(p =>
-                        p.description.toLowerCase().includes(invoiceSearchTerm.toLowerCase()) ||
-                        p.barcode.toLowerCase().includes(invoiceSearchTerm.toLowerCase())
-                      )
-                      .sort((a, b) => {
-                        const aStock = (parseFloat(a.stock_actual as any) || 0) > 0 ? 1 : 0;
-                        const bStock = (parseFloat(b.stock_actual as any) || 0) > 0 ? 1 : 0;
-                        if (aStock !== bStock) return bStock - aStock;
-                        return (a.description || '').localeCompare(b.description || '', 'es', { sensitivity: 'base' });
-                      });
+                    const filtered = filteredInvoiceSearchProducts;
 
                     if (filtered.length === 0) {
                       return (
                         <div className="p-8 text-center flex flex-col items-center justify-center gap-3">
-                          <p className="text-xs text-slate-450 italic font-sans">No se encontró ningún producto.</p>
+                          <p className="text-xs text-slate-450 italic font-sans">No se encontró ningún producto con esa clave o descripción.</p>
                           <button
                             type="button"
                             onClick={() => setShowNewProdModal(true)}
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 px-3 rounded text-[10px] font-sans uppercase flex items-center gap-1.5 shadow"
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 px-3 rounded-lg text-[10px] font-sans uppercase flex items-center gap-1.5 shadow"
                           >
                             <Plus className="w-3 h-3 bg-emerald-700/50 rounded-full p-0.5" />
                             Registrar Producto
@@ -8122,16 +9304,35 @@ export default function Inventario({
 
                     return filtered.map(p => {
                       const isAdded = invoiceProducts.some(item => item.product.id === p.id);
+                      const currentStk = typeof p.stock_actual === 'number' ? p.stock_actual : (parseFloat(p.stock_actual as any) || 0);
+
                       return (
-                        <div key={p.id} className="flex justify-between items-center p-2.5 hover:bg-slate-50/50">
-                          <div className="min-w-0 pr-2">
-                            <p className="font-bold text-slate-700 text-xs truncate max-w-[200px]" title={p.description}>{p.description}</p>
-                            <p className="text-[10px] text-slate-400 font-mono truncate">{p.barcode}</p>
+                        <div key={p.id} className="flex justify-between items-center p-3 hover:bg-slate-50 transition-colors">
+                          <div className="min-w-0 pr-2 space-y-0.5">
+                            <p className="font-extrabold text-slate-800 text-xs truncate max-w-[210px]" title={p.description}>
+                              {p.description}
+                            </p>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono text-[9.5px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">
+                                {p.barcode || 'S/C'}
+                              </span>
+                              <span className={`font-mono text-[9.5px] px-1.5 py-0.5 rounded font-bold ${
+                                currentStk > 0 
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                                  : 'bg-rose-50 text-rose-600 border border-rose-200'
+                              }`}>
+                                Stk: {formatStockVal(currentStk, p.a_granel)}
+                              </span>
+                            </div>
                           </div>
                           <button
                             type="button"
-                            disabled={isAdded}
                             onClick={() => {
+                              if (isAdded) {
+                                showAlert('Producto Ya Agregado', `El producto "${p.description}" ya se encuentra agregado en la lista de carga de esta factura.`);
+                                showToast(`⚠️ "${p.description}" ya fue agregado a la factura.`);
+                                return;
+                              }
                               setInvoiceProducts(prev => [
                                 ...prev,
                                 {
@@ -8143,13 +9344,14 @@ export default function Inventario({
                                 }
                               ]);
                             }}
-                            className={`font-sans font-bold text-[10px] px-2.5 py-1 rounded transition-all flex-shrink-0 ${
+                            className={`font-sans font-extrabold text-[10px] px-3 py-1.5 rounded-lg transition-all flex-shrink-0 active:scale-95 ${
                               isAdded
-                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                ? 'bg-amber-100/90 text-amber-900 border border-amber-300 hover:bg-amber-200 cursor-pointer shadow-xs'
+                                : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
                             }`}
+                            title={isAdded ? 'Ver advertencia de producto ya cargado' : 'Añadir este producto a la factura'}
                           >
-                            {isAdded ? 'Cargado ✓' : 'Añadir'}
+                            {isAdded ? 'Cargado ✓' : 'Añadir +'}
                           </button>
                         </div>
                       );
@@ -8158,119 +9360,161 @@ export default function Inventario({
                 </div>
               </div>
 
-              {/* Right Column: Invoice Load List */}
-              <div className="w-3/5 p-4 flex flex-col overflow-hidden min-h-0 bg-slate-50">
-                <label className="text-[10px] uppercase tracking-wider text-slate-455 font-extrabold font-mono block mb-2">Lista de Carga de Factura ({invoiceProducts.length} ítems)</label>
+              {/* Right Column: Invoice Load List (62% width) */}
+              <div className="w-[62%] p-4 flex flex-col overflow-hidden min-h-0 bg-slate-50">
+                <div className="flex justify-between items-center mb-2">
+                  <label className="text-[10px] uppercase tracking-wider text-slate-500 font-extrabold font-mono flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-emerald-700" />
+                    Lista de Carga de Factura ({invoiceProducts.length} ítems)
+                  </label>
+                  {invoiceProducts.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setInvoiceProducts([])}
+                      className="text-[10px] text-rose-600 hover:text-rose-800 font-bold hover:underline"
+                    >
+                      Vaciar Lista
+                    </button>
+                  )}
+                </div>
                 
-                <div className="flex-grow overflow-auto border border-slate-200 rounded-lg bg-white min-h-0 shadow-inner">
+                <div className="flex-grow overflow-auto border border-slate-200 rounded-xl bg-white min-h-0 shadow-sm">
                   {invoiceProducts.length === 0 ? (
-                    <div className="h-full flex flex-col justify-center items-center p-8 text-center text-slate-400">
-                      <Layers className="w-8 h-8 text-slate-300 mb-2" />
-                      <p className="text-xs font-sans">Añada productos desde el buscador izquierdo para comenzar la carga.</p>
+                    <div className="h-full flex flex-col justify-center items-center p-12 text-center text-slate-400 space-y-2">
+                      <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-300">
+                        <Layers className="w-6 h-6" />
+                      </div>
+                      <p className="text-xs font-sans font-bold text-slate-600">No hay productos en esta factura aún.</p>
+                      <p className="text-[11px] text-slate-400 font-sans max-w-xs">Busca y añade productos desde la columna izquierda o presiona Enter para comenzar a armar la carga.</p>
                     </div>
                   ) : (
                     <table className="w-full text-left border-collapse text-xs">
-                      <thead className="bg-slate-100 text-[10px] uppercase text-slate-500 font-mono sticky top-0 z-10 border-b border-slate-200">
+                      <thead className="bg-slate-100 text-[10px] uppercase text-slate-600 font-mono sticky top-0 z-10 border-b border-slate-200 select-none">
                         <tr>
-                          <th className="px-3 py-2 w-[34%]">Producto</th>
-                          <th className="px-2 py-2 text-center w-[12%]">Exist.</th>
-                          <th className="px-2 py-2 text-center w-[14%] bg-emerald-100/90 text-emerald-900 font-black border-b-2 border-emerald-500 tracking-wider">A AGREGAR 📦</th>
-                          <th className="px-2 py-2 text-right w-[13%]">Costo $</th>
-                          <th className="px-2 py-2 text-right w-[13%]">Detalle $</th>
-                          <th className="px-2 py-2 text-right w-[12%]">Mayor $</th>
-                          <th className="px-2 py-2 text-center w-[4%]"></th>
+                          <th className="px-3 py-2.5 w-[30%]">Producto</th>
+                          <th className="px-2 py-2.5 text-center w-[10%]">Exist.</th>
+                          <th className="px-2 py-2.5 text-center w-[16%] bg-emerald-600 text-white font-black rounded-t-md shadow-xs">
+                            A AGREGAR 📦
+                          </th>
+                          <th className="px-2 py-2.5 text-right w-[14%]">Costo $</th>
+                          <th className="px-2 py-2.5 text-right w-[14%]">Detalle $</th>
+                          <th className="px-2 py-2.5 text-right w-[14%]">Mayor $</th>
+                          <th className="px-2 py-2.5 text-center w-[6%]"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {invoiceProducts.map((item, index) => (
-                          <tr key={item.product.id} className="hover:bg-slate-55/40">
-                            <td className="px-3 py-2 font-sans">
-                              <div className="flex items-center justify-between gap-1.5">
-                                <div className="min-w-0 pr-1">
-                                  <p className="font-bold text-slate-800 text-xs truncate max-w-[130px]" title={item.product.description}>
-                                    {item.product.description}
-                                  </p>
-                                  <span className="text-[9px] text-slate-400 font-mono block">{item.product.barcode}</span>
+                        {invoiceProducts.map((item, index) => {
+                          const hasPriceIssue = item.precio_detalle_usd <= item.precio_costo_usd || item.precio_mayor_usd <= item.precio_costo_usd;
+
+                          return (
+                            <tr key={item.product.id} className={`hover:bg-slate-50/80 transition-colors ${hasPriceIssue ? 'bg-amber-50/40' : ''}`}>
+                              {/* Producto */}
+                              <td className="px-3 py-2.5 font-sans">
+                                <div className="flex items-center justify-between gap-1.5">
+                                  <div className="min-w-0 pr-1 space-y-0.5">
+                                    <p className="font-extrabold text-slate-800 text-xs truncate max-w-[140px]" title={item.product.description}>
+                                      {item.product.description}
+                                    </p>
+                                    <span className="text-[9.5px] text-slate-400 font-mono block truncate">{item.product.barcode || 'S/C'}</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setInvoiceAuxItemIndex(index)}
+                                    className="bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-800 p-1.5 rounded-md transition-all shadow-xs flex-shrink-0 active:scale-95"
+                                    title="Abrir Auxiliar de Cálculo de Precios para este producto"
+                                  >
+                                    <Calculator className="w-3.5 h-3.5 text-amber-700" />
+                                  </button>
                                 </div>
+                              </td>
+
+                              {/* Existencia Actual */}
+                              <td className="px-2 py-2.5 text-center font-mono select-none">
+                                <span className="bg-slate-100 text-slate-700 font-bold px-2 py-1 rounded-md text-[10.5px] border border-slate-200 inline-block">
+                                  {formatStockVal(item.product.stock_actual, item.product.a_granel)}
+                                </span>
+                              </td>
+
+                              {/* Cantidad A Agregar */}
+                              <td className="px-2 py-2.5 text-center bg-emerald-50/40">
+                                <input
+                                  type="number"
+                                  min="0.001"
+                                  step="any"
+                                  value={item.qty}
+                                  onChange={(e) => {
+                                    const val = parseFloat(e.target.value) || 0;
+                                    setInvoiceProducts(prev => prev.map((it, idx) => idx === index ? { ...it, qty: val } : it));
+                                  }}
+                                  className="w-16 bg-emerald-100/90 border-2 border-emerald-500 rounded-lg py-1 px-1 text-center text-xs font-mono font-black text-emerald-950 focus:bg-white focus:border-emerald-600 focus:ring-2 focus:ring-emerald-400 shadow-sm"
+                                />
+                              </td>
+
+                              {/* Costo USD */}
+                              <td className="px-2 py-2.5 text-right">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="any"
+                                  value={item.precio_costo_usd}
+                                  onChange={(e) => {
+                                    const val = parseFloat(e.target.value) || 0;
+                                    setInvoiceProducts(prev => prev.map((it, idx) => idx === index ? { ...it, precio_costo_usd: val } : it));
+                                  }}
+                                  className="w-16 bg-white border border-slate-300 rounded-md py-1 px-1 text-right text-xs font-mono font-bold text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-400 shadow-xs"
+                                />
+                              </td>
+
+                              {/* Precio Detalle USD */}
+                              <td className="px-2 py-2.5 text-right">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="any"
+                                  value={item.precio_detalle_usd}
+                                  onChange={(e) => {
+                                    const val = parseFloat(e.target.value) || 0;
+                                    setInvoiceProducts(prev => prev.map((it, idx) => idx === index ? { ...it, precio_detalle_usd: val } : it));
+                                  }}
+                                  className={`w-16 bg-white border rounded-md py-1 px-1 text-right text-xs font-mono font-bold text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-400 shadow-xs ${
+                                    item.precio_detalle_usd <= item.precio_costo_usd ? 'border-rose-400 text-rose-700 bg-rose-50' : 'border-slate-300'
+                                  }`}
+                                />
+                              </td>
+
+                              {/* Precio Mayor USD */}
+                              <td className="px-2 py-2.5 text-right">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="any"
+                                  value={item.precio_mayor_usd}
+                                  onChange={(e) => {
+                                    const val = parseFloat(e.target.value) || 0;
+                                    setInvoiceProducts(prev => prev.map((it, idx) => idx === index ? { ...it, precio_mayor_usd: val } : it));
+                                  }}
+                                  className={`w-16 bg-white border rounded-md py-1 px-1 text-right text-xs font-mono font-bold text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-400 shadow-xs ${
+                                    item.precio_mayor_usd <= item.precio_costo_usd ? 'border-rose-400 text-rose-700 bg-rose-50' : 'border-slate-300'
+                                  }`}
+                                />
+                              </td>
+
+                              {/* Botón Eliminar Ítem */}
+                              <td className="px-2 py-2.5 text-center">
                                 <button
                                   type="button"
-                                  onClick={() => setInvoiceAuxItemIndex(index)}
-                                  className="bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-800 p-1.5 rounded transition-all shadow-xs flex-shrink-0 active:scale-95"
-                                  title="Abrir Auxiliar de Cálculo de Precios para este producto"
+                                  onClick={() => {
+                                    setInvoiceProducts(prev => prev.filter((_, idx) => idx !== index));
+                                  }}
+                                  className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all active:scale-95 mx-auto font-bold"
+                                  title="Eliminar este producto de la carga"
                                 >
-                                  <Calculator className="w-3.5 h-3.5 text-amber-700" />
+                                  <Trash2 className="w-3.5 h-3.5" />
                                 </button>
-                              </div>
-                            </td>
-                            <td className="px-2 py-2 text-center font-mono text-slate-700 font-bold select-none">
-                              {formatStockVal(item.product.stock_actual, item.product.a_granel)}
-                            </td>
-                            <td className="px-2 py-2 text-center bg-emerald-50/50">
-                              <input
-                                type="number"
-                                min="0.001"
-                                step="any"
-                                value={item.qty}
-                                onChange={(e) => {
-                                  const val = parseFloat(e.target.value) || 0;
-                                  setInvoiceProducts(prev => prev.map((it, idx) => idx === index ? { ...it, qty: val } : it));
-                                }}
-                                className="w-16 bg-emerald-100/70 border-2 border-emerald-500 rounded px-1.5 py-1 text-center text-xs font-mono font-black text-emerald-950 focus:bg-white focus:border-emerald-600 focus:ring-2 focus:ring-emerald-400 shadow-sm"
-                              />
-                            </td>
-                            <td className="px-2 py-2 text-right">
-                              <input
-                                type="number"
-                                min="0"
-                                step="any"
-                                value={item.precio_costo_usd}
-                                onChange={(e) => {
-                                  const val = parseFloat(e.target.value) || 0;
-                                  setInvoiceProducts(prev => prev.map((it, idx) => idx === index ? { ...it, precio_costo_usd: val } : it));
-                                }}
-                                className="w-16 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-right text-xs font-mono font-bold focus:bg-white focus:outline-none"
-                              />
-                            </td>
-                            <td className="px-2 py-2 text-right">
-                              <input
-                                type="number"
-                                min="0"
-                                step="any"
-                                value={item.precio_detalle_usd}
-                                onChange={(e) => {
-                                  const val = parseFloat(e.target.value) || 0;
-                                  setInvoiceProducts(prev => prev.map((it, idx) => idx === index ? { ...it, precio_detalle_usd: val } : it));
-                                }}
-                                className="w-16 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-right text-xs font-mono font-bold focus:bg-white focus:outline-none"
-                              />
-                            </td>
-                            <td className="px-2 py-2 text-right">
-                              <input
-                                type="number"
-                                min="0"
-                                step="any"
-                                value={item.precio_mayor_usd}
-                                onChange={(e) => {
-                                  const val = parseFloat(e.target.value) || 0;
-                                  setInvoiceProducts(prev => prev.map((it, idx) => idx === index ? { ...it, precio_mayor_usd: val } : it));
-                                }}
-                                className="w-16 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-right text-xs font-mono font-bold focus:bg-white focus:outline-none"
-                              />
-                            </td>
-                            <td className="px-2 py-2 text-center">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setInvoiceProducts(prev => prev.filter((_, idx) => idx !== index));
-                                }}
-                                className="text-red-500 hover:text-red-750 text-sm font-bold focus:outline-none"
-                                title="Eliminar ítem"
-                              >
-                                ✕
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   )}
@@ -8278,19 +9522,30 @@ export default function Inventario({
               </div>
             </div>
 
-            {/* Footer */}
-            <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex justify-between items-center">
-              <div className="flex flex-col">
-                <span className="text-[10px] uppercase tracking-wider text-slate-450 font-extrabold font-mono">Total Costo de Factura</span>
-                <span className="text-slate-800 font-mono font-black text-sm">
-                  ${invoiceProducts.reduce((acc, it) => acc + (it.qty * it.precio_costo_usd), 0).toFixed(2)}
-                </span>
+            {/* Summary Footer */}
+            <div className="bg-white px-6 py-3.5 border-t border-slate-200 flex flex-wrap justify-between items-center gap-4 shadow-inner">
+              <div className="flex items-center gap-6">
+                <div className="flex flex-col">
+                  <span className="text-[10px] uppercase tracking-wider text-slate-450 font-extrabold font-mono">Total Costo Factura (USD)</span>
+                  <span className="text-emerald-700 font-mono font-black text-lg leading-tight">
+                    ${invoiceProducts.reduce((acc, it) => acc + (it.qty * it.precio_costo_usd), 0).toFixed(2)}
+                  </span>
+                </div>
+                {tasaDia && (
+                  <div className="flex flex-col border-l border-slate-200 pl-4">
+                    <span className="text-[10px] uppercase tracking-wider text-slate-450 font-extrabold font-mono">Total en Bolívares (VES)</span>
+                    <span className="text-slate-800 font-mono font-bold text-sm leading-tight">
+                      Bs. {(invoiceProducts.reduce((acc, it) => acc + (it.qty * it.precio_costo_usd), 0) * tasaDia).toFixed(2)}
+                    </span>
+                  </div>
+                )}
               </div>
-              <div className="flex gap-2">
+
+              <div className="flex gap-2.5 items-center">
                 <button
                   type="button"
                   onClick={() => setShowInvoiceLoadModal(false)}
-                  className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2.5 rounded-lg text-xs font-sans font-bold transition-all"
+                  className="bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 px-4 py-2.5 rounded-xl text-xs font-sans font-extrabold transition-all active:scale-95"
                 >
                   Cancelar
                 </button>
@@ -8300,47 +9555,107 @@ export default function Inventario({
                   type="button"
                   disabled={invoiceProducts.length === 0}
                   onClick={handlePauseInvoiceLoad}
-                  className="bg-amber-500 hover:bg-amber-600 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-transparent text-slate-950 font-extrabold border border-amber-600 px-4 py-2.5 rounded-lg text-xs font-sans flex items-center gap-1.5 transition-all shadow-xs active:scale-95"
+                  className="bg-amber-500 hover:bg-amber-600 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-transparent text-slate-950 font-extrabold border border-amber-600 px-4 py-2.5 rounded-xl text-xs font-sans flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
                   title="Poner esta carga en espera para reanudarla más tarde"
                 >
                   <PauseCircle className="w-4 h-4 text-slate-950" />
                   <span>Pausar Carga</span>
                 </button>
+
                 <button
                   type="button"
-                  disabled={invoiceProducts.length === 0 || !invoiceNumber.trim()}
+                  disabled={isProcessingInvoiceLoad || invoiceProducts.length === 0 || !invoiceNumber || !invoiceNumber.trim()}
                   onClick={async () => {
-                    const invalidIndex = invoiceProducts.findIndex(
-                      it => it.precio_detalle_usd <= it.precio_costo_usd || it.precio_mayor_usd <= it.precio_costo_usd
-                    );
+                    if (isProcessingInvoiceLoad) return;
+                    setIsProcessingInvoiceLoad(true);
+                    try {
+                      const invalidIndex = invoiceProducts.findIndex(
+                        it => it.precio_detalle_usd <= it.precio_costo_usd || it.precio_mayor_usd <= it.precio_costo_usd
+                      );
 
-                    if (invalidIndex !== -1) {
-                      showAlert(`El producto "${invoiceProducts[invalidIndex].product.description}" tiene precios de venta menores o iguales a su precio de costo.`);
-                      return;
-                    }
+                      if (invalidIndex !== -1) {
+                        showAlert(`El producto "${invoiceProducts[invalidIndex].product.description}" tiene precios de venta menores o iguales a su precio de costo.`);
+                        return;
+                      }
 
-                    const updates = invoiceProducts.map(it => ({
-                      prodId: it.product.id,
-                      qty: it.qty,
-                      precio_costo_usd: it.precio_costo_usd,
-                      precio_detalle_usd: it.precio_detalle_usd,
-                      precio_mayor_usd: it.precio_mayor_usd
-                    }));
+                      const isOcasional = String(invoiceProveedorId) === '1' || invoiceProveedorId === 1;
+                      let rawInvoiceNum = invoiceNumber.trim().toUpperCase();
+                      if (isOcasional && !rawInvoiceNum.startsWith('OCASIONAL-')) {
+                        rawInvoiceNum = `OCASIONAL-${rawInvoiceNum.replace(/^FAC-/, '')}`;
+                      }
 
-                    const reason = `Carga por Factura: ${invoiceNumber.trim()}`;
-                    const success = await onUpdateProductStockBulk(updates, reason);
-                    if (success) {
-                      showToast(`Se han cargado con éxito ${invoiceProducts.length} productos bajo la Factura: ${invoiceNumber}`);
-                      setShowInvoiceLoadModal(false);
-                      setInvoiceProducts([]);
-                      setInvoiceNumber('');
-                    } else {
-                      showAlert('Ocurrió un error al intentar procesar la carga de la factura.');
+                      const totalCost = invoiceProducts.reduce((acc, it) => acc + (it.qty * it.precio_costo_usd), 0);
+                      const compraPayload = {
+                        numero_factura: rawInvoiceNum,
+                        proveedor_id: parseInt(String(invoiceProveedorId), 10) || 1,
+                        usuario_id: _currentUser?.id || 1,
+                        fecha_emision: getLocalDateStr(),
+                        condicion_pago: 'Contado',
+                        subtotal_usd: totalCost,
+                        total_usd: totalCost,
+                        total_ves: totalCost * (tasaDia || 1),
+                        observaciones: `Carga por Factura #${rawInvoiceNum}`,
+                        items: invoiceProducts.map(it => ({
+                          producto_id: it.product.id,
+                          cantidad: it.qty,
+                          costo_unitario_usd: it.precio_costo_usd,
+                          precio_detalle_usd: it.precio_detalle_usd,
+                          precio_mayor_usd: it.precio_mayor_usd,
+                          total_usd: it.qty * it.precio_costo_usd,
+                          product: {
+                            id: it.product.id,
+                            barcode: it.product.barcode,
+                            description: it.product.description
+                          }
+                        }))
+                      };
+
+                      const res = await fetch(`${getApiBaseUrl()}/compras`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(compraPayload)
+                      });
+
+                      if (res.ok) {
+                        // Actualizar el estado local de productos sin peticiones PUT de red adicionales
+                        invoiceProducts.forEach(it => {
+                          const prod = products.find(p => p.id === it.product.id);
+                          if (prod) {
+                            const cleanQty = prod.a_granel ? it.qty : Math.round(it.qty);
+                            prod.stock_actual = (parseFloat(prod.stock_actual as any) || 0) + cleanQty;
+                            prod.precio_costo_usd = it.precio_costo_usd;
+                            prod.precio_detalle_usd = it.precio_detalle_usd;
+                            prod.precio_mayor_usd = it.precio_mayor_usd;
+                          }
+                        });
+
+                        loadComprasHistory();
+                        await refreshKardexMovements();
+                        showToast(`Se han cargado con éxito ${invoiceProducts.length} productos bajo la Factura: ${invoiceNumber}`);
+                        setShowInvoiceLoadModal(false);
+                        setInvoiceProducts([]);
+                        setInvoiceNumber('');
+                      } else {
+                        const errData = await res.json().catch(() => ({}));
+                        showAlert('Error de Carga', errData.error || 'Ocurrió un error al procesar la carga por factura.');
+                      }
+                    } catch (e: any) {
+                      console.error('Error procesando carga por factura:', e);
+                      showAlert('Error de Carga', e?.message || 'Ocurrió un error al procesar la carga por factura.');
+                    } finally {
+                      setIsProcessingInvoiceLoad(false);
                     }
                   }}
-                  className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-lg text-xs font-sans font-bold transition-all"
+                  className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:text-slate-400 disabled:cursor-not-allowed text-white px-6 py-2.5 rounded-xl text-xs font-sans font-extrabold transition-all flex items-center gap-2 shadow-md active:scale-95"
                 >
-                  Procesar Carga ({invoiceProducts.length})
+                  {isProcessingInvoiceLoad ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Procesando Carga...</span>
+                    </>
+                  ) : (
+                    <span>Procesar Carga ({invoiceProducts.length})</span>
+                  )}
                 </button>
               </div>
             </div>

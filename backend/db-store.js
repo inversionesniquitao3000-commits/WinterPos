@@ -258,7 +258,7 @@ try {
       total_usd NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
       total_ves NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
       saldo_pendiente_usd NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-      estatus VARCHAR(20) DEFAULT 'Pendiente',
+      estatus VARCHAR(50) DEFAULT 'Pendiente',
       observaciones TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
@@ -300,6 +300,18 @@ try {
       total_ves NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
       detalles_json JSONB NOT NULL,
       estatus VARCHAR(20) DEFAULT 'Pendiente'
+    );
+
+    CREATE TABLE IF NOT EXISTS Salidas_Pausadas (
+      id VARCHAR(100) PRIMARY KEY,
+      usuario_id BIGINT,
+      motivo VARCHAR(100),
+      origen VARCHAR(50),
+      factura_id BIGINT,
+      numero_factura VARCHAR(100),
+      observaciones TEXT,
+      items JSONB NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE SEQUENCE IF NOT EXISTS seq_factura START WITH 1;
@@ -367,18 +379,21 @@ try {
   // Sync master_pass from config.json → PG (one-time migration if DB column is NULL)
   try {
     const mpRow = await client.query('SELECT id, master_pass FROM Configuracion_Empresa ORDER BY id DESC LIMIT 1');
-    if (mpRow.rowCount > 0 && !mpRow.rows[0].master_pass) {
+    if (mpRow.rowCount === 0) {
+      await client.query("INSERT INTO Configuracion_Empresa (nombre_comercio, master_pass) VALUES ('INVERSIONES NIQUITAO 3000 C.A.', '1234')");
+      console.log('🔑 Fila de Configuracion_Empresa inicializada con Master Pass por defecto (1234).');
+    } else if (!mpRow.rows[0].master_pass) {
       const jsonPath = path.join(path.resolve('./data'), 'config.json');
       let jsonPass = '1234';
       if (fs.existsSync(jsonPath)) {
         try {
           const jsonData = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
-          if (jsonData.master_pass) jsonPass = jsonData.master_pass;
+          if (jsonData.master_pass) jsonPass = String(jsonData.master_pass);
         } catch (_) {}
       }
       await client.query('UPDATE Configuracion_Empresa SET master_pass = $1 WHERE id = $2', [jsonPass, mpRow.rows[0].id]);
-      console.log(`🔑 Master Pass sincronizado a PostgreSQL: (valor restaurado desde respaldo).`);
-    } else if (mpRow.rowCount > 0) {
+      console.log(`🔑 Master Pass sincronizado a PostgreSQL.`);
+    } else {
       console.log(`🔑 Master Pass ya configurado en PostgreSQL.`);
     }
   } catch (mpErr) {
@@ -951,6 +966,43 @@ export async function updateProductStock(prodId, stockActual) {
     return true;
   }
   return false;
+}
+
+export async function updateProductStockBulk(updates) {
+  if (!Array.isArray(updates) || updates.length === 0) return true;
+  if (usePostgres) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const update of updates) {
+        const prodRes = await client.query('SELECT a_granel FROM Productos WHERE id = $1', [update.prodId]);
+        let isGranel = false;
+        if (prodRes.rows.length > 0) {
+          isGranel = !!prodRes.rows[0].a_granel;
+        }
+        const finalStock = isGranel ? update.stock_actual : Math.round(update.stock_actual);
+        await client.query('UPDATE Productos SET stock_actual = $1 WHERE id = $2', [finalStock, update.prodId]);
+      }
+      await client.query('COMMIT');
+      return true;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('Error en updateProductStockBulk (Postgres):', err.message);
+      return false;
+    } finally {
+      client.release();
+    }
+  }
+  const products = readJsonFile('products.json', mockProducts);
+  for (const update of updates) {
+    const idx = products.findIndex(p => p.id === update.prodId);
+    if (idx !== -1) {
+      const isGranel = !!products[idx].a_granel;
+      products[idx].stock_actual = isGranel ? update.stock_actual : Math.round(update.stock_actual);
+    }
+  }
+  writeJsonFile('products.json', products);
+  return true;
 }
 
 export async function updateProductPrices(prodId, prices) {
@@ -2231,6 +2283,48 @@ export async function saveMovement(m) {
   movements.push(newItem);
   writeJsonFile('movements.json', movements);
   return newItem;
+}
+
+export async function saveMovementsBulk(movementsList) {
+  if (!Array.isArray(movementsList) || movementsList.length === 0) return [];
+  if (usePostgres) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const userRes = await client.query('SELECT id FROM Usuarios LIMIT 1');
+      const userId = userRes.rowCount > 0 ? userRes.rows[0].id : 1;
+      const savedList = [];
+
+      for (const m of movementsList) {
+        const prodRes = await client.query('SELECT id FROM Productos WHERE codigo_barras_clave = $1', [m.productCode]);
+        if (prodRes.rowCount > 0) {
+          const prodId = prodRes.rows[0].id;
+          const res = await client.query(
+            `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
+             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, fecha`,
+            [prodId, userId, m.type, m.qty, m.stock_anterior, m.stock_posterior, m.motivo]
+          );
+          savedList.push({
+            ...m,
+            id: res.rows[0].id,
+            date: getLocalISODateString(new Date(res.rows[0].fecha))
+          });
+        }
+      }
+      await client.query('COMMIT');
+      return savedList;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('Error en saveMovementsBulk (Postgres):', err.message);
+    } finally {
+      client.release();
+    }
+  }
+  const movements = readJsonFile('movements.json', []);
+  const added = movementsList.map((m, idx) => ({ ...m, id: Date.now() + idx }));
+  movements.push(...added);
+  writeJsonFile('movements.json', movements);
+  return added;
 }
 
 export async function getPriceHistory() {
@@ -3626,9 +3720,10 @@ export async function getMasterPass() {
           await pool.query('UPDATE Configuracion_Empresa SET master_pass = $1 WHERE id = $2', ['1234', row.id]);
           return '1234';
         }
-        return row.master_pass;
+        return String(row.master_pass);
       }
-      // No config row at all — should not happen but handle gracefully
+      // If no config row at all, insert initial row
+      await pool.query("INSERT INTO Configuracion_Empresa (nombre_comercio, master_pass) VALUES ('INVERSIONES NIQUITAO 3000 C.A.', '1234')");
       return '1234';
     } catch (err) {
       console.error('Error al obtener master_pass (Postgres):', err.message);
@@ -3637,19 +3732,22 @@ export async function getMasterPass() {
   }
   // JSON fallback (only if PG not connected)
   const config = readJsonFile('config.json', mockConfig);
-  return config.master_pass || '1234';
+  return String(config.master_pass || '1234');
 }
 
 export async function saveMasterPass(newPass) {
+  const passStr = String(newPass || '').trim();
   if (usePostgres) {
     try {
       const existing = await pool.query('SELECT id FROM Configuracion_Empresa ORDER BY id DESC LIMIT 1');
       if (existing.rowCount > 0) {
-        await pool.query('UPDATE Configuracion_Empresa SET master_pass = $1 WHERE id = $2', [newPass, existing.rows[0].id]);
+        await pool.query('UPDATE Configuracion_Empresa SET master_pass = $1 WHERE id = $2', [passStr, existing.rows[0].id]);
         console.log(`✅ Master Pass actualizado en PostgreSQL.`);
         return true;
       }
-      throw new Error('No existe registro de Configuracion_Empresa en la BD.');
+      await pool.query("INSERT INTO Configuracion_Empresa (nombre_comercio, master_pass) VALUES ('INVERSIONES NIQUITAO 3000 C.A.', $1)", [passStr]);
+      console.log(`✅ Master Pass creado en PostgreSQL.`);
+      return true;
     } catch (err) {
       console.error('Error al guardar master_pass (Postgres):', err.message);
       throw err;
@@ -3657,14 +3755,14 @@ export async function saveMasterPass(newPass) {
   }
   // JSON fallback (only if PG not connected)
   const config = readJsonFile('config.json', mockConfig);
-  config.master_pass = newPass;
+  config.master_pass = passStr;
   writeJsonFile('config.json', config);
   return true;
 }
 
 export async function verifyMasterPass(enteredPass) {
   const currentPass = await getMasterPass();
-  return (enteredPass || '').trim() === (currentPass || '').trim();
+  return String(enteredPass || '').trim() === String(currentPass || '').trim();
 }
 
 export async function getAccionistas() {
@@ -4162,6 +4260,35 @@ export async function saveCompra(compraData) {
     try {
       await client.query('BEGIN');
 
+      const provId = parseInt(String(proveedor_id || 1), 10) || 1;
+      let cleanNum = numero_factura?.trim().toUpperCase() || `FAC-${Date.now()}`;
+
+      // Si es Proveedor Ocasional (ID 1), anteponer prefijo OCASIONAL- para diferenciar de compras formales
+      if (provId === 1) {
+        if (!cleanNum.startsWith('OCASIONAL-') && !cleanNum.startsWith('FAC-OCASIONAL-')) {
+          cleanNum = `OCASIONAL-${cleanNum.replace(/^(FAC-)/, '')}`;
+        }
+      } else {
+        if (!cleanNum.startsWith('FAC-') && !cleanNum.startsWith('OCASIONAL-')) {
+          cleanNum = `FAC-${cleanNum}`;
+        }
+      }
+
+      // Check for duplicate invoice number for the same provider
+      const dupCheck = await client.query(
+        `SELECT c.id, p.razon_social 
+         FROM Compras c 
+         LEFT JOIN Proveedores p ON c.proveedor_id = p.id 
+         WHERE UPPER(TRIM(c.numero_factura)) = UPPER(TRIM($1)) AND c.proveedor_id = $2
+         LIMIT 1`,
+        [cleanNum, provId]
+      );
+
+      if (dupCheck.rowCount > 0) {
+        const provName = dupCheck.rows[0].razon_social || 'el proveedor seleccionado';
+        throw new Error(`La factura "${cleanNum}" ya se encuentra registrada para ${provName}.`);
+      }
+
       // 1. Insert into Compras
       const compraRes = await client.query(
         `INSERT INTO Compras (
@@ -4171,8 +4298,8 @@ export async function saveCompra(compraData) {
          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
          RETURNING id`,
         [
-          numero_factura?.trim() || `FAC-${Date.now()}`,
-          proveedor_id,
+          cleanNum,
+          provId,
           usuario_id,
           fecha_emision,
           fecha_vencimiento || null,
@@ -4210,13 +4337,18 @@ export async function saveCompra(compraData) {
             const prevStock = parseFloat(prodCheck.rows[0].stock_actual || 0);
             const nextStock = prevStock + qty;
 
-            // Update product stock and optionally cost price (explicit NUMERIC cast for PostgreSQL)
+            const precioDetalle = parseFloat(item.precio_detalle_usd || item.precio_detalle || 0);
+            const precioMayor = parseFloat(item.precio_mayor_usd || item.precio_mayor || 0);
+
+            // Update product stock and costs (explicit NUMERIC cast for PostgreSQL)
             await client.query(
               `UPDATE Productos 
                SET stock_actual = $1, 
-                   precio_costo_usd = CASE WHEN CAST($2 AS NUMERIC) > 0 THEN CAST($2 AS NUMERIC) ELSE precio_costo_usd END
+                   precio_costo_usd = CASE WHEN CAST($2 AS NUMERIC) > 0 THEN CAST($2 AS NUMERIC) ELSE precio_costo_usd END,
+                   precio_detalle_usd = CASE WHEN CAST($4 AS NUMERIC) > 0 THEN CAST($4 AS NUMERIC) ELSE precio_detalle_usd END,
+                   precio_mayor_usd = CASE WHEN CAST($5 AS NUMERIC) > 0 THEN CAST($5 AS NUMERIC) ELSE precio_mayor_usd END
                WHERE id = $3`,
-              [nextStock, unitCost, prodId]
+              [nextStock, unitCost, prodId, precioDetalle, precioMayor]
             );
 
             // Log Inventory Movement
@@ -4731,6 +4863,204 @@ export async function deleteCotizacionProveedor(id) {
   const updated = list.filter(c => c.id !== Number(id));
   writeJsonFile('cotizaciones_proveedores.json', updated);
   return true;
+}
+
+// =============================================================
+// SALIDA DE INVENTARIO (MERMAS, USO INTERNO, ERROR, REVERSIÓN)
+// =============================================================
+export async function saveSalidaInventario(salidaData) {
+  const {
+    usuario_id = 1,
+    usuario_nombre = 'ADMINISTRADOR',
+    motivo = 'Merma / Daño / Vencimiento',
+    origen = 'manual',
+    factura_id = null,
+    numero_factura = '',
+    observaciones = '',
+    items = [],
+    anular_factura_completa = false
+  } = salidaData;
+
+  const resultItems = [];
+
+  if (usePostgres) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      for (const item of items) {
+        const prodId = item.producto_id || item.id;
+        const qty = Math.abs(parseFloat(item.cantidad_sacar || item.cantidad || item.qty || 0));
+        const itemMotivo = item.motivo_especifico || motivo;
+
+        if (prodId && qty > 0) {
+          const prodRes = await client.query('SELECT id, codigo_barras_clave, descripcion, stock_actual, precio_costo_usd FROM Productos WHERE id = $1', [prodId]);
+          if (prodRes.rowCount > 0) {
+            const p = prodRes.rows[0];
+            const prevStock = parseFloat(p.stock_actual || 0);
+            const nextStock = Math.max(0, prevStock - qty);
+
+            await client.query('UPDATE Productos SET stock_actual = $1 WHERE id = $2', [nextStock, prodId]);
+
+            let fullMotivo = `Salida [${itemMotivo}]`;
+            if (numero_factura) {
+              fullMotivo += ` (Ref Factura #${numero_factura})`;
+            }
+            if (observaciones) {
+              fullMotivo += `: ${observaciones}`;
+            }
+
+            const movRes = await client.query(
+              `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
+               VALUES ($1, $2, 'Salida', $3, $4, $5, $6) RETURNING id, fecha`,
+              [prodId, usuario_id, qty, prevStock, nextStock, fullMotivo]
+            );
+
+            resultItems.push({
+              producto_id: prodId,
+              codigo: p.codigo_barras_clave,
+              descripcion: p.descripcion,
+              stock_anterior: prevStock,
+              stock_posterior: nextStock,
+              cantidad_sacada: qty,
+              movimiento_id: movRes.rows[0].id
+            });
+          }
+        }
+      }
+
+      if (anular_factura_completa && factura_id) {
+        await client.query(
+          `UPDATE Compras SET estatus = 'Anulada', observaciones = COALESCE(observaciones, '') || ' [ANULADA POR SALIDA TOTAL DE INVENTARIO]' WHERE id = $1`,
+          [factura_id]
+        );
+      }
+
+      await client.query('COMMIT');
+      return { success: true, count: resultItems.length, items: resultItems };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('Error en saveSalidaInventario (Postgres):', err.message);
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  // JSON fallback
+  const products = readJsonFile('products.json', mockProducts);
+  const jsonMovements = readJsonFile('movements.json', []);
+
+  for (const item of items) {
+    const prodId = item.producto_id || item.id;
+    const qty = Math.abs(parseFloat(item.cantidad_sacar || item.cantidad || item.qty || 0));
+    const itemMotivo = item.motivo_especifico || motivo;
+
+    const pIdx = products.findIndex(p => String(p.id) === String(prodId));
+    if (pIdx !== -1 && qty > 0) {
+      const prevStock = parseFloat(products[pIdx].stock_actual || 0);
+      const nextStock = Math.max(0, prevStock - qty);
+      products[pIdx].stock_actual = nextStock;
+
+      let fullMotivo = `Salida [${itemMotivo}]`;
+      if (numero_factura) fullMotivo += ` (Ref Factura #${numero_factura})`;
+      if (observaciones) fullMotivo += `: ${observaciones}`;
+
+      const newMov = {
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        productCode: products[pIdx].codigo_barras_clave,
+        productDescription: products[pIdx].descripcion,
+        type: 'Salida',
+        qty: qty,
+        stock_anterior: prevStock,
+        stock_posterior: nextStock,
+        motivo: fullMotivo,
+        date: getLocalISODateString()
+      };
+      jsonMovements.unshift(newMov);
+
+      resultItems.push({
+        producto_id: prodId,
+        codigo: products[pIdx].codigo_barras_clave,
+        descripcion: products[pIdx].descripcion,
+        stock_anterior: prevStock,
+        stock_posterior: nextStock,
+        cantidad_sacada: qty
+      });
+    }
+  }
+
+  writeJsonFile('products.json', products);
+  writeJsonFile('movements.json', jsonMovements);
+
+  if (anular_factura_completa && factura_id) {
+    const compras = readJsonFile('compras.json', []);
+    const cIdx = compras.findIndex(c => String(c.id) === String(factura_id));
+    if (cIdx !== -1) {
+      compras[cIdx].estatus = 'Anulada - Salida Inventario';
+      writeJsonFile('compras.json', compras);
+    }
+  }
+
+  return { success: true, count: resultItems.length, items: resultItems };
+}
+
+export async function getSalidasPausadas() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query('SELECT * FROM Salidas_Pausadas ORDER BY id DESC');
+      return res.rows.map(r => ({
+        id: r.id,
+        usuario_id: r.usuario_id,
+        motivo: r.motivo,
+        origen: r.origen,
+        factura_id: r.factura_id,
+        numero_factura: r.numero_factura,
+        observaciones: r.observaciones,
+        items: r.items || [],
+        fecha: getLocalISODateString(r.created_at)
+      }));
+    } catch (err) {
+      console.error('Error en getSalidasPausadas (Postgres):', err.message);
+    }
+  }
+  return readJsonFile('salidas_pausadas.json', []);
+}
+
+export async function saveSalidasPausadas(salidasPausadas) {
+  const list = Array.isArray(salidasPausadas) ? salidasPausadas : [];
+  if (usePostgres) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM Salidas_Pausadas');
+      for (const s of list) {
+        await client.query(
+          `INSERT INTO Salidas_Pausadas (id, usuario_id, motivo, origen, factura_id, numero_factura, observaciones, items)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [
+            String(s.id || `PAUSE-${Date.now()}`),
+            s.usuario_id || 1,
+            s.motivo || 'Salida Pausada',
+            s.origen || 'manual',
+            s.factura_id || null,
+            s.numero_factura || '',
+            s.observaciones || '',
+            JSON.stringify(s.items || [])
+          ]
+        );
+      }
+      await client.query('COMMIT');
+      return list;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('Error en saveSalidasPausadas (Postgres):', err.message);
+    } finally {
+      client.release();
+    }
+  }
+  writeJsonFile('salidas_pausadas.json', list);
+  return list;
 }
 
 

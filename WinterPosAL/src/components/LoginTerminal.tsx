@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Shield, Network, Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import { User, CompanyConfig } from '../types';
 import { useDialog } from '../hooks/useDialog';
+import { getApiBaseUrl } from '../utils';
 
 interface LoginTerminalProps {
   onLoginSuccess: (user: User) => void;
@@ -18,7 +19,7 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
   const [clickCount, setClickCount] = useState(0);
   const [serverIP, setServerIP] = useState(() => {
     const saved = localStorage.getItem('pos_lan_ip');
-    if (saved && saved !== '192.168.11.40') return saved;
+    if (saved) return saved;
     return window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
       ? window.location.hostname
       : '127.0.0.1';
@@ -41,6 +42,7 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
 
   // Auto-focus username input on load, refresh, or window focus
   useEffect(() => {
@@ -83,20 +85,52 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
     }
   };
 
-  const handleSaveConfig = (e: React.FormEvent) => {
+  const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
     const finalTerminal = terminalNameState.trim().toUpperCase() || 'CAJA_01';
-    localStorage.setItem('pos_lan_ip', serverIP);
-    localStorage.setItem('pos_lan_port', serverPort);
+    const targetIP = serverIP.trim() || 'localhost';
+    const targetPort = serverPort.trim() || '5000';
+
+    if (dbMode === 'remote') {
+      setIsTestingConnection(true);
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4000); // 4 segundos timeout
+
+        const testUrl = `http://${targetIP}:${targetPort}/api/status`;
+        const res = await fetch(testUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        if (!res.ok) {
+          throw new Error(`El servidor respondió con código HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        console.log('Servidor verificado con éxito:', data);
+      } catch (err: any) {
+        setIsTestingConnection(false);
+        const isTimeout = err.name === 'AbortError';
+        showAlert(
+          `No se pudo establecer conexión con el Servidor Central en "${targetIP}:${targetPort}".\n\n- ${isTimeout ? 'La solicitud expiró por tiempo de espera (Timeout 4s).' : (err.message || 'Error de red')}\n\nPor favor verifique:\n1. Que el equipo Servidor (${targetIP}) esté encendido y conectado a la red LAN.\n2. Que el backend de WinterPOS esté ejecutándose en la IP ${targetIP}.\n3. Que el puerto ${targetPort} esté permitido en el Firewall de Windows del Servidor.`,
+          'Fallo de Conexión LAN',
+          'error'
+        );
+        return; // No guardar IP inaccesible
+      }
+      setIsTestingConnection(false);
+    }
+
+    localStorage.setItem('pos_lan_ip', targetIP);
+    localStorage.setItem('pos_lan_port', targetPort);
     localStorage.setItem('pos_db_mode', dbMode);
     localStorage.setItem('pos_terminal_name', finalTerminal);
     setTerminalNameState(finalTerminal);
     setShowConfig(false);
     
-    console.log('Saved network and terminal config', { dbMode, serverIP, serverPort, finalTerminal });
+    console.log('Saved network and terminal config', { dbMode, targetIP, targetPort, finalTerminal });
     showAlert(
-      `Configuración de estación "${finalTerminal}" guardada correctamente (${dbMode === 'local' ? 'Modo Local' : `${serverIP}:${serverPort}`}).`,
-      'Configuración Guardada',
+      `Conexión Verificada. Configuración de la estación "${finalTerminal}" guardada correctamente (${dbMode === 'local' ? 'Modo Local' : `${targetIP}:${targetPort}`}).`,
+      'Conexión Exitosa con Servidor',
       'success'
     );
   };
@@ -113,12 +147,7 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
     setIsLoading(true);
 
     try {
-      const savedIp = localStorage.getItem('pos_lan_ip');
-      const savedMode = localStorage.getItem('pos_db_mode') || 'local';
-      const browserHost = window.location.hostname;
-      const isRemoteAccess = browserHost !== 'localhost' && browserHost !== '127.0.0.1';
-      const host = isRemoteAccess ? browserHost : (savedMode === 'local' ? 'localhost' : (savedIp || 'localhost'));
-      const checkUrl = `http://${host}:5000/api/users/login-check`;
+      const checkUrl = `${getApiBaseUrl()}/users/login-check`;
       const terminalSaved = localStorage.getItem('pos_terminal_name') || 'LOCAL';
 
       const checkRes = await fetch(checkUrl, {
@@ -352,9 +381,17 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
 
                 <button
                   type="submit"
-                  className="w-full bg-[#08284c] hover:bg-[#061f3b] text-white py-2 rounded text-[10px] font-bold font-sans tracking-wide transition-all border border-slate-700"
+                  disabled={isTestingConnection}
+                  className="w-full bg-[#08284c] hover:bg-[#061f3b] disabled:bg-slate-700 text-white py-2 rounded text-[10px] font-bold font-sans tracking-wide transition-all border border-slate-700 flex items-center justify-center gap-2"
                 >
-                  GUARDAR Y RECONECTAR
+                  {isTestingConnection ? (
+                    <>
+                      <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      <span>PROBANDO CONEXIÓN CON SERVIDAR...</span>
+                    </>
+                  ) : (
+                    <span>GUARDAR Y RECONECTAR</span>
+                  )}
                 </button>
               </form>
             )}
