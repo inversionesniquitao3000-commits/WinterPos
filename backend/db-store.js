@@ -171,7 +171,7 @@ try {
     ALTER TABLE IF EXISTS Pagos_Venta DROP CONSTRAINT IF EXISTS pagos_venta_metodo_pago_check;
     ALTER TABLE IF EXISTS Abonos DROP CONSTRAINT IF EXISTS abonos_metodo_pago_check;
     ALTER TABLE IF EXISTS Abonos ADD COLUMN IF NOT EXISTS caja_id INT REFERENCES Cajas_Apertura_Cierre(id) ON DELETE SET NULL;
-    ALTER TABLE IF EXISTS Usuarios ADD COLUMN IF NOT EXISTS clave VARCHAR(100) DEFAULT 'admin';
+    ALTER TABLE IF EXISTS Usuarios ADD COLUMN IF NOT EXISTS clave VARCHAR(100) DEFAULT 'admin*';
     ALTER TABLE IF EXISTS Usuarios ADD COLUMN IF NOT EXISTS permisos TEXT;
     ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS estacion_nombre VARCHAR(50) DEFAULT 'CAJA_PRINCIPAL';
     ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS vuelto_usd NUMERIC DEFAULT 0;
@@ -774,8 +774,12 @@ export async function getUsers() {
     inventario: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
     ventas: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
     clientes: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+    proveedores: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+    inversiones: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+    documentos: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
     tasa: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
-    config: { ver: true, crear: true, editar: true, eliminar: true, admin: true }
+    config: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+    movil: { ver: true, crear: true, editar: true, eliminar: true, admin: true }
   };
 
   if (usePostgres) {
@@ -788,7 +792,7 @@ export async function getUsers() {
           nombre: r.nombre,
           rol: r.rol,
           estado: r.estado,
-          clave: r.clave || 'admin',
+          clave: r.clave || 'admin*',
           permisos: r.permisos ? (typeof r.permisos === 'string' ? JSON.parse(r.permisos) : r.permisos) : defaultPermsAdmin
         }));
       } else {
@@ -796,7 +800,7 @@ export async function getUsers() {
         await pool.query(
           `INSERT INTO Usuarios (usuario, clave, nombre, rol, estado, permisos)
            VALUES ($1, $2, $3, $4, $5, $6)`,
-          ['admin', 'admin', 'Administrador', 'ADMINISTRADOR', 'Activo', JSON.stringify(defaultPermsAdmin)]
+          ['admin', 'admin*', 'Administrador', 'ADMINISTRADOR', 'Activo', JSON.stringify(defaultPermsAdmin)]
         );
         const res2 = await pool.query('SELECT id, usuario, nombre, rol, estado, clave, permisos FROM Usuarios ORDER BY id ASC');
         return res2.rows.map(r => ({
@@ -805,7 +809,7 @@ export async function getUsers() {
           nombre: r.nombre,
           rol: r.rol,
           estado: r.estado,
-          clave: r.clave || 'admin',
+          clave: r.clave || 'admin*',
           permisos: r.permisos ? (typeof r.permisos === 'string' ? JSON.parse(r.permisos) : r.permisos) : defaultPermsAdmin
         }));
       }
@@ -821,7 +825,7 @@ export async function getUsers() {
       nombre: 'Administrador',
       rol: 'ADMINISTRADOR',
       estado: 'Activo',
-      clave: 'admin',
+      clave: 'admin*',
       permisos: defaultPermsAdmin
     }];
   }
@@ -1500,7 +1504,28 @@ export async function deleteClient(id) {
 
 // --- USER & ROLE CRUD & DATABASE MANAGEMENT FUNCTIONS ---
 
+const FULL_ADMIN_PERMISSIONS = {
+  caja: { ver: true, crear: true, editar: true, eliminar: true, admin: true, emitir_no_fiscal: true },
+  inventario: { ver: true, crear: true, editar: true, eliminar: true, admin: true, ver_costos: true },
+  ventas: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+  clientes: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+  proveedores: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+  inversiones: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+  documentos: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+  tasa: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+  config: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+  movil: { ver: true, crear: true, editar: true, eliminar: true, admin: true }
+};
+
 export async function saveUser(u) {
+  if (u.rol?.toLowerCase() === 'administrador' || u.usuario?.toLowerCase() === 'admin') {
+    const existingUsers = await getUsers();
+    const hasAdmin = existingUsers.some(x => x.usuario?.toLowerCase() === 'admin');
+    if (hasAdmin) {
+      throw new Error('El rol ADMINISTRADOR es exclusivo del usuario principal "admin". No se pueden registrar administradores adicionales.');
+    }
+    u.permisos = FULL_ADMIN_PERMISSIONS;
+  }
   const permsStr = JSON.stringify(u.permisos || {});
   if (usePostgres) {
     try {
@@ -1533,7 +1558,7 @@ export async function saveUser(u) {
     nombre: u.nombre,
     rol: u.rol,
     estado: u.estado || 'Activo',
-    clave: u.clave || 'admin',
+    clave: u.clave || 'admin*',
     permisos: u.permisos
   };
   users.push(newUser);
@@ -1542,6 +1567,9 @@ export async function saveUser(u) {
 }
 
 export async function updateUser(id, u) {
+  if (u.usuario?.toLowerCase() === 'admin' || u.rol?.toLowerCase() === 'administrador') {
+    u.permisos = FULL_ADMIN_PERMISSIONS;
+  }
   const permsStr = JSON.stringify(u.permisos || {});
   if (usePostgres) {
     try {
@@ -1587,7 +1615,11 @@ export async function updateUser(id, u) {
 export async function deleteUser(id) {
   if (usePostgres) {
     try {
-      const res = await pool.query('DELETE FROM Usuarios WHERE id = $1 RETURNING id', [id]);
+      const checkRes = await pool.query('SELECT usuario FROM Usuarios WHERE id = $1', [id]);
+      if (checkRes.rows.length > 0 && (checkRes.rows[0].usuario || '').toLowerCase() === 'admin') {
+        throw new Error('El usuario principal "admin" es el administrador del sistema y está protegido contra eliminación.');
+      }
+      const res = await pool.query('DELETE FROM Usuarios WHERE id = $1 AND LOWER(usuario) <> \'admin\' RETURNING id', [id]);
       return res.rowCount > 0;
     } catch (err) {
       console.error('Error en deleteUser (Postgres):', err.message);
@@ -1597,6 +1629,9 @@ export async function deleteUser(id) {
   const users = readJsonFile('users.json', mockUsers);
   const idx = users.findIndex(user => user.id === parseInt(id) || user.id === id);
   if (idx !== -1) {
+    if ((users[idx].usuario || '').toLowerCase() === 'admin') {
+      throw new Error('El usuario principal "admin" es el administrador del sistema y está protegido contra eliminación.');
+    }
     users.splice(idx, 1);
     writeJsonFile('users.json', users);
     return true;
@@ -1614,8 +1649,12 @@ export async function getRoles() {
         inventario: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
         ventas: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
         clientes: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        proveedores: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        inversiones: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        documentos: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
         tasa: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
-        config: { ver: true, crear: true, editar: true, eliminar: true, admin: true }
+        config: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        movil: { ver: true, crear: true, editar: true, eliminar: true, admin: true }
       }
     },
     {
@@ -1664,6 +1703,14 @@ export async function getRoles() {
 }
 
 export async function saveRole(r) {
+  if (r.nombre?.trim().toLowerCase() === 'administrador') {
+    const existingRoles = await getRoles();
+    const hasAdminRole = existingRoles.some(x => x.nombre?.trim().toLowerCase() === 'administrador');
+    if (hasAdminRole) {
+      throw new Error('El perfil de rol ADMINISTRADOR es único en el sistema y ya se encuentra registrado.');
+    }
+    r.permisos = FULL_ADMIN_PERMISSIONS;
+  }
   const permsStr = JSON.stringify(r.permisos || {});
   if (usePostgres) {
     try {
@@ -1693,6 +1740,9 @@ export async function saveRole(r) {
 }
 
 export async function updateRole(id, r) {
+  if (r.nombre?.toLowerCase() === 'administrador') {
+    r.permisos = FULL_ADMIN_PERMISSIONS;
+  }
   const permsStr = JSON.stringify(r.permisos || {});
   if (usePostgres) {
     try {
@@ -1920,14 +1970,18 @@ export async function wipeDatabase(options) {
       nombre: 'Administrador',
       rol: 'ADMINISTRADOR',
       estado: 'Activo',
-      clave: 'admin',
+      clave: 'admin*',
       permisos: {
         caja: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
         inventario: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
         ventas: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
         clientes: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        proveedores: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        inversiones: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        documentos: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
         tasa: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
-        config: { ver: true, crear: true, editar: true, eliminar: true, admin: true }
+        config: { ver: true, crear: true, editar: true, eliminar: true, admin: true },
+        movil: { ver: true, crear: true, editar: true, eliminar: true, admin: true }
       }
     };
     writeJsonFile('users.json', [defaultAdminUser]);
@@ -5062,6 +5116,210 @@ export async function saveSalidasPausadas(salidasPausadas) {
   writeJsonFile('salidas_pausadas.json', list);
   return list;
 }
+
+// ==========================================
+// REPOSITORIO DE DOCUMENTOS DE LA EMPRESA
+// ==========================================
+
+export async function getDocumentosEmpresa() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query('SELECT * FROM Documentos_Empresa ORDER BY id DESC');
+      return res.rows.map(r => ({
+        id: r.id,
+        categoria: r.categoria,
+        titulo: r.titulo,
+        descripcion: r.descripcion || '',
+        nombre_archivo: r.nombre_archivo,
+        ruta_archivo: r.ruta_archivo,
+        mime_type: r.mime_type,
+        tamano_bytes: Number(r.tamano_bytes || 0),
+        fecha_emision: r.fecha_emision ? String(r.fecha_emision).substring(0, 10) : null,
+        fecha_vencimiento: r.fecha_vencimiento ? String(r.fecha_vencimiento).substring(0, 10) : null,
+        estatus: r.estatus || 'Vigente',
+        es_historico: Boolean(r.es_historico),
+        requisito_key: r.requisito_key || null,
+        created_by: r.created_by || 'Admin',
+        created_at: getLocalISODateString(r.created_at)
+      }));
+    } catch (err) {
+      console.error('Error en getDocumentosEmpresa (Postgres):', err.message);
+    }
+  }
+  return readJsonFile('documentos_empresa.json', []);
+}
+
+export async function saveDocumentoEmpresa(docData) {
+  if (usePostgres) {
+    try {
+      const query = `
+        INSERT INTO Documentos_Empresa (
+          categoria, titulo, descripcion, nombre_archivo, ruta_archivo,
+          mime_type, tamano_bytes, fecha_emision, fecha_vencimiento, estatus, es_historico, requisito_key, created_by
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        RETURNING *;
+      `;
+      const values = [
+        docData.categoria || 'OTROS',
+        docData.titulo,
+        docData.descripcion || '',
+        docData.nombre_archivo,
+        docData.ruta_archivo,
+        docData.mime_type || 'application/octet-stream',
+        docData.tamano_bytes || 0,
+        docData.fecha_emision || null,
+        docData.fecha_vencimiento || null,
+        docData.estatus || 'Vigente',
+        Boolean(docData.es_historico),
+        docData.requisito_key || null,
+        docData.created_by || 'Admin'
+      ];
+      const res = await pool.query(query, values);
+      const r = res.rows[0];
+      return {
+        id: r.id,
+        categoria: r.categoria,
+        titulo: r.titulo,
+        descripcion: r.descripcion,
+        nombre_archivo: r.nombre_archivo,
+        ruta_archivo: r.ruta_archivo,
+        mime_type: r.mime_type,
+        tamano_bytes: Number(r.tamano_bytes || 0),
+        fecha_emision: r.fecha_emision ? String(r.fecha_emision).substring(0, 10) : null,
+        fecha_vencimiento: r.fecha_vencimiento ? String(r.fecha_vencimiento).substring(0, 10) : null,
+        estatus: r.estatus,
+        es_historico: Boolean(r.es_historico),
+        requisito_key: r.requisito_key || null,
+        created_by: r.created_by,
+        created_at: getLocalISODateString(r.created_at)
+      };
+    } catch (err) {
+      console.error('Error en saveDocumentoEmpresa (Postgres):', err.message);
+    }
+  }
+
+  const docs = readJsonFile('documentos_empresa.json', []);
+  const newDoc = {
+    id: Date.now(),
+    categoria: docData.categoria || 'OTROS',
+    titulo: docData.titulo,
+    descripcion: docData.descripcion || '',
+    nombre_archivo: docData.nombre_archivo,
+    ruta_archivo: docData.ruta_archivo,
+    mime_type: docData.mime_type || 'application/octet-stream',
+    tamano_bytes: docData.tamano_bytes || 0,
+    fecha_emision: docData.fecha_emision || null,
+    fecha_vencimiento: docData.fecha_vencimiento || null,
+    estatus: docData.estatus || 'Vigente',
+    es_historico: Boolean(docData.es_historico),
+    requisito_key: docData.requisito_key || null,
+    created_by: docData.created_by || 'Admin',
+    created_at: getLocalISODateString()
+  };
+  docs.unshift(newDoc);
+  writeJsonFile('documentos_empresa.json', docs);
+  return newDoc;
+}
+
+export async function updateDocumentoEmpresa(id, updateData) {
+  if (usePostgres) {
+    try {
+      const hoy = new Date().toISOString().substring(0, 10);
+      let estatus = updateData.estatus;
+      if (!estatus) {
+        estatus = updateData.fecha_vencimiento && updateData.fecha_vencimiento < hoy ? 'Vencido' : 'Vigente';
+      }
+      if (updateData.es_historico) estatus = 'Historico';
+
+      const query = `
+        UPDATE Documentos_Empresa 
+        SET titulo = $1, categoria = $2, descripcion = $3, fecha_emision = $4, fecha_vencimiento = $5, estatus = $6, es_historico = $7, requisito_key = $8
+        WHERE id = $9
+        RETURNING *;
+      `;
+      const values = [
+        updateData.titulo,
+        updateData.categoria,
+        updateData.descripcion || '',
+        updateData.fecha_emision || null,
+        updateData.fecha_vencimiento || null,
+        estatus,
+        Boolean(updateData.es_historico),
+        updateData.requisito_key || null,
+        id
+      ];
+      const res = await pool.query(query, values);
+      if (res.rows.length > 0) {
+        const r = res.rows[0];
+        return {
+          id: r.id,
+          categoria: r.categoria,
+          titulo: r.titulo,
+          descripcion: r.descripcion,
+          nombre_archivo: r.nombre_archivo,
+          ruta_archivo: r.ruta_archivo,
+          mime_type: r.mime_type,
+          tamano_bytes: Number(r.tamano_bytes || 0),
+          fecha_emision: r.fecha_emision ? String(r.fecha_emision).substring(0, 10) : null,
+          fecha_vencimiento: r.fecha_vencimiento ? String(r.fecha_vencimiento).substring(0, 10) : null,
+          estatus: r.estatus,
+          es_historico: Boolean(r.es_historico),
+          requisito_key: r.requisito_key || null,
+          created_by: r.created_by,
+          created_at: getLocalISODateString(r.created_at)
+        };
+      }
+    } catch (err) {
+      console.error('Error en updateDocumentoEmpresa (Postgres):', err.message);
+    }
+  }
+
+  const docs = readJsonFile('documentos_empresa.json', []);
+  const idx = docs.findIndex(d => String(d.id) === String(id));
+  if (idx !== -1) {
+    const hoy = new Date().toISOString().substring(0, 10);
+    let estatus = updateData.estatus;
+    if (!estatus) {
+      estatus = updateData.fecha_vencimiento && updateData.fecha_vencimiento < hoy ? 'Vencido' : 'Vigente';
+    }
+    if (updateData.es_historico) estatus = 'Historico';
+
+    docs[idx] = {
+      ...docs[idx],
+      titulo: updateData.titulo,
+      categoria: updateData.categoria,
+      descripcion: updateData.descripcion || '',
+      fecha_emision: updateData.fecha_emision || null,
+      fecha_vencimiento: updateData.fecha_vencimiento || null,
+      estatus: estatus,
+      es_historico: Boolean(updateData.es_historico),
+      requisito_key: updateData.requisito_key || null
+    };
+    writeJsonFile('documentos_empresa.json', docs);
+    return docs[idx];
+  }
+  return null;
+}
+
+export async function deleteDocumentoEmpresa(id) {
+  if (usePostgres) {
+    try {
+      const res = await pool.query('DELETE FROM Documentos_Empresa WHERE id = $1 RETURNING *', [id]);
+      if (res.rows.length > 0) {
+        return res.rows[0];
+      }
+    } catch (err) {
+      console.error('Error en deleteDocumentoEmpresa (Postgres):', err.message);
+    }
+  }
+
+  let docs = readJsonFile('documentos_empresa.json', []);
+  const docToDelete = docs.find(d => String(d.id) === String(id));
+  docs = docs.filter(d => String(d.id) !== String(id));
+  writeJsonFile('documentos_empresa.json', docs);
+  return docToDelete || null;
+}
+
 
 
 

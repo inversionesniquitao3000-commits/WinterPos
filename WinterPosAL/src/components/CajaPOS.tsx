@@ -6,11 +6,13 @@ import {
   Calculator, CheckCircle2, Ticket,
   Clock, ListOrdered, Plus, AlertCircle, DollarSign, RotateCcw, Printer,
   Calendar, Lock, Coins, RefreshCw, ShieldCheck, FileText,
-  Banknote, Eye, LogOut, X, Image as ImageIcon, ZoomIn
+  Banknote, Eye, LogOut, X, Image as ImageIcon, ZoomIn,
+  Edit, Minus, Sparkles, Package, Upload
 } from 'lucide-react';
 import { formatNumberToWordsUSD, printTicketReceipt, formatBs } from '../utils';
 import { useDialog } from '../hooks/useDialog';
 import CambioDivisasModal from './CambioDivisasModal';
+import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
 
 interface CajaPOSProps {
   products: Product[];
@@ -57,6 +59,9 @@ interface CajaPOSProps {
     qty: number,
     reason: string
   ) => Promise<void>;
+  onUpdateProduct?: (prod: Product) => Promise<any> | any;
+  onDeleteProduct?: (prodId: number) => Promise<any> | any;
+  hasPermission?: (modulo: string, accion: 'ver' | 'crear' | 'editar' | 'eliminar') => boolean;
   onRegisterAbono: (
     clientId: number,
     amountUSD: number,
@@ -102,6 +107,9 @@ export default function CajaPOS({
   shiftDevolucionesUsd,
   shiftDevolucionesVes,
   onUpdateProductStock,
+  onUpdateProduct,
+  onDeleteProduct,
+  hasPermission: _hasPermission,
   onRegisterAbono,
   abonos,
   getApiUrl,
@@ -113,6 +121,151 @@ export default function CajaPOS({
   const [isClosingCaja, setIsClosingCaja] = useState(false);
   const [userDismissedApertura, setUserDismissedApertura] = useState(false);
   const [showAperturaModal, setShowAperturaModal] = useState(!cajaAbierta);
+
+  // Right-Click Context Menu State
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; product: Product } | null>(null);
+
+  // Quick Product Modals from Context Menu
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [imageManagerProduct, setImageManagerProduct] = useState<Product | null>(null);
+  const [imageManagerUrlInput, setImageManagerUrlInput] = useState<string>('');
+  const [isGeneratingAiImage, setIsGeneratingAiImage] = useState<boolean>(false);
+
+  // States for MODIFICAR FICHA DE PRODUCTO Modal
+  const [editClave, setEditClave] = useState('');
+  const [editBarcode, setEditBarcode] = useState('');
+  const [editCat, setEditCat] = useState('GENERAL');
+  const [editTaxActive, setEditTaxActive] = useState(true);
+  const [editTaxName, setEditTaxName] = useState('IVA');
+  const [editTaxPct, setEditTaxPct] = useState('16');
+  const [editDesc, setEditDesc] = useState('');
+  const [editAGranel, setEditAGranel] = useState(false);
+  const [editVencimiento, setEditVencimiento] = useState('');
+  const [editCost, setEditCost] = useState('0');
+  const [editDetail, setEditDetail] = useState('0');
+  const [editMayor, setEditMayor] = useState('0');
+  const [editMinStock, setEditMinStock] = useState('5');
+  const [editWholesaleQty, setEditWholesaleQty] = useState('6');
+  const [editImageUrl, setEditImageUrl] = useState('');
+  const [isAuxExpandedEdit, setIsAuxExpandedEdit] = useState(false);
+  const [showQuickAddCatModal, setShowQuickAddCatModal] = useState(false);
+  const [newCatInputName, setNewCatInputName] = useState('');
+  const [customCategories, setCustomCategories] = useState<string[]>([]);
+
+  const allCategories = useMemo(() => {
+    const set = new Set<string>();
+    set.add('GENERAL');
+    products.forEach(p => { if (p.category) set.add(p.category.toUpperCase()); });
+    customCategories.forEach(c => set.add(c.toUpperCase()));
+    return Array.from(set);
+  }, [products, customCategories]);
+
+  useEffect(() => {
+    if (editingProduct) {
+      setEditClave((editingProduct as any).clave || editingProduct.barcode || '');
+      setEditBarcode(editingProduct.barcode || '');
+      setEditCat(editingProduct.category || 'GENERAL');
+      setEditTaxActive(editingProduct.exento_impuesto !== true);
+      setEditTaxName((editingProduct as any).tax_name || 'IVA');
+      setEditTaxPct((editingProduct as any).tax_pct?.toString() || editingProduct.porcentaje_impuesto?.toString() || '16');
+      setEditDesc(editingProduct.description || '');
+      setEditAGranel(editingProduct.a_granel === true);
+      setEditVencimiento(editingProduct.fecha_vencimiento || '');
+      setEditCost(editingProduct.precio_costo_usd?.toString() || '0');
+      setEditDetail(editingProduct.precio_detalle_usd?.toString() || '0');
+      setEditMayor(editingProduct.precio_mayor_usd?.toString() || '0');
+      setEditMinStock(editingProduct.stock_minimo?.toString() || '5');
+      setEditWholesaleQty(editingProduct.cantidad_mayorista?.toString() || '6');
+      setEditImageUrl(editingProduct.imagen_url || '');
+    }
+  }, [editingProduct]);
+
+  const handleUpdateProductSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProduct) return;
+
+    const desc = editDesc.trim();
+    if (!desc) {
+      showAlert('La descripción del artículo es obligatoria.', 'Campo Requerido', 'warning');
+      return;
+    }
+
+    const cost = parseFloat(editCost) || 0;
+    const detail = parseFloat(editDetail) || 0;
+    const mayor = parseFloat(editMayor) || 0;
+    const minStock = parseInt(editMinStock) || 5;
+    const wholesaleQty = parseInt(editWholesaleQty) || 6;
+    const taxPctNum = editTaxActive ? (parseFloat(editTaxPct) || 16) : 0;
+
+    const updated: Product = {
+      ...editingProduct,
+      barcode: editBarcode.trim() || editClave.trim(),
+      category: editCat.toUpperCase(),
+      description: desc.toUpperCase(),
+      a_granel: editAGranel,
+      exento_impuesto: !editTaxActive,
+      porcentaje_impuesto: taxPctNum,
+      fecha_vencimiento: editVencimiento || undefined,
+      precio_costo_usd: cost,
+      precio_detalle_usd: detail,
+      precio_mayor_usd: mayor,
+      stock_minimo: minStock,
+      cantidad_mayorista: wholesaleQty,
+      imagen_url: editImageUrl.trim()
+    };
+    (updated as any).clave = editClave.trim() || editBarcode.trim();
+    (updated as any).tax_name = editTaxActive ? editTaxName : undefined;
+    (updated as any).tax_pct = taxPctNum;
+
+    if (onUpdateProduct) {
+      await onUpdateProduct(updated);
+    }
+    setEditingProduct(null);
+    showAlert('✅ Ficha técnica del producto actualizada exitosamente.', 'Producto Guardado', 'info');
+  };
+
+  useEffect(() => {
+    const handleCloseContextMenu = () => setContextMenu(null);
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    window.addEventListener('click', handleCloseContextMenu);
+    window.addEventListener('scroll', handleCloseContextMenu, true);
+    window.addEventListener('keydown', handleEsc);
+    return () => {
+      window.removeEventListener('click', handleCloseContextMenu);
+      window.removeEventListener('scroll', handleCloseContextMenu, true);
+      window.removeEventListener('keydown', handleEsc);
+    };
+  }, []);
+
+  const handleGenerateAiImageForProduct = async (prod: Product) => {
+    setIsGeneratingAiImage(true);
+    try {
+      const res = await fetch(getApiUrl('/ai/generate-product-image'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: prod.description,
+          category: prod.category,
+          barcode: prod.barcode,
+          saveLocal: true
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.imageUrl) {
+        const updatedProd = { ...prod, imagen_url: data.imageUrl };
+        if (onUpdateProduct) await onUpdateProduct(updatedProd);
+        showAlert('✅ Imagen generada con Inteligencia Artificial y asociada al producto con éxito.', 'Imagen Generada', 'info');
+      } else {
+        showAlert('No se pudo generar la imagen: ' + (data.error || 'Respuesta no exitosa'), 'Error IA', 'warning');
+      }
+    } catch (err: any) {
+      showAlert(`Error conectando con servicio de IA: ${err.message}`, 'Error IA', 'warning');
+    } finally {
+      setIsGeneratingAiImage(false);
+    }
+  };
 
   // Quick Client Registration Modal State
   const [showQuickClientModal, setShowQuickClientModal] = useState(false);
@@ -3387,10 +3540,17 @@ export default function CajaPOS({
           return (
             <div 
               onClick={() => activeItem.imagen_url && setZoomedProduct(activeItem)}
-              className={`bg-white border border-blue-200 rounded-xl p-3 shadow-sm flex items-center gap-3 bg-gradient-to-r from-blue-50/40 to-white transition-all ${
-                activeItem.imagen_url ? 'cursor-pointer hover:border-blue-400 hover:shadow-md group' : ''
-              }`}
-              title={activeItem.imagen_url ? "Haga clic para ver la imagen ampliada en grande" : undefined}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const menuWidth = 250;
+                const menuHeight = 350;
+                const x = Math.min(e.clientX, window.innerWidth - menuWidth - 15);
+                const y = Math.min(e.clientY, window.innerHeight - menuHeight - 15);
+                setContextMenu({ x: Math.max(10, x), y: Math.max(10, y), product: activeItem });
+              }}
+              className="bg-white border border-blue-200 rounded-xl p-3 shadow-sm flex items-center gap-3 bg-gradient-to-r from-blue-50/40 to-white transition-all cursor-pointer hover:border-blue-400 hover:shadow-md group select-none"
+              title="Clic Izquierdo: Ampliar Foto | Clic Derecho: Menú de Opciones del Producto"
             >
               <div className="w-14 h-14 rounded-lg bg-slate-100 border border-slate-200 flex-shrink-0 flex items-center justify-center overflow-hidden relative shadow-inner group-hover:ring-2 group-hover:ring-blue-400 transition-all">
                 <div className="text-slate-400 text-center text-[9px] font-bold">
@@ -7157,6 +7317,560 @@ export default function CajaPOS({
           </div>
         </div>
       )}
+
+      {/* FLOATING CONTEXT MENU (RIGHT-CLICK ON PRODUCT PREVIEW OR IMAGE) */}
+      {contextMenu && (
+        <div 
+          className="fixed z-50 bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden w-64 text-slate-800 text-xs font-sans animate-in fade-in zoom-in duration-100"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="p-3 bg-slate-900 text-white flex items-center gap-2 border-b border-slate-800">
+            <div className="p-2 bg-slate-800 rounded-lg text-blue-400">
+              <Package className="w-4 h-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <span className="text-[9px] text-blue-300 font-mono font-bold block truncate">{contextMenu.product.barcode || 'S/C'}</span>
+              <span className="text-[11px] font-black text-white block uppercase truncate leading-tight">{contextMenu.product.description}</span>
+              <span className="text-[9px] text-emerald-400 font-mono block mt-0.5">
+                Stock: {formatStockVal(contextMenu.product.stock_actual, contextMenu.product.a_granel)} {contextMenu.product.a_granel ? 'kg' : 'uds'}
+              </span>
+            </div>
+          </div>
+
+          <div className="p-1 space-y-0.5 font-bold">
+            {/* 1. Modificar Ficha Técnica */}
+            <button
+              type="button"
+              onClick={() => {
+                const prod = contextMenu.product;
+                setContextMenu(null);
+                setEditingProduct(prod);
+              }}
+              className="w-full text-left px-2.5 py-1.5 hover:bg-slate-100 hover:text-slate-900 rounded-lg flex items-center gap-2 transition-colors"
+            >
+              <Edit className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
+              <span>Modificar Ficha Técnica</span>
+            </button>
+
+            <div className="border-t border-slate-100 my-1"></div>
+
+            {/* 2. Generar Foto con IA */}
+            <button
+              type="button"
+              onClick={() => {
+                const prod = contextMenu.product;
+                setContextMenu(null);
+                handleGenerateAiImageForProduct(prod);
+              }}
+              className="w-full text-left px-2.5 py-1.5 hover:bg-indigo-50 hover:text-indigo-900 rounded-lg flex items-center gap-2 transition-colors"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+              <span>Generar Foto con IA</span>
+            </button>
+
+            {/* 6. Ver Imagen Ampliada */}
+            {contextMenu.product.imagen_url && (
+              <button
+                type="button"
+                onClick={() => {
+                  const prod = contextMenu.product;
+                  setContextMenu(null);
+                  setZoomedProduct(prod);
+                }}
+                className="w-full text-left px-2.5 py-1.5 hover:bg-emerald-50 hover:text-emerald-900 rounded-lg flex items-center gap-2 transition-colors text-emerald-700"
+              >
+                <ZoomIn className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                <span>Ver Imagen Ampliada</span>
+              </button>
+            )}
+
+            {/* 7. Eliminar Producto */}
+            <div className="border-t border-slate-100 my-1"></div>
+            <button
+              type="button"
+              disabled={contextMenu.product.stock_actual > 0}
+              onClick={async () => {
+                const prod = contextMenu.product;
+                setContextMenu(null);
+                if (prod.stock_actual > 0) return;
+                const ok = await showConfirm(`¿Eliminar permanentemente "${prod.description}"?`, 'Confirmar Eliminación', { confirmLabel: 'Eliminar', isDanger: true });
+                if (ok && onDeleteProduct) {
+                  await onDeleteProduct(prod.id);
+                  showAlert('🗑️ Producto eliminado del sistema.', 'Producto Eliminado', 'info');
+                }
+              }}
+              className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 transition-colors ${
+                contextMenu.product.stock_actual > 0 
+                  ? 'opacity-40 cursor-not-allowed text-slate-400' 
+                  : 'hover:bg-rose-50 text-rose-600 hover:text-rose-700'
+              }`}
+              title={contextMenu.product.stock_actual > 0 ? "Solo se puede eliminar con existencia 0" : "Eliminar producto"}
+            >
+              <Minus className="w-3.5 h-3.5 text-rose-600 flex-shrink-0" />
+              <span>Eliminar Producto</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* QUICK IMAGE MANAGER MODAL */}
+      {imageManagerProduct && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 font-sans">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
+                  <ImageIcon className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 text-sm">Gestionar Foto del Producto</h3>
+                  <p className="text-xs text-slate-500 font-mono">{imageManagerProduct.barcode} • {imageManagerProduct.description}</p>
+                </div>
+              </div>
+              <button onClick={() => setImageManagerProduct(null)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">URL Directa de Imagen (HTTPS)</label>
+                <input
+                  type="text"
+                  placeholder="https://ejemplo.com/imagen.jpg"
+                  value={imageManagerUrlInput}
+                  onChange={(e) => setImageManagerUrlInput(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-mono focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">o Subir Archivo Local (JPG, PNG)</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file && imageManagerProduct) {
+                      const reader = new FileReader();
+                      reader.onload = async () => {
+                        const base64 = reader.result as string;
+                        const updated = { ...imageManagerProduct, imagen_url: base64 };
+                        if (onUpdateProduct) await onUpdateProduct(updated);
+                        setImageManagerProduct(null);
+                        showAlert('✅ Imagen subida y asociada exitosamente.', 'Imagen Guardada', 'info');
+                      };
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                  className="w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => handleGenerateAiImageForProduct(imageManagerProduct)}
+                disabled={isGeneratingAiImage}
+                className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-bold rounded-xl flex items-center gap-1 border border-amber-200"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>{isGeneratingAiImage ? 'Generando...' : 'Generar con IA'}</span>
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setImageManagerProduct(null)}
+                  className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 text-xs font-bold rounded-xl"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (imageManagerProduct) {
+                      const updated = { ...imageManagerProduct, imagen_url: imageManagerUrlInput.trim() };
+                      if (onUpdateProduct) await onUpdateProduct(updated);
+                      setImageManagerProduct(null);
+                      showAlert('✅ Imagen actualizada con éxito.', 'Imagen Guardada', 'info');
+                    }
+                  }}
+                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-sm"
+                >
+                  Guardar Imagen
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: MODIFICAR FICHA DE PRODUCTO (EXACT DESIGN MATCH) */}
+      {editingProduct && (
+        <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-sans text-slate-800">
+          <div className={`bg-white border border-slate-200 rounded-xl overflow-hidden w-full ${isAuxExpandedEdit ? 'max-w-2xl sm:max-w-3xl' : 'max-w-xl'} shadow-2xl p-6 space-y-4 transition-all duration-300 max-h-[92vh] overflow-y-auto`}>
+            
+            <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                <Edit className="w-4 h-4 text-slate-600 bg-slate-100 rounded-full p-0.5" />
+                MODIFICAR FICHA DE PRODUCTO
+              </h3>
+              <button type="button" onClick={() => setEditingProduct(null)} className="text-slate-400 hover:text-slate-700">✕</button>
+            </div>
+
+            <form onSubmit={handleUpdateProductSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1 font-sans">Clave del Producto <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej. HARINA-PAN-1K"
+                    value={editClave.toUpperCase()}
+                    onChange={(e) => {
+                      const val = e.target.value.toUpperCase();
+                      if (editBarcode === editClave || editBarcode === '') {
+                        setEditBarcode(val);
+                      }
+                      setEditClave(val);
+                    }}
+                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-855 focus:bg-white focus:border-blue-600 focus:outline-none uppercase font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1 font-sans">Código de Barras</label>
+                  <input
+                    type="text"
+                    placeholder="Vacío = usar Clave"
+                    value={editBarcode}
+                    onChange={(e) => setEditBarcode(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-blue-600 focus:outline-none font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1 font-sans">Categoría</label>
+                  <div className="flex gap-2">
+                    <select
+                      value={editCat}
+                      onChange={(e) => setEditCat(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-blue-600 focus:outline-none font-bold"
+                    >
+                      {allCategories.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setShowQuickAddCatModal(true)}
+                      className="bg-red-800 hover:bg-red-900 text-white px-3 py-2.5 rounded text-xs font-bold font-mono transition-all flex items-center justify-center shadow-sm"
+                      title="Agregar nueva categoría"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1 font-sans">Impuesto</label>
+                  <div className="flex items-center gap-2 bg-slate-50 border border-slate-350 rounded p-2 text-xs select-none h-[38px]">
+                    <label className="flex items-center gap-1.5 cursor-pointer font-sans font-bold text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={editTaxActive}
+                        onChange={(e) => setEditTaxActive(e.target.checked)}
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-4 h-4"
+                      />
+                      <span>Si</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="IVA"
+                      disabled={!editTaxActive}
+                      value={editTaxName}
+                      onChange={(e) => setEditTaxName(e.target.value.toUpperCase())}
+                      className="w-full bg-white border border-slate-300 rounded p-1 text-[11px] font-sans font-bold text-slate-800 uppercase disabled:opacity-40 disabled:bg-slate-100"
+                    />
+                    <span className="font-bold text-slate-500 font-sans">%</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      disabled={!editTaxActive}
+                      value={editTaxPct}
+                      onChange={(e) => setEditTaxPct(e.target.value)}
+                      className="w-12 text-center bg-white border border-slate-300 rounded p-1 font-bold font-mono text-[11px] text-slate-855 disabled:opacity-40 disabled:bg-slate-100"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-500 block mb-1 font-sans">Descripción del Artículo <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Descripción del artículo..."
+                  value={editDesc.toUpperCase()}
+                  onChange={(e) => setEditDesc(e.target.value.toUpperCase())}
+                  className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-855 focus:bg-white focus:border-blue-600 focus:outline-none font-sans font-bold uppercase"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1 font-sans">Forma de Venta</label>
+                  <select
+                    value={editAGranel ? 'granel' : 'unidad'}
+                    onChange={(e) => setEditAGranel(e.target.value === 'granel')}
+                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-blue-600 focus:outline-none font-sans font-semibold"
+                  >
+                    <option value="unidad">Venta por Unidad / Entero</option>
+                    <option value="granel">Venta a Granel (Peso / Kg / Fraccional)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1 font-sans">Fecha de Vencimiento (Opcional)</label>
+                  <input
+                    type="date"
+                    value={editVencimiento}
+                    onChange={(e) => setEditVencimiento(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-350 rounded p-2 text-xs text-slate-800 focus:bg-white focus:border-blue-600 focus:outline-none font-sans font-medium"
+                  />
+                </div>
+              </div>
+
+              {/* AUXILIAR DE CÁLCULO DE PRECIOS */}
+              <AuxiliarCalculoPrecios
+                initialCost={editCost}
+                initialDetail={editDetail}
+                initialMayor={editMayor}
+                tasaBCV={tasaDia}
+                tasaFallback={tasaDia}
+                taxActive={editTaxActive}
+                taxPct={parseFloat(editTaxPct) || 16}
+                onToggleExpand={(expanded) => setIsAuxExpandedEdit(expanded)}
+                onApplyPrices={({ cost, detail, mayor }) => {
+                  setEditCost(cost);
+                  setEditDetail(detail);
+                  setEditMayor(mayor);
+                }}
+              />
+
+              <div className="grid grid-cols-3 gap-3 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Costo ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    value={editCost}
+                    onChange={(e) => setEditCost(e.target.value)}
+                    className="w-full bg-white border border-slate-300 rounded p-1.5 text-xs font-mono font-bold focus:ring-1 focus:ring-blue-600 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Detalle ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    value={editDetail}
+                    onChange={(e) => setEditDetail(e.target.value)}
+                    className="w-full bg-white border border-slate-300 rounded p-1.5 text-xs font-mono font-bold focus:ring-1 focus:ring-blue-600 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Mayor ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    value={editMayor}
+                    onChange={(e) => setEditMayor(e.target.value)}
+                    className="w-full bg-white border border-slate-300 rounded p-1.5 text-xs font-mono font-bold focus:ring-1 focus:ring-blue-600 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1 font-sans">Stock Mínimo (Alerta)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={editMinStock}
+                    onChange={(e) => setEditMinStock(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-blue-600 focus:outline-none font-mono text-center font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1 font-sans">Cant. Mayorista</label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={editWholesaleQty}
+                    onChange={(e) => setEditWholesaleQty(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-blue-600 focus:outline-none font-mono text-center font-bold"
+                  />
+                </div>
+              </div>
+
+              {/* SECCIÓN DE IMAGEN DEL PRODUCTO (MANUAL / IA) */}
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700 uppercase font-sans flex items-center gap-1.5">
+                    <ImageIcon className="w-3.5 h-3.5 text-blue-600" />
+                    <span>IMAGEN DEL PRODUCTO</span>
+                  </label>
+                  {editImageUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setEditImageUrl('')}
+                      className="text-[10px] text-red-600 hover:text-red-800 font-bold underline"
+                    >
+                      Quitar Imagen
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-3">
+                  {/* Vista Previa */}
+                  <div className="w-16 h-16 rounded-lg bg-white border border-slate-300 flex items-center justify-center flex-shrink-0 overflow-hidden relative shadow-inner">
+                    <div className="text-center p-1">
+                      <ImageIcon className="w-5 h-5 text-slate-300 mx-auto" />
+                      <span className="text-[8px] text-slate-400 font-bold block">Sin Foto</span>
+                    </div>
+                    {editImageUrl && (
+                      <img 
+                        key={`edit-prod-img-${editImageUrl}`}
+                        src={editImageUrl} 
+                        alt="Preview" 
+                        className="w-full h-full object-cover absolute inset-0 bg-white" 
+                        onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
+                        onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
+                      />
+                    )}
+                  </div>
+
+                  <div className="flex-1 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder="Pegar URL de imagen (https://...)"
+                        value={editImageUrl}
+                        onChange={(e) => setEditImageUrl(e.target.value)}
+                        className="w-full bg-white border border-slate-300 rounded p-1.5 text-xs text-slate-800 font-mono focus:border-blue-600 focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <label className="bg-slate-200 hover:bg-slate-300 text-slate-800 px-3 py-1.5 rounded text-xs font-bold font-sans cursor-pointer transition-all flex items-center gap-1">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Subir desde PC</span>
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          className="hidden" 
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onload = () => {
+                                setEditImageUrl(reader.result as string);
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                      </label>
+
+                      {editingProduct && (
+                        <button
+                          type="button"
+                          onClick={() => handleGenerateAiImageForProduct(editingProduct)}
+                          disabled={isGeneratingAiImage}
+                          className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-3 py-1.5 rounded text-xs font-bold font-sans transition-all flex items-center gap-1 shadow-sm"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                          <span>{isGeneratingAiImage ? 'Generando...' : 'Generar con IA'}</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setEditingProduct(null)}
+                  className="px-4 py-2.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold font-sans"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-6 py-2.5 rounded bg-slate-800 hover:bg-slate-900 text-white text-xs font-black font-sans uppercase shadow-md"
+                >
+                  GUARDAR CAMBIOS
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* QUICK ADD CATEGORY MODAL */}
+      {showQuickAddCatModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4 font-sans">
+          <div className="bg-white rounded-2xl max-w-xs w-full p-5 shadow-2xl space-y-3">
+            <h4 className="font-bold text-slate-800 text-xs uppercase">Agregar Nueva Categoría</h4>
+            <input
+              type="text"
+              placeholder="Nombre de la Categoría..."
+              value={newCatInputName}
+              onChange={(e) => setNewCatInputName(e.target.value.toUpperCase())}
+              className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-bold uppercase"
+            />
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowQuickAddCatModal(false)}
+                className="px-3 py-1.5 text-xs text-slate-500 font-bold"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (newCatInputName.trim()) {
+                    const cat = newCatInputName.trim().toUpperCase();
+                    setCustomCategories(prev => [...prev, cat]);
+                    setEditCat(cat);
+                    setNewCatInputName('');
+                    setShowQuickAddCatModal(false);
+                  }
+                }}
+                className="px-4 py-1.5 bg-blue-600 text-white text-xs font-bold rounded-xl"
+              >
+                Agregar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

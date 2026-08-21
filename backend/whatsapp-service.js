@@ -807,7 +807,7 @@ export async function sendCierreReport(imageBase64, textSummary) {
   }
 }
 
-// Send Direct WhatsApp Message to a specific Phone Number
+// Send Direct WhatsApp Message to a specific Phone Number or Group JID
 export async function sendDirectWhatsAppMessage(phone, textMessage, imageBase64 = null) {
   const config = await getWhatsAppConfig();
   if (!config.enabled) {
@@ -815,19 +815,25 @@ export async function sendDirectWhatsAppMessage(phone, textMessage, imageBase64 
   }
 
   if (!phone || typeof phone !== 'string' || phone.trim() === '') {
-    throw new Error('Número de teléfono no válido.');
+    throw new Error('Número de teléfono o ID de grupo no válido.');
   }
 
-  let cleanNum = phone.replace(/[^0-9]/g, '');
-  if (cleanNum.startsWith('0')) {
-    cleanNum = '58' + cleanNum.substring(1);
-  } else if (cleanNum.length === 10 && (cleanNum.startsWith('412') || cleanNum.startsWith('414') || cleanNum.startsWith('424') || cleanNum.startsWith('416') || cleanNum.startsWith('426'))) {
-    cleanNum = '58' + cleanNum;
-  } else if (!cleanNum.startsWith('58') && cleanNum.length === 10) {
-    cleanNum = '58' + cleanNum;
-  }
+  let target = phone.trim();
 
-  const target = `${cleanNum}@c.us`;
+  // Si ya viene con sufijo de WhatsApp (@g.us para grupos, @c.us o @s.whatsapp.net para contactos)
+  if (target.endsWith('@g.us') || target.endsWith('@c.us') || target.endsWith('@s.whatsapp.net')) {
+    // Conservar el JID original intacto
+  } else {
+    let cleanNum = target.replace(/[^0-9]/g, '');
+    if (cleanNum.startsWith('0')) {
+      cleanNum = '58' + cleanNum.substring(1);
+    } else if (cleanNum.length === 10 && (cleanNum.startsWith('412') || cleanNum.startsWith('414') || cleanNum.startsWith('424') || cleanNum.startsWith('416') || cleanNum.startsWith('426'))) {
+      cleanNum = '58' + cleanNum;
+    } else if (!cleanNum.startsWith('58') && cleanNum.length === 10) {
+      cleanNum = '58' + cleanNum;
+    }
+    target = `${cleanNum}@c.us`;
+  }
 
   console.log(`[WhatsApp Direct] Intentando enviar mensaje a ${target}...`);
 
@@ -836,7 +842,7 @@ export async function sendDirectWhatsAppMessage(phone, textMessage, imageBase64 
     console.log(`[WhatsApp Direct Mock] Destino: ${target}`);
     console.log(`[WhatsApp Direct Mock] Mensaje:\n${textMessage}`);
     console.log('[WhatsApp Direct Mock] -------------------------------');
-    return { success: true, simulated: true, targetPhone: cleanNum };
+    return { success: true, simulated: true, targetPhone: target };
   }
 
   if (connectionStatus !== 'CONNECTED' || !client) {
@@ -857,10 +863,50 @@ export async function sendDirectWhatsAppMessage(phone, textMessage, imageBase64 
       await client.sendMessage(target, textMessage);
     }
     console.log(`[WhatsApp Direct] Mensaje enviado con éxito a ${target}`);
-    return { success: true, targetPhone: cleanNum };
+    return { success: true, targetPhone: target };
   } catch (sendErr) {
     console.error(`[WhatsApp Direct] Error al enviar a ${target}:`, sendErr.message);
     throw sendErr;
   }
+}
+
+export async function sendDocumentVencimientoWhatsAppReport(docs) {
+  const config = await getWhatsAppConfig();
+  if (!config || !config.enabled || !config.groupId) {
+    return { ok: false, error: 'Bot de WhatsApp no configurado o deshabilitado en F10 Configuración.' };
+  }
+
+  const hoyStr = new Date().toISOString().substring(0, 10);
+  const en30dias = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10);
+
+  const vencidos = docs.filter(d => !d.es_historico && d.fecha_vencimiento && d.fecha_vencimiento < hoyStr);
+  const porVencer = docs.filter(d => !d.es_historico && d.fecha_vencimiento && d.fecha_vencimiento >= hoyStr && d.fecha_vencimiento <= en30dias);
+
+  if (vencidos.length === 0 && porVencer.length === 0) {
+    return { ok: true, message: 'No hay documentos vencidos ni por vencer.' };
+  }
+
+  let msg = `⚠️ *ALERTA DE CUMPLIMIENTO LEGAL & FISCAL - WINTERPOS*\n`;
+  msg += `📅 *Fecha:* ${new Date().toLocaleDateString('es-VE')}\n\n`;
+
+  if (vencidos.length > 0) {
+    msg += `❌ *DOCUMENTOS VENCIDOS (${vencidos.length}):*\n`;
+    vencidos.forEach(d => {
+      msg += `• *${d.titulo}* (${d.categoria}): Venció el ${d.fecha_vencimiento}\n`;
+    });
+    msg += `\n`;
+  }
+
+  if (porVencer.length > 0) {
+    msg += `⏳ *DOCUMENTOS POR VENCER (${porVencer.length}):*\n`;
+    porVencer.forEach(d => {
+      msg += `• *${d.titulo}* (${d.categoria}): Vence el ${d.fecha_vencimiento}\n`;
+    });
+    msg += `\n`;
+  }
+
+  msg += `💡 _Favor iniciar los trámites de renovación para evitar sanciones de ley._`;
+
+  return await sendDirectWhatsAppMessage(config.groupId, msg);
 }
 

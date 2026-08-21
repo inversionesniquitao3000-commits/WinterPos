@@ -148,7 +148,32 @@ export interface CompanyConfig {
   tasa_oficial_bcv?: number;
   logo_url?: string;
   moneda_ticket_default?: 'USD' | 'VES';
+  estadoFiscal?: 'ACTIVA' | 'DESACTIVADA' | 'MODO_PRUEBA' | 'IMPRENTA_DIGITAL' | 'PAFE_ELECTRONICA';
+  imprentaRif?: string;
+  imprentaRazonSocial?: string;
+  providenciaSeniat?: string;
+  rangoControlDesde?: string;
+  rangoControlHasta?: string;
 }
+
+export interface CompanyDocument {
+  id: number | string;
+  categoria: 'SENIAT' | 'MERCANTIL' | 'MUNICIPAL' | 'PARAFISCAL' | 'OTROS';
+  titulo: string;
+  descripcion?: string;
+  nombre_archivo: string;
+  ruta_archivo: string;
+  mime_type?: string;
+  tamano_bytes?: number;
+  fecha_emision?: string | null;
+  fecha_vencimiento?: string | null;
+  estatus?: 'Vigente' | 'Vencido' | 'En Tramite' | 'Historico';
+  es_historico?: boolean;
+  requisito_key?: string;
+  created_by?: string;
+  created_at?: string;
+}
+
 
 export interface Sale {
   id?: number;

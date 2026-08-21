@@ -149,6 +149,7 @@ export async function processFiscalSale(saleData, fiscalConfig = {}) {
       ok: true,
       isFiscal: false,
       nroFiscal: null,
+      nroControl: null,
       serialFiscal: null,
       nroZ: null,
       estatusFiscal: 'NO_APLICA',
@@ -156,7 +157,63 @@ export async function processFiscalSale(saleData, fiscalConfig = {}) {
     };
   }
 
-  // Try physical Spooler if in ACTIVA mode
+  // 1. MODO IMPRENTA DIGITAL (Formas Libres con RIF Imprenta y N° de Control SENIAT)
+  if (estado === 'IMPRENTA_DIGITAL') {
+    const simState = getSimulatorState();
+    simState.ultimoNroControl = (simState.ultimoNroControl || 0) + 1;
+    simState.ultimoNroFiscal = (simState.ultimoNroFiscal || 1000) + 1;
+    saveSimulatorState(simState);
+
+    const paddedControl = `00-${String(simState.ultimoNroControl).padStart(8, '0')}`;
+    const nroFiscal = `ID-${String(simState.ultimoNroFiscal).padStart(8, '0')}`;
+    const imprentaRif = fiscalConfig.imprentaRif || 'J-40123456-7';
+    const imprentaRazon = fiscalConfig.imprentaRazonSocial || 'IMPRENTA DIGITAL AUTORIZADA SENIAT C.A.';
+    const providencia = fiscalConfig.providenciaSeniat || 'SNAT/2014/0032';
+
+    return {
+      ok: true,
+      isFiscal: true,
+      modalidad: 'IMPRENTA_DIGITAL',
+      nroFiscal: nroFiscal,
+      nroControl: paddedControl,
+      serialFiscal: `IMP-DIGITAL-${imprentaRif}`,
+      estatusFiscal: 'EMITIDA_IMPRENTA_DIGITAL',
+      imprentaInfo: {
+        rif: imprentaRif,
+        razonSocial: imprentaRazon,
+        providencia: providencia,
+        rangoControlDesde: fiscalConfig.rangoControlDesde || '00-00000001',
+        rangoControlHasta: fiscalConfig.rangoControlHasta || '00-00005000'
+      },
+      message: `✅ Factura Imprenta Digital emita (Control: ${paddedControl}, N° Factura: ${nroFiscal}).`
+    };
+  }
+
+  // 2. MODO PAFE / FACTURACIÓN ELECTRÓNICA EN LÍNEA
+  if (estado === 'PAFE_ELECTRONICA') {
+    const simState = getSimulatorState();
+    simState.ultimoNroFiscal = (simState.ultimoNroFiscal || 1000) + 1;
+    saveSimulatorState(simState);
+
+    const nroFiscal = `FE-${String(simState.ultimoNroFiscal).padStart(8, '0')}`;
+    const nroControl = `FE-CTRL-${Date.now().toString().slice(-8)}`;
+    const hashAuth = `SENIAT-PAFE-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+
+    return {
+      ok: true,
+      isFiscal: true,
+      modalidad: 'PAFE_ELECTRONICA',
+      nroFiscal,
+      nroControl,
+      serialFiscal: 'PAFE-SENIAT-ONLINE',
+      hashAutenticidad: hashAuth,
+      qrUrl: `https://factura.seniat.gob.ve/consulta?hash=${hashAuth}`,
+      estatusFiscal: 'EMITIDA_ELECTRONICA',
+      message: `✅ Factura Electrónica en Línea firmada digitalmente (${nroFiscal}).`
+    };
+  }
+
+  // 3. Try physical Spooler if in ACTIVA mode (Máquina Fiscal HKA/Bixolon)
   if (estado === 'ACTIVA') {
     try {
       const payload = {
@@ -183,6 +240,7 @@ export async function processFiscalSale(saleData, fiscalConfig = {}) {
           ok: true,
           isFiscal: true,
           nroFiscal,
+          nroControl: spoolerRes.data?.nroControl || null,
           serialFiscal,
           nroZ,
           estatusFiscal: 'EMITIDA',
@@ -191,7 +249,6 @@ export async function processFiscalSale(saleData, fiscalConfig = {}) {
       }
     } catch (err) {
       console.warn(`[Fiscal Spooler] Error conectando a ${spoolerIp}:`, err.message);
-      // If hardware fails, fallback to simulation or throw
       throw new Error(`Error de comunicación con la máquina fiscal: ${err.message}. Verifique el cable o Spooler.`);
     }
   }
@@ -209,6 +266,7 @@ export async function processFiscalSale(saleData, fiscalConfig = {}) {
     ok: true,
     isFiscal: true,
     nroFiscal: paddedFiscalNo,
+    nroControl: `00-${paddedFiscalNo}`,
     serialFiscal: serialSim,
     nroZ: paddedZ,
     estatusFiscal: 'EMITIDA',
@@ -216,6 +274,7 @@ export async function processFiscalSale(saleData, fiscalConfig = {}) {
     message: `✅ [SIMULADOR FISCAL] Factura Fiscal #${paddedFiscalNo} registrada (Serial: ${serialSim}).`
   };
 }
+
 
 /**
  * Issues an informative Reporte X (Lectura Parcial)

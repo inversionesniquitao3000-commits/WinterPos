@@ -41,6 +41,10 @@
   background: linear-gradient(180deg, #581c87 0%, #7e22ce 100%);
 }
 
+.tab-grad-documentos {
+  background: linear-gradient(180deg, #1e3a8a 0%, #2563eb 100%);
+}
+
 /* Custom terminal animations and scanline styling */
 .scanline {
   background: linear-gradient(

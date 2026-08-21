@@ -28,6 +28,7 @@ import LicenciaModal from './components/LicenciaModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import { MasterPassModal } from './components/MasterPassModal';
 import { InversionesModulo } from './components/InversionesModulo';
+import { RepositorioDocumental } from './components/RepositorioDocumental';
 import MobileApp from './mobile/MobileApp';
 import ManualAccesoMovilModal from './components/ManualAccesoMovilModal';
 import { 
@@ -246,8 +247,8 @@ export default function App() {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [sessionNotice, setSessionNotice] = useState<string>('');
 
-  // Active Pestaña Tab F1-F10 + Inversiones + Proveedores
-  const [activeTab, setActiveTab] = useState<'caja' | 'inventario' | 'ventas' | 'clientes' | 'proveedores' | 'tasa' | 'config' | 'inversiones'>('caja');
+  // Active Pestaña Tab F1-F10 + Inversiones + Proveedores + Documentos Legales
+  const [activeTab, setActiveTab] = useState<'caja' | 'inventario' | 'ventas' | 'clientes' | 'proveedores' | 'tasa' | 'config' | 'inversiones' | 'documentos'>('caja');
   const [users, setUsers] = useState<User[]>(mockUsers);
   // Inversiones module: Master Pass modal guard + persistent sub-tab
   const [showMasterPassModal, setShowMasterPassModal] = useState(false);
@@ -396,7 +397,8 @@ export default function App() {
   }, []);
 
   const getApiUrl = (path: string) => {
-    return `${getApiBaseUrl()}${path}`;
+    const cleanPath = path.startsWith('/api/') ? path.substring(4) : path;
+    return `${getApiBaseUrl()}${cleanPath}`;
   };
 
   const postApiData = async (path: string, body: any) => {
@@ -1094,6 +1096,18 @@ export default function App() {
       } else if (e.key === 'F5' && hasModulePermission('proveedores', 'ver')) {
         e.preventDefault();
         setActiveTab('proveedores');
+      } else if (e.key === 'F6') {
+        e.preventDefault();
+        if (currentUser && (currentUser.rol?.toLowerCase() === 'administrador' || currentUser.rol?.toLowerCase() === 'admin')) {
+          if (inversionesUnlocked) {
+            setActiveTab('inversiones');
+          } else {
+            setShowMasterPassModal(true);
+          }
+        }
+      } else if (e.key === 'F7' && hasModulePermission('documentos', 'ver')) {
+        e.preventDefault();
+        setActiveTab('documentos');
       } else if (e.key === 'F9' && hasModulePermission('tasa', 'ver')) {
         e.preventDefault();
         setActiveTab('tasa');
@@ -1104,7 +1118,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handleGlobalKeys);
     return () => window.removeEventListener('keydown', handleGlobalKeys);
-  }, [currentUser]);
+  }, [currentUser, inversionesUnlocked]);
 
   // Escape key listener to close modals
   useEffect(() => {
@@ -2637,6 +2651,44 @@ export default function App() {
           </button>
         )}
 
+        {/* F6 Inversiones & Accionistas */}
+        {currentUser && (currentUser.rol?.toLowerCase() === 'administrador' || currentUser.rol?.toLowerCase() === 'admin') && (
+          <button
+            onClick={() => {
+              if (inversionesUnlocked) {
+                setActiveTab('inversiones');
+              } else {
+                setShowMasterPassModal(true);
+              }
+            }}
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${
+              activeTab === 'inversiones'
+                ? 'tab-grad-inversiones text-white shadow-md ring-1 ring-white/20'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+            }`}
+            title="Módulo de Control de Inversiones y Accionistas [F6] (Solo Administrador)"
+          >
+            <Briefcase className="w-5 h-5 flex-shrink-0" />
+            <span>F6 Inversiones</span>
+          </button>
+        )}
+
+        {/* F7 Documentos Legales y Fiscales */}
+        {hasModulePermission('documentos', 'ver') && (
+          <button
+            onClick={() => setActiveTab('documentos')}
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${
+              activeTab === 'documentos'
+                ? 'tab-grad-documentos text-white shadow-md ring-1 ring-white/20'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+            }`}
+            title="Bóveda de Documentos Legales y Fiscales de la Empresa [F7]"
+          >
+            <ShieldCheck className="w-5 h-5 flex-shrink-0 text-blue-400" />
+            <span>F7 Docs. Legales</span>
+          </button>
+        )}
+
         {hasModulePermission('tasa', 'ver') && (
           <button
             onClick={() => setActiveTab('tasa')}
@@ -2665,49 +2717,25 @@ export default function App() {
           </button>
         )}
 
-        {/* Inversiones & Accionistas - Mismo esquema visual unificado */}
-        {currentUser && (currentUser.rol?.toLowerCase() === 'administrador' || currentUser.rol?.toLowerCase() === 'admin') && (
-          <button
-            onClick={() => {
-              if (inversionesUnlocked) {
-                setActiveTab('inversiones');
-              } else {
-                setShowMasterPassModal(true);
-              }
-            }}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${
-              activeTab === 'inversiones'
-                ? 'tab-grad-inversiones text-white shadow-md ring-1 ring-white/20'
-                : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-            }`}
-            title="Módulo de Control de Inversiones y Accionistas (Solo Administrador)"
-          >
-            <Briefcase className="w-5 h-5 flex-shrink-0" />
-            <span>Inversiones</span>
-          </button>
-        )}
-
         {/* Mobile View & QR Connector Buttons (Solo Administrador o Permiso Habilitado) */}
         {hasModulePermission('movil', 'ver') && (
-          <>
+          <div className="flex items-center gap-1.5 ml-auto">
             <button
               onClick={() => setIsMobileMode(true)}
-              className="flex items-center gap-1.5 px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-black font-sans rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-md transition-all active:scale-95 ml-auto cursor-pointer"
-              title="Ver versión de Control Gerencial Móvil (Optimizado para Smartphones y Tablets)"
+              className="p-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-sm transition-all active:scale-95 cursor-pointer"
+              title="Vista Móvil (Optimizado para Smartphones y Tablets)"
             >
               <Smartphone className="w-4 h-4" />
-              <span>Vista Móvil</span>
             </button>
 
             <button
               onClick={() => setShowManualAccesoModal(true)}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold font-sans rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 shadow-sm transition-all active:scale-95 cursor-pointer"
-              title="Ver Código QR e instrucciones para conectar tu teléfono"
+              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 shadow-sm transition-all active:scale-95 cursor-pointer"
+              title="Conectar Celular (Código QR e instrucciones de acceso)"
             >
-              <QrCode className="w-4 h-4 text-emerald-400" />
-              <span>Conectar Celular</span>
+              <QrCode className="w-4 h-4" />
             </button>
-          </>
+          </div>
         )}
       </nav>
 
@@ -2743,6 +2771,9 @@ export default function App() {
               shiftDevolucionesUsd={shiftDevolucionesUsd}
               shiftDevolucionesVes={shiftDevolucionesVes}
               onUpdateProductStock={handleUpdateProductStock}
+              onUpdateProduct={handleUpdateProduct}
+              onDeleteProduct={handleDeleteProduct}
+              hasPermission={hasModulePermission}
               onRegisterAbono={handleRegisterAbono}
               abonos={abonos}
               getApiUrl={getApiUrl}
@@ -2965,6 +2996,17 @@ export default function App() {
                 onSubTabChange={setInversionesSubTab}
                 tasaDia={tasaDia}
                 companyConfig={companyConfig}
+              />
+            </ErrorBoundary>
+          )}
+
+          {/* TAB: REPOSITORIO DE DOCUMENTOS LEGALES Y FISCALES */}
+          {activeTab === 'documentos' && currentUser && (
+            <ErrorBoundary moduleName="Bóveda Documental Legal y Fiscal">
+              <RepositorioDocumental
+                currentUser={currentUser}
+                getApiUrl={getApiUrl}
+                hasPermission={hasModulePermission}
               />
             </ErrorBoundary>
           )}

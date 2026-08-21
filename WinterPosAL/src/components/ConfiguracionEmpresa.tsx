@@ -26,6 +26,8 @@ const MODULOS_PERMISOS = [
   { id: 'ventas', label: 'F3 Historial Ventas' },
   { id: 'clientes', label: 'F4 Clientes' },
   { id: 'proveedores', label: 'F5 Proveedores & Compras' },
+  { id: 'inversiones', label: '💼 F6 Inversiones & Socios' },
+  { id: 'documentos', label: '🛡️ F7 Documentos Legales' },
   { id: 'tasa', label: 'F9 Tasa de Cambio' },
   { id: 'config', label: 'F10 Configuración' },
   { id: 'movil', label: '📱 Acceso y Control Móvil' }
@@ -74,6 +76,20 @@ const MODULE_GUIDES_MAP: Record<string, { title: string; ver: string; crear: str
     editar: 'Modificar datos, abonar/pagar a cuentas por pagar y convertir cotizaciones a compra',
     eliminar: 'Eliminar proveedores (sin saldo deudor), cancelar cotizaciones'
   },
+  inversiones: {
+    title: '💼 F6 INVERSIONES & SOCIOS',
+    ver: 'Ver módulo de capital, socios, aportes, dividendos y liquidez',
+    crear: 'Registrar nuevo socio, aportar capital o inyectar fondos',
+    editar: 'Modificar datos de accionistas y ajustar retiros/dividendos',
+    eliminar: 'Retirar o liquidar participaciones de socios'
+  },
+  documentos: {
+    title: '🛡️ F7 DOCUMENTOS LEGALES',
+    ver: 'Acceso a consultar la bóveda de documentos legales y fiscales',
+    crear: 'Cargar nuevos documentos legales (RIF, Registro, Licencia, Solvencias)',
+    editar: 'Modificar títulos, fechas de emisión, vencimiento y categorías de documentos',
+    eliminar: 'Eliminar documentos del repositorio de la empresa'
+  },
   tasa: {
     title: 'F9 TASA DE CAMBIO',
     ver: 'Ver tasa activa y tabla de historial',
@@ -89,13 +105,14 @@ const MODULE_GUIDES_MAP: Record<string, { title: string; ver: string; crear: str
     eliminar: 'Desconectar sesiones activas en red y borrar perfiles/usuarios'
   },
   movil: {
-    title: 'ACCESO Y CONTROL MÓVIL',
+    title: '📱 ACCESO Y CONTROL MÓVIL',
     ver: 'Ver botones Vista Móvil y Conectar Celular en el encabezado',
     crear: 'Generar códigos QR de sincronización para smartphones',
     editar: 'Permitir comandos gerenciales desde el teléfono',
     eliminar: 'Desconectar sesiones móviles sincronizadas'
   }
 };
+
 
 const DEFAULT_WA_TEMPLATE = `📊 *REPORTE DE ARQUEO Y CIERRE DE CAJA*
 
@@ -381,6 +398,11 @@ export default function ConfiguracionEmpresa({
     imprimirCopiaFiscal: boolean;
     estadoFiscal: string;
     tipoDocumentoDefault?: 'FACTURA_FISCAL' | 'NOTA_ENTREGA';
+    imprentaRif?: string;
+    imprentaRazonSocial?: string;
+    providenciaSeniat?: string;
+    rangoControlDesde?: string;
+    rangoControlHasta?: string;
   }>(() => {
     const saved = localStorage.getItem('pos_fiscal_printer_config');
     const defaultDoc = (localStorage.getItem('pos_default_tipo_documento') as any) || 'FACTURA_FISCAL';
@@ -395,7 +417,12 @@ export default function ConfiguracionEmpresa({
       exigirRifCliente: true,
       imprimirCopiaFiscal: false,
       estadoFiscal: 'ACTIVA',
-      tipoDocumentoDefault: defaultDoc
+      tipoDocumentoDefault: defaultDoc,
+      imprentaRif: '',
+      imprentaRazonSocial: '',
+      providenciaSeniat: '',
+      rangoControlDesde: '00-00000001',
+      rangoControlHasta: '00-00005000'
     };
   });
 
@@ -778,23 +805,37 @@ export default function ConfiguracionEmpresa({
     showToast('Políticas de multisesión actualizadas correctamente.');
   };
 
+  const getFullAdminPermissions = () => {
+    const perms: any = {};
+    MODULOS_PERMISOS.forEach(mod => {
+      perms[mod.id] = { ver: true, crear: true, editar: true, eliminar: true, admin: true };
+    });
+    perms.inventario = { ...perms.inventario, ver_costos: true };
+    perms.caja = { ...perms.caja, emitir_no_fiscal: true };
+    return perms;
+  };
+
   // User Handlers
   const handleOpenNewUser = () => {
     setEditingUser(null);
+    const nonAdminRoles = roleList.filter(r => r.nombre?.trim().toUpperCase() !== 'ADMINISTRADOR');
+    const firstRole = nonAdminRoles.length > 0 ? nonAdminRoles[0] : null;
+    const initialRol = firstRole ? firstRole.nombre.toUpperCase() : '';
+    const initialPerms = firstRole?.permisos ? { ...firstRole.permisos } : getEmptyPerms();
+
     setUserForm({
       usuario: '',
       nombre: '',
-      rol: 'ADMINISTRADOR',
+      rol: initialRol,
       clave: '',
       estado: 'Activo',
-      permisos: getEmptyPerms()
+      permisos: initialPerms
     });
-    // Default to admin permissions when starting new user form with ADMINISTRADOR role
-    handleApplyRolePermissions('ADMINISTRADOR');
     setShowUserModal(true);
   };
 
   const handleOpenEditUser = (u: User) => {
+    const isUserAdmin = u.usuario?.toLowerCase() === 'admin' || u.rol?.toUpperCase() === 'ADMINISTRADOR';
     setEditingUser(u);
     setUserForm({
       usuario: u.usuario,
@@ -802,7 +843,7 @@ export default function ConfiguracionEmpresa({
       rol: u.rol?.toUpperCase() || 'ADMINISTRADOR',
       clave: u.clave || '',
       estado: u.estado,
-      permisos: u.permisos || getEmptyPerms()
+      permisos: isUserAdmin ? getFullAdminPermissions() : (u.permisos || getEmptyPerms())
     });
     setShowUserModal(true);
   };
@@ -815,13 +856,14 @@ export default function ConfiguracionEmpresa({
     }
 
     try {
+      const isUserAdmin = userForm.usuario.toLowerCase().trim() === 'admin' || userForm.rol?.toUpperCase() === 'ADMINISTRADOR';
       const body = {
         usuario: userForm.usuario.toLowerCase().trim(),
         nombre: userForm.nombre.trim(),
         rol: userForm.rol?.toUpperCase(),
         clave: userForm.clave,
         estado: userForm.estado,
-        permisos: userForm.permisos
+        permisos: isUserAdmin ? getFullAdminPermissions() : userForm.permisos
       };
 
       const url = editingUser ? getApiUrl(`/users/${editingUser.id}`) : getApiUrl('/users');
@@ -849,6 +891,11 @@ export default function ConfiguracionEmpresa({
   };
 
   const handleDeleteUser = async (id: number) => {
+    const targetUser = userList.find(u => u.id === id);
+    if (targetUser && (targetUser.usuario?.toLowerCase() === 'admin' || targetUser.rol?.toLowerCase() === 'administrador')) {
+      showAlert('El usuario principal "admin" es el administrador del sistema y está protegido contra eliminación.', 'Operación Protegida', 'warning');
+      return;
+    }
     if (id === currentUser.id) {
       showAlert('No puedes eliminar tu propio usuario activo en sesión.', 'Operación No Permitida', 'warning');
       return;
@@ -883,13 +930,18 @@ export default function ConfiguracionEmpresa({
   };
 
   const handleOpenEditRole = (r: Role) => {
+    const isRoleAdmin = r.nombre?.trim().toUpperCase() === 'ADMINISTRADOR';
+    if (isRoleAdmin && currentUser.usuario?.toLowerCase() !== 'admin' && currentUser.rol?.toUpperCase() !== 'ADMINISTRADOR') {
+      showAlert('Sólo el usuario Administrador principal del sistema puede modificar la plantilla del perfil Administrador.', 'Operación Protegida', 'warning');
+      return;
+    }
     setEditingRole({
       ...r,
       nombre: r.nombre?.toUpperCase()
     });
     setRoleForm({
       nombre: r.nombre?.toUpperCase(),
-      permisos: r.permisos || getEmptyPerms()
+      permisos: isRoleAdmin ? getFullAdminPermissions() : (r.permisos || getEmptyPerms())
     });
     setShowRoleModal(true);
   };
@@ -901,10 +953,21 @@ export default function ConfiguracionEmpresa({
       return;
     }
 
+    if (!editingRole && roleForm.nombre.trim().toUpperCase() === 'ADMINISTRADOR') {
+      setErrorMsg('El perfil "ADMINISTRADOR" es único del sistema. No se puede registrar un perfil duplicado con este nombre.');
+      return;
+    }
+
+    const isRoleAdmin = roleForm.nombre.trim().toUpperCase() === 'ADMINISTRADOR';
+    if (isRoleAdmin && currentUser.usuario?.toLowerCase() !== 'admin' && currentUser.rol?.toUpperCase() !== 'ADMINISTRADOR') {
+      setErrorMsg('Sólo el usuario Administrador principal del sistema puede modificar el perfil Administrador.');
+      return;
+    }
+
     try {
       const body = {
         nombre: roleForm.nombre.trim().toUpperCase(),
-        permisos: roleForm.permisos
+        permisos: isRoleAdmin ? getFullAdminPermissions() : roleForm.permisos
       };
 
       const isVirtualAdmin = editingRole && editingRole.id === -1;
@@ -955,24 +1018,11 @@ export default function ConfiguracionEmpresa({
 
   const handleApplyRolePermissions = (roleName: string) => {
     if (roleName.trim().toUpperCase() === 'ADMINISTRADOR') {
-      const adminRole = roleList.find(r => r.nombre.trim().toUpperCase() === 'ADMINISTRADOR');
-      if (adminRole) {
-        setUserForm(prev => ({
-          ...prev,
-          rol: 'ADMINISTRADOR',
-          permisos: { ...adminRole.permisos }
-        }));
-      } else {
-        const fullPerms: any = {};
-        MODULOS_PERMISOS.forEach(m => {
-          fullPerms[m.id] = { ver: true, crear: true, editar: true, eliminar: true, admin: true };
-        });
-        setUserForm(prev => ({
-          ...prev,
-          rol: 'ADMINISTRADOR',
-          permisos: fullPerms
-        }));
-      }
+      setUserForm(prev => ({
+        ...prev,
+        rol: 'ADMINISTRADOR',
+        permisos: getFullAdminPermissions()
+      }));
       return;
     }
 
@@ -984,6 +1034,136 @@ export default function ConfiguracionEmpresa({
         permisos: { ...role.permisos }
       }));
     }
+  };
+
+  const handleSelectAllRoleMatrix = () => {
+    setRoleForm(prev => {
+      const nextPerms: any = { ...prev.permisos };
+      MODULOS_PERMISOS.forEach(mod => {
+        const currentModPerms = nextPerms[mod.id] || {};
+        nextPerms[mod.id] = {
+          ...currentModPerms,
+          ver: true,
+          crear: true,
+          editar: true,
+          eliminar: true,
+          admin: true
+        };
+      });
+      if (!nextPerms.inventario) nextPerms.inventario = {};
+      nextPerms.inventario.ver_costos = true;
+      if (!nextPerms.caja) nextPerms.caja = {};
+      nextPerms.caja.emitir_no_fiscal = true;
+      return { ...prev, permisos: nextPerms };
+    });
+  };
+
+  const handleDeselectAllRoleMatrix = () => {
+    if (roleForm.nombre?.trim().toUpperCase() === 'ADMINISTRADOR') {
+      showAlert('El perfil ADMINISTRADOR cuenta con Control Total permanente sobre todas las funciones del sistema. Sus privilegios no pueden ser reducidos.', 'Perfil Protegido', 'warning');
+      return;
+    }
+    setRoleForm(prev => {
+      const nextPerms: any = { ...prev.permisos };
+      MODULOS_PERMISOS.forEach(mod => {
+        const currentModPerms = nextPerms[mod.id] || {};
+        nextPerms[mod.id] = {
+          ...currentModPerms,
+          ver: false,
+          crear: false,
+          editar: false,
+          eliminar: false,
+          admin: false,
+          ver_costos: false,
+          emitir_no_fiscal: false
+        };
+      });
+      return { ...prev, permisos: nextPerms };
+    });
+  };
+
+  const handleToggleColumnRoleMatrix = (actionId: 'ver' | 'crear' | 'editar' | 'eliminar') => {
+    if (roleForm.nombre?.trim().toUpperCase() === 'ADMINISTRADOR') {
+      showAlert('El perfil ADMINISTRADOR cuenta con Control Total permanente sobre todas las funciones del sistema. Sus privilegios no pueden ser reducidos.', 'Perfil Protegido', 'warning');
+      return;
+    }
+    setRoleForm(prev => {
+      const nextPerms: any = { ...prev.permisos };
+      const allChecked = MODULOS_PERMISOS.every(mod => !!nextPerms[mod.id]?.[actionId]);
+      MODULOS_PERMISOS.forEach(mod => {
+        const currentModPerms = nextPerms[mod.id] || { ver: false, crear: false, editar: false, eliminar: false };
+        nextPerms[mod.id] = {
+          ...currentModPerms,
+          [actionId]: !allChecked
+        };
+      });
+      return { ...prev, permisos: nextPerms };
+    });
+  };
+
+  const handleSelectAllUserMatrix = () => {
+    setUserForm(prev => {
+      const nextPerms: any = { ...prev.permisos };
+      MODULOS_PERMISOS.forEach(mod => {
+        const currentModPerms = nextPerms[mod.id] || {};
+        nextPerms[mod.id] = {
+          ...currentModPerms,
+          ver: true,
+          crear: true,
+          editar: true,
+          eliminar: true,
+          admin: true
+        };
+      });
+      if (!nextPerms.inventario) nextPerms.inventario = {};
+      nextPerms.inventario.ver_costos = true;
+      if (!nextPerms.caja) nextPerms.caja = {};
+      nextPerms.caja.emitir_no_fiscal = true;
+      return { ...prev, permisos: nextPerms };
+    });
+  };
+
+  const handleDeselectAllUserMatrix = () => {
+    if (userForm.rol?.toUpperCase() === 'ADMINISTRADOR' || userForm.usuario?.toLowerCase() === 'admin') {
+      showAlert('Este usuario cuenta con Rol ADMINISTRADOR y posee Control Total permanente. Sus privilegios no pueden ser reducidos.', 'Usuario Protegido', 'warning');
+      return;
+    }
+    setUserForm(prev => {
+      const nextPerms: any = { ...prev.permisos };
+      MODULOS_PERMISOS.forEach(mod => {
+        const currentModPerms = nextPerms[mod.id] || {};
+        nextPerms[mod.id] = {
+          ...currentModPerms,
+          ver: false,
+          crear: false,
+          editar: false,
+          eliminar: false,
+          admin: false,
+          ver_costos: false,
+          emitir_no_fiscal: false
+        };
+      });
+      return { ...prev, permisos: nextPerms };
+    });
+  };
+
+  const handleToggleColumnUserMatrix = (actionId: 'ver' | 'crear' | 'editar' | 'eliminar') => {
+    if (userForm.rol?.toUpperCase() === 'ADMINISTRADOR' || userForm.usuario?.toLowerCase() === 'admin') {
+      showAlert('Este usuario cuenta con Rol ADMINISTRADOR y posee Control Total permanente. Sus privilegios no pueden ser reducidos.', 'Usuario Protegido', 'warning');
+      return;
+    }
+    setUserForm(prev => {
+      const nextPerms: any = { ...prev.permisos };
+      const allChecked = MODULOS_PERMISOS.every(mod => !!nextPerms[mod.id]?.[actionId]);
+      MODULOS_PERMISOS.forEach(mod => {
+        const currentModPerms = nextPerms[mod.id] || { ver: false, crear: false, editar: false, eliminar: false };
+        nextPerms[mod.id] = {
+          ...currentModPerms,
+          [actionId]: !allChecked
+        };
+      });
+      return { ...prev, permisos: nextPerms };
+    });
   };
 
   // Peripheral Handlers
@@ -1971,13 +2151,22 @@ export default function ConfiguracionEmpresa({
                             >
                               <Edit className="w-4 h-4" />
                             </button>
-                            <button
-                              onClick={() => handleDeleteUser(u.id)}
-                              className="text-slate-400 hover:text-rose-600 p-1 transition-all"
-                              title="Eliminar Usuario"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {u.usuario?.toLowerCase() === 'admin' ? (
+                              <span
+                                className="text-slate-300 p-1 cursor-not-allowed flex items-center justify-center"
+                                title="El usuario principal admin es el administrador del sistema y está protegido contra eliminación."
+                              >
+                                <Lock className="w-4 h-4 text-slate-400 opacity-60" />
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => handleDeleteUser(u.id)}
+                                className="text-slate-400 hover:text-rose-600 p-1 transition-all"
+                                title="Eliminar Usuario"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -2027,7 +2216,7 @@ export default function ConfiguracionEmpresa({
 
                         return displayRoles.map(r => {
                           const isSystemAdmin = r.nombre?.trim().toLowerCase() === 'administrador';
-                          const activeModules = Object.keys(r.permisos || {}).filter(m => r.permisos[m]?.ver);
+                          const activeModules = MODULOS_PERMISOS.filter(m => !!r.permisos?.[m.id]?.ver);
                           return (
                             <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50/50 text-xs">
                               <td className="py-3 px-3 font-bold text-slate-700 uppercase flex items-center gap-2">
@@ -2037,23 +2226,40 @@ export default function ConfiguracionEmpresa({
                                 )}
                               </td>
                               <td className="py-3 px-3 text-slate-500 font-sans">
-                                {activeModules.length === 0 ? 'Sin permisos' : activeModules.map(m => {
-                                  const modName = MODULOS_PERMISOS.find(x => x.id === m)?.label || m;
-                                  return (
-                                    <span key={m} className="inline-block bg-slate-100 text-slate-700 text-[10px] px-2 py-0.5 rounded mr-1 mb-1 font-bold font-mono">
-                                      {modName.split(' ')[1] || modName}
-                                    </span>
-                                  );
-                                })}
+                                {activeModules.length === 0 ? (
+                                  <span className="text-slate-400 italic text-[11px]">Sin permisos asignados</span>
+                                ) : activeModules.length === MODULOS_PERMISOS.length ? (
+                                  <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10.5px] px-2.5 py-1 rounded-lg font-bold">
+                                    <CheckSquare className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>Acceso Total (Todos los Módulos F1-F10)</span>
+                                  </span>
+                                ) : (
+                                  <div className="flex flex-wrap gap-1">
+                                    {activeModules.map(m => (
+                                      <span key={m.id} className="inline-block bg-slate-100 border border-slate-250 text-slate-700 text-[10px] px-2 py-0.5 rounded-md font-bold">
+                                        {m.label}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
                               </td>
                               <td className="py-3 px-3 text-right flex justify-end gap-2">
-                                <button
-                                  onClick={() => handleOpenEditRole(r)}
-                                  className="text-slate-400 hover:text-sky-600 p-1 transition-all"
-                                  title="Editar Perfil"
-                                >
-                                  <Edit className="w-4 h-4" />
-                                </button>
+                                {isSystemAdmin && currentUser.usuario?.toLowerCase() !== 'admin' && currentUser.rol?.toUpperCase() !== 'ADMINISTRADOR' ? (
+                                  <span
+                                    className="text-slate-300 p-1 cursor-not-allowed flex items-center justify-center"
+                                    title="Sólo el usuario Administrador principal del sistema puede modificar la plantilla del perfil Administrador."
+                                  >
+                                    <Lock className="w-4 h-4 text-slate-400 opacity-60" />
+                                  </span>
+                                ) : (
+                                  <button
+                                    onClick={() => handleOpenEditRole(r)}
+                                    className="text-slate-400 hover:text-sky-600 p-1 transition-all"
+                                    title="Editar Perfil"
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </button>
+                                )}
                                 {!isSystemAdmin && (
                                   <button
                                     onClick={() => handleDeleteRole(r.id, r.nombre)}
@@ -2740,19 +2946,90 @@ export default function ConfiguracionEmpresa({
                       </div>
                     ) : (
                       <div>
-                        <label className="text-xs text-slate-700 block mb-1 font-bold">Estado del Servicio Fiscal</label>
+                        <label className="text-xs text-slate-700 block mb-1 font-bold">Estado / Modalidad del Servicio Fiscal</label>
                         <select
                           value={fiscalPrinterConfig.estadoFiscal}
                           onChange={(e) => setFiscalPrinterConfig(prev => ({ ...prev, estadoFiscal: e.target.value }))}
-                          className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none font-medium"
+                          className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none font-bold"
                         >
-                          <option value="ACTIVA">🟢 Impresora Fiscal Activa (Producción)</option>
-                          <option value="MODO_PRUEBA">🟡 Modo Prueba / Demo (Sin emisión SENIAT)</option>
-                          <option value="DESACTIVADA">🔴 Desactivada</option>
+                          <option value="ACTIVA">🟢 Impresora Fiscal Física (HKA / Bixolon SENIAT)</option>
+                          <option value="IMPRENTA_DIGITAL">🖨️ Imprenta Digital SENIAT (Formas Libres / N° Control)</option>
+                          <option value="PAFE_ELECTRONICA">🌐 Facturación Electrónica en Línea (PAFE SENIAT)</option>
+                          <option value="MODO_PRUEBA">🟡 Modo Simulación / Prueba (Sin validez fiscal)</option>
+                          <option value="DESACTIVADA">🔴 Facturación Fiscal Desactivada</option>
                         </select>
                       </div>
                     )}
                   </div>
+
+                  {/* Campos adicionales para IMPRENTA DIGITAL */}
+                  {fiscalPrinterConfig.estadoFiscal === 'IMPRENTA_DIGITAL' && (
+                    <div className="bg-blue-50/60 border border-blue-200 p-3.5 rounded-xl space-y-3">
+                      <div className="flex items-center gap-2 text-blue-900 font-bold text-xs">
+                        <Printer className="w-4 h-4 text-blue-600" />
+                        <span>Datos Legales de la Imprenta Digital Autorizada (SENIAT)</span>
+                      </div>
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[11px] text-slate-700 block font-semibold mb-1">RIF Imprenta Autorizada</label>
+                          <input
+                            type="text"
+                            placeholder="Ej. J-40123456-7"
+                            value={fiscalPrinterConfig.imprentaRif || ''}
+                            onChange={(e) => setFiscalPrinterConfig(prev => ({ ...prev, imprentaRif: e.target.value.toUpperCase() }))}
+                            className="w-full bg-white border border-blue-200 rounded-lg p-2 text-xs font-mono uppercase"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[11px] text-slate-700 block font-semibold mb-1">N° Providencia SENIAT Imprenta</label>
+                          <input
+                            type="text"
+                            placeholder="Ej. SNAT/2014/0032"
+                            value={fiscalPrinterConfig.providenciaSeniat || ''}
+                            onChange={(e) => setFiscalPrinterConfig(prev => ({ ...prev, providenciaSeniat: e.target.value }))}
+                            className="w-full bg-white border border-blue-200 rounded-lg p-2 text-xs font-mono"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] text-slate-700 block font-semibold mb-1">Razón Social de la Imprenta</label>
+                        <input
+                          type="text"
+                          placeholder="Ej. IMPRENTA DIGITAL AUTORIZADA SENIAT C.A."
+                          value={fiscalPrinterConfig.imprentaRazonSocial || ''}
+                          onChange={(e) => setFiscalPrinterConfig(prev => ({ ...prev, imprentaRazonSocial: e.target.value }))}
+                          className="w-full bg-white border border-blue-200 rounded-lg p-2 text-xs"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[11px] text-slate-700 block font-semibold mb-1">Rango Control Desde</label>
+                          <input
+                            type="text"
+                            placeholder="00-00000001"
+                            value={fiscalPrinterConfig.rangoControlDesde || ''}
+                            onChange={(e) => setFiscalPrinterConfig(prev => ({ ...prev, rangoControlDesde: e.target.value }))}
+                            className="w-full bg-white border border-blue-200 rounded-lg p-2 text-xs font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[11px] text-slate-700 block font-semibold mb-1">Rango Control Hasta</label>
+                          <input
+                            type="text"
+                            placeholder="00-00005000"
+                            value={fiscalPrinterConfig.rangoControlHasta || ''}
+                            onChange={(e) => setFiscalPrinterConfig(prev => ({ ...prev, rangoControlHasta: e.target.value }))}
+                            className="w-full bg-white border border-blue-200 rounded-lg p-2 text-xs font-mono"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
 
                   {/* Switches de Opciones Fiscales */}
                   <div className="border-t border-slate-100 pt-3.5 space-y-2.5">
@@ -3974,257 +4251,413 @@ export default function ConfiguracionEmpresa({
 
       </div>
 
-      {/* USER MODAL FORM */}
+      {/* USER MODAL FORM (SPACIOUS 2-COLUMN LAYOUT WITH BATCH ACTIONS) */}
       {showUserModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 text-left">
-          <form onSubmit={handleSaveUser} className="bg-white border border-slate-200 rounded-xl max-w-lg w-full overflow-hidden shadow-2xl p-6 space-y-4 text-slate-800">
-            <h3 className="text-sm font-extrabold text-slate-700 border-b border-slate-100 pb-2 flex items-center gap-2">
-              <Users className="w-4 h-4 text-winter-configStart" />
-              {editingUser ? `Modificar Usuario: ${editingUser.usuario.toUpperCase()}` : 'Registrar Nuevo Usuario'}
-            </h3>
+        <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 text-left font-sans animate-fade-in">
+          <form 
+            onSubmit={handleSaveUser} 
+            className="bg-white border border-slate-200 rounded-2xl max-w-5xl w-full overflow-hidden shadow-2xl flex flex-col max-h-[92vh] text-slate-800"
+          >
+            {/* Header */}
+            <div className="flex justify-between items-center bg-slate-50 border-b border-slate-200 px-6 py-4">
+              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                <Users className="w-5 h-5 text-emerald-600" />
+                <span>{editingUser ? `MODIFICAR USUARIO: ${editingUser.usuario.toUpperCase()}` : 'REGISTRAR NUEVO USUARIO'}</span>
+              </h3>
+              <button 
+                type="button" 
+                onClick={() => setShowUserModal(false)} 
+                className="text-slate-400 hover:text-slate-700 text-lg font-bold"
+              >
+                ✕
+              </button>
+            </div>
 
             {errorMsg && (
-              <div className="bg-rose-50 border border-rose-200 text-rose-700 px-3 py-2 rounded text-[10px] font-sans">
+              <div className="mx-6 mt-4 bg-rose-50 border border-rose-200 text-rose-700 px-4 py-2.5 rounded-lg text-xs font-sans">
                 {errorMsg}
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="text-[10px] text-slate-500 block mb-1 font-sans">Usuario (Login)</label>
-                <input
-                  type="text"
-                  required
-                  disabled={!!editingUser}
-                  placeholder=""
-                  autoComplete="off"
-                  value={userForm.usuario}
-                  onChange={(e) => {
-                    const cleanVal = e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '');
-                    setUserForm(prev => ({ ...prev, usuario: cleanVal }));
-                  }}
-                  className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs focus:bg-white focus:border-winter-configStart focus:outline-none font-mono"
-                />
-              </div>
-              <div>
-                <label className="text-[10px] text-slate-500 block mb-1 font-sans">Nombre Completo</label>
-                <input
-                  type="text"
-                  required
-                  placeholder=""
-                  autoComplete="off"
-                  value={userForm.nombre}
-                  onChange={(e) => setUserForm(prev => ({ ...prev, nombre: e.target.value }))}
-                  className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs focus:bg-white focus:border-winter-configStart focus:outline-none font-sans"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="text-[10px] text-slate-500 block mb-1 font-sans">Contraseña / PIN</label>
-                <input
-                  type="password"
-                  required={!editingUser}
-                  placeholder=""
-                  autoComplete="new-password"
-                  value={userForm.clave}
-                  onChange={(e) => setUserForm(prev => ({ ...prev, clave: e.target.value.toLowerCase() }))}
-                  className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs focus:bg-white focus:border-winter-configStart focus:outline-none font-mono"
-                />
-              </div>
-              <div>
-                <label className="text-[10px] text-slate-500 block mb-1 font-sans">Perfil / Rol Base</label>
-                <select
-                  value={userForm.rol?.toUpperCase()}
-                  onChange={(e) => {
-                    const val = e.target.value.toUpperCase();
-                    setUserForm(prev => ({ ...prev, rol: val }));
-                    handleApplyRolePermissions(val);
-                  }}
-                  className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs focus:bg-white focus:border-winter-configStart focus:outline-none font-sans font-bold"
-                >
-                  <option value="">Seleccione...</option>
-                  <option value="ADMINISTRADOR">ADMINISTRADOR</option>
-                  {roleList
-                    .filter(r => r.nombre?.trim().toUpperCase() !== 'ADMINISTRADOR')
-                    .map(r => (
-                      <option key={r.id} value={r.nombre.toUpperCase()}>{r.nombre.toUpperCase()}</option>
-                    ))
-                  }
-                </select>
-              </div>
-              <div>
-                <label className="text-[10px] text-slate-500 block mb-1 font-sans">Estado</label>
-                <select
-                  value={userForm.estado}
-                  onChange={(e) => setUserForm(prev => ({ ...prev, estado: e.target.value as any }))}
-                  className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs focus:bg-white focus:border-winter-configStart focus:outline-none font-sans"
-                >
-                  <option value="Activo">Activo</option>
-                  <option value="Inactivo">Inactivo</option>
-                </select>
-              </div>
-            </div>
-
-            {/* PERMISSIONS MATRIX */}
-            <div className="border-t border-slate-100 pt-3 text-left">
-              <label className="text-xs font-bold text-slate-700 block mb-2 font-sans">Matriz de Permisos Personalizados</label>
+            {/* 2-Column Body Content */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 overflow-y-auto flex-1">
               
-              <div className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50">
-                <table className="w-full text-left font-sans text-[10px] border-collapse">
-                  <thead>
-                    <tr className="bg-slate-100 border-b border-slate-250 text-slate-650 uppercase font-bold">
-                      <th className="py-2 px-3 text-left">Módulo</th>
-                      {ACCIONES_PERMISOS.map(act => (
-                        <th key={act.id} className="py-2 px-2 text-center">{act.label}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {MODULOS_PERMISOS.map(mod => (
-                      <tr key={mod.id} className="border-b border-slate-200/55 hover:bg-slate-100/50">
-                        <td className="py-2 px-3 font-bold text-slate-700 text-left">{mod.label}</td>
+              {/* LEFT COLUMN: User Form Inputs + Quick Matrix Actions + Special Permissions */}
+              <div className="lg:col-span-4 space-y-4 border-b lg:border-b-0 lg:border-r border-slate-200 pb-4 lg:pb-0 lg:pr-5">
+                
+                {/* Inputs */}
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-700 block mb-1 font-sans uppercase">
+                      Usuario (Login) <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      disabled={!!editingUser}
+                      placeholder="ej. pedro.perez"
+                      autoComplete="off"
+                      value={userForm.usuario}
+                      onChange={(e) => {
+                        const cleanVal = e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '');
+                        setUserForm(prev => ({ ...prev, usuario: cleanVal }));
+                      }}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-mono disabled:bg-slate-100 disabled:text-slate-500 font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-700 block mb-1 font-sans uppercase">
+                      Nombre Completo <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="ej. Pedro Pérez"
+                      autoComplete="off"
+                      value={userForm.nombre}
+                      onChange={(e) => setUserForm(prev => ({ ...prev, nombre: e.target.value }))}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-sans font-bold"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-700 block mb-1 font-sans uppercase">
+                        Contraseña / PIN <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="password"
+                        required={!editingUser}
+                        placeholder={editingUser ? "Sin cambios" : "••••••••"}
+                        autoComplete="new-password"
+                        value={userForm.clave}
+                        onChange={(e) => setUserForm(prev => ({ ...prev, clave: e.target.value.toLowerCase() }))}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-700 block mb-1 font-sans uppercase">
+                        Estado
+                      </label>
+                      <select
+                        value={userForm.estado}
+                        onChange={(e) => setUserForm(prev => ({ ...prev, estado: e.target.value as any }))}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-sans font-bold"
+                      >
+                        <option value="Activo">Activo</option>
+                        <option value="Inactivo">Inactivo</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-700 block mb-1 font-sans uppercase">
+                      Perfil / Rol Base
+                    </label>
+                    <select
+                      value={userForm.rol?.toUpperCase()}
+                      disabled={editingUser?.usuario?.toLowerCase() === 'admin'}
+                      onChange={(e) => {
+                        const val = e.target.value.toUpperCase();
+                        setUserForm(prev => ({ ...prev, rol: val }));
+                        handleApplyRolePermissions(val);
+                      }}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-sans font-extrabold uppercase text-slate-800 disabled:bg-slate-100 disabled:text-slate-500 font-bold"
+                    >
+                      <option value="">Seleccione Rol Base...</option>
+                      {(editingUser?.usuario?.toLowerCase() === 'admin' || editingUser?.rol?.toUpperCase() === 'ADMINISTRADOR') && (
+                        <option value="ADMINISTRADOR">ADMINISTRADOR (SISTEMA - ÚNICO)</option>
+                      )}
+                      {roleList
+                        .filter(r => r.nombre?.trim().toUpperCase() !== 'ADMINISTRADOR')
+                        .map(r => (
+                          <option key={r.id} value={r.nombre.toUpperCase()}>{r.nombre.toUpperCase()}</option>
+                        ))
+                      }
+                    </select>
+                  </div>
+                </div>
+
+                {/* ACCIONES RÁPIDAS DE MATRIZ (SELECCIONAR / DESSELECCIONAR TODO) */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2">
+                  <span className="text-[11px] font-extrabold text-slate-700 uppercase block flex items-center gap-1.5">
+                    <CheckSquare className="w-4 h-4 text-emerald-600" />
+                    <span>Acciones Rápidas de Matriz</span>
+                  </span>
+                  <p className="text-[10px] text-slate-500 leading-tight">
+                    Marque o desmarque masivamente todas las casillas de este usuario.
+                  </p>
+                  
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleSelectAllUserMatrix}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-xs font-bold font-sans transition-all flex items-center justify-center gap-1 shadow-sm"
+                    >
+                      <CheckSquare className="w-3.5 h-3.5" />
+                      <span>Seleccionar Todo</span>
+                    </button>
+                    
+                    <button
+                      type="button"
+                      onClick={handleDeselectAllUserMatrix}
+                      className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-2 rounded-lg text-xs font-bold font-sans transition-all flex items-center justify-center gap-1"
+                    >
+                      <Square className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Desseleccionar</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* PERMISOS ESPECIALES */}
+                <div className="space-y-2.5">
+                  <span className="text-[11px] font-extrabold text-slate-700 uppercase block">
+                    Permisos Especiales
+                  </span>
+
+                  {/* PRECIO COSTO TOGGLE */}
+                  <div className="p-3 bg-amber-50/90 border border-amber-250 rounded-xl space-y-2 font-sans">
+                    <div className="flex items-start gap-2">
+                      <DollarSign className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold text-slate-800 text-[11px] block">
+                          Visualizar Precios de Costo (F2 Inventario)
+                        </span>
+                        <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
+                          Muestra la columna "P. Costo" y totales financieros.
+                        </span>
+                      </div>
+                    </div>
+
+                    {userForm.rol?.toUpperCase() === 'ADMINISTRADOR' ? (
+                      <span className="inline-block px-2.5 py-1 bg-amber-100 border border-amber-300 text-amber-800 rounded font-bold text-[9.5px] uppercase">
+                        Siempre Visible (Admin)
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUserForm(prev => {
+                            const nextPerms = { ...prev.permisos };
+                            const currInv = nextPerms.inventario || { ver: false, crear: false, editar: false, eliminar: false };
+                            nextPerms.inventario = {
+                              ...currInv,
+                              ver_costos: !currInv.ver_costos
+                            };
+                            return { ...prev, permisos: nextPerms };
+                          });
+                        }}
+                        className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all cursor-pointer bg-white border-slate-300 hover:border-amber-500 text-slate-700 shadow-2xs font-bold text-xs"
+                      >
+                        {userForm.permisos?.inventario?.ver_costos ? (
+                          <span className="flex items-center gap-1 text-emerald-700">
+                            <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> Visible (Permitido)
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-slate-500">
+                            <Square className="w-3.5 h-3.5 text-slate-400" /> Oculto (Denegado)
+                          </span>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* EMISION NO FISCAL TOGGLE */}
+                  <div className="p-3 bg-blue-50/90 border border-blue-250 rounded-xl space-y-2 font-sans">
+                    <div className="flex items-start gap-2">
+                      <FileText className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold text-slate-800 text-[11px] block">
+                          Notas de Entrega / No Fiscal (F1 Caja)
+                        </span>
+                        <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
+                          Permite emitir comprobantes no fiscales sin pasar por la impresora fiscal.
+                        </span>
+                      </div>
+                    </div>
+
+                    {userForm.rol?.toUpperCase() === 'ADMINISTRADOR' ? (
+                      <span className="inline-block px-2.5 py-1 bg-blue-100 border border-blue-300 text-blue-800 rounded font-bold text-[9.5px] uppercase">
+                        Autorizado (Admin)
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUserForm(prev => {
+                            const nextPerms = { ...prev.permisos };
+                            const currCaja = nextPerms.caja || { ver: false, crear: false, editar: false, eliminar: false };
+                            nextPerms.caja = {
+                              ...currCaja,
+                              emitir_no_fiscal: !currCaja.emitir_no_fiscal
+                            };
+                            return { ...prev, permisos: nextPerms };
+                          });
+                        }}
+                        className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all cursor-pointer bg-white border-slate-300 hover:border-blue-500 text-slate-700 shadow-2xs font-bold text-xs"
+                      >
+                        {userForm.permisos?.caja?.emitir_no_fiscal ? (
+                          <span className="flex items-center gap-1 text-emerald-700">
+                            <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> Habilitado (Permitido)
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-slate-500">
+                            <Square className="w-3.5 h-3.5 text-slate-400" /> Bloqueado (Denegado)
+                          </span>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* RIGHT COLUMN: Permissions Matrix + Guide */}
+              <div className="lg:col-span-8 space-y-4">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-extrabold text-slate-800 block uppercase font-sans">
+                    Matriz de Permisos Personalizados del Usuario
+                  </label>
+                  <span className="text-[10px] text-slate-500">
+                    Haga clic en las columnas para marcar/desmarcar por acción
+                  </span>
+                </div>
+
+                {/* Matrix Table */}
+                <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                  <table className="w-full text-left font-sans text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-100 border-b border-slate-250 text-slate-700 uppercase font-bold">
+                        <th className="py-2.5 px-3 text-left">Módulo</th>
                         {ACCIONES_PERMISOS.map(act => {
-                          const isChecked = !!userForm.permisos[mod.id]?.[act.id];
+                          const actionId = act.id as 'ver' | 'crear' | 'editar' | 'eliminar';
+                          const isColAllChecked = MODULOS_PERMISOS.every(m => !!userForm.permisos[m.id]?.[actionId]);
                           return (
-                            <td key={act.id} className="py-2 px-2 text-center">
+                            <th key={act.id} className="py-2.5 px-2 text-center">
                               <button
                                 type="button"
-                                onClick={() => {
-                                  setUserForm(prev => {
-                                    const nextPerms = { ...prev.permisos };
-                                    const currentModPerms = nextPerms[mod.id] || { ver: false, crear: false, editar: false, eliminar: false };
-                                    nextPerms[mod.id] = {
-                                      ...currentModPerms,
-                                      [act.id]: !currentModPerms[act.id]
-                                    };
-                                    return { ...prev, permisos: nextPerms };
-                                  });
-                                }}
-                                className="inline-flex items-center justify-center p-1 text-slate-400 hover:text-sky-600 transition-all"
+                                onClick={() => handleToggleColumnUserMatrix(actionId)}
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-all ${
+                                  isColAllChecked 
+                                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                    : 'bg-white hover:bg-slate-200 text-slate-700 border border-slate-300'
+                                }`}
+                                title={`Alternar columna ${act.label}`}
                               >
-                                {isChecked ? (
-                                  <CheckSquare className="w-4 h-4 text-sky-600" />
-                                ) : (
-                                  <Square className="w-4 h-4 text-slate-350" />
-                                )}
+                                <span>{act.label}</span>
+                                {isColAllChecked ? <CheckSquare className="w-3 h-3 text-emerald-600" /> : <Square className="w-3 h-3 text-slate-400" />}
                               </button>
-                            </td>
+                            </th>
                           );
                         })}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* PRECIO COSTO VISIBILITY PERMISSION TOGGLE FOR USER */}
-              <div className="mt-3 p-2.5 bg-amber-50/80 border border-amber-250 rounded-lg flex items-center justify-between gap-3 shadow-2xs font-sans">
-                <div className="flex items-start gap-2">
-                  <DollarSign className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-bold text-slate-800 text-[11px] block">
-                      Visualizar Precios de Costo y Valoración Financiera (F2 Inventario)
-                    </span>
-                    <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
-                      Permite ver la columna <strong className="text-amber-900">"P. Costo"</strong> en catálogo y totales de costos en barra superior.
-                    </span>
-                  </div>
+                    </thead>
+                    <tbody>
+                      {MODULOS_PERMISOS.map(mod => (
+                        <tr key={mod.id} className="border-b border-slate-100 hover:bg-slate-50/70 transition-colors">
+                          <td className="py-2.5 px-3 font-bold text-slate-800 text-left">
+                            {mod.label}
+                          </td>
+                          {ACCIONES_PERMISOS.map(act => {
+                            const isUserAdmin = userForm.rol?.toUpperCase() === 'ADMINISTRADOR' || userForm.usuario?.toLowerCase() === 'admin';
+                            const isChecked = isUserAdmin || !!userForm.permisos[mod.id]?.[act.id];
+                            return (
+                              <td key={act.id} className="py-2.5 px-2 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (isUserAdmin) {
+                                      showAlert('Este usuario cuenta con Rol ADMINISTRADOR y posee Control Total permanente. Sus privilegios no pueden ser reducidos.', 'Usuario Protegido', 'warning');
+                                      return;
+                                    }
+                                    setUserForm(prev => {
+                                      const nextPerms = { ...prev.permisos };
+                                      const currentModPerms = nextPerms[mod.id] || { ver: false, crear: false, editar: false, eliminar: false };
+                                      nextPerms[mod.id] = {
+                                        ...currentModPerms,
+                                        [act.id]: !currentModPerms[act.id]
+                                      };
+                                      return { ...prev, permisos: nextPerms };
+                                    });
+                                  }}
+                                  className={`inline-flex items-center justify-center p-1.5 rounded-lg transition-all ${
+                                    isUserAdmin 
+                                      ? 'text-emerald-600 opacity-90 cursor-not-allowed' 
+                                      : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
+                                  }`}
+                                  title={isUserAdmin ? 'Permiso permanente (Control Total Admin)' : 'Alternar permiso'}
+                                >
+                                  {isChecked ? (
+                                    <CheckSquare className="w-4 h-4 text-emerald-600" />
+                                  ) : (
+                                    <Square className="w-4 h-4 text-slate-300" />
+                                  )}
+                                </button>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
 
-                {userForm.rol?.toUpperCase() === 'ADMINISTRADOR' ? (
-                  <span className="px-2 py-1 bg-amber-100 border border-amber-300 text-amber-800 rounded font-bold text-[9px] uppercase whitespace-nowrap">
-                    Siempre Visible (Admin)
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUserForm(prev => {
-                        const nextPerms = { ...prev.permisos };
-                        const currInv = nextPerms.inventario || { ver: false, crear: false, editar: false, eliminar: false };
-                        nextPerms.inventario = {
-                          ...currInv,
-                          ver_costos: !currInv.ver_costos
-                        };
-                        return { ...prev, permisos: nextPerms };
-                      });
-                    }}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded border transition-all cursor-pointer bg-white border-slate-300 hover:border-amber-500 text-slate-700"
-                  >
-                    {userForm.permisos?.inventario?.ver_costos ? (
-                      <span className="flex items-center gap-1 text-emerald-700 font-bold text-[10.5px]">
-                        <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> Visible
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1 text-slate-400 font-medium text-[10.5px]">
-                        <Square className="w-3.5 h-3.5 text-slate-350" /> Oculto
-                      </span>
-                    )}
-                  </button>
-                )}
-              </div>
-
-              {/* EMITIR NOTAS DE ENTREGA / NO FISCAL PERMISSION TOGGLE FOR USER */}
-              <div className="mt-2.5 p-2.5 bg-blue-50/80 border border-blue-250 rounded-lg flex items-center justify-between gap-3 shadow-2xs font-sans">
-                <div className="flex items-start gap-2">
-                  <FileText className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-bold text-slate-800 text-[11px] block">
-                      Autorizar Emisión de Notas de Entrega / Comprobantes No Fiscales (F1 Caja)
+                {/* Interactive Operations Guide */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs leading-relaxed text-slate-700 space-y-2 font-sans">
+                  <div className="flex items-center justify-between border-b border-slate-200 pb-2 gap-2">
+                    <span className="font-extrabold text-slate-800 uppercase text-[10.5px] flex items-center gap-1.5">
+                      💡 Guía de Operaciones por Módulo:
                     </span>
-                    <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
-                      Permite al operador alternar a <strong className="text-blue-900">"Nota de Entrega"</strong> sin enviar la factura a la máquina fiscal.
-                    </span>
+                    <div className="flex gap-1 overflow-x-auto">
+                      {MODULOS_PERMISOS.map(m => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => setActiveGuideModule(m.id)}
+                          className={`px-2 py-0.5 rounded font-mono font-bold text-[9px] transition-all cursor-pointer ${
+                            activeGuideModule === m.id
+                              ? 'bg-slate-800 text-white shadow-xs'
+                              : 'bg-white text-slate-600 hover:bg-slate-200 border border-slate-250'
+                          }`}
+                        >
+                          {m.id.toUpperCase()}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
 
-                {userForm.rol?.toUpperCase() === 'ADMINISTRADOR' ? (
-                  <span className="px-2 py-1 bg-blue-100 border border-blue-300 text-blue-800 rounded font-bold text-[9px] uppercase whitespace-nowrap">
-                    Autorizado (Admin)
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUserForm(prev => {
-                        const nextPerms = { ...prev.permisos };
-                        const currCaja = nextPerms.caja || { ver: false, crear: false, editar: false, eliminar: false };
-                        nextPerms.caja = {
-                          ...currCaja,
-                          emitir_no_fiscal: !currCaja.emitir_no_fiscal
-                        };
-                        return { ...prev, permisos: nextPerms };
-                      });
-                    }}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded border transition-all cursor-pointer bg-white border-slate-300 hover:border-blue-500 text-slate-700"
-                  >
-                    {userForm.permisos?.caja?.emitir_no_fiscal ? (
-                      <span className="flex items-center gap-1 text-emerald-700 font-bold text-[10.5px]">
-                        <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> Habilitado
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1 text-slate-400 font-medium text-[10.5px]">
-                        <Square className="w-3.5 h-3.5 text-slate-350" /> Bloqueado
-                      </span>
-                    )}
-                  </button>
-                )}
+                  {(() => {
+                    const guide = MODULE_GUIDES_MAP[activeGuideModule] || MODULE_GUIDES_MAP.inventario;
+                    return (
+                      <div className="space-y-1">
+                        <span className="font-extrabold text-slate-800 block text-[10px] uppercase font-mono">
+                          📌 {guide.title}
+                        </span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-white p-2.5 rounded-lg border border-slate-200 text-slate-700 text-[11px]">
+                          <div><strong className="text-sky-700">Ver:</strong> {guide.ver}</div>
+                          <div><strong className="text-emerald-700">Crear:</strong> {guide.crear}</div>
+                          <div><strong className="text-amber-700">Editar:</strong> {guide.editar}</div>
+                          <div><strong className="text-rose-700">Eliminar:</strong> {guide.eliminar}</div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
             </div>
 
-            <div className="flex gap-2.5 pt-3">
+            {/* Modal Footer */}
+            <div className="flex justify-end items-center gap-3 bg-slate-50 border-t border-slate-200 px-6 py-4">
               <button
                 type="button"
                 onClick={() => setShowUserModal(false)}
-                className="w-1/3 bg-slate-100 hover:bg-slate-200 border border-slate-250 text-slate-600 py-2.5 rounded font-sans text-xs transition-all"
+                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded-xl font-bold font-sans text-xs transition-all"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
-                className="w-2/3 bg-winter-configStart hover:bg-winter-configEnd text-white py-2.5 rounded font-bold font-sans text-xs transition-all shadow-sm"
+                className="px-7 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-black font-sans text-xs uppercase shadow-md transition-all"
               >
                 Guardar Usuario
               </button>
@@ -4233,235 +4666,334 @@ export default function ConfiguracionEmpresa({
         </div>
       )}
 
-      {/* ROLE MODAL FORM */}
+      {/* ROLE MODAL FORM (SPACIOUS 2-COLUMN LAYOUT WITH BATCH ACTIONS) */}
       {showRoleModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 text-left">
-          <form onSubmit={handleSaveRole} className="bg-white border border-slate-200 rounded-xl max-w-lg w-full overflow-hidden shadow-2xl p-6 space-y-4 text-slate-800">
-            <h3 className="text-sm font-extrabold text-slate-700 border-b border-slate-100 pb-2 flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4 text-winter-configStart" />
-              {editingRole ? `Modificar Perfil: ${editingRole.nombre.toUpperCase()}` : 'Registrar Nuevo Perfil de Rol'}
-            </h3>
+        <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 text-left font-sans animate-fade-in">
+          <form 
+            onSubmit={handleSaveRole} 
+            className="bg-white border border-slate-200 rounded-2xl max-w-5xl w-full overflow-hidden shadow-2xl flex flex-col max-h-[92vh] text-slate-800"
+          >
+            {/* Header */}
+            <div className="flex justify-between items-center bg-slate-50 border-b border-slate-200 px-6 py-4">
+              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                <ShieldAlert className="w-5 h-5 text-emerald-600" />
+                <span>{editingRole ? `MODIFICAR PERFIL: ${editingRole.nombre.toUpperCase()}` : 'REGISTRAR NUEVO PERFIL DE ROL'}</span>
+              </h3>
+              <button 
+                type="button" 
+                onClick={() => setShowRoleModal(false)} 
+                className="text-slate-400 hover:text-slate-700 text-lg font-bold"
+              >
+                ✕
+              </button>
+            </div>
 
             {errorMsg && (
-              <div className="bg-rose-50 border border-rose-200 text-rose-700 px-3 py-2 rounded text-[10px] font-sans">
+              <div className="mx-6 mt-4 bg-rose-50 border border-rose-200 text-rose-700 px-4 py-2.5 rounded-lg text-xs font-sans">
                 {errorMsg}
               </div>
             )}
 
-            <div>
-              <label className="text-[10px] text-slate-500 block mb-1 font-sans">Nombre del Rol / Perfil</label>
-              <input
-                type="text"
-                required
-                disabled={editingRole?.nombre?.trim().toUpperCase() === 'ADMINISTRADOR'}
-                placeholder=""
-                autoComplete="off"
-                value={roleForm.nombre}
-                onChange={(e) => setRoleForm(prev => ({ ...prev, nombre: e.target.value.toUpperCase() }))}
-                className="w-full bg-slate-50 border border-slate-300 rounded p-2.5 text-xs focus:bg-white focus:border-winter-configStart focus:outline-none font-sans font-bold disabled:bg-slate-100 disabled:text-slate-500 uppercase"
-              />
-            </div>
-
-            {/* PERMISSIONS MATRIX */}
-            <div className="border-t border-slate-100 pt-3 text-left">
-              <label className="text-xs font-bold text-slate-700 block mb-2 font-sans">Matriz de Permisos del Perfil</label>
+            {/* 2-Column Body Content */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 overflow-y-auto flex-1">
               
-              <div className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50">
-                <table className="w-full text-left font-sans text-[10px] border-collapse">
-                  <thead>
-                    <tr className="bg-slate-100 border-b border-slate-255 text-slate-655 uppercase font-bold">
-                      <th className="py-2 px-3 text-left">Módulo</th>
-                      {ACCIONES_PERMISOS.map(act => (
-                        <th key={act.id} className="py-2 px-2 text-center">{act.label}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {MODULOS_PERMISOS.map(mod => (
-                      <tr key={mod.id} className="border-b border-slate-200/55 hover:bg-slate-100/50">
-                        <td className="py-2 px-3 font-bold text-slate-700 text-left">{mod.label}</td>
+              {/* LEFT COLUMN: Role Name + Quick Matrix Actions + Special Permissions */}
+              <div className="lg:col-span-4 space-y-4 border-b lg:border-b-0 lg:border-r border-slate-200 pb-4 lg:pb-0 lg:pr-5">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1 font-sans uppercase">
+                    Nombre del Rol / Perfil <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    disabled={editingRole?.nombre?.trim().toUpperCase() === 'ADMINISTRADOR'}
+                    placeholder="Ej. CAJERO, SUPERVISOR, VENDEDOR"
+                    autoComplete="off"
+                    value={roleForm.nombre}
+                    onChange={(e) => setRoleForm(prev => ({ ...prev, nombre: e.target.value.toUpperCase() }))}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-sans font-bold disabled:bg-slate-100 disabled:text-slate-500 uppercase"
+                  />
+                </div>
+
+                {/* ACCIONES RÁPIDAS DE MATRIZ (SELECCIONAR / DESSELECCIONAR TODO) */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2">
+                  <span className="text-[11px] font-extrabold text-slate-700 uppercase block flex items-center gap-1.5">
+                    <CheckSquare className="w-4 h-4 text-emerald-600" />
+                    <span>Acciones Rápidas de Matriz</span>
+                  </span>
+                  <p className="text-[10px] text-slate-500 leading-tight">
+                    Marque o desmarque masivamente todas las casillas de verificación de permisos con un solo clic.
+                  </p>
+                  
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleSelectAllRoleMatrix}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-xs font-bold font-sans transition-all flex items-center justify-center gap-1 shadow-sm"
+                    >
+                      <CheckSquare className="w-3.5 h-3.5" />
+                      <span>Seleccionar Todo</span>
+                    </button>
+                    
+                    <button
+                      type="button"
+                      onClick={handleDeselectAllRoleMatrix}
+                      className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-2 rounded-lg text-xs font-bold font-sans transition-all flex items-center justify-center gap-1"
+                    >
+                      <Square className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Desseleccionar</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* PERMISOS ESPECIALES */}
+                <div className="space-y-2.5">
+                  <span className="text-[11px] font-extrabold text-slate-700 uppercase block">
+                    Permisos Especiales
+                  </span>
+
+                  {/* PRECIO COSTO TOGGLE */}
+                  <div className="p-3 bg-amber-50/90 border border-amber-250 rounded-xl space-y-2 font-sans">
+                    <div className="flex items-start gap-2">
+                      <DollarSign className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold text-slate-800 text-[11px] block">
+                          Visualizar Precios de Costo (F2 Inventario)
+                        </span>
+                        <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
+                          Muestra la columna "P. Costo" y totales financieros.
+                        </span>
+                      </div>
+                    </div>
+
+                    {roleForm.nombre?.trim().toUpperCase() === 'ADMINISTRADOR' ? (
+                      <span className="inline-block px-2.5 py-1 bg-amber-100 border border-amber-300 text-amber-800 rounded font-bold text-[9.5px] uppercase">
+                        Siempre Visible (Admin)
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRoleForm(prev => {
+                            const nextPerms = { ...prev.permisos };
+                            const currInv = nextPerms.inventario || { ver: false, crear: false, editar: false, eliminar: false };
+                            nextPerms.inventario = {
+                              ...currInv,
+                              ver_costos: !currInv.ver_costos
+                            };
+                            return { ...prev, permisos: nextPerms };
+                          });
+                        }}
+                        className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all cursor-pointer bg-white border-slate-300 hover:border-amber-500 text-slate-700 shadow-2xs font-bold text-xs"
+                      >
+                        {roleForm.permisos?.inventario?.ver_costos ? (
+                          <span className="flex items-center gap-1 text-emerald-700">
+                            <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> Visible (Permitido)
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-slate-500">
+                            <Square className="w-3.5 h-3.5 text-slate-400" /> Oculto (Denegado)
+                          </span>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* EMISION NO FISCAL TOGGLE */}
+                  <div className="p-3 bg-blue-50/90 border border-blue-250 rounded-xl space-y-2 font-sans">
+                    <div className="flex items-start gap-2">
+                      <FileText className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold text-slate-800 text-[11px] block">
+                          Notas de Entrega / No Fiscal (F1 Caja)
+                        </span>
+                        <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
+                          Permite emitir comprobantes no fiscales sin pasar por la impresora fiscal.
+                        </span>
+                      </div>
+                    </div>
+
+                    {roleForm.nombre?.trim().toUpperCase() === 'ADMINISTRADOR' ? (
+                      <span className="inline-block px-2.5 py-1 bg-blue-100 border border-blue-300 text-blue-800 rounded font-bold text-[9.5px] uppercase">
+                        Autorizado (Admin)
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRoleForm(prev => {
+                            const nextPerms = { ...prev.permisos };
+                            const currCaja = nextPerms.caja || { ver: false, crear: false, editar: false, eliminar: false };
+                            nextPerms.caja = {
+                              ...currCaja,
+                              emitir_no_fiscal: !currCaja.emitir_no_fiscal
+                            };
+                            return { ...prev, permisos: nextPerms };
+                          });
+                        }}
+                        className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all cursor-pointer bg-white border-slate-300 hover:border-blue-500 text-slate-700 shadow-2xs font-bold text-xs"
+                      >
+                        {roleForm.permisos?.caja?.emitir_no_fiscal ? (
+                          <span className="flex items-center gap-1 text-emerald-700">
+                            <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> Habilitado (Permitido)
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-slate-500">
+                            <Square className="w-3.5 h-3.5 text-slate-400" /> Bloqueado (Denegado)
+                          </span>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* RIGHT COLUMN: Permissions Matrix + Guide */}
+              <div className="lg:col-span-8 space-y-4">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-extrabold text-slate-800 block uppercase font-sans">
+                    Matriz de Permisos del Perfil
+                  </label>
+                  <span className="text-[10px] text-slate-500">
+                    Haga clic en las columnas para marcar/desmarcar por acción
+                  </span>
+                </div>
+
+                {/* Matrix Table */}
+                <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                  <table className="w-full text-left font-sans text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-100 border-b border-slate-250 text-slate-700 uppercase font-bold">
+                        <th className="py-2.5 px-3 text-left">Módulo</th>
                         {ACCIONES_PERMISOS.map(act => {
-                          const isChecked = !!roleForm.permisos[mod.id]?.[act.id];
+                          const actionId = act.id as 'ver' | 'crear' | 'editar' | 'eliminar';
+                          const isColAllChecked = MODULOS_PERMISOS.every(m => !!roleForm.permisos[m.id]?.[actionId]);
                           return (
-                            <td key={act.id} className="py-2 px-2 text-center">
+                            <th key={act.id} className="py-2.5 px-2 text-center">
                               <button
                                 type="button"
-                                onClick={() => {
-                                  setRoleForm(prev => {
-                                    const nextPerms = { ...prev.permisos };
-                                    const currentModPerms = nextPerms[mod.id] || { ver: false, crear: false, editar: false, eliminar: false };
-                                    nextPerms[mod.id] = {
-                                      ...currentModPerms,
-                                      [act.id]: !currentModPerms[act.id]
-                                    };
-                                    return { ...prev, permisos: nextPerms };
-                                  });
-                                }}
-                                className="inline-flex items-center justify-center p-1 text-slate-400 hover:text-sky-600 transition-all"
+                                onClick={() => handleToggleColumnRoleMatrix(actionId)}
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase transition-all ${
+                                  isColAllChecked 
+                                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                    : 'bg-white hover:bg-slate-200 text-slate-700 border border-slate-300'
+                                }`}
+                                title={`Alternar columna ${act.label}`}
                               >
-                                {isChecked ? (
-                                  <CheckSquare className="w-4 h-4 text-sky-600" />
-                                ) : (
-                                  <Square className="w-4 h-4 text-slate-350" />
-                                )}
+                                <span>{act.label}</span>
+                                {isColAllChecked ? <CheckSquare className="w-3 h-3 text-emerald-600" /> : <Square className="w-3 h-3 text-slate-400" />}
                               </button>
-                            </td>
+                            </th>
                           );
                         })}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* PRECIO COSTO VISIBILITY PERMISSION TOGGLE FOR ROLE */}
-              <div className="mt-3 p-2.5 bg-amber-50/80 border border-amber-250 rounded-lg flex items-center justify-between gap-3 shadow-2xs font-sans">
-                <div className="flex items-start gap-2">
-                  <DollarSign className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-bold text-slate-800 text-[11px] block">
-                      Visualizar Precios de Costo y Valoración Financiera (F2 Inventario)
-                    </span>
-                    <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
-                      Permite ver la columna <strong className="text-amber-900">"P. Costo"</strong> en catálogo y totales de costos en barra superior.
-                    </span>
-                  </div>
+                    </thead>
+                    <tbody>
+                      {MODULOS_PERMISOS.map(mod => (
+                        <tr key={mod.id} className="border-b border-slate-100 hover:bg-slate-50/70 transition-colors">
+                          <td className="py-2.5 px-3 font-bold text-slate-800 text-left">
+                            {mod.label}
+                          </td>
+                          {ACCIONES_PERMISOS.map(act => {
+                            const isRoleAdmin = roleForm.nombre?.trim().toUpperCase() === 'ADMINISTRADOR';
+                            const isChecked = isRoleAdmin || !!roleForm.permisos[mod.id]?.[act.id];
+                            return (
+                              <td key={act.id} className="py-2.5 px-2 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (isRoleAdmin) {
+                                      showAlert('El perfil ADMINISTRADOR cuenta con Control Total permanente sobre todas las funciones del sistema. Sus privilegios no pueden ser reducidos.', 'Perfil Protegido', 'warning');
+                                      return;
+                                    }
+                                    setRoleForm(prev => {
+                                      const nextPerms = { ...prev.permisos };
+                                      const currentModPerms = nextPerms[mod.id] || { ver: false, crear: false, editar: false, eliminar: false };
+                                      nextPerms[mod.id] = {
+                                        ...currentModPerms,
+                                        [act.id]: !currentModPerms[act.id]
+                                      };
+                                      return { ...prev, permisos: nextPerms };
+                                    });
+                                  }}
+                                  className={`inline-flex items-center justify-center p-1.5 rounded-lg transition-all ${
+                                    isRoleAdmin 
+                                      ? 'text-emerald-600 opacity-90 cursor-not-allowed' 
+                                      : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
+                                  }`}
+                                  title={isRoleAdmin ? 'Permiso permanente (Control Total Admin)' : 'Alternar permiso'}
+                                >
+                                  {isChecked ? (
+                                    <CheckSquare className="w-4 h-4 text-emerald-600" />
+                                  ) : (
+                                    <Square className="w-4 h-4 text-slate-300" />
+                                  )}
+                                </button>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
 
-                {roleForm.nombre?.trim().toUpperCase() === 'ADMINISTRADOR' ? (
-                  <span className="px-2 py-1 bg-amber-100 border border-amber-300 text-amber-800 rounded font-bold text-[9px] uppercase whitespace-nowrap">
-                    Siempre Visible (Admin)
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRoleForm(prev => {
-                        const nextPerms = { ...prev.permisos };
-                        const currInv = nextPerms.inventario || { ver: false, crear: false, editar: false, eliminar: false };
-                        nextPerms.inventario = {
-                          ...currInv,
-                          ver_costos: !currInv.ver_costos
-                        };
-                        return { ...prev, permisos: nextPerms };
-                      });
-                    }}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded border transition-all cursor-pointer bg-white border-slate-300 hover:border-amber-500 text-slate-700"
-                  >
-                    {roleForm.permisos?.inventario?.ver_costos ? (
-                      <span className="flex items-center gap-1 text-emerald-700 font-bold text-[10.5px]">
-                        <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> Visible
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1 text-slate-400 font-medium text-[10.5px]">
-                        <Square className="w-3.5 h-3.5 text-slate-350" /> Oculto
-                      </span>
-                    )}
-                  </button>
-                )}
-              </div>
-
-              {/* EMITIR NOTAS DE ENTREGA / NO FISCAL PERMISSION TOGGLE FOR ROLE */}
-              <div className="mt-2.5 p-2.5 bg-blue-50/80 border border-blue-250 rounded-lg flex items-center justify-between gap-3 shadow-2xs font-sans">
-                <div className="flex items-start gap-2">
-                  <FileText className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-bold text-slate-800 text-[11px] block">
-                      Autorizar Emisión de Notas de Entrega / Comprobantes No Fiscales (F1 Caja)
+                {/* Interactive Operations Guide */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs leading-relaxed text-slate-700 space-y-2 font-sans">
+                  <div className="flex items-center justify-between border-b border-slate-200 pb-2 gap-2">
+                    <span className="font-extrabold text-slate-800 uppercase text-[10.5px] flex items-center gap-1.5">
+                      💡 Guía de Operaciones por Módulo:
                     </span>
-                    <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
-                      Permite a este perfil alternar a <strong className="text-blue-900">"Nota de Entrega"</strong> sin pasar por la máquina fiscal.
-                    </span>
-                  </div>
-                </div>
-
-                {roleForm.nombre?.trim().toUpperCase() === 'ADMINISTRADOR' ? (
-                  <span className="px-2 py-1 bg-blue-100 border border-blue-300 text-blue-800 rounded font-bold text-[9px] uppercase whitespace-nowrap">
-                    Autorizado (Admin)
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRoleForm(prev => {
-                        const nextPerms = { ...prev.permisos };
-                        const currCaja = nextPerms.caja || { ver: false, crear: false, editar: false, eliminar: false };
-                        nextPerms.caja = {
-                          ...currCaja,
-                          emitir_no_fiscal: !currCaja.emitir_no_fiscal
-                        };
-                        return { ...prev, permisos: nextPerms };
-                      });
-                    }}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded border transition-all cursor-pointer bg-white border-slate-300 hover:border-blue-500 text-slate-700"
-                  >
-                    {roleForm.permisos?.caja?.emitir_no_fiscal ? (
-                      <span className="flex items-center gap-1 text-emerald-700 font-bold text-[10.5px]">
-                        <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> Habilitado
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1 text-slate-400 font-medium text-[10.5px]">
-                        <Square className="w-3.5 h-3.5 text-slate-350" /> Bloqueado
-                      </span>
-                    )}
-                  </button>
-                )}
-              </div>
-
-              {/* Guía interactiva de permisos por Módulo */}
-              <div className="mt-2 bg-[#08284c]/5 border border-indigo-200 rounded p-2.5 text-[9.5px] leading-relaxed text-slate-700 space-y-2">
-                <div className="flex items-center justify-between border-b border-indigo-100 pb-1.5 gap-2">
-                  <span className="font-extrabold text-indigo-950 uppercase font-sans text-[10px] flex items-center gap-1">
-                    💡 Guía de Operaciones por Módulo:
-                  </span>
-                  <div className="flex gap-1 overflow-x-auto">
-                    {MODULOS_PERMISOS.map(m => (
-                      <button
-                        key={m.id}
-                        type="button"
-                        onClick={() => setActiveGuideModule(m.id)}
-                        className={`px-1.5 py-0.5 rounded font-mono font-bold text-[8.5px] transition-all cursor-pointer ${
-                          activeGuideModule === m.id
-                            ? 'bg-indigo-600 text-white shadow-xs'
-                            : 'bg-white text-slate-600 hover:bg-indigo-50 border border-slate-200'
-                        }`}
-                      >
-                        {m.id.toUpperCase()}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {(() => {
-                  const guide = MODULE_GUIDES_MAP[activeGuideModule] || MODULE_GUIDES_MAP.inventario;
-                  return (
-                    <div className="space-y-1 font-sans">
-                      <span className="font-extrabold text-indigo-900 block text-[9.5px] uppercase font-mono">
-                        📌 {guide.title}
-                      </span>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 bg-white p-2 rounded border border-slate-200 text-slate-700">
-                        <div><strong className="text-sky-700">Ver:</strong> {guide.ver}</div>
-                        <div><strong className="text-emerald-700">Crear:</strong> {guide.crear}</div>
-                        <div><strong className="text-amber-700">Editar:</strong> {guide.editar}</div>
-                        <div><strong className="text-rose-700">Eliminar:</strong> {guide.eliminar}</div>
-                      </div>
+                    <div className="flex gap-1 overflow-x-auto">
+                      {MODULOS_PERMISOS.map(m => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => setActiveGuideModule(m.id)}
+                          className={`px-2 py-0.5 rounded font-mono font-bold text-[9px] transition-all cursor-pointer ${
+                            activeGuideModule === m.id
+                              ? 'bg-slate-800 text-white shadow-xs'
+                              : 'bg-white text-slate-600 hover:bg-slate-200 border border-slate-250'
+                          }`}
+                        >
+                          {m.id.toUpperCase()}
+                        </button>
+                      ))}
                     </div>
-                  );
-                })()}
+                  </div>
+
+                  {(() => {
+                    const guide = MODULE_GUIDES_MAP[activeGuideModule] || MODULE_GUIDES_MAP.inventario;
+                    return (
+                      <div className="space-y-1">
+                        <span className="font-extrabold text-slate-800 block text-[10px] uppercase font-mono">
+                          📌 {guide.title}
+                        </span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-white p-2.5 rounded-lg border border-slate-200 text-slate-700 text-[11px]">
+                          <div><strong className="text-sky-700">Ver:</strong> {guide.ver}</div>
+                          <div><strong className="text-emerald-700">Crear:</strong> {guide.crear}</div>
+                          <div><strong className="text-amber-700">Editar:</strong> {guide.editar}</div>
+                          <div><strong className="text-rose-700">Eliminar:</strong> {guide.eliminar}</div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
             </div>
 
-            <div className="flex gap-2.5 pt-3">
+            {/* Modal Footer */}
+            <div className="flex justify-end items-center gap-3 bg-slate-50 border-t border-slate-200 px-6 py-4">
               <button
                 type="button"
                 onClick={() => setShowRoleModal(false)}
-                className="w-1/3 bg-slate-100 hover:bg-slate-200 border border-slate-250 text-slate-600 py-2.5 rounded font-sans text-xs transition-all"
+                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded-xl font-bold font-sans text-xs transition-all"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
-                className="w-2/3 bg-winter-configStart hover:bg-winter-configEnd text-white py-2.5 rounded font-bold font-sans text-xs transition-all shadow-sm"
+                className="px-7 py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-black font-sans text-xs uppercase shadow-md transition-all"
               >
                 Guardar Perfil
               </button>

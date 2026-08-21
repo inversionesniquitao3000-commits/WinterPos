@@ -142,8 +142,33 @@ export async function initDatabase() {
       console.log('✅ Esquema de tablas e índices creado exitosamente en PostgreSQL.');
     } else {
       console.log('✅ Base de datos PostgreSQL verificada. Tablas operativas.');
+      // Auto-migración para asegurar que Documentos_Empresa exista en instalaciones existentes
+      await clientTarget.query(`
+        CREATE TABLE IF NOT EXISTS Documentos_Empresa (
+            id BIGSERIAL PRIMARY KEY,
+            categoria VARCHAR(50) NOT NULL CHECK (categoria IN ('SENIAT', 'MERCANTIL', 'MUNICIPAL', 'PARAFISCAL', 'OTROS')),
+            titulo VARCHAR(150) NOT NULL,
+            descripcion TEXT,
+            nombre_archivo VARCHAR(255) NOT NULL,
+            ruta_archivo TEXT NOT NULL,
+            mime_type VARCHAR(100),
+            tamano_bytes BIGINT DEFAULT 0,
+            fecha_emision DATE,
+            fecha_vencimiento DATE,
+            estatus VARCHAR(20) DEFAULT 'Vigente',
+            es_historico BOOLEAN DEFAULT FALSE,
+            requisito_key VARCHAR(100),
+            created_by VARCHAR(100),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        ALTER TABLE Documentos_Empresa ADD COLUMN IF NOT EXISTS es_historico BOOLEAN DEFAULT FALSE;
+        ALTER TABLE Documentos_Empresa ADD COLUMN IF NOT EXISTS requisito_key VARCHAR(100);
+        CREATE INDEX IF NOT EXISTS idx_documentos_categoria ON Documentos_Empresa(categoria);
+        CREATE INDEX IF NOT EXISTS idx_documentos_vencimiento ON Documentos_Empresa(fecha_vencimiento);
+      `).catch(err => console.warn('[Migration Documentos_Empresa]', err.message));
     }
     return true;
+
   } catch (err) {
     console.error('Error al inicializar las tablas:', err.message);
     return false;
