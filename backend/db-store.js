@@ -846,7 +846,10 @@ export async function getProducts() {
         precio_costo_usd: parseFloat(r.precio_costo_usd || 0),
         precio_detalle_usd: parseFloat(r.precio_detalle_usd || 0),
         precio_mayor_usd: parseFloat(r.precio_mayor_usd || 0),
+        precio_bulto_usd: parseFloat(r.precio_bulto_usd || 0),
         cantidad_mayorista: parseInt(r.cantidad_mayorista || 12, 10),
+        cant_bulto: parseInt(r.cant_bulto || 0, 10),
+        ganancia_bulto: parseFloat(r.ganancia_bulto || 0),
         exento_impuesto: !!r.exento_impuesto,
         imagen_url: r.imagen_url || '',
         estado: r.estado || 'Activo',
@@ -869,9 +872,9 @@ export async function saveProduct(p) {
   if (usePostgres) {
     try {
       const res = await pool.query(
-        `INSERT INTO Productos (codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, precio_costo_usd, precio_detalle_usd, precio_mayor_usd, cantidad_mayorista, exento_impuesto, imagen_url, estado, a_granel, fecha_vencimiento, porcentaje_impuesto)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id`,
-        [p.barcode, p.description, p.category, stockActual, stockMinimo, p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.cantidad_mayorista || 12, p.exento_impuesto, p.imagen_url, p.estado, p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
+        `INSERT INTO Productos (codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, precio_costo_usd, precio_detalle_usd, precio_mayor_usd, precio_bulto_usd, cantidad_mayorista, cant_bulto, ganancia_bulto, exento_impuesto, imagen_url, estado, a_granel, fecha_vencimiento, porcentaje_impuesto)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING id`,
+        [p.barcode, p.description, p.category, stockActual, stockMinimo, p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.precio_bulto_usd || 0, p.cantidad_mayorista || 12, p.cant_bulto || 0, p.ganancia_bulto || 0, p.exento_impuesto, p.imagen_url, p.estado, p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
       );
       return { ...p, id: res.rows[0].id, stock_actual: stockActual, stock_minimo: stockMinimo };
     } catch (err) {
@@ -898,9 +901,9 @@ export async function updateProduct(p) {
     try {
       const res = await pool.query(
         `UPDATE Productos 
-         SET codigo_barras_clave = $1, descripcion = $2, categoria = $3, stock_minimo = $4, precio_costo_usd = $5, precio_detalle_usd = $6, precio_mayor_usd = $7, cantidad_mayorista = $8, exento_impuesto = $9, imagen_url = $10, estado = $11, a_granel = $12, fecha_vencimiento = $13, porcentaje_impuesto = $14, stock_actual = $15
-         WHERE id = $16 RETURNING *`,
-        [barcode, description, category, stockMinimo, parseFloat(p.precio_costo_usd) || 0, parseFloat(p.precio_detalle_usd) || 0, parseFloat(p.precio_mayor_usd) || 0, parseInt(p.cantidad_mayorista) || 12, !!p.exento_impuesto, p.imagen_url || '', p.estado || 'Activo', isGranel, p.fecha_vencimiento || null, parseFloat(p.porcentaje_impuesto || 0), stockActual, prodId]
+         SET codigo_barras_clave = $1, descripcion = $2, categoria = $3, stock_minimo = $4, precio_costo_usd = $5, precio_detalle_usd = $6, precio_mayor_usd = $7, precio_bulto_usd = $8, cantidad_mayorista = $9, cant_bulto = $10, ganancia_bulto = $11, exento_impuesto = $12, imagen_url = $13, estado = $14, a_granel = $15, fecha_vencimiento = $16, porcentaje_impuesto = $17, stock_actual = $18
+         WHERE id = $19 RETURNING *`,
+        [barcode, description, category, stockMinimo, parseFloat(p.precio_costo_usd) || 0, parseFloat(p.precio_detalle_usd) || 0, parseFloat(p.precio_mayor_usd) || 0, parseFloat(p.precio_bulto_usd) || 0, parseInt(p.cantidad_mayorista) || 12, parseInt(p.cant_bulto) || 0, parseFloat(p.ganancia_bulto) || 0, !!p.exento_impuesto, p.imagen_url || '', p.estado || 'Activo', isGranel, p.fecha_vencimiento || null, parseFloat(p.porcentaje_impuesto || 0), stockActual, prodId]
       );
       if (res.rowCount > 0) {
         const r = res.rows[0];
@@ -915,7 +918,10 @@ export async function updateProduct(p) {
           precio_costo_usd: parseFloat(r.precio_costo_usd),
           precio_detalle_usd: parseFloat(r.precio_detalle_usd),
           precio_mayor_usd: parseFloat(r.precio_mayor_usd),
+          precio_bulto_usd: parseFloat(r.precio_bulto_usd || 0),
           cantidad_mayorista: parseInt(r.cantidad_mayorista) || 12,
+          cant_bulto: parseInt(r.cant_bulto || 0),
+          ganancia_bulto: parseFloat(r.ganancia_bulto || 0),
           exento_impuesto: !!r.exento_impuesto,
           porcentaje_impuesto: parseFloat(r.porcentaje_impuesto || 0),
           a_granel: !!r.a_granel,
@@ -1012,10 +1018,17 @@ export async function updateProductStockBulk(updates) {
 export async function updateProductPrices(prodId, prices) {
   if (usePostgres) {
     try {
-      await pool.query(
-        'UPDATE Productos SET precio_costo_usd = $1, precio_detalle_usd = $2, precio_mayor_usd = $3 WHERE id = $4',
-        [prices.cost, prices.detail, prices.mayor, prodId]
-      );
+      if (prices.bulto !== undefined) {
+        await pool.query(
+          'UPDATE Productos SET precio_costo_usd = $1, precio_detalle_usd = $2, precio_mayor_usd = $3, precio_bulto_usd = $4 WHERE id = $5',
+          [prices.cost, prices.detail, prices.mayor, parseFloat(prices.bulto) || 0, prodId]
+        );
+      } else {
+        await pool.query(
+          'UPDATE Productos SET precio_costo_usd = $1, precio_detalle_usd = $2, precio_mayor_usd = $3 WHERE id = $4',
+          [prices.cost, prices.detail, prices.mayor, prodId]
+        );
+      }
       return true;
     } catch (err) {
       console.error('Error en updateProductPrices (Postgres):', err.message);
@@ -1027,6 +1040,9 @@ export async function updateProductPrices(prodId, prices) {
     products[idx].precio_costo_usd = prices.cost;
     products[idx].precio_detalle_usd = prices.detail;
     products[idx].precio_mayor_usd = prices.mayor;
+    if (prices.bulto !== undefined) {
+      products[idx].precio_bulto_usd = parseFloat(prices.bulto) || 0;
+    }
     writeJsonFile('products.json', products);
     return true;
   }
@@ -1040,10 +1056,17 @@ export async function updateProductPricesBulk(updates) {
       client = await pool.connect();
       await client.query('BEGIN');
       for (const update of updates) {
-        await client.query(
-          'UPDATE Productos SET precio_costo_usd = $1, precio_detalle_usd = $2, precio_mayor_usd = $3 WHERE id = $4',
-          [update.cost, update.detail, update.mayor, update.id]
-        );
+        if (update.bulto !== undefined) {
+          await client.query(
+            'UPDATE Productos SET precio_costo_usd = $1, precio_detalle_usd = $2, precio_mayor_usd = $3, precio_bulto_usd = $4 WHERE id = $5',
+            [update.cost, update.detail, update.mayor, parseFloat(update.bulto) || 0, update.id]
+          );
+        } else {
+          await client.query(
+            'UPDATE Productos SET precio_costo_usd = $1, precio_detalle_usd = $2, precio_mayor_usd = $3 WHERE id = $4',
+            [update.cost, update.detail, update.mayor, update.id]
+          );
+        }
       }
       await client.query('COMMIT');
       return true;

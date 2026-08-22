@@ -8,7 +8,10 @@ export interface Product {
   precio_costo_usd: number;
   precio_detalle_usd: number;
   precio_mayor_usd: number;
+  precio_bulto_usd?: number;
   cantidad_mayorista: number;
+  cant_bulto?: number;
+  ganancia_bulto?: number;
   exento_impuesto: boolean;
   imagen_url: string;
   estado: 'Activo' | 'Inactivo';
@@ -16,6 +19,8 @@ export interface Product {
   fecha_vencimiento?: string;
   porcentaje_impuesto?: number;
 }
+
+export type PriceType = 'DETALLE' | 'MAYOR' | 'BULTO';
 
 export interface Client {
   id: number;
@@ -93,9 +98,10 @@ export interface TasaHistoryItem {
 export interface SaleItem {
   product: Product;
   qty: number;
-  priceType: 'Detalle' | 'Mayor' | 'Costo';
+  priceType: 'Detalle' | 'Mayor' | 'Bulto' | 'Costo';
   priceUSD: number;
   totalUSD: number;
+  isManualPriceType?: boolean;
 }
 
 export interface Payment {

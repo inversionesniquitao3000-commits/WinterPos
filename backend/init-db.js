@@ -165,7 +165,11 @@ export async function initDatabase() {
         ALTER TABLE Documentos_Empresa ADD COLUMN IF NOT EXISTS requisito_key VARCHAR(100);
         CREATE INDEX IF NOT EXISTS idx_documentos_categoria ON Documentos_Empresa(categoria);
         CREATE INDEX IF NOT EXISTS idx_documentos_vencimiento ON Documentos_Empresa(fecha_vencimiento);
-      `).catch(err => console.warn('[Migration Documentos_Empresa]', err.message));
+
+        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS precio_bulto_usd NUMERIC(12, 2) DEFAULT 0 CHECK (precio_bulto_usd >= 0);
+        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS cant_bulto INT DEFAULT 0 CHECK (cant_bulto >= 0);
+        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS ganancia_bulto NUMERIC(8, 2) DEFAULT 0;
+      `).catch(err => console.warn('[Migration Documentos_Empresa / Productos]', err.message));
     }
     return true;
 

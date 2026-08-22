@@ -2,12 +2,14 @@ import { useState, useEffect } from 'react';
 import { Calculator, Percent, DollarSign, Zap, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, Edit2, ShieldAlert, TrendingUp } from 'lucide-react';
 
 interface AuxiliarCalculoPreciosProps {
-  onApplyPrices: (prices: { cost: string; detail: string; mayor: string }) => void;
+  onApplyPrices: (prices: { cost: string; detail: string; mayor: string; bulto: string }) => void;
   tasaBCV?: number;       // Official BCV Rate
   tasaFallback?: number;  // Fallback system rate
   initialCost?: string;
   initialDetail?: string;
   initialMayor?: string;
+  initialBulto?: string;
+  cantBulto?: number;
   taxActive?: boolean;
   taxPct?: number;
   onToggleExpand?: (expanded: boolean) => void;
@@ -20,6 +22,8 @@ export default function AuxiliarCalculoPrecios({
   initialCost = '',
   initialDetail = '',
   initialMayor = '',
+  initialBulto = '',
+  cantBulto = 1,
   taxActive = false,
   taxPct = 16,
   onToggleExpand
@@ -42,12 +46,14 @@ export default function AuxiliarCalculoPrecios({
   // Profit margin states (%)
   const [marginDetail, setMarginDetail] = useState('30');
   const [marginMayor, setMarginMayor] = useState('15');
+  const [marginBulto, setMarginBulto] = useState('8');
 
   // Initial previous prices for comparison guide
   const prevCost = parseFloat(initialCost) || 0;
   const prevDetail = parseFloat(initialDetail) || 0;
   const prevMayor = parseFloat(initialMayor) || 0;
-  const hasInitialPrices = prevCost > 0 || prevDetail > 0 || prevMayor > 0;
+  const prevBulto = parseFloat(initialBulto) || 0;
+  const hasInitialPrices = prevCost > 0 || prevDetail > 0 || prevMayor > 0 || prevBulto > 0;
 
   // Helper to enforce max 2 decimal places strictly for manual inputs
   const sanitize2Decimals = (val: string) => {
@@ -95,30 +101,44 @@ export default function AuxiliarCalculoPrecios({
   // Calculated prices in USD
   const pctDetail = Math.max(parseFloat(marginDetail) || 0, 0);
   let pctMayor = Math.max(parseFloat(marginMayor) || 0, 0);
+  let pctBulto = Math.max(parseFloat(marginBulto) || 0, 0);
 
-  // CONSTRAINT RULE: Wholesale margin/price MUST be less than retail margin/price
+  // CONSTRAINT RULE: Wholesale margin/price MUST be less than retail, and bulk MUST be less than wholesale
   let isMayorAdjusted = false;
   if (pctMayor >= pctDetail && pctDetail > 0) {
     pctMayor = Math.max(0, pctDetail - 1);
     isMayorAdjusted = true;
   }
 
+  let isBultoAdjusted = false;
+  if (pctBulto >= pctMayor && pctMayor > 0) {
+    pctBulto = Math.max(0, pctMayor - 1);
+    isBultoAdjusted = true;
+  }
+
   const rawDetailUSD = unitCostUSD > 0 ? (unitCostUSD * (1 + pctDetail / 100)) : (parseFloat(initialDetail) || 0);
   let rawMayorUSD = unitCostUSD > 0 ? (unitCostUSD * (1 + pctMayor / 100)) : (parseFloat(initialMayor) || 0);
+  let rawBultoUSD = unitCostUSD > 0 ? (unitCostUSD * (1 + pctBulto / 100)) : (parseFloat(initialBulto) || 0);
 
-  // Additional check to enforce rawMayorUSD < rawDetailUSD
+  // Additional check to enforce rawMayorUSD < rawDetailUSD and rawBultoUSD < rawMayorUSD
   if (rawMayorUSD >= rawDetailUSD && rawDetailUSD > 0) {
     rawMayorUSD = Math.max(0, rawDetailUSD - 0.01);
     isMayorAdjusted = true;
   }
+  if (rawBultoUSD >= rawMayorUSD && rawMayorUSD > 0) {
+    rawBultoUSD = Math.max(0, rawMayorUSD - 0.01);
+    isBultoAdjusted = true;
+  }
 
   const calculatedDetailUSD = rawDetailUSD;
   const calculatedMayorUSD = rawMayorUSD;
+  const calculatedBultoUSD = rawBultoUSD;
 
   // IVA Calculations
   const taxMultiplier = taxActive && taxPct > 0 ? (1 + taxPct / 100) : 1;
   const detailWithIva = calculatedDetailUSD * taxMultiplier;
   const mayorWithIva = calculatedMayorUSD * taxMultiplier;
+  const bultoWithIva = calculatedBultoUSD * taxMultiplier;
 
   const [appliedToast, setAppliedToast] = useState(false);
 
@@ -127,7 +147,8 @@ export default function AuxiliarCalculoPrecios({
       onApplyPrices({
         cost: unitCostUSD.toFixed(2),
         detail: calculatedDetailUSD.toFixed(2),
-        mayor: calculatedMayorUSD.toFixed(2)
+        mayor: calculatedMayorUSD.toFixed(2),
+        bulto: calculatedBultoUSD.toFixed(2)
       });
       setAppliedToast(true);
       setTimeout(() => setAppliedToast(false), 2500);
@@ -329,14 +350,14 @@ export default function AuxiliarCalculoPrecios({
               )}
             </div>
 
-            {isMayorAdjusted && (
+            {(isMayorAdjusted || isBultoAdjusted) && (
               <div className="flex items-center gap-1 text-[10px] font-bold text-amber-800 bg-amber-100 p-1.5 rounded border border-amber-300">
                 <ShieldAlert className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-                <span>Nota: El Precio Mayor ha sido ajustado para mantenerse inferior al Precio Venta.</span>
+                <span>Nota: Los precios se calibraron automáticamente para garantizar la jerarquía: Costo &lt; Bulto &lt; Mayor &lt; Detalle.</span>
               </div>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
               {/* Retail Margin */}
               <div className="space-y-1 bg-emerald-50/50 border border-emerald-200 rounded-lg p-2">
                 <div className="flex justify-between items-center">
@@ -432,6 +453,57 @@ export default function AuxiliarCalculoPrecios({
                   </div>
                 </div>
               </div>
+
+              {/* Bulk / Case Margin */}
+              <div className="space-y-1 bg-amber-50/80 border border-amber-300 rounded-lg p-2">
+                <div className="flex justify-between items-center">
+                  <label className="text-[10px] font-extrabold text-amber-900">
+                    % Ganancia Bulto / Empaque
+                  </label>
+                  <div className="text-right font-mono">
+                    <span className="text-xs font-black text-amber-700 block">
+                      Base: ${calculatedBultoUSD.toFixed(2)}
+                    </span>
+                    <span className="text-[8.5px] font-bold text-amber-800 block">
+                      Bulto x{cantBulto || 1}: ${(calculatedBultoUSD * (cantBulto || 1)).toFixed(2)}
+                    </span>
+                    {taxActive && (
+                      <span className="text-[9px] font-extrabold text-blue-700 block">
+                        +{taxPct}% IVA: ${bultoWithIva.toFixed(2)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    placeholder="8"
+                    value={marginBulto}
+                    onChange={(e) => setMarginBulto(e.target.value)}
+                    className="w-16 bg-white border border-amber-300 rounded p-1 text-xs font-mono font-bold text-center focus:ring-1 focus:ring-amber-500 focus:outline-none"
+                  />
+                  <span className="text-xs font-bold text-amber-800">%</span>
+                  {/* Preset Buttons */}
+                  <div className="flex flex-wrap gap-1 ml-auto">
+                    {['5', '8', '10', '12'].map(pct => (
+                      <button
+                        key={pct}
+                        type="button"
+                        onClick={() => setMarginBulto(pct)}
+                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded border transition-all ${
+                          marginBulto === pct 
+                            ? 'bg-amber-600 text-white border-amber-600' 
+                            : 'bg-white text-amber-800 border-amber-300 hover:bg-amber-100'
+                        }`}
+                      >
+                        {pct}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -448,7 +520,7 @@ export default function AuxiliarCalculoPrecios({
                 </span>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 text-center text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
                 {/* COSTO */}
                 <div className="bg-white/95 border border-amber-200 rounded-md p-1.5 space-y-0.5 shadow-2xs">
                   <span className="text-[10px] font-extrabold text-amber-800 block uppercase">Costo ($)</span>
@@ -497,6 +569,25 @@ export default function AuxiliarCalculoPrecios({
                   {taxActive && taxPct > 0 && (
                     <span className="text-[9px] font-bold text-blue-700 block font-mono">
                       +IVA: ${mayorWithIva.toFixed(2)}
+                    </span>
+                  )}
+                </div>
+
+                {/* VENTA BULTO */}
+                <div className="bg-white/95 border border-amber-300 rounded-md p-1.5 space-y-0.5 shadow-2xs">
+                  <span className="text-[10px] font-extrabold text-amber-900 block uppercase">Venta Bulto ($)</span>
+                  <div className="flex items-center justify-center gap-1 font-mono flex-wrap">
+                    <span className="text-slate-400 text-xs font-bold line-through">
+                      ${prevBulto.toFixed(2)}
+                    </span>
+                    <span className="text-amber-600 font-extrabold text-xs">➡️</span>
+                    <span className="text-amber-900 font-black text-xs bg-amber-100 px-1 py-0.5 rounded">
+                      ${calculatedBultoUSD.toFixed(2)}
+                    </span>
+                  </div>
+                  {taxActive && taxPct > 0 && (
+                    <span className="text-[9px] font-bold text-blue-700 block font-mono">
+                      +IVA: ${bultoWithIva.toFixed(2)}
                     </span>
                   )}
                 </div>

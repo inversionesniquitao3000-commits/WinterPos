@@ -10,7 +10,7 @@ interface TasaCambioProps {
   currentUser: User;
   isServer?: boolean;
   getApiUrl?: (path: string) => string;
-  onUpdateTasa: (newDia: number, newVuelto: number) => void;
+  onUpdateTasa: (newDia: number, newVuelto: number, userOverrideLabel?: string) => void;
   onClearHistory?: () => Promise<void>;
 }
 
@@ -26,9 +26,42 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
     return (localStorage.getItem('pos_auto_tasa_mode') as 'off' | 'usd' | 'eur') || 'off';
   });
 
+  // Auto BCV Interval / Fixed Time Settings
+  const [autoInterval, setAutoInterval] = useState<string>(() => {
+    return localStorage.getItem('pos_auto_tasa_interval') || '10';
+  });
+  const [autoFixedTime, setAutoFixedTime] = useState<string>(() => {
+    return localStorage.getItem('pos_auto_tasa_fixed_time') || '17:00';
+  });
+
+  const isAdmin = Boolean(
+    currentUser && (
+      currentUser.rol?.toUpperCase().includes('ADMIN') || 
+      currentUser.rol?.toUpperCase() === 'ADMINISTRADOR' || 
+      currentUser.rol?.toUpperCase() === 'SUPERADMIN' ||
+      currentUser.permisos?.['tasas']?.admin || 
+      currentUser.permisos?.['tasas']?.editar
+    )
+  );
+
+  const handleUpdateInterval = (val: string) => {
+    setAutoInterval(val);
+    localStorage.setItem('pos_auto_tasa_interval', val);
+    window.dispatchEvent(new Event('pos_auto_tasa_config_changed'));
+    setSuccessMsg(`Frecuencia de sincronización automática cambiada a: ${val === 'fixed' ? 'Hora fija' : `Cada ${val} minutos`}`);
+  };
+
+  const handleUpdateFixedTime = (val: string) => {
+    setAutoFixedTime(val);
+    localStorage.setItem('pos_auto_tasa_fixed_time', val);
+    window.dispatchEvent(new Event('pos_auto_tasa_config_changed'));
+    setSuccessMsg(`Hora de sincronización diaria fijada a las: ${val}`);
+  };
+
   const handleSelectAutoMode = (mode: 'off' | 'usd' | 'eur') => {
     setAutoMode(mode);
     localStorage.setItem('pos_auto_tasa_mode', mode);
+    window.dispatchEvent(new Event('pos_auto_tasa_config_changed'));
 
     if (mode === 'off') {
       showAlert('Modo Manual Activado. Ahora puede registrar las tasas de cobro y vuelto manualmente.', 'Modo Manual', 'info');
@@ -83,6 +116,19 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
             eur: data.eur || '',
             fechaValor: data.fechaValor || ''
           });
+
+          // Si el modo automático está activo, verificar si la tasa cambió y sincronizarla
+          const currentAutoMode = (localStorage.getItem('pos_auto_tasa_mode') as 'off' | 'usd' | 'eur') || 'off';
+          if (currentAutoMode !== 'off') {
+            const raw = currentAutoMode === 'eur' ? data.eur : data.usd;
+            const parsed = parseBcvVal(raw);
+            if (parsed > 0 && Math.abs(tasaDia - parsed) >= 0.01) {
+              const targetStr = parsed.toFixed(2);
+              setInputDia(targetStr);
+              setInputVuelto(targetStr);
+              onUpdateTasa(parsed, parsed, currentAutoMode === 'eur' ? 'SISTEMA (Auto BCV €)' : 'SISTEMA (Auto BCV $)');
+            }
+          }
         } else {
           setBcvError('No se recibió respuesta válida.');
         }
@@ -99,6 +145,8 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
 
   useEffect(() => {
     loadBcvRates();
+    const interval = setInterval(loadBcvRates, 10 * 60 * 1000);
+    return () => clearInterval(interval);
   }, []);
 
   // Helper to parse BCV rates cleanly
@@ -125,14 +173,6 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
       setInputVuelto(valStr);
     }
   };
-
-  const isAdmin = Boolean(
-    currentUser && (
-      currentUser.rol?.toUpperCase().includes('ADMIN') || 
-      currentUser.rol === 'ADMINISTRADOR' || 
-      currentUser.rol === 'ADMIN'
-    )
-  );
 
   const handleConfirmClearHistory = async () => {
     const ok = await showConfirm(
@@ -368,65 +408,124 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
     <div className="space-y-6 text-slate-800 font-mono text-xs">
       
       {/* HEADER WITH AUTO BCV MODE TOGGLE */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
-        <div>
-          <h1 className="text-xl font-extrabold text-winter-clientesStart tracking-wider flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-winter-clientesStart" />
-            TASAS DE CAMBIO (AUDITORÍA DIARIA)
-          </h1>
-          <p className="text-xs text-slate-500 mt-1 font-sans">
-            Establezca las tasas cambiarias de cobro y de vuelto del día en bolívares para las conversiones automáticas del POS.
-          </p>
+      <div className="flex flex-col gap-3 border-b border-slate-200 pb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-extrabold text-winter-clientesStart tracking-wider flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-winter-clientesStart" />
+              TASAS DE CAMBIO (AUDITORÍA DIARIA)
+            </h1>
+            <p className="text-xs text-slate-500 mt-1 font-sans">
+              Establezca las tasas cambiarias de cobro y de vuelto del día en bolívares para las conversiones automáticas del POS.
+            </p>
+          </div>
+
+          {/* AUTO BCV SELECTOR BUTTONS */}
+          <div className="bg-slate-100 p-1.5 rounded-xl border border-slate-250 flex items-center gap-1 shrink-0 self-start sm:self-auto shadow-2xs font-sans">
+            <span className="text-[10.5px] font-extrabold text-slate-500 uppercase px-2 hidden md:inline tracking-wider">
+              Auto BCV:
+            </span>
+
+            {/* MANUAL BUTTON */}
+            <button
+              type="button"
+              onClick={() => handleSelectAutoMode('off')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                autoMode === 'off'
+                  ? 'bg-white text-slate-800 shadow-sm border border-slate-300'
+                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'
+              }`}
+            >
+              <span className="text-sm">⚙️</span>
+              <span>Manual</span>
+            </button>
+
+            {/* AUTO USD BUTTON */}
+            <button
+              type="button"
+              onClick={() => handleSelectAutoMode('usd')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                autoMode === 'usd'
+                  ? 'bg-emerald-600 text-white shadow-sm font-extrabold ring-2 ring-emerald-300'
+                  : 'text-emerald-700 hover:bg-emerald-50'
+              }`}
+            >
+              <span className="text-sm">💵</span>
+              <span>Auto $ BCV</span>
+            </button>
+
+            {/* AUTO EUR BUTTON */}
+            <button
+              type="button"
+              onClick={() => handleSelectAutoMode('eur')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                autoMode === 'eur'
+                  ? 'bg-indigo-600 text-white shadow-sm font-extrabold ring-2 ring-indigo-300'
+                  : 'text-indigo-700 hover:bg-indigo-50'
+              }`}
+            >
+              <span className="text-sm">💶</span>
+              <span>Auto € BCV</span>
+            </button>
+          </div>
         </div>
 
-        {/* AUTO BCV SELECTOR BUTTONS */}
-        <div className="bg-slate-100 p-1.5 rounded-xl border border-slate-250 flex items-center gap-1 shrink-0 self-start sm:self-auto shadow-2xs font-sans">
-          <span className="text-[10.5px] font-extrabold text-slate-500 uppercase px-2 hidden md:inline tracking-wider">
-            Auto BCV:
-          </span>
+        {/* PARAMETRIZACIÓN DE FRECUENCIA AUTO BCV (ADMINISTRADOR) */}
+        {autoMode !== 'off' && (
+          <div className="bg-gradient-to-r from-slate-50 to-indigo-50/40 p-3 rounded-xl border border-indigo-100 flex flex-wrap items-center justify-between gap-3 text-xs font-sans animate-fadeIn">
+            <div className="flex items-center gap-2">
+              <span className="flex h-2.5 w-2.5 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+              </span>
+              <span className="font-extrabold text-slate-800">
+                Sincronización Automática Activa ({autoMode === 'eur' ? '€ Euro BCV' : '$ Dólar BCV'}):
+              </span>
+              <span className="text-slate-500 text-[11px]">
+                {autoInterval === 'fixed'
+                  ? `Se actualiza diariamente a las ${autoFixedTime} (hora oficial del BCV)`
+                  : `Se valida cada ${autoInterval} minutos en segundo plano`}
+              </span>
+            </div>
 
-          {/* MANUAL BUTTON */}
-          <button
-            type="button"
-            onClick={() => handleSelectAutoMode('off')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-              autoMode === 'off'
-                ? 'bg-white text-slate-800 shadow-sm border border-slate-300'
-                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'
-            }`}
-          >
-            <span className="text-sm">⚙️</span>
-            <span>Manual</span>
-          </button>
+            <div className="flex items-center gap-2">
+              <label className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">
+                ⏱️ Frecuencia:
+              </label>
+              {isAdmin ? (
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={autoInterval}
+                    onChange={(e) => handleUpdateInterval(e.target.value)}
+                    className="bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-2xs cursor-pointer"
+                  >
+                    <option value="10">⚡ Cada 10 minutos (Recomendado)</option>
+                    <option value="15">⚡ Cada 15 minutos</option>
+                    <option value="20">⚡ Cada 20 minutos</option>
+                    <option value="30">⚡ Cada 30 minutos</option>
+                    <option value="60">⚡ Cada 1 hora</option>
+                    <option value="120">⚡ Cada 2 horas</option>
+                    <option value="fixed">⏰ A una hora fija diaria</option>
+                  </select>
 
-          {/* AUTO USD BUTTON */}
-          <button
-            type="button"
-            onClick={() => handleSelectAutoMode('usd')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-              autoMode === 'usd'
-                ? 'bg-emerald-600 text-white shadow-sm font-extrabold ring-2 ring-emerald-300'
-                : 'text-emerald-700 hover:bg-emerald-50'
-            }`}
-          >
-            <span className="text-sm">💵</span>
-            <span>Auto $ BCV</span>
-          </button>
-
-          {/* AUTO EUR BUTTON */}
-          <button
-            type="button"
-            onClick={() => handleSelectAutoMode('eur')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-              autoMode === 'eur'
-                ? 'bg-indigo-600 text-white shadow-sm font-extrabold ring-2 ring-indigo-300'
-                : 'text-indigo-700 hover:bg-indigo-50'
-            }`}
-          >
-            <span className="text-sm">💶</span>
-            <span>Auto € BCV</span>
-          </button>
-        </div>
+                  {autoInterval === 'fixed' && (
+                    <input
+                      type="time"
+                      value={autoFixedTime}
+                      onChange={(e) => handleUpdateFixedTime(e.target.value)}
+                      className="bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-2xs cursor-pointer"
+                      title="Hora de actualización automática diaria"
+                    />
+                  )}
+                </div>
+              ) : (
+                <span className="text-[11px] bg-slate-200/80 px-2 py-1 rounded text-slate-600 font-bold">
+                  {autoInterval === 'fixed' ? `Hora Fija: ${autoFixedTime}` : `Cada ${autoInterval} min`} (Configurado por Administrador)
+                </span>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {errorMsg && (

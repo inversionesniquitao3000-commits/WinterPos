@@ -27,6 +27,8 @@ WizardStyle=modern
 PrivilegesRequired=admin
 SetupIconFile=app_icon.ico
 UninstallDisplayIcon={app}\installer\app_icon.ico
+WizardImageFile=wizard_sidebar.bmp
+WizardSmallImageFile=wizard_small.bmp
 
 [Languages]
 Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"

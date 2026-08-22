@@ -923,6 +923,31 @@ export default function CajaPOS({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const determinePriceAndType = (prod: Product, qty: number, appliesCost: boolean): { priceUSD: number; priceType: 'Detalle' | 'Mayor' | 'Bulto' | 'Costo' } => {
+    const costPrice = parseFloat(prod.precio_costo_usd as any) || 0;
+    const detailPrice = parseFloat(prod.precio_detalle_usd as any) || 0;
+    const mayorPrice = parseFloat(prod.precio_mayor_usd as any) || 0;
+    const bultoPrice = parseFloat(prod.precio_bulto_usd as any) || 0;
+
+    const cantMayor = parseInt(prod.cantidad_mayorista as any) || 12;
+    const cantBulto = parseInt(prod.cant_bulto as any) || 0;
+
+    if (appliesCost) {
+      return { priceUSD: costPrice, priceType: 'Costo' };
+    }
+
+    // Automatic evaluation hierarchy strictly based on quantity:
+    if (cantBulto > 0 && bultoPrice > 0 && qty >= cantBulto) {
+      return { priceUSD: bultoPrice, priceType: 'Bulto' };
+    }
+
+    if (cantMayor > 0 && mayorPrice > 0 && qty >= cantMayor) {
+      return { priceUSD: mayorPrice, priceType: 'Mayor' };
+    }
+
+    return { priceUSD: detailPrice, priceType: 'Detalle' };
+  };
+
   const handleSelectClient = (cli: Client) => {
     setSelectedClient(cli);
     setDiscountPct(cli.porcentaje_descuento);
@@ -932,25 +957,76 @@ export default function CajaPOS({
     localStorage.setItem('pos_current_client_doc', cli.cedula_rif);
 
     // Recalculate cart item prices for the selected client
-    if (cli.aplica_precio_costo) {
-      setSaleItems(prev => prev.map(item => {
-        const costPrice = item.product.precio_costo_usd;
-        return { ...item, priceUSD: costPrice, priceType: 'Costo', totalUSD: item.qty * costPrice };
-      }));
-    } else {
-      setSaleItems(prev => prev.map(item => {
-        const normalPrice = item.qty >= item.product.cantidad_mayorista ? item.product.precio_mayor_usd : item.product.precio_detalle_usd;
-        const normalType = item.qty >= item.product.cantidad_mayorista ? 'Mayor' : 'Detalle';
-        return { ...item, priceUSD: normalPrice, priceType: normalType, totalUSD: item.qty * normalPrice };
-      }));
-    }
+    setSaleItems(prev => prev.map(item => {
+      const { priceUSD, priceType } = determinePriceAndType(item.product, item.qty, !!cli.aplica_precio_costo);
+      return { ...item, priceUSD, priceType, totalUSD: item.qty * priceUSD };
+    }));
 
     focusSearchInput();
+  };
+
+  const handleCyclePriceLevel = (prodId: number) => {
+    setSaleItems(prev => prev.map(item => {
+      if (item.product.id !== prodId) return item;
+
+      const prod = item.product;
+      const cantMayor = parseInt(prod.cantidad_mayorista as any) || 6;
+      const cantBulto = parseInt(prod.cant_bulto as any) || 0;
+      const hasMayor = (parseFloat(prod.precio_mayor_usd as any) || 0) > 0 && cantMayor > 0;
+      const hasBulto = (parseFloat(prod.precio_bulto_usd as any) || 0) > 0 && cantBulto > 0;
+
+      // Cycle hierarchy: Detalle (qty 1) -> Mayor (qty cantMayor) -> Bulto (qty cantBulto) -> Detalle (qty 1)
+      let targetQty = 1;
+      if (item.priceType === 'Detalle') {
+        if (hasMayor) {
+          targetQty = cantMayor;
+        } else if (hasBulto) {
+          targetQty = cantBulto;
+        } else {
+          targetQty = 1;
+        }
+      } else if (item.priceType === 'Mayor') {
+        if (hasBulto) {
+          targetQty = cantBulto;
+        } else {
+          targetQty = 1;
+        }
+      } else {
+        targetQty = 1;
+      }
+
+      // Verify available stock
+      if (targetQty > prod.stock_actual) {
+        showToast(`Stock insuficiente para alcanzar volumen (${targetQty} uds). Disponible: ${formatStockVal(prod.stock_actual, prod.a_granel)} ${prod.a_granel ? 'kg' : 'uds'}`, 'error');
+        return item;
+      }
+
+      const { priceUSD, priceType } = determinePriceAndType(prod, targetQty, !!selectedClient.aplica_precio_costo);
+      showToast(`Cantidad ajustada a ${targetQty} uds (${priceType})`, 'info');
+
+      return {
+        ...item,
+        qty: targetQty,
+        priceUSD,
+        priceType,
+        totalUSD: targetQty * priceUSD
+      };
+    }));
   };
   
   const [selectedSeller, setSelectedSeller] = useState<string>(currentUser.nombre);
   
-  const [searchProdTerm, setSearchProdTerm] = useState('');
+  const [searchProdTerm, setSearchProdTerm] = useState<string>(() => {
+    return sessionStorage.getItem('pos_caja_search_term') || '';
+  });
+
+  useEffect(() => {
+    if (searchProdTerm) {
+      sessionStorage.setItem('pos_caja_search_term', searchProdTerm);
+    } else {
+      sessionStorage.removeItem('pos_caja_search_term');
+    }
+  }, [searchProdTerm]);
   const [searchSelectedIndex, setSearchSelectedIndex] = useState<number>(-1);
   const searchDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -1697,14 +1773,14 @@ export default function CajaPOS({
           return prev;
         }
         showToast(`Se agregaron ${formattedQty} ${itemUnit} de "${prod.description}" al carrito.`, 'success');
+        const { priceUSD, priceType } = determinePriceAndType(prod, nextQty, useCostPrice);
         return prev.map(item =>
           item.product.id === prod.id
-            ? { ...item, qty: nextQty, totalUSD: nextQty * item.priceUSD }
+            ? { ...item, qty: nextQty, priceUSD, priceType, totalUSD: nextQty * priceUSD }
             : item
         );
       } else {
-        const priceUSD = useCostPrice ? prod.precio_costo_usd : prod.precio_detalle_usd;
-        const priceType = useCostPrice ? 'Costo' : 'Detalle';
+        const { priceUSD, priceType } = determinePriceAndType(prod, finalQty, useCostPrice);
         showToast(`Se agregó "${prod.description}" (${formattedQty} ${itemUnit}) al carrito.`, 'success');
         return [...prev, {
           product: prod,
@@ -1802,23 +1878,17 @@ export default function CajaPOS({
     }
 
     setSaleItems(prev =>
-      prev.map(item =>
-        item.product.id === prodId
-          ? {
-              ...item,
-              qty: nextQty,
-              priceUSD: selectedClient.aplica_precio_costo
-                ? item.product.precio_costo_usd
-                : (nextQty >= item.product.cantidad_mayorista ? item.product.precio_mayor_usd : item.product.precio_detalle_usd),
-              priceType: selectedClient.aplica_precio_costo
-                ? 'Costo'
-                : (nextQty >= item.product.cantidad_mayorista ? 'Mayor' : 'Detalle'),
-              totalUSD: nextQty * (selectedClient.aplica_precio_costo
-                ? item.product.precio_costo_usd
-                : (nextQty >= item.product.cantidad_mayorista ? item.product.precio_mayor_usd : item.product.precio_detalle_usd))
-            }
-          : item
-      )
+      prev.map(item => {
+        if (item.product.id !== prodId) return item;
+        const { priceUSD, priceType } = determinePriceAndType(item.product, nextQty, !!selectedClient.aplica_precio_costo);
+        return {
+          ...item,
+          qty: nextQty,
+          priceUSD,
+          priceType,
+          totalUSD: nextQty * priceUSD
+        };
+      })
     );
   };
 
@@ -3457,13 +3527,25 @@ export default function CajaPOS({
                           </div>
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <span className={`px-1.5 py-0.5 rounded text-[9px] border font-bold ${
-                            item.priceType === 'Mayor' 
-                              ? 'bg-purple-50 border-purple-200 text-purple-700' 
-                              : 'bg-emerald-50 border-emerald-250 text-emerald-700'
-                          }`}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCyclePriceLevel(item.product.id);
+                            }}
+                            className={`px-2 py-0.5 rounded text-[9.5px] border font-black transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-95 ${
+                              (item.priceType as string) === 'Bulto' || (item.priceType as string) === 'BULTO'
+                                ? 'bg-amber-100 border-amber-300 text-amber-900 hover:bg-amber-200'
+                                : (item.priceType as string) === 'Mayor' || (item.priceType as string) === 'MAYOR'
+                                  ? 'bg-purple-100 border-purple-300 text-purple-900 hover:bg-purple-200'
+                                  : item.priceType === 'Costo'
+                                    ? 'bg-rose-100 border-rose-300 text-rose-900'
+                                    : 'bg-emerald-100 border-emerald-300 text-emerald-900 hover:bg-emerald-200'
+                            }`}
+                            title="Haga clic para autocompletar la cantidad y alternar nivel: Detalle (x1) ➡️ Mayor ➡️ Bulto"
+                          >
                             {item.priceType}
-                          </span>
+                          </button>
                         </td>
                         <td className="px-4 py-3 text-center font-mono">
                           <div className="flex items-center justify-center gap-2">
@@ -7259,9 +7341,9 @@ export default function CajaPOS({
               )}
             </div>
 
-            {/* Footer with Price Details (Detal & Mayor) & Stock */}
+            {/* Footer with Price Details (Detal, Mayor, Bulto) & Stock */}
             <div className="bg-slate-50 border-t border-slate-200 p-4 font-sans">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className={`grid grid-cols-1 ${zoomedProduct.precio_bulto_usd && zoomedProduct.precio_bulto_usd > 0 ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-2.5`}>
                 {/* 1. PRECIO DETALLE */}
                 <div className="bg-white border border-emerald-200 rounded-xl p-2.5 shadow-2xs">
                   <span className="text-[9.5px] text-emerald-800 uppercase font-extrabold flex items-center gap-1">
@@ -7299,7 +7381,30 @@ export default function CajaPOS({
                   </div>
                 </div>
 
-                {/* 3. STOCK ACTUAL */}
+                {/* 3. PRECIO BULTO */}
+                {zoomedProduct.precio_bulto_usd && zoomedProduct.precio_bulto_usd > 0 ? (
+                  <div className="bg-white border border-amber-300 rounded-xl p-2.5 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[9.5px] text-amber-900 uppercase font-extrabold flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                        Precio Bulto (P3)
+                      </span>
+                      <span className="text-[8.5px] font-extrabold bg-amber-50 text-amber-800 border border-amber-300 px-1 py-0.2 rounded font-mono">
+                        ≥ {zoomedProduct.cant_bulto || 1} uds
+                      </span>
+                    </div>
+                    <div className="mt-1">
+                      <span className="text-lg font-black text-amber-900 font-mono block leading-tight">
+                        ${zoomedProduct.precio_bulto_usd.toFixed(2)}
+                      </span>
+                      <span className="text-[10.5px] font-bold text-slate-600 font-mono">
+                        {formatBs(zoomedProduct.precio_bulto_usd * tasaDia)}
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* 4. STOCK ACTUAL */}
                 <div className="bg-white border border-slate-200 rounded-xl p-2.5 shadow-2xs flex flex-col justify-between">
                   <span className="text-[9.5px] text-slate-500 uppercase font-bold">Stock Disponible</span>
                   <div className="mt-1">
@@ -7339,7 +7444,8 @@ export default function CajaPOS({
             </div>
           </div>
 
-          <div className="p-1 space-y-0.5 font-bold">
+          <div className="p-1 space-y-1 font-bold">
+
             {/* 1. Modificar Ficha Técnica */}
             <button
               type="button"

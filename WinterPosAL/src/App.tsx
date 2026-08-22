@@ -537,6 +537,19 @@ export default function App() {
     }
   }, [activeTab, lanIP, dbMode]);
 
+const cleanProductObject = (p: any): Product => ({
+  ...p,
+  stock_actual: parseFloat(p.stock_actual) || 0,
+  stock_minimo: parseFloat(p.stock_minimo) || 0,
+  precio_costo_usd: parseFloat(p.precio_costo_usd) || 0,
+  precio_detalle_usd: parseFloat(p.precio_detalle_usd) || 0,
+  precio_mayor_usd: parseFloat(p.precio_mayor_usd) || 0,
+  precio_bulto_usd: parseFloat(p.precio_bulto_usd) || 0,
+  cantidad_mayorista: parseInt(p.cantidad_mayorista) || 12,
+  cant_bulto: parseInt(p.cant_bulto) || 0,
+  ganancia_bulto: parseFloat(p.ganancia_bulto) || 0
+});
+
   // Refresh products, movements, and price history automatically when entering the inventario tab
   useEffect(() => {
     if (activeTab === 'inventario') {
@@ -545,11 +558,7 @@ export default function App() {
           const productsRes = await fetch(getApiUrl('/productos'));
           if (productsRes.ok) {
             const productsData = await productsRes.json();
-            setProducts(productsData.map((p: any) => ({
-              ...p,
-              stock_actual: parseFloat(p.stock_actual) || 0,
-              stock_minimo: parseFloat(p.stock_minimo) || 0,
-            })));
+            setProducts(productsData.map(cleanProductObject));
           }
         } catch (err) {
           console.error('Error al actualizar productos al entrar al inventario:', err);
@@ -948,11 +957,7 @@ export default function App() {
 
         if (productsRes.ok) {
           const productsData = await productsRes.json();
-          setProducts(productsData.map((p: any) => ({
-            ...p,
-            stock_actual: parseFloat(p.stock_actual) || 0,
-            stock_minimo: parseFloat(p.stock_minimo) || 0,
-          })));
+          setProducts(productsData.map(cleanProductObject));
         }
 
         if (clientsRes.ok) {
@@ -1149,24 +1154,37 @@ export default function App() {
     }
   };
 
-  // Auto BCV Rate Sync on User Login (Executes once per login session with duplicate prevention)
+  // Engine de sincronización y validación automática de tasa BCV parametrizable
   useEffect(() => {
     if (!currentUser) return;
 
-    const autoMode = (localStorage.getItem('pos_auto_tasa_mode') as 'off' | 'usd' | 'eur') || 'off';
-    if (autoMode === 'off') return;
+    let timer: any = null;
 
-    const sessionKey = `pos_auto_rate_synced_${currentUser.id}_${new Date().toISOString().substring(0, 10)}`;
-    if (sessionStorage.getItem(sessionKey)) {
-      return; // Already ran for this login session
-    }
+    const syncAutoBcvRate = async (isForced = false) => {
+      const autoMode = (localStorage.getItem('pos_auto_tasa_mode') as 'off' | 'usd' | 'eur') || 'off';
+      if (autoMode === 'off') return;
 
-    const syncAutoBcvRateOnLogin = async () => {
+      const intervalType = localStorage.getItem('pos_auto_tasa_interval') || '10';
+      const fixedTime = localStorage.getItem('pos_auto_tasa_fixed_time') || '17:00';
+
+      // Si es hora fija, verificar si coincide con la hora actual (a menos que sea forzado por cambio de config)
+      if (intervalType === 'fixed' && !isForced) {
+        const now = new Date();
+        const currentHM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        const todayKey = `pos_fixed_tasa_done_${now.toISOString().substring(0, 10)}`;
+        if (currentHM !== fixedTime) {
+          return;
+        }
+        if (sessionStorage.getItem(todayKey)) {
+          return; // Ya ejecutado en este minuto del día
+        }
+      }
+
       try {
         const res = await fetch(getApiUrl('/bcv'));
-        if (!res.ok) throw new Error('Respuesta HTTP no exitosa');
+        if (!res.ok) throw new Error('Respuesta HTTP no exitosa al consultar BCV');
         const bcvData = await res.json();
-        if (!bcvData) throw new Error('Respuesta vacía');
+        if (!bcvData) throw new Error('Respuesta vacía del servicio BCV');
 
         const rawValStr = autoMode === 'eur' ? bcvData.eur : bcvData.usd;
         if (!rawValStr) throw new Error('Tasa no encontrada en respuesta BCV');
@@ -1175,34 +1193,56 @@ export default function App() {
         if (isNaN(cleanedVal) || cleanedVal <= 0) throw new Error('Valor numérico de tasa inválido');
 
         const targetRate = Math.round(cleanedVal * 100) / 100;
-        const todayStr = new Date().toISOString().substring(0, 10);
 
-        // Strict Duplicate Prevention Filter
+        // Comprobación contra la tasa de cobro activa actualmente
         const latestHistory = tasaHistory.length > 0 ? tasaHistory[tasaHistory.length - 1] : null;
-        const latestDateStr = latestHistory?.fecha_actualizacion ? latestHistory.fecha_actualizacion.substring(0, 10) : '';
+        const currentCobro = latestHistory ? latestHistory.tasa_cobro : 0;
 
-        const isDuplicate = latestHistory &&
-          latestDateStr === todayStr &&
-          Math.abs(latestHistory.tasa_cobro - targetRate) < 0.001 &&
-          Math.abs(latestHistory.tasa_vuelto - targetRate) < 0.001;
-
-        sessionStorage.setItem(sessionKey, 'done');
-
-        if (isDuplicate) {
-          console.log(`[Auto BCV] La tasa del día ya está actualizada a ${targetRate} Bs (${autoMode.toUpperCase()}). Se omite registro duplicado.`);
-          return;
+        if (Math.abs(currentCobro - targetRate) >= 0.01) {
+          console.log(`[Auto BCV] 🔄 Actualización automática detectada: ${currentCobro} Bs ➡️ ${targetRate} Bs (${autoMode === 'eur' ? '€ Euro' : '$ Dólar'}). Aplicando en sistema...`);
+          const userLabel = autoMode === 'eur' ? 'SISTEMA (Auto BCV €)' : 'SISTEMA (Auto BCV $)';
+          await handleUpdateTasa(targetRate, targetRate, userLabel);
+        } else {
+          console.log(`[Auto BCV] ✅ Validación periódica: Tasa al día con el BCV (${targetRate} Bs).`);
         }
 
-        console.log(`[Auto BCV] Sincronizando automáticamente al inicio de sesión: ${targetRate} Bs (${autoMode.toUpperCase()} BCV)...`);
-        const userLabel = autoMode === 'eur' ? 'SISTEMA (Auto BCV €)' : 'SISTEMA (Auto BCV $)';
-        await handleUpdateTasa(targetRate, targetRate, userLabel);
+        if (intervalType === 'fixed') {
+          sessionStorage.setItem(`pos_fixed_tasa_done_${new Date().toISOString().substring(0, 10)}`, 'done');
+        }
       } catch (err: any) {
-        console.warn(`[Auto BCV Fallback] Sin conexión a internet o API BCV no disponible (${err?.message || err}). La operativa del sistema continúa normalmente con la última tasa activa registrada.`);
-        sessionStorage.setItem(sessionKey, 'done');
+        // En caso de fallo de red o caída de la API del BCV, el sistema mantiene intacta la última tasa establecida (Resguardo Offline)
+        console.warn(`[Auto BCV Resguardo Offline] Sin conexión a Internet o API BCV no disponible. Operación continúa normalmente con la última tasa activa (${tasaDia} Bs).`);
       }
     };
 
-    syncAutoBcvRateOnLogin();
+    const setupTimer = () => {
+      if (timer) clearInterval(timer);
+
+      const autoMode = (localStorage.getItem('pos_auto_tasa_mode') as 'off' | 'usd' | 'eur') || 'off';
+      if (autoMode === 'off') return;
+
+      const intervalVal = localStorage.getItem('pos_auto_tasa_interval') || '10';
+      const intervalMs = intervalVal === 'fixed' 
+        ? 60 * 1000 // Si es hora fija, revisar cada 1 minuto si ya es la hora
+        : (parseInt(intervalVal, 10) || 10) * 60 * 1000;
+
+      timer = setInterval(() => syncAutoBcvRate(false), intervalMs);
+    };
+
+    // Ejecutar inmediatamente al inicio
+    syncAutoBcvRate(true);
+    setupTimer();
+
+    const onConfigChanged = () => {
+      syncAutoBcvRate(true);
+      setupTimer();
+    };
+    window.addEventListener('pos_auto_tasa_config_changed', onConfigChanged);
+
+    return () => {
+      if (timer) clearInterval(timer);
+      window.removeEventListener('pos_auto_tasa_config_changed', onConfigChanged);
+    };
   }, [currentUser?.id, tasaHistory.length]);
 
   const handleClearTasaHistory = async () => {
@@ -1219,16 +1259,8 @@ export default function App() {
 
   const handleAddProduct = async (prod: Product) => {
     const saved = await postApiData('/productos', prod);
-    const cleanedSaved = saved ? {
-      ...saved,
-      stock_actual: parseFloat(saved.stock_actual) || 0,
-      stock_minimo: parseFloat(saved.stock_minimo) || 0,
-    } : null;
-    const cleanedProd = {
-      ...prod,
-      stock_actual: parseFloat(prod.stock_actual as any) || 0,
-      stock_minimo: parseFloat(prod.stock_minimo as any) || 0,
-    };
+    const cleanedSaved = saved ? cleanProductObject(saved) : null;
+    const cleanedProd = cleanProductObject(prod);
     if (cleanedSaved) {
       setProducts(prev => [...prev, cleanedSaved]);
     } else {
@@ -1271,11 +1303,7 @@ export default function App() {
       });
       if (res.ok) {
         const saved = await res.json();
-        const cleanedSaved = {
-          ...saved,
-          stock_actual: parseFloat(saved.stock_actual) || 0,
-          stock_minimo: parseFloat(saved.stock_minimo) || 0,
-        };
+        const cleanedSaved = cleanProductObject(saved);
         setProducts(prev => prev.map(p => p.id === prod.id ? cleanedSaved : p));
         return true;
       } else {
@@ -2162,6 +2190,8 @@ export default function App() {
   };
 
   const confirmLogoutUser = () => {
+    sessionStorage.removeItem('pos_inventory_search_term');
+    sessionStorage.removeItem('pos_caja_search_term');
     setCurrentUser(null);
     setActiveTab('caja');
   };
@@ -2283,11 +2313,7 @@ export default function App() {
           const pRes = await fetch(getApiUrl('/productos'));
           if (pRes.ok) {
             const pData = await pRes.json();
-            setProducts(pData.map((p: any) => ({
-              ...p,
-              stock_actual: parseFloat(p.stock_actual) || 0,
-              stock_minimo: parseFloat(p.stock_minimo) || 0,
-            })));
+            setProducts(pData.map(cleanProductObject));
           }
         } catch (_) {}
 

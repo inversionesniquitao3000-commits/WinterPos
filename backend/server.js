@@ -338,8 +338,8 @@ app.post('/api/productos/stock/bulk', async (req, res) => {
 });
 
 app.post('/api/productos/precios', async (req, res) => {
-  const { id, cost, detail, mayor } = req.body;
-  const success = await updateProductPrices(id, { cost, detail, mayor });
+  const { id, cost, detail, mayor, bulto } = req.body;
+  const success = await updateProductPrices(id, { cost, detail, mayor, bulto });
   res.json({ success });
 });
 
@@ -781,8 +781,11 @@ async function fetchBcvRates() {
   });
 }
 
-// Background query on startup
+// Background query on startup and every 10 minutes
 fetchBcvRates().catch(() => {});
+setInterval(() => {
+  fetchBcvRates().catch(() => {});
+}, 10 * 60 * 1000);
 
 app.get('/api/bcv', async (req, res) => {
   const rates = await fetchBcvRates();

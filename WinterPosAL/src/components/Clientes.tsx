@@ -305,7 +305,7 @@ export default function Clientes({
   const [abonoRef, setAbonoRef] = useState('');
 
   // Sorting state (Catálogo)
-  type SortField = 'cedula_rif' | 'nombre' | 'telefono' | 'porcentaje_descuento' | 'limite_credito' | 'credito_disponible' | 'saldo_pendiente';
+  type SortField = 'cedula_rif' | 'nombre' | 'telefono' | 'porcentaje_descuento' | 'aplica_precio_costo' | 'limite_credito' | 'credito_disponible' | 'saldo_pendiente';
   const [sortField, setSortField] = useState<SortField>('nombre');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
@@ -394,8 +394,27 @@ export default function Clientes({
 
   const filteredClients = useMemo(() => {
     return [...baseFiltered].sort((a, b) => {
-      const va = a[sortField];
-      const vb = b[sortField];
+      let va: any = a[sortField];
+      let vb: any = b[sortField];
+
+      if (sortField === 'porcentaje_descuento') {
+        va = parseFloat(a.porcentaje_descuento as any) || 0;
+        vb = parseFloat(b.porcentaje_descuento as any) || 0;
+        return sortDir === 'asc' ? va - vb : vb - va;
+      }
+
+      if (sortField === 'aplica_precio_costo') {
+        va = a.aplica_precio_costo === true ? 1 : 0;
+        vb = b.aplica_precio_costo === true ? 1 : 0;
+        return sortDir === 'asc' ? va - vb : vb - va;
+      }
+
+      if (sortField === 'limite_credito' || sortField === 'credito_disponible' || sortField === 'saldo_pendiente') {
+        va = parseFloat(va) || 0;
+        vb = parseFloat(vb) || 0;
+        return sortDir === 'asc' ? va - vb : vb - va;
+      }
+
       if (typeof va === 'number' && typeof vb === 'number') {
         return sortDir === 'asc' ? va - vb : vb - va;
       }
@@ -1409,8 +1428,18 @@ export default function Clientes({
                           <SortIcon field="saldo_pendiente" />
                         </div>
                       </th>
-                      <th className="sticky top-0 z-10 bg-slate-700 px-3 py-2.5 text-center font-sans uppercase font-bold text-white">% Desc.</th>
-                      <th className="sticky top-0 z-10 bg-slate-700 px-3 py-2.5 text-center font-sans uppercase font-bold text-white">P. Costo</th>
+                      <th className="sticky top-0 z-10 bg-slate-700 px-3 py-2.5 cursor-pointer select-none font-sans uppercase font-bold text-center text-white hover:bg-slate-600 transition-colors" onClick={() => handleSort('porcentaje_descuento')}>
+                        <div className="flex items-center justify-center gap-1">
+                          <span>% Desc.</span>
+                          <SortIcon field="porcentaje_descuento" />
+                        </div>
+                      </th>
+                      <th className="sticky top-0 z-10 bg-slate-700 px-3 py-2.5 cursor-pointer select-none font-sans uppercase font-bold text-center text-white hover:bg-slate-600 transition-colors" onClick={() => handleSort('aplica_precio_costo')}>
+                        <div className="flex items-center justify-center gap-1">
+                          <span>P. Costo</span>
+                          <SortIcon field="aplica_precio_costo" />
+                        </div>
+                      </th>
                       <th className="sticky top-0 z-10 bg-slate-700 px-3 py-2.5 text-center font-sans uppercase font-bold w-40 text-white">Ver Detalle</th>
                     </tr>
                   </thead>
