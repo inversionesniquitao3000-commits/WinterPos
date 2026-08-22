@@ -31,10 +31,11 @@ import { InversionesModulo } from './components/InversionesModulo';
 import { RepositorioDocumental } from './components/RepositorioDocumental';
 import MobileApp from './mobile/MobileApp';
 import ManualAccesoMovilModal from './components/ManualAccesoMovilModal';
+import { ThemeSelectorModal, ThemeMode, ThemePalette } from './components/ThemeSelectorModal';
 import { 
   ShoppingBag, Package, Users, Truck,
   TrendingUp, Settings, LogOut, Globe, Cpu, History, Printer, CheckCircle2, ShieldCheck, Briefcase,
-  Smartphone, QrCode, PauseCircle, Play
+  Smartphone, QrCode, PauseCircle, Play, Palette, Sun, Moon
 } from 'lucide-react';
 import { printTicketReceipt, formatBs, formatUSD, getApiBaseUrl } from './utils';
 
@@ -144,6 +145,34 @@ export default function App() {
       return [];
     }
   });
+
+  // Theme Engine (Modo Claro/Oscuro y Paletas de Colores)
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
+    return (localStorage.getItem('pos_theme_mode') as ThemeMode) || 'light';
+  });
+  const [themePalette, setThemePalette] = useState<ThemePalette>(() => {
+    return (localStorage.getItem('pos_theme_palette') as ThemePalette) || 'winter';
+  });
+  const [showThemeModal, setShowThemeModal] = useState<boolean>(false);
+
+  // Sincronización en tiempo real del tema visual en el DOM y LocalStorage
+  useEffect(() => {
+    const root = document.documentElement;
+    root.setAttribute('data-theme-mode', themeMode);
+    root.setAttribute('data-theme-palette', themePalette);
+    if (themeMode === 'dark') {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+    localStorage.setItem('pos_theme_mode', themeMode);
+    localStorage.setItem('pos_theme_palette', themePalette);
+  }, [themeMode, themePalette]);
+
+  const handleResetThemeDefault = () => {
+    setThemeMode('light');
+    setThemePalette('winter');
+  };
 
   const [compras, setCompras] = useState<Compra[]>(() => {
     try {
@@ -1164,6 +1193,7 @@ const cleanProductObject = (p: any): Product => ({
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setReprintSale(null);
+        setShowThemeModal(false);
       }
     };
     window.addEventListener('keydown', handleEsc);
@@ -2537,10 +2567,10 @@ const cleanProductObject = (p: any): Product => ({
   }
 
   return (
-    <div className="h-screen bg-winter-bg text-slate-800 flex flex-col overflow-hidden font-mono selection:bg-winter-blueBtn selection:text-white">
+    <div className="h-screen bg-theme-main text-slate-800 dark:text-slate-100 flex flex-col overflow-hidden font-mono selection:bg-winter-blueBtn selection:text-white transition-colors duration-300">
       
-      {/* HEADER SECTION - WinterPOS Colors */}
-      <header className="bg-winter-header border-b border-slate-700/20 px-6 py-4 flex flex-row items-center justify-between gap-4 select-none relative z-20 shadow-md text-white flex-shrink-0">
+      {/* HEADER SECTION - Dynamic Theme Header */}
+      <header className="bg-theme-header border-b border-slate-700/20 px-6 py-4 flex flex-row items-center justify-between gap-4 select-none relative z-20 shadow-md text-white flex-shrink-0 transition-colors duration-300">
         
         {/* Left operator info */}
         <div className="flex items-center gap-3 flex-shrink-0">
@@ -2643,8 +2673,8 @@ const cleanProductObject = (p: any): Product => ({
 
       </header>
 
-      {/* TABS BAR - WinterPOS Colors with High-Visibility Typography */}
-      <nav className="bg-winter-tabBar border-b border-slate-900/60 px-4 sm:px-6 py-2 select-none flex flex-wrap items-center gap-2 z-10 text-slate-300 flex-shrink-0 shadow-md">
+      {/* TABS BAR - Dynamic Theme TabBar with High-Visibility Typography */}
+      <nav className="bg-theme-tabbar border-b border-slate-900/60 px-4 sm:px-6 py-2 select-none flex flex-wrap items-center gap-2 z-10 text-slate-300 flex-shrink-0 shadow-md transition-colors duration-300">
         {hasModulePermission('caja', 'ver') && (
           <button
             onClick={() => setActiveTab('caja')}
@@ -2781,26 +2811,44 @@ const cleanProductObject = (p: any): Product => ({
           </button>
         )}
 
-        {/* Mobile View & QR Connector Buttons (Solo Administrador o Permiso Habilitado) */}
-        {hasModulePermission('movil', 'ver') && (
-          <div className="flex items-center gap-1.5 ml-auto">
-            <button
-              onClick={() => setIsMobileMode(true)}
-              className="p-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-sm transition-all active:scale-95 cursor-pointer"
-              title="Vista Móvil (Optimizado para Smartphones y Tablets)"
-            >
-              <Smartphone className="w-4 h-4" />
-            </button>
+        {/* Action Buttons: Theme Selector + Mobile View & QR Connector */}
+        <div className="flex items-center gap-1.5 ml-auto">
+          {/* Botón Selector de Paleta / Modo Claro-Oscuro */}
+          <button
+            type="button"
+            onClick={() => setShowThemeModal(true)}
+            className="px-2.5 py-1.5 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-amber-300 border border-slate-700/80 shadow-xs transition-all active:scale-95 cursor-pointer flex items-center gap-1.5 text-xs font-bold font-sans"
+            title="Personalización Visual: Paleta de Colores y Modo Claro / Oscuro"
+          >
+            <Palette className="w-4 h-4 text-amber-400" />
+            <span className="text-[11px] text-slate-200 hidden md:inline">Temas</span>
+            {themeMode === 'dark' ? (
+              <Moon className="w-3.5 h-3.5 text-indigo-300" />
+            ) : (
+              <Sun className="w-3.5 h-3.5 text-yellow-400" />
+            )}
+          </button>
 
-            <button
-              onClick={() => setShowManualAccesoModal(true)}
-              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 shadow-sm transition-all active:scale-95 cursor-pointer"
-              title="Conectar Celular (Código QR e instrucciones de acceso)"
-            >
-              <QrCode className="w-4 h-4" />
-            </button>
-          </div>
-        )}
+          {hasModulePermission('movil', 'ver') && (
+            <>
+              <button
+                onClick={() => setIsMobileMode(true)}
+                className="p-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-sm transition-all active:scale-95 cursor-pointer"
+                title="Vista Móvil (Optimizado para Smartphones y Tablets)"
+              >
+                <Smartphone className="w-4 h-4" />
+              </button>
+
+              <button
+                onClick={() => setShowManualAccesoModal(true)}
+                className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 shadow-sm transition-all active:scale-95 cursor-pointer"
+                title="Conectar Celular (Código QR e instrucciones de acceso)"
+              >
+                <QrCode className="w-4 h-4" />
+              </button>
+            </>
+          )}
+        </div>
       </nav>
 
       {/* MAIN CONTENT AREA */}
@@ -3406,6 +3454,17 @@ const cleanProductObject = (p: any): Product => ({
           </div>
         </div>
       )}
+
+      {/* MODAL SELECTOR DE TEMAS Y PALETAS DE COLOR */}
+      <ThemeSelectorModal
+        isOpen={showThemeModal}
+        onClose={() => setShowThemeModal(false)}
+        currentMode={themeMode}
+        currentPalette={themePalette}
+        onSelectMode={(mode) => setThemeMode(mode)}
+        onSelectPalette={(palette) => setThemePalette(palette)}
+        onResetDefault={handleResetThemeDefault}
+      />
 
     </div>
   );

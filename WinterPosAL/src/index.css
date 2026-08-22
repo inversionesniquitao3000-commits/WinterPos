@@ -2,13 +2,248 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ==========================================================================
+   WINTERPOS THEME ENGINE - COLOR PALETTES & LIGHT/DARK MODES
+   Default Mode: Light Mode (Modo Claro)
+   Default Palette: Winter Classic (Azul Winter)
+   ========================================================================== */
+
+:root {
+  /* LIGHT MODE (DEFAULT) BASE TOKENS */
+  --theme-mode: light;
+  --theme-bg: #f5f8fa;
+  --theme-surface: #ffffff;
+  --theme-surface-card: #ffffff;
+  --theme-surface-hover: #f1f5f9;
+  --theme-text-primary: #0f172a;
+  --theme-text-secondary: #475569;
+  --theme-text-muted: #64748b;
+  --theme-border: #e2e8f0;
+  --theme-border-subtle: #cbd5e1;
+  --theme-scrollbar-track: #e2e8f0;
+  --theme-scrollbar-thumb: #94a3b8;
+
+  /* PALETTE: WINTER (DEFAULT) */
+  --theme-header: #0f3562;
+  --theme-header-border: #1e40af40;
+  --theme-tabbar: #112d4e;
+  --theme-primary: #0b5fa5;
+  --theme-primary-hover: #084c85;
+  --theme-primary-light: #eff6ff;
+  --theme-accent: #ffd700;
+  --theme-badge-bg: #0b5fa520;
+  --theme-badge-text: #1d4ed8;
+}
+
+/* --- PALETTE DEFINITIONS (LIGHT MODE) --- */
+[data-theme-palette="winter"] {
+  --theme-header: #0f3562;
+  --theme-header-border: #1e40af40;
+  --theme-tabbar: #112d4e;
+  --theme-primary: #0b5fa5;
+  --theme-primary-hover: #084c85;
+  --theme-primary-light: #eff6ff;
+  --theme-accent: #ffd700;
+  --theme-badge-bg: #0b5fa520;
+  --theme-badge-text: #1d4ed8;
+}
+
+[data-theme-palette="emerald"] {
+  --theme-header: #064e3b;
+  --theme-header-border: #04785740;
+  --theme-tabbar: #065f46;
+  --theme-primary: #059669;
+  --theme-primary-hover: #047857;
+  --theme-primary-light: #ecfdf5;
+  --theme-accent: #34d399;
+  --theme-badge-bg: #05966920;
+  --theme-badge-text: #047857;
+}
+
+[data-theme-palette="purple"] {
+  --theme-header: #3b0764;
+  --theme-header-border: #6d28d940;
+  --theme-tabbar: #4c1d95;
+  --theme-primary: #7c3aed;
+  --theme-primary-hover: #6d28d9;
+  --theme-primary-light: #f5f3ff;
+  --theme-accent: #a78bfa;
+  --theme-badge-bg: #7c3aed20;
+  --theme-badge-text: #6d28d9;
+}
+
+[data-theme-palette="amber"] {
+  --theme-header: #78350f;
+  --theme-header-border: #b4530940;
+  --theme-tabbar: #92400e;
+  --theme-primary: #d97706;
+  --theme-primary-hover: #b45309;
+  --theme-primary-light: #fffbeb;
+  --theme-accent: #fbbf24;
+  --theme-badge-bg: #d9770620;
+  --theme-badge-text: #b45309;
+}
+
+[data-theme-palette="slate"] {
+  --theme-header: #0f172a;
+  --theme-header-border: #33415540;
+  --theme-tabbar: #1e293b;
+  --theme-primary: #334155;
+  --theme-primary-hover: #1e293b;
+  --theme-primary-light: #f8fafc;
+  --theme-accent: #94a3b8;
+  --theme-badge-bg: #33415520;
+  --theme-badge-text: #1e293b;
+}
+
+[data-theme-palette="ruby"] {
+  --theme-header: #881337;
+  --theme-header-border: #be123c40;
+  --theme-tabbar: #9f1239;
+  --theme-primary: #e11d48;
+  --theme-primary-hover: #be123c;
+  --theme-primary-light: #fff1f2;
+  --theme-accent: #fda4af;
+  --theme-badge-bg: #e11d4820;
+  --theme-badge-text: #be123c;
+}
+
+[data-theme-palette="cyan"] {
+  --theme-header: #164e63;
+  --theme-header-border: #0e749040;
+  --theme-tabbar: #155e75;
+  --theme-primary: #0891b2;
+  --theme-primary-hover: #0e7490;
+  --theme-primary-light: #ecfeff;
+  --theme-accent: #22d3ee;
+  --theme-badge-bg: #0891b220;
+  --theme-badge-text: #0e7490;
+}
+
+/* ==========================================================================
+   DARK MODE OVERRIDES ([data-theme-mode="dark"])
+   ========================================================================== */
+[data-theme-mode="dark"] {
+  --theme-mode: dark;
+  --theme-bg: #0b1120;
+  --theme-surface: #131d31;
+  --theme-surface-card: #18233c;
+  --theme-surface-hover: #1e2d4d;
+  --theme-text-primary: #f8fafc;
+  --theme-text-secondary: #cbd5e1;
+  --theme-text-muted: #94a3b8;
+  --theme-border: #243452;
+  --theme-border-subtle: #334b75;
+  --theme-scrollbar-track: #0f172a;
+  --theme-scrollbar-thumb: #334155;
+}
+
+[data-theme-mode="dark"][data-theme-palette="winter"] {
+  --theme-header: #0a1b33;
+  --theme-tabbar: #0d2242;
+  --theme-primary: #3b82f6;
+  --theme-primary-hover: #2563eb;
+  --theme-primary-light: #1e3a8a30;
+}
+
+[data-theme-mode="dark"][data-theme-palette="emerald"] {
+  --theme-header: #022c22;
+  --theme-tabbar: #064e3b;
+  --theme-primary: #10b981;
+  --theme-primary-hover: #059669;
+  --theme-primary-light: #064e3b30;
+}
+
+[data-theme-mode="dark"][data-theme-palette="purple"] {
+  --theme-header: #2e1065;
+  --theme-tabbar: #3b0764;
+  --theme-primary: #a855f7;
+  --theme-primary-hover: #9333ea;
+  --theme-primary-light: #581c8730;
+}
+
+[data-theme-mode="dark"][data-theme-palette="amber"] {
+  --theme-header: #451a03;
+  --theme-tabbar: #78350f;
+  --theme-primary: #f59e0b;
+  --theme-primary-hover: #d97706;
+  --theme-primary-light: #78350f30;
+}
+
+[data-theme-mode="dark"][data-theme-palette="slate"] {
+  --theme-header: #020617;
+  --theme-tabbar: #0f172a;
+  --theme-primary: #64748b;
+  --theme-primary-hover: #475569;
+  --theme-primary-light: #1e293b30;
+}
+
+[data-theme-mode="dark"][data-theme-palette="ruby"] {
+  --theme-header: #4c0519;
+  --theme-tabbar: #881337;
+  --theme-primary: #f43f5e;
+  --theme-primary-hover: #e11d48;
+  --theme-primary-light: #88133730;
+}
+
+[data-theme-mode="dark"][data-theme-palette="cyan"] {
+  --theme-header: #083344;
+  --theme-tabbar: #164e63;
+  --theme-primary: #06b6d4;
+  --theme-primary-hover: #0891b2;
+  --theme-primary-light: #164e6330;
+}
+
+/* ==========================================================================
+   BASE & TYPOGRAPHY STYLING
+   ========================================================================== */
 @layer base {
   body {
-    @apply bg-winter-bg text-slate-800 antialiased font-sans select-none;
+    background-color: var(--theme-bg);
+    color: var(--theme-text-primary);
+    @apply antialiased font-sans select-none;
+    transition: background-color 0.25s ease, color 0.25s ease;
   }
 }
 
-/* Tab Active Gradients matching WinterPOS variables */
+/* Custom classes mapped to theme variables */
+.bg-theme-main {
+  background-color: var(--theme-bg);
+}
+
+.bg-theme-header {
+  background-color: var(--theme-header);
+}
+
+.bg-theme-tabbar {
+  background-color: var(--theme-tabbar);
+}
+
+.bg-theme-surface {
+  background-color: var(--theme-surface);
+}
+
+.bg-theme-card {
+  background-color: var(--theme-surface-card);
+}
+
+.border-theme {
+  border-color: var(--theme-border);
+}
+
+.text-theme-primary {
+  color: var(--theme-text-primary);
+}
+
+.text-theme-secondary {
+  color: var(--theme-text-secondary);
+}
+
+.text-theme-muted {
+  color: var(--theme-text-muted);
+}
+
+/* Tab Active Gradients */
 .tab-grad-caja {
   background: linear-gradient(180deg, #074080 0%, #0d5aa5 100%);
 }
@@ -72,11 +307,12 @@
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  @apply bg-slate-200;
+  background-color: var(--theme-scrollbar-track);
 }
 ::-webkit-scrollbar-thumb {
-  @apply bg-slate-400 rounded-md;
+  background-color: var(--theme-scrollbar-thumb);
+  border-radius: 6px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  @apply bg-slate-500;
+  filter: brightness(0.8);
 }
