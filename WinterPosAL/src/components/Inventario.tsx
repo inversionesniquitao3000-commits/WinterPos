@@ -8,6 +8,7 @@ import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr, getApiBaseUrl, formatImageUrl } from '../utils';
 import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
 import AsistenteImportacionPDF from './AsistenteImportacionPDF';
+import BarcodeVisualizer from './BarcodeVisualizer';
 
 interface InventarioProps {
   products: Product[];
@@ -1080,8 +1081,6 @@ export default function Inventario({
   
   // Modals / Actions states
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [isAuxExpandedNew, setIsAuxExpandedNew] = useState(false);
-  const [isAuxExpandedEdit, setIsAuxExpandedEdit] = useState(false);
   const [showAdjustModal, setShowAdjustModal] = useState(false);
   const [showPriceModal, setShowPriceModal] = useState(false);
   const [showNewProdModal, setShowNewProdModal] = useState(false);
@@ -2767,23 +2766,157 @@ export default function Inventario({
 
     const success = await onUpdateProduct(updatedProd);
     if (success) {
+      clearPausedDraft();
       setShowEditProdModal(false);
       setSelectedProduct(updatedProd);
       showToast('Producto actualizado con éxito.');
     }
   };
 
-  // Modal position and minimize state
+  // Persistent Paused Product Draft State & Methods
+  const clearPausedDraft = () => {
+    try {
+      localStorage.removeItem('pos_paused_product_draft');
+      window.dispatchEvent(new Event('pos_paused_draft_changed'));
+    } catch (_) {}
+  };
+
+  const handlePauseRegistration = () => {
+    const draft = {
+      type: 'new',
+      timestamp: new Date().toISOString(),
+      data: {
+        clave: newClave,
+        barcode: newBarcode,
+        desc: newDesc,
+        cat: newCat,
+        cost: newCost,
+        detail: newDetail,
+        mayor: newMayor,
+        bulto: newBulto,
+        minStock: newMinStock,
+        wholesaleQty: newWholesaleQty,
+        cantBulto: newCantBulto,
+        taxActive: newTaxActive,
+        taxName: newTaxName,
+        taxPct: newTaxPct,
+        aGranel: newAGranel,
+        vencimiento: newVencimiento,
+        imageUrl: newImageUrl,
+      }
+    };
+    try {
+      localStorage.setItem('pos_paused_product_draft', JSON.stringify(draft));
+      window.dispatchEvent(new Event('pos_paused_draft_changed'));
+    } catch (_) {}
+    setShowNewProdModal(false);
+    showToast('⏸️ Registro de producto en pausa. Puede trabajar con normalidad y retomarlo cuando decida.');
+  };
+
+  const handlePauseEdit = () => {
+    const draft = {
+      type: 'edit',
+      timestamp: new Date().toISOString(),
+      data: {
+        clave: editClave,
+        barcode: editBarcode,
+        desc: editDesc,
+        cat: editCat,
+        cost: editCost,
+        detail: editDetail,
+        mayor: editMayor,
+        bulto: editBulto,
+        minStock: editMinStock,
+        wholesaleQty: editWholesaleQty,
+        cantBulto: editCantBulto,
+        taxActive: editTaxActive,
+        taxName: editTaxName,
+        taxPct: editTaxPct,
+        aGranel: editAGranel,
+        vencimiento: editVencimiento,
+        imageUrl: editImageUrl,
+        selectedProduct: selectedProduct
+      }
+    };
+    try {
+      localStorage.setItem('pos_paused_product_draft', JSON.stringify(draft));
+      window.dispatchEvent(new Event('pos_paused_draft_changed'));
+    } catch (_) {}
+    setShowEditProdModal(false);
+    showToast('⏸️ Edición de producto en pausa. Puede trabajar con normalidad y retomarlo cuando decida.');
+  };
+
+  const restoreDraft = () => {
+    try {
+      const saved = localStorage.getItem('pos_paused_product_draft');
+      if (!saved) return;
+      const draft = JSON.parse(saved);
+      if (draft.type === 'new' && draft.data) {
+        setNewClave(draft.data.clave || '');
+        setNewBarcode(draft.data.barcode || draft.data.clave || '');
+        setNewDesc(draft.data.desc || '');
+        setNewCat(draft.data.cat || 'ALIMENTOS');
+        setNewCost(draft.data.cost || '');
+        setNewDetail(draft.data.detail || '');
+        setNewMayor(draft.data.mayor || '');
+        setNewBulto(draft.data.bulto || '');
+        setNewMinStock(draft.data.minStock || '5');
+        setNewWholesaleQty(draft.data.wholesaleQty || '12');
+        setNewCantBulto(draft.data.cantBulto || '0');
+        setNewTaxActive(draft.data.taxActive ?? true);
+        setNewTaxName(draft.data.taxName || 'IVA');
+        setNewTaxPct(draft.data.taxPct || '16');
+        setNewAGranel(draft.data.aGranel || false);
+        setNewVencimiento(draft.data.vencimiento || '');
+        setNewImageUrl(draft.data.imageUrl || '');
+        setShowNewProdModal(true);
+      } else if (draft.type === 'edit' && draft.data) {
+        setSelectedProduct(draft.data.selectedProduct || null);
+        setEditClave(draft.data.clave || '');
+        setEditBarcode(draft.data.barcode || draft.data.clave || '');
+        setEditDesc(draft.data.desc || '');
+        setEditCat(draft.data.cat || 'ALIMENTOS');
+        setEditCost(draft.data.cost || '');
+        setEditDetail(draft.data.detail || '');
+        setEditMayor(draft.data.mayor || '');
+        setEditBulto(draft.data.bulto || '');
+        setEditMinStock(draft.data.minStock || '5');
+        setEditWholesaleQty(draft.data.wholesaleQty || '12');
+        setEditCantBulto(draft.data.cantBulto || '0');
+        setEditTaxActive(draft.data.taxActive ?? true);
+        setEditTaxName(draft.data.taxName || 'IVA');
+        setEditTaxPct(draft.data.taxPct || '16');
+        setEditAGranel(draft.data.aGranel || false);
+        setEditVencimiento(draft.data.vencimiento || '');
+        setEditImageUrl(draft.data.imageUrl || '');
+        setShowEditProdModal(true);
+      }
+    } catch (e) {
+      console.error('Error restaurando borrador pausado:', e);
+    }
+  };
+
+  // Listen to resume event ONLY when user clicks Reanudar
+  useEffect(() => {
+    const handleGlobalResume = () => {
+      restoreDraft();
+    };
+
+    window.addEventListener('pos_resume_product_draft', handleGlobalResume);
+    return () => {
+      window.removeEventListener('pos_resume_product_draft', handleGlobalResume);
+    };
+  }, []);
+
+  // Modal position state
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
-  const [isMinimized, setIsMinimized] = useState(false);
   const dragStartRef = useRef({ x: 0, y: 0 });
 
   // Reset positions when modal toggles
   useEffect(() => {
     if (!showNewProdModal) {
       setDragPos({ x: 0, y: 0 });
-      setIsMinimized(false);
     }
   }, [showNewProdModal]);
 
@@ -3135,6 +3268,7 @@ export default function Inventario({
     };
 
     onAddProduct(newProd);
+    clearPausedDraft();
     setShowNewProdModal(false);
     
     // Clear form
@@ -5959,785 +6093,965 @@ export default function Inventario({
         </div>
       )}
 
-      {/* MODAL: CREATE PRODUCT - Light theme translucent, draggable & minimizable */}
-      {showNewProdModal && isMinimized && (
-        <div 
-          onClick={() => setIsMinimized(false)}
-          className="fixed bottom-4 right-4 bg-winter-inventarioStart hover:bg-winter-inventarioEnd text-white px-4 py-3 rounded-lg shadow-2xl z-[70] flex items-center gap-3 cursor-pointer animate-bounce font-mono text-xs border border-white/20 select-none"
-        >
-          <Plus className="w-4 h-4" />
-          <span>[+] RESTAURAR REGISTRO: {newClave.toUpperCase() || 'NUEVO PRODUCTO'}</span>
-        </div>
-      )}
-
-      {showNewProdModal && !isMinimized && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-[70] animate-fade-in font-mono text-slate-800">
+      {/* MODAL: CREATE PRODUCT - 2 Column Responsive Grid, Draggable & Pausable */}
+      {showNewProdModal && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-[70] animate-fade-in font-sans text-slate-800">
           <div 
             style={{ transform: `translate(${dragPos.x}px, ${dragPos.y}px)` }}
-            className={`bg-white border border-slate-200 rounded-xl overflow-hidden w-full ${isAuxExpandedNew ? 'max-w-2xl sm:max-w-3xl' : 'max-w-xl'} shadow-2xl p-6 space-y-4 pointer-events-auto select-none transition-all duration-300 max-h-[92vh] overflow-y-auto`}
+            className="bg-white border border-slate-200 rounded-2xl overflow-hidden w-full max-w-[1380px] shadow-2xl pointer-events-auto select-none transition-all duration-300 max-h-[94vh] flex flex-col"
           >
+            {/* Header Draggable */}
             <div 
               onMouseDown={handleMouseDown}
-              className="flex justify-between items-center border-b border-slate-200 pb-3 cursor-grab active:cursor-grabbing select-none"
+              className="flex justify-between items-center border-b border-slate-200 px-6 py-3.5 bg-slate-50 cursor-grab active:cursor-grabbing select-none flex-shrink-0"
             >
-              <h3 className="text-sm font-extrabold text-slate-850 flex items-center gap-2 pointer-events-none">
-                <Plus className="w-4 h-4 text-winter-inventarioStart" />
-                REGISTRAR PRODUCTO EN EL MAESTRO
-              </h3>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 bg-winter-inventarioStart/10 text-winter-inventarioStart rounded-lg">
+                  <Plus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900 tracking-wide flex items-center gap-2 pointer-events-none">
+                    REGISTRAR PRODUCTO EN EL MAESTRO
+                    <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-full font-mono">NUEVO</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500 font-medium pointer-events-none">
+                    Complete la información comercial, código de barras y estrategia de precios.
+                  </p>
+                </div>
+              </div>
+
+              {/* Controles de Ventana (Pausar, Minimizar, Cerrar) */}
+              <div className="flex items-center gap-1.5">
                 <button 
                   type="button"
-                  onClick={() => setIsMinimized(true)}
-                  className="text-slate-405 hover:text-slate-700 p-1 hover:bg-slate-100/50 rounded transition-all"
+                  onClick={handlePauseRegistration}
+                  className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 rounded-lg text-xs font-bold font-sans transition-all flex items-center gap-1 cursor-pointer active:scale-95 shadow-2xs"
+                  title="Pausar el registro para hacer otra tarea y retomar después"
+                >
+                  <PauseCircle className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Pausar</span>
+                </button>
+                <button 
+                  type="button"
+                  onClick={handlePauseRegistration}
+                  className="text-slate-400 hover:text-slate-700 p-1.5 hover:bg-slate-200 rounded-lg transition-all"
                   title="Minimizar ventana"
                 >
                   <Minus className="w-4 h-4" />
                 </button>
                 <button 
                   type="button"
-                  onClick={() => setShowNewProdModal(false)} 
-                  className="text-slate-405 hover:text-slate-700 p-1 hover:bg-slate-100/50 rounded transition-all"
+                  onClick={() => {
+                    clearPausedDraft();
+                    setShowNewProdModal(false);
+                  }} 
+                  className="text-slate-400 hover:text-red-600 p-1.5 hover:bg-red-50 rounded-lg transition-all"
                   title="Cerrar ventana"
                 >
-                  ✕
+                  <X className="w-4 h-4" />
                 </button>
               </div>
             </div>
 
-            <form onSubmit={handleCreateProduct} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Clave del Producto <span className="text-red-500">*</span></label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ej. HARINA-PAN-1K"
-                    value={newClave.toUpperCase()}
-                    onChange={(e) => setNewClave(e.target.value.toUpperCase())}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-850 focus:bg-white focus:border-winter-inventarioStart focus:outline-none uppercase font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Código de Barras</label>
-                  <input
-                    type="text"
-                    placeholder="Vacío = usar Clave"
-                    value={newBarcode}
-                    onChange={(e) => setNewBarcode(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Categoría</label>
-                  <div className="flex gap-2">
-                    <select
-                      value={newCat}
-                      onChange={(e) => setNewCat(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none"
-                    >
-                      {allCategories.map(cat => (
-                        <option key={cat} value={cat}>{cat}</option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setQuickAddTarget('new');
-                        setShowQuickAddModal(true);
-                      }}
-                      className="bg-winter-inventarioStart hover:bg-winter-inventarioEnd text-white px-3 py-2.5 rounded text-xs font-bold font-mono transition-all flex items-center justify-center shadow-sm"
-                      title="Agregar nueva categoría"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Impuesto</label>
-                  <div className="flex items-center gap-2 bg-slate-50 border border-slate-350 rounded p-2 text-xs select-none h-[38px]">
-                    <label className="flex items-center gap-1.5 cursor-pointer font-sans font-bold text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={newTaxActive}
-                        onChange={(e) => setNewTaxActive(e.target.checked)}
-                        className="rounded border-slate-300 text-winter-inventarioStart focus:ring-winter-inventarioStart w-4 h-4"
-                      />
-                      <span>Si</span>
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="IVA"
-                      disabled={!newTaxActive}
-                      value={newTaxName}
-                      onChange={(e) => setNewTaxName(e.target.value.toUpperCase())}
-                      className="w-full bg-white border border-slate-300 rounded p-1 text-[11px] font-sans font-bold text-slate-800 uppercase disabled:opacity-40 disabled:bg-slate-100"
-                    />
-                    <span className="font-bold text-slate-500 font-sans">%</span>
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      disabled={!newTaxActive}
-                      value={newTaxPct}
-                      onChange={(e) => setNewTaxPct(e.target.value)}
-                      className="w-12 text-center bg-white border border-slate-300 rounded p-1 font-bold font-mono text-[11px] text-slate-850 disabled:opacity-40 disabled:bg-slate-100"
-                    />
-                    <Search className="w-3.5 h-3.5 text-slate-450" />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-500 block mb-1 font-sans">DESCRIPCIÓN DEL ARTÍCULO <span className="text-red-500">*</span></label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Descripción del artículo..."
-                  value={newDesc.toUpperCase()}
-                  onChange={(e) => setNewDesc(e.target.value.toUpperCase())}
-                  className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-850 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-sans font-bold uppercase"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Forma de Venta</label>
-                  <select
-                    value={newAGranel ? 'granel' : 'unidad'}
-                    onChange={(e) => setNewAGranel(e.target.value === 'granel')}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-sans font-semibold"
-                  >
-                    <option value="unidad">Venta por Unidad / Entero</option>
-                    <option value="granel">Venta a Granel (Peso / Kg / Fraccional)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Fecha de Vencimiento (Opcional)</label>
-                  <input
-                    type="date"
-                    value={newVencimiento}
-                    onChange={(e) => setNewVencimiento(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-mono"
-                  />
-                </div>
-              </div>
-
-              {/* AUXILIAR DE CÁLCULO DE PRECIOS */}
-              <AuxiliarCalculoPrecios
-                initialCost={newCost}
-                initialDetail={newDetail}
-                initialMayor={newMayor}
-                initialBulto={newBulto}
-                cantBulto={parseInt(newCantBulto) || 1}
-                tasaBCV={bcvRateUSD || parseFloat(localStorage.getItem('pos_bcv_usd') || '0') || 0}
-                tasaFallback={tasaDia || parseFloat(localStorage.getItem('pos_tasa_activa') || '0') || 0}
-                taxActive={newTaxActive}
-                taxPct={parseFloat(newTaxPct) || 16}
-                onToggleExpand={(expanded) => setIsAuxExpandedNew(expanded)}
-                onApplyPrices={({ cost, detail, mayor, bulto }) => {
-                  setNewCost(cost);
-                  setNewDetail(detail);
-                  setNewMayor(mayor);
-                  setNewBulto(bulto);
-                }}
-              />
-
-              <div className="grid grid-cols-4 gap-3 bg-slate-50 border border-slate-200 rounded-lg p-3">
-                <div>
-                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Precio Costo ($)</label>
-                  <input
-                     type="number"
-                     step="0.01"
-                     min="0"
-                     placeholder="0.00"
-                     value={newCost}
-                     onChange={(e) => setNewCost(e.target.value)}
-                     className="w-full bg-white border border-slate-350 rounded p-1.5 text-xs text-yellow-600 font-mono focus:bg-white focus:border-winter-inventarioStart focus:outline-none"
-                   />
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Precio Venta ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="0.00"
-                    value={newDetail}
-                    onChange={(e) => setNewDetail(e.target.value)}
-                    className="w-full bg-white border border-slate-350 rounded p-1.5 text-xs text-emerald-700 font-mono focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-bold"
-                  />
-                  <span className="text-[8.5px] text-slate-400 block font-sans mt-0.5">
-                    {newTaxActive 
-                      ? `+${newTaxPct}% ${newTaxName || 'IVA'}: $${((parseFloat(newDetail) || 0) * (1 + (parseFloat(newTaxPct) || 0) / 100)).toFixed(2)}` 
-                      : 'Exento (0% IVA)'}
-                  </span>
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Precio Mayor ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="0.00"
-                    value={newMayor}
-                    onChange={(e) => setNewMayor(e.target.value)}
-                    className="w-full bg-white border border-slate-350 rounded p-1.5 text-xs text-purple-750 font-mono focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-bold"
-                  />
-                  <span className="text-[8.5px] text-slate-400 block font-sans mt-0.5">
-                    {newTaxActive 
-                      ? `+${newTaxPct}% ${newTaxName || 'IVA'}: $${((parseFloat(newMayor) || 0) * (1 + (parseFloat(newTaxPct) || 0) / 100)).toFixed(2)}` 
-                      : 'Exento (0% IVA)'}
-                  </span>
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Bulto / Caja ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="0.00"
-                    value={newBulto}
-                    onChange={(e) => setNewBulto(e.target.value)}
-                    className="w-full bg-white border border-amber-300 rounded p-1.5 text-xs text-amber-900 font-mono focus:bg-white focus:border-amber-500 focus:outline-none font-extrabold"
-                  />
-                  <span className="text-[8.5px] text-amber-700 block font-sans mt-0.5 font-bold">
-                    Opcional
-                  </span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Stk. Mín</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={newMinStock}
-                    onChange={(e) => setNewMinStock(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-mono text-center font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Cant. Mayorista</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={newWholesaleQty}
-                    onChange={(e) => setNewWholesaleQty(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-mono text-center font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Cant. Bulto / Empaque</label>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="0 (Opcional)"
-                    value={newCantBulto}
-                    onChange={(e) => setNewCantBulto(e.target.value)}
-                    className="w-full bg-slate-50 border border-amber-300 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-amber-500 focus:outline-none font-mono text-center font-bold"
-                  />
-                </div>
-              </div>
-
-              {/* SECCIÓN DE IMAGEN DEL PRODUCTO (MANUAL / IA) */}
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-700 uppercase font-sans flex items-center gap-1.5">
-                    <ImageIcon className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Imagen del Producto (Opcional)</span>
-                  </label>
-                  {newImageUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setNewImageUrl('')}
-                      className="text-[10px] text-red-600 hover:text-red-800 font-bold underline"
-                    >
-                      Quitar Imagen
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-3">
-                  {/* Vista Previa */}
-                  <div className="w-16 h-16 rounded-lg bg-white border border-slate-300 flex items-center justify-center flex-shrink-0 overflow-hidden relative shadow-inner">
-                    <div className="text-center p-1">
-                      <ImageIcon className="w-5 h-5 text-slate-300 mx-auto" />
-                      <span className="text-[8px] text-slate-400 font-bold block">Sin Foto</span>
-                    </div>
-                    {newImageUrl && (
-                      <img 
-                        key={`new-prod-img-${newImageUrl}`}
-                        src={formatImageUrl(newImageUrl)} 
-                        alt="Preview" 
-                        className="w-full h-full object-cover absolute inset-0 bg-white" 
-                        onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
-                        onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
-                      />
-                    )}
-                  </div>
-
-                  <div className="flex-1 space-y-1.5">
-                    {/* URL Input */}
-                    <div className="relative flex items-center">
-                      <LinkIcon className="w-3.5 h-3.5 text-slate-400 absolute left-2" />
+            {/* Form Body - 2 Columns Grid (4 Cols Izq / 8 Cols Der para máxima prioridad al Auxiliar) */}
+            <form onSubmit={handleCreateProduct} className="p-4 overflow-y-auto space-y-3 flex-1">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+                
+                {/* === COLUMNA IZQUIERDA: CÓDIGO, DATOS GENERALES, IMAGEN Y CONTROL DE STOCK (4 Cols) === */}
+                <div className="lg:col-span-4 space-y-2.5">
+                  
+                  {/* Bloque Identificación & Código de Barras */}
+                  <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-2.5 space-y-2">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-700 block mb-0.5">
+                        Código / Clave del Producto <span className="text-red-500">*</span>
+                      </label>
                       <input
                         type="text"
-                        placeholder="Pegar URL de imagen (https://...)"
-                        value={newImageUrl}
-                        onChange={(e) => setNewImageUrl(e.target.value)}
-                        className="w-full bg-white border border-slate-300 rounded pl-7 pr-2 py-1 text-[11px] text-slate-800 focus:outline-none focus:border-blue-500"
+                        required
+                        maxLength={15}
+                        value={newClave.toUpperCase()}
+                        onChange={(e) => {
+                          const val = e.target.value.toUpperCase().slice(0, 15);
+                          setNewClave(val);
+                          setNewBarcode(val);
+                        }}
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs text-slate-900 focus:border-winter-inventarioStart focus:outline-none uppercase font-bold shadow-2xs font-mono tracking-wider"
                       />
                     </div>
 
-                    {/* Action buttons: Subir Archivo PC & Generar IA */}
-                    <div className="flex items-center gap-2">
-                      <label className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-[10px] font-bold py-1 px-2 rounded cursor-pointer flex items-center gap-1 transition-all active:scale-95">
-                        <UploadCloud className="w-3 h-3 text-slate-600" />
-                        <span>{isUploadingManualImage ? 'Subiendo...' : 'Subir desde PC'}</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) handleUploadImageFile(file, 'new');
-                          }}
-                        />
-                      </label>
-
-                      <button
-                        type="button"
-                        disabled={isGeneratingAiImage || !newDesc.trim()}
-                        onClick={async () => {
-                          if (!newDesc.trim()) {
-                            showAlert('Escriba una descripción primero para que la IA sepa qué imagen generar.', 'Descripción Requerida', 'warning');
-                            return;
-                          }
-                          setIsGeneratingAiImage(true);
-                          try {
-                            const res = await fetch(`${getApiBaseUrl()}/ai/generate-product-image`, {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ description: newDesc, category: newCat, barcode: newBarcode, saveLocal: true })
-                            });
-                            const data = await res.json();
-                            if (data.success && data.imageUrl) {
-                              setNewImageUrl(data.imageUrl);
-                              showToast('✨ Imagen generada con IA para este producto.');
-                            } else {
-                              showAlert('No se pudo generar la imagen para este producto.', 'Error IA', 'warning');
-                            }
-                          } catch (err: any) {
-                            showAlert(`Error: ${err.message}`, 'Error IA', 'warning');
-                          } finally {
-                            setIsGeneratingAiImage(false);
-                          }
-                        }}
-                        className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 text-white text-[10px] font-bold py-1 px-2.5 rounded flex items-center gap-1 shadow-xs transition-all active:scale-95"
-                        title="Generar imagen automáticamente basada en la descripción"
-                      >
-                        <Sparkles className="w-3 h-3 text-amber-300" />
-                        <span>{isGeneratingAiImage ? 'Generando...' : 'Generar con IA'}</span>
-                      </button>
+                    {/* Visor Dinámico de Código de Barras */}
+                    <div>
+                      <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1">
+                        <QrCode className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>Vista Previa del Código de Barras (Escaneable)</span>
+                      </div>
+                      <BarcodeVisualizer
+                        value={newBarcode || newClave}
+                        description={newDesc}
+                        compact={true}
+                      />
                     </div>
                   </div>
+
+                  {/* Bloque Datos del Artículo */}
+                  <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-2.5 space-y-2">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-700 block mb-0.5">
+                        DESCRIPCIÓN DEL ARTÍCULO <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={newDesc.toUpperCase()}
+                        onChange={(e) => setNewDesc(e.target.value.toUpperCase())}
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs text-slate-900 focus:border-winter-inventarioStart focus:outline-none font-bold uppercase shadow-2xs"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10.5px] font-bold text-slate-700 block mb-0.5">Categoría</label>
+                        <div className="flex gap-1">
+                          <select
+                            value={newCat}
+                            onChange={(e) => setNewCat(e.target.value)}
+                            className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-800 focus:border-winter-inventarioStart focus:outline-none font-medium shadow-2xs"
+                          >
+                            {allCategories.map(cat => (
+                              <option key={cat} value={cat}>{cat}</option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setQuickAddTarget('new');
+                              setShowQuickAddModal(true);
+                            }}
+                            className="bg-winter-inventarioStart hover:bg-winter-inventarioEnd text-white px-2 py-1 rounded-lg text-xs font-bold transition-all flex items-center justify-center shadow-2xs cursor-pointer"
+                            title="Agregar nueva categoría"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-[10.5px] font-bold text-slate-700 block mb-0.5">Impuesto IVA</label>
+                        <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs select-none shadow-2xs h-[30px]">
+                          <label className="flex items-center gap-1 cursor-pointer font-bold text-slate-700 text-xs">
+                            <input
+                              type="checkbox"
+                              checked={newTaxActive}
+                              onChange={(e) => setNewTaxActive(e.target.checked)}
+                              className="rounded border-slate-300 text-winter-inventarioStart focus:ring-winter-inventarioStart w-3.5 h-3.5"
+                            />
+                            <span>Sí</span>
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="IVA"
+                            disabled={!newTaxActive}
+                            value={newTaxName}
+                            onChange={(e) => setNewTaxName(e.target.value.toUpperCase())}
+                            className="w-10 bg-slate-50 border border-slate-200 rounded px-1 py-0.5 text-[10px] font-bold text-slate-800 uppercase disabled:opacity-40"
+                          />
+                          <span className="font-bold text-slate-400 text-[10px]">%</span>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            disabled={!newTaxActive}
+                            value={newTaxPct}
+                            onChange={(e) => setNewTaxPct(e.target.value)}
+                            className="w-9 text-center bg-slate-50 border border-slate-200 rounded px-0.5 py-0.5 font-bold font-mono text-[10px] text-slate-900 disabled:opacity-40"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10.5px] font-bold text-slate-700 block mb-0.5">Forma de Venta</label>
+                        <select
+                          value={newAGranel ? 'granel' : 'unidad'}
+                          onChange={(e) => setNewAGranel(e.target.value === 'granel')}
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-800 focus:border-winter-inventarioStart focus:outline-none font-medium shadow-2xs"
+                        >
+                          <option value="unidad">Por Unidad</option>
+                          <option value="granel">A Granel (Kg)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-[10.5px] font-bold text-slate-700 block mb-0.5">Vencimiento (Opcional)</label>
+                        <input
+                          type="date"
+                          min={new Date().toISOString().split('T')[0]}
+                          value={newVencimiento}
+                          onChange={(e) => setNewVencimiento(e.target.value)}
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2 py-0.5 text-xs text-slate-800 focus:border-winter-inventarioStart focus:outline-none font-mono shadow-2xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Bloque Imagen del Producto */}
+                  <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-2 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10.5px] font-bold text-slate-700 uppercase flex items-center gap-1">
+                        <ImageIcon className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Imagen del Producto (Opcional)</span>
+                      </label>
+                      {newImageUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setNewImageUrl('')}
+                          className="text-[9.5px] text-red-600 hover:text-red-800 font-bold underline cursor-pointer"
+                        >
+                          Quitar
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="w-10 h-10 rounded-lg bg-white border border-slate-300 flex items-center justify-center flex-shrink-0 overflow-hidden relative shadow-2xs">
+                        <div className="text-center p-0.5">
+                          <ImageIcon className="w-3.5 h-3.5 text-slate-300 mx-auto" />
+                          <span className="text-[6.5px] text-slate-400 font-bold block">Sin Foto</span>
+                        </div>
+                        {newImageUrl && (
+                          <img 
+                            key={`new-prod-img-${newImageUrl}`}
+                            src={formatImageUrl(newImageUrl)} 
+                            alt="Preview" 
+                            className="w-full h-full object-cover absolute inset-0 bg-white" 
+                            onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
+                            onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
+                          />
+                        )}
+                      </div>
+
+                      <div className="flex-1 space-y-1">
+                        <div className="relative flex items-center">
+                          <LinkIcon className="w-3 h-3 text-slate-400 absolute left-2" />
+                          <input
+                            type="text"
+                            placeholder="URL de imagen (https://...)"
+                            value={newImageUrl}
+                            onChange={(e) => setNewImageUrl(e.target.value)}
+                            className="w-full bg-white border border-slate-300 rounded-lg pl-6 pr-2 py-0.5 text-[10px] text-slate-800 focus:outline-none focus:border-blue-500 shadow-2xs"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <label className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-[9.5px] font-bold py-0.5 px-2 rounded-md cursor-pointer flex items-center gap-1 transition-all active:scale-95">
+                            <UploadCloud className="w-3 h-3 text-slate-600" />
+                            <span>{isUploadingManualImage ? 'Subiendo...' : 'Subir'}</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) handleUploadImageFile(file, 'new');
+                              }}
+                            />
+                          </label>
+
+                          <button
+                            type="button"
+                            disabled={isGeneratingAiImage || !newDesc.trim()}
+                            onClick={async () => {
+                              if (!newDesc.trim()) {
+                                showAlert('Escriba una descripción primero para que la IA sepa qué imagen generar.', 'Descripción Requerida', 'warning');
+                                return;
+                              }
+                              setIsGeneratingAiImage(true);
+                              try {
+                                const res = await fetch(`${getApiBaseUrl()}/ai/generate-product-image`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ description: newDesc, category: newCat, barcode: newBarcode, saveLocal: true })
+                                });
+                                const data = await res.json();
+                                if (data.success && data.imageUrl) {
+                                  setNewImageUrl(data.imageUrl);
+                                  showToast('✨ Imagen generada con IA para este producto.');
+                                } else {
+                                  showAlert('No se pudo generar la imagen para este producto.', 'Error IA', 'warning');
+                                }
+                              } catch (err: any) {
+                                showAlert(`Error: ${err.message}`, 'Error IA', 'warning');
+                              } finally {
+                                setIsGeneratingAiImage(false);
+                              }
+                            }}
+                            className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 text-white text-[9.5px] font-bold py-0.5 px-2 rounded-md flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
+                            title="Generar imagen automáticamente basada en la descripción"
+                          >
+                            <Sparkles className="w-3 h-3 text-amber-300" />
+                            <span>{isGeneratingAiImage ? 'Generando...' : 'Generar IA'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Bloque Control de Inventario y Empaque (Ubicado debajo de las imágenes) */}
+                  <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-2.5 space-y-1.5">
+                    <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
+                      Control de Inventario y Empaque
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {/* Stock Mínimo */}
+                      <div className="bg-white border border-slate-200 rounded-lg p-1.5 shadow-2xs">
+                        <label className="text-[9.5px] font-bold text-slate-700 block mb-0.5 whitespace-nowrap">Stock Mínimo</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={newMinStock}
+                          onChange={(e) => setNewMinStock(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-xs text-slate-900 focus:outline-none font-mono text-center font-bold"
+                        />
+                      </div>
+
+                      {/* Cant. Mayorista */}
+                      <div className="bg-white border border-slate-200 rounded-lg p-1.5 shadow-2xs">
+                        <label className="text-[9.5px] font-bold text-slate-700 block mb-0.5 whitespace-nowrap">Cant. Mayor</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={newWholesaleQty}
+                          onChange={(e) => setNewWholesaleQty(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-xs text-slate-900 focus:outline-none font-mono text-center font-bold"
+                        />
+                      </div>
+
+                      {/* Cant. por Bulto */}
+                      <div className="bg-white border border-amber-200 rounded-lg p-1.5 shadow-2xs">
+                        <label className="text-[9.5px] font-bold text-amber-900 block mb-0.5 whitespace-nowrap">Unids / Bulto</label>
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="0"
+                          value={newCantBulto}
+                          onChange={(e) => setNewCantBulto(e.target.value)}
+                          className="w-full bg-slate-50 border border-amber-300 rounded px-1.5 py-1 text-xs text-slate-900 focus:outline-none font-mono text-center font-bold"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
                 </div>
+
+                {/* === COLUMNA DERECHA: PRECIOS Y AUXILIAR (8 Cols - Prioridad Máxima 66.7%) === */}
+                <div className="lg:col-span-8 space-y-2.5 flex flex-col">
+                  
+                  {/* AUXILIAR DE CÁLCULO DE PRECIOS */}
+                  <div className="flex-shrink-0">
+                    <AuxiliarCalculoPrecios
+                      initialCost={newCost}
+                      initialDetail={newDetail}
+                      initialMayor={newMayor}
+                      initialBulto={newBulto}
+                      cantBulto={parseInt(newCantBulto) || 1}
+                      tasaBCV={bcvRateUSD || parseFloat(localStorage.getItem('pos_bcv_usd') || '0') || 0}
+                      tasaFallback={tasaDia || parseFloat(localStorage.getItem('pos_tasa_activa') || '0') || 0}
+                      taxActive={newTaxActive}
+                      taxPct={parseFloat(newTaxPct) || 16}
+                      onApplyPrices={({ cost, detail, mayor, bulto }) => {
+                        setNewCost(cost);
+                        setNewDetail(detail);
+                        setNewMayor(mayor);
+                        setNewBulto(bulto);
+                      }}
+                    />
+                  </div>
+
+                  {/* ESTRATEGIA DE PRECIOS ($ USD - 4 COLUMNAS ESPACIOSAS) */}
+                  <div className="bg-slate-50/80 border border-slate-200 rounded-xl p-2.5 space-y-1.5 shadow-2xs">
+                    <div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
+                      <span>Estrategia de Precios ($ USD)</span>
+                      <span className="text-[9px] text-slate-400 font-normal">Jerarquía: Costo &lt; Bulto &lt; Mayor &lt; Detalle</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                      {/* Costo */}
+                      <div className="bg-white border border-yellow-200 rounded-lg p-1.5 shadow-2xs">
+                        <label className="text-[9.5px] font-bold text-amber-800 block mb-0.5 whitespace-nowrap">Precio Costo ($)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={newCost}
+                          onChange={(e) => setNewCost(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-xs text-yellow-700 font-mono font-bold focus:bg-white focus:outline-none"
+                        />
+                      </div>
+
+                      {/* Detalle */}
+                      <div className="bg-white border border-emerald-200 rounded-lg p-1.5 shadow-2xs">
+                        <label className="text-[9.5px] font-bold text-emerald-800 block mb-0.5 whitespace-nowrap">Venta Detalle ($)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={newDetail}
+                          onChange={(e) => setNewDetail(e.target.value)}
+                          className="w-full bg-slate-50 border border-emerald-300 rounded px-1.5 py-1 text-xs text-emerald-700 font-mono font-black focus:bg-white focus:outline-none"
+                        />
+                        <span className="text-[8px] text-slate-400 block mt-0.5 font-mono truncate">
+                          {newTaxActive 
+                            ? `+IVA: $${((parseFloat(newDetail) || 0) * (1 + (parseFloat(newTaxPct) || 0) / 100)).toFixed(2)}` 
+                            : 'Exento'}
+                        </span>
+                      </div>
+
+                      {/* Mayor */}
+                      <div className="bg-white border border-purple-200 rounded-lg p-1.5 shadow-2xs">
+                        <label className="text-[9.5px] font-bold text-purple-800 block mb-0.5 whitespace-nowrap">Precio Mayor ($)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={newMayor}
+                          onChange={(e) => setNewMayor(e.target.value)}
+                          className="w-full bg-slate-50 border border-purple-300 rounded px-1.5 py-1 text-xs text-purple-800 font-mono font-bold focus:bg-white focus:outline-none"
+                        />
+                        <span className="text-[8px] text-slate-400 block mt-0.5 font-mono truncate">
+                          {newTaxActive 
+                            ? `+IVA: $${((parseFloat(newMayor) || 0) * (1 + (parseFloat(newTaxPct) || 0) / 100)).toFixed(2)}` 
+                            : 'Exento'}
+                        </span>
+                      </div>
+
+                      {/* Bulto */}
+                      <div className="bg-white border border-amber-200 rounded-lg p-1.5 shadow-2xs">
+                        <label className="text-[9.5px] font-bold text-amber-900 block mb-0.5 whitespace-nowrap">Bulto / Caja ($)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={newBulto}
+                          onChange={(e) => setNewBulto(e.target.value)}
+                          className="w-full bg-slate-50 border border-amber-300 rounded px-1.5 py-1 text-xs text-amber-950 font-mono font-black focus:bg-white focus:outline-none"
+                        />
+                        <span className="text-[8px] text-amber-700 block mt-0.5 font-bold">
+                          Opcional
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+
               </div>
 
-              <div className="text-[10px] text-slate-500 font-sans border-t border-slate-200 pt-2">
-                * Nota: El producto recién creado iniciará con stock actual de 0. Para agregar stock físico inicial, use el botón "Stock" del catálogo y justifíquelo en auditoría.
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowNewProdModal(false)}
-                  className="w-1/3 bg-slate-100 border border-slate-250 text-slate-600 py-2.5 rounded font-sans text-xs hover:bg-slate-200 transition-all"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="w-2/3 bg-winter-inventarioStart hover:bg-winter-inventarioEnd text-white py-2.5 rounded font-bold font-sans text-xs tracking-wider transition-all"
-                >
-                  CREAR PRODUCTO
-                </button>
+              {/* FOOTER ACTIONS */}
+              <div className="border-t border-slate-200 pt-2 flex flex-col sm:flex-row justify-between items-center gap-2">
+                <span className="text-[10px] text-slate-400">
+                  * El producto iniciará con stock 0. Para registrar existencias iniciales, use el botón "Stock / Auditoría".
+                </span>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={() => setShowNewProdModal(false)}
+                    className="flex-1 sm:flex-none px-4 py-1.5 bg-slate-100 border border-slate-300 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 sm:flex-none px-6 py-1.5 bg-winter-inventarioStart hover:bg-winter-inventarioEnd text-white rounded-xl text-xs font-bold tracking-wider transition-all shadow-md active:scale-95 cursor-pointer"
+                  >
+                    CREAR PRODUCTO
+                  </button>
+                </div>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* MODAL: MODIFICAR FICHA DE PRODUCTO */}
+      {/* MODAL: EDIT PRODUCT - 2 Column Responsive Grid, Draggable & Pausable */}
       {showEditProdModal && (
-        <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-sans text-slate-800">
-          <div className={`bg-white border border-slate-200 rounded-xl overflow-hidden w-full ${isAuxExpandedEdit ? 'max-w-2xl sm:max-w-3xl' : 'max-w-xl'} shadow-2xl p-6 space-y-4 transition-all duration-300 max-h-[92vh] overflow-y-auto`}>
+        <div className="fixed inset-0 bg-slate-955/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50 animate-fade-in font-sans text-slate-800">
+          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden w-full max-w-[1380px] shadow-2xl transition-all duration-300 max-h-[94vh] flex flex-col">
             
-            <div className="flex justify-between items-center border-b border-slate-200 pb-3">
-              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
-                <Edit className="w-4 h-4 text-slate-600 bg-slate-100 rounded-full p-0.5" />
-                MODIFICAR FICHA DE PRODUCTO
-              </h3>
-              <button type="button" onClick={() => setShowEditProdModal(false)} className="text-slate-400 hover:text-slate-700">✕</button>
+            {/* Header */}
+            <div className="flex justify-between items-center border-b border-slate-200 px-6 py-3.5 bg-slate-50 flex-shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 bg-slate-200 text-slate-700 rounded-lg">
+                  <Edit className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900 tracking-wide flex items-center gap-2">
+                    MODIFICAR FICHA DE PRODUCTO
+                    <span className="bg-indigo-100 text-indigo-800 text-[10px] font-black px-2 py-0.5 rounded-full font-mono">ID: {selectedProduct?.id || '—'}</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500 font-medium">
+                    Actualice los precios, códigos de barras, empaques y características del artículo.
+                  </p>
+                </div>
+              </div>
+
+              {/* Controles de Ventana (Pausar, Minimizar, Cerrar) */}
+              <div className="flex items-center gap-1.5">
+                <button 
+                  type="button"
+                  onClick={handlePauseEdit}
+                  className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 rounded-lg text-xs font-bold font-sans transition-all flex items-center gap-1 cursor-pointer active:scale-95 shadow-2xs"
+                  title="Pausar la edición para hacer otra tarea y retomar después"
+                >
+                  <PauseCircle className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Pausar</span>
+                </button>
+                <button 
+                  type="button"
+                  onClick={handlePauseEdit}
+                  className="text-slate-400 hover:text-slate-700 p-1.5 hover:bg-slate-200 rounded-lg transition-all"
+                  title="Minimizar ventana"
+                >
+                  <Minus className="w-4 h-4" />
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => {
+                    clearPausedDraft();
+                    setShowEditProdModal(false);
+                  }} 
+                  className="text-slate-400 hover:text-red-600 p-1.5 hover:bg-red-50 rounded-lg transition-all"
+                  title="Cerrar ventana"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
-            <form onSubmit={handleUpdateProductSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Clave del Producto <span className="text-red-500">*</span></label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ej. HARINA-PAN-1K"
-                    value={editClave.toUpperCase()}
-                    onChange={(e) => {
-                      const val = e.target.value.toUpperCase();
-                      if (editBarcode === editClave || editBarcode === '') {
-                        setEditBarcode(val);
-                      }
-                      setEditClave(val);
-                    }}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-855 focus:bg-white focus:border-winter-inventarioStart focus:outline-none uppercase font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Código de Barras</label>
-                  <input
-                    type="text"
-                    placeholder="Vacío = usar Clave"
-                    value={editBarcode}
-                    onChange={(e) => setEditBarcode(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Categoría</label>
-                  <div className="flex gap-2">
-                    <select
-                      value={editCat}
-                      onChange={(e) => setEditCat(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none"
-                    >
-                      {allCategories.map(cat => (
-                        <option key={cat} value={cat}>{cat}</option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setQuickAddTarget('edit');
-                        setShowQuickAddModal(true);
-                      }}
-                      className="bg-winter-inventarioStart hover:bg-winter-inventarioEnd text-white px-3 py-2.5 rounded text-xs font-bold font-mono transition-all flex items-center justify-center shadow-sm"
-                      title="Agregar nueva categoría"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Impuesto</label>
-                  <div className="flex items-center gap-2 bg-slate-50 border border-slate-350 rounded p-2 text-xs select-none h-[38px]">
-                    <label className="flex items-center gap-1.5 cursor-pointer font-sans font-bold text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={editTaxActive}
-                        onChange={(e) => setEditTaxActive(e.target.checked)}
-                        className="rounded border-slate-300 text-winter-inventarioStart focus:ring-winter-inventarioStart w-4 h-4"
-                      />
-                      <span>Si</span>
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="IVA"
-                      disabled={!editTaxActive}
-                      value={editTaxName}
-                      onChange={(e) => setEditTaxName(e.target.value.toUpperCase())}
-                      className="w-full bg-white border border-slate-300 rounded p-1 text-[11px] font-sans font-bold text-slate-800 uppercase disabled:opacity-40 disabled:bg-slate-100"
-                    />
-                    <span className="font-bold text-slate-500 font-sans">%</span>
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      disabled={!editTaxActive}
-                      value={editTaxPct}
-                      onChange={(e) => setEditTaxPct(e.target.value)}
-                      className="w-12 text-center bg-white border border-slate-300 rounded p-1 font-bold font-mono text-[11px] text-slate-855 disabled:opacity-40 disabled:bg-slate-100"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-500 block mb-1 font-sans">Descripción del Artículo <span className="text-red-500">*</span></label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Descripción del artículo..."
-                  value={editDesc.toUpperCase()}
-                  onChange={(e) => setEditDesc(e.target.value.toUpperCase())}
-                  className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-855 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-sans font-bold uppercase"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Forma de Venta</label>
-                  <select
-                    value={editAGranel ? 'granel' : 'unidad'}
-                    onChange={(e) => setEditAGranel(e.target.value === 'granel')}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-sans font-semibold"
-                  >
-                    <option value="unidad">Venta por Unidad / Entero</option>
-                    <option value="granel">Venta a Granel (Peso / Kg / Fraccional)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Fecha de Vencimiento (Opcional)</label>
-                  <input
-                    type="date"
-                    value={editVencimiento}
-                    onChange={(e) => setEditVencimiento(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-sans font-medium"
-                  />
-                </div>
-              </div>
-
-              {/* AUXILIAR DE CÁLCULO DE PRECIOS */}
-              <AuxiliarCalculoPrecios
-                initialCost={editCost}
-                initialDetail={editDetail}
-                initialMayor={editMayor}
-                initialBulto={editBulto}
-                cantBulto={parseInt(editCantBulto) || 1}
-                tasaBCV={bcvRateUSD || parseFloat(localStorage.getItem('pos_bcv_usd') || '0') || 0}
-                tasaFallback={tasaDia || parseFloat(localStorage.getItem('pos_tasa_activa') || '0') || 0}
-                taxActive={editTaxActive}
-                taxPct={parseFloat(editTaxPct) || 16}
-                onToggleExpand={(expanded) => setIsAuxExpandedEdit(expanded)}
-                onApplyPrices={({ cost, detail, mayor, bulto }) => {
-                  setEditCost(cost);
-                  setEditDetail(detail);
-                  setEditMayor(mayor);
-                  setEditBulto(bulto);
-                }}
-              />
-
-              <div className="grid grid-cols-4 gap-3 bg-slate-50 border border-slate-200 rounded-lg p-3">
-                <div>
-                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Costo ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    required
-                    value={editCost}
-                    onChange={(e) => setEditCost(e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded p-1.5 text-xs font-mono font-bold focus:ring-1 focus:ring-winter-inventarioStart focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Detalle ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    required
-                    value={editDetail}
-                    onChange={(e) => setEditDetail(e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded p-1.5 text-xs font-mono font-bold text-emerald-700 focus:ring-1 focus:ring-winter-inventarioStart focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Mayor ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    required
-                    value={editMayor}
-                    onChange={(e) => setEditMayor(e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded p-1.5 text-xs font-mono font-bold text-purple-750 focus:ring-1 focus:ring-winter-inventarioStart focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Bulto / Caja ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="0.00"
-                    value={editBulto}
-                    onChange={(e) => setEditBulto(e.target.value)}
-                    className="w-full bg-white border border-amber-300 rounded p-1.5 text-xs font-mono font-extrabold text-amber-900 focus:ring-1 focus:ring-amber-500 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Stk. Mín</label>
-                  <input
-                    type="number"
-                    min="1"
-                    required
-                    value={editMinStock}
-                    onChange={(e) => setEditMinStock(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-mono text-center font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Cant. Mayorista</label>
-                  <input
-                    type="number"
-                    min="1"
-                    required
-                    value={editWholesaleQty}
-                    onChange={(e) => setEditWholesaleQty(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-mono text-center font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Cant. Bulto / Empaque</label>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="0 (Opcional)"
-                    value={editCantBulto}
-                    onChange={(e) => setEditCantBulto(e.target.value)}
-                    className="w-full bg-slate-50 border border-amber-300 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-amber-500 focus:outline-none font-mono text-center font-bold"
-                  />
-                </div>
-              </div>
-
-              {/* SECCIÓN DE IMAGEN DEL PRODUCTO (MANUAL / IA) */}
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-700 uppercase font-sans flex items-center gap-1.5">
-                    <ImageIcon className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Imagen del Producto</span>
-                  </label>
-                  {editImageUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setEditImageUrl('')}
-                      className="text-[10px] text-red-600 hover:text-red-800 font-bold underline"
-                    >
-                      Quitar Imagen
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-3">
-                  {/* Vista Previa */}
-                  <div className="w-16 h-16 rounded-lg bg-white border border-slate-300 flex items-center justify-center flex-shrink-0 overflow-hidden relative shadow-inner">
-                    <div className="text-center p-1">
-                      <ImageIcon className="w-5 h-5 text-slate-300 mx-auto" />
-                      <span className="text-[8px] text-slate-400 font-bold block">Sin Foto</span>
-                    </div>
-                    {editImageUrl && (
-                      <img 
-                        key={`edit-prod-img-${editImageUrl}`}
-                        src={formatImageUrl(editImageUrl)} 
-                        alt="Preview" 
-                        className="w-full h-full object-cover absolute inset-0 bg-white" 
-                        onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
-                        onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
-                      />
-                    )}
-                  </div>
-
-                  <div className="flex-1 space-y-1.5">
-                    {/* URL Input */}
-                    <div className="relative flex items-center">
-                      <LinkIcon className="w-3.5 h-3.5 text-slate-400 absolute left-2" />
+            {/* Form Body - 2 Columns Grid (4 Cols Izq / 8 Cols Der para máxima prioridad al Auxiliar) */}
+            <form onSubmit={handleUpdateProductSubmit} className="p-4 overflow-y-auto space-y-3 flex-1">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+                
+                {/* === COLUMNA IZQUIERDA: CÓDIGO, DATOS GENERALES, IMAGEN Y CONTROL DE STOCK (4 Cols) === */}
+                <div className="lg:col-span-4 space-y-2.5">
+                  
+                  {/* Bloque Identificación & Código de Barras */}
+                  <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-2.5 space-y-2">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-700 block mb-0.5">
+                        Código / Clave del Producto <span className="text-red-500">*</span>
+                      </label>
                       <input
                         type="text"
-                        placeholder="Pegar URL de imagen (https://...)"
-                        value={editImageUrl}
-                        onChange={(e) => setEditImageUrl(e.target.value)}
-                        className="w-full bg-white border border-slate-300 rounded pl-7 pr-2 py-1 text-[11px] text-slate-800 focus:outline-none focus:border-blue-500"
+                        required
+                        maxLength={15}
+                        value={editClave.toUpperCase()}
+                        onChange={(e) => {
+                          const val = e.target.value.toUpperCase().slice(0, 15);
+                          setEditClave(val);
+                          setEditBarcode(val);
+                        }}
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs text-slate-900 focus:border-winter-inventarioStart focus:outline-none uppercase font-bold shadow-2xs font-mono tracking-wider"
                       />
                     </div>
 
-                    {/* Action buttons: Subir Archivo PC & Generar IA */}
-                    <div className="flex items-center gap-2">
-                      <label className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-[10px] font-bold py-1 px-2 rounded cursor-pointer flex items-center gap-1 transition-all active:scale-95">
-                        <UploadCloud className="w-3 h-3 text-slate-600" />
-                        <span>{isUploadingManualImage ? 'Subiendo...' : 'Subir desde PC'}</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) handleUploadImageFile(file, 'edit');
-                          }}
-                        />
-                      </label>
-
-                      <button
-                        type="button"
-                        disabled={isGeneratingAiImage || !editDesc.trim()}
-                        onClick={async () => {
-                          if (!editDesc.trim()) {
-                            showAlert('Escriba una descripción primero para que la IA sepa qué imagen generar.', 'Descripción Requerida', 'warning');
-                            return;
-                          }
-                          setIsGeneratingAiImage(true);
-                          try {
-                            const res = await fetch(`${getApiBaseUrl()}/ai/generate-product-image`, {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ description: editDesc, category: editCat, barcode: editBarcode, saveLocal: true })
-                            });
-                            const data = await res.json();
-                            if (data.success && data.imageUrl) {
-                              setEditImageUrl(data.imageUrl);
-                              showToast('✨ Imagen generada con IA para este producto.');
-                            } else {
-                              showAlert('No se pudo generar la imagen para este producto.', 'Error IA', 'warning');
-                            }
-                          } catch (err: any) {
-                            showAlert(`Error: ${err.message}`, 'Error IA', 'warning');
-                          } finally {
-                            setIsGeneratingAiImage(false);
-                          }
-                        }}
-                        className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 text-white text-[10px] font-bold py-1 px-2.5 rounded flex items-center gap-1 shadow-xs transition-all active:scale-95"
-                        title="Generar imagen automáticamente basada en la descripción"
-                      >
-                        <Sparkles className="w-3 h-3 text-amber-300" />
-                        <span>{isGeneratingAiImage ? 'Generando...' : 'Generar con IA'}</span>
-                      </button>
+                    {/* Visor Dinámico de Código de Barras */}
+                    <div>
+                      <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1">
+                        <QrCode className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>Vista Previa del Código de Barras (Escaneable)</span>
+                      </div>
+                      <BarcodeVisualizer
+                        value={editBarcode || editClave}
+                        description={editDesc}
+                        compact={true}
+                      />
                     </div>
                   </div>
+
+                  {/* Bloque Datos del Artículo */}
+                  <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-2.5 space-y-2">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-700 block mb-0.5">
+                        Descripción del Artículo <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={editDesc.toUpperCase()}
+                        onChange={(e) => setEditDesc(e.target.value.toUpperCase())}
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs text-slate-900 focus:border-winter-inventarioStart focus:outline-none font-bold uppercase shadow-2xs"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10.5px] font-bold text-slate-700 block mb-0.5">Categoría</label>
+                        <div className="flex gap-1">
+                          <select
+                            value={editCat}
+                            onChange={(e) => setEditCat(e.target.value)}
+                            className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-800 focus:border-winter-inventarioStart focus:outline-none font-medium shadow-2xs"
+                          >
+                            {allCategories.map(cat => (
+                              <option key={cat} value={cat}>{cat}</option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setQuickAddTarget('edit');
+                              setShowQuickAddModal(true);
+                            }}
+                            className="bg-winter-inventarioStart hover:bg-winter-inventarioEnd text-white px-2 py-1 rounded-lg text-xs font-bold transition-all flex items-center justify-center shadow-2xs cursor-pointer"
+                            title="Agregar nueva categoría"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-[10.5px] font-bold text-slate-700 block mb-0.5">Impuesto IVA</label>
+                        <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs select-none shadow-2xs h-[30px]">
+                          <label className="flex items-center gap-1 cursor-pointer font-bold text-slate-700 text-xs">
+                            <input
+                              type="checkbox"
+                              checked={editTaxActive}
+                              onChange={(e) => setEditTaxActive(e.target.checked)}
+                              className="rounded border-slate-300 text-winter-inventarioStart focus:ring-winter-inventarioStart w-3.5 h-3.5"
+                            />
+                            <span>Sí</span>
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="IVA"
+                            disabled={!editTaxActive}
+                            value={editTaxName}
+                            onChange={(e) => setEditTaxName(e.target.value.toUpperCase())}
+                            className="w-10 bg-slate-50 border border-slate-200 rounded px-1 py-0.5 text-[10px] font-bold text-slate-800 uppercase disabled:opacity-40"
+                          />
+                          <span className="font-bold text-slate-400 text-[10px]">%</span>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            disabled={!editTaxActive}
+                            value={editTaxPct}
+                            onChange={(e) => setEditTaxPct(e.target.value)}
+                            className="w-9 text-center bg-slate-50 border border-slate-200 rounded px-0.5 py-0.5 font-bold font-mono text-[10px] text-slate-900 disabled:opacity-40"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10.5px] font-bold text-slate-700 block mb-0.5">Forma de Venta</label>
+                        <select
+                          value={editAGranel ? 'granel' : 'unidad'}
+                          onChange={(e) => setEditAGranel(e.target.value === 'granel')}
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-800 focus:border-winter-inventarioStart focus:outline-none font-medium shadow-2xs"
+                        >
+                          <option value="unidad">Por Unidad</option>
+                          <option value="granel">A Granel (Kg)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-[10.5px] font-bold text-slate-700 block mb-0.5">Vencimiento (Opcional)</label>
+                        <input
+                          type="date"
+                          min={new Date().toISOString().split('T')[0]}
+                          value={editVencimiento}
+                          onChange={(e) => setEditVencimiento(e.target.value)}
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2 py-0.5 text-xs text-slate-800 focus:border-winter-inventarioStart focus:outline-none font-mono shadow-2xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Bloque Imagen del Producto */}
+                  <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-2 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10.5px] font-bold text-slate-700 uppercase flex items-center gap-1">
+                        <ImageIcon className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Imagen del Producto (Opcional)</span>
+                      </label>
+                      {editImageUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setEditImageUrl('')}
+                          className="text-[9.5px] text-red-600 hover:text-red-800 font-bold underline cursor-pointer"
+                        >
+                          Quitar
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="w-10 h-10 rounded-lg bg-white border border-slate-300 flex items-center justify-center flex-shrink-0 overflow-hidden relative shadow-2xs">
+                        <div className="text-center p-0.5">
+                          <ImageIcon className="w-3.5 h-3.5 text-slate-300 mx-auto" />
+                          <span className="text-[6.5px] text-slate-400 font-bold block">Sin Foto</span>
+                        </div>
+                        {editImageUrl && (
+                          <img 
+                            key={`edit-prod-img-${editImageUrl}`}
+                            src={formatImageUrl(editImageUrl)} 
+                            alt="Preview" 
+                            className="w-full h-full object-cover absolute inset-0 bg-white" 
+                            onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
+                            onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
+                          />
+                        )}
+                      </div>
+
+                      <div className="flex-1 space-y-1">
+                        <div className="relative flex items-center">
+                          <LinkIcon className="w-3 h-3 text-slate-400 absolute left-2" />
+                          <input
+                            type="text"
+                            placeholder="URL de imagen (https://...)"
+                            value={editImageUrl}
+                            onChange={(e) => setEditImageUrl(e.target.value)}
+                            className="w-full bg-white border border-slate-300 rounded-lg pl-6 pr-2 py-0.5 text-[10px] text-slate-800 focus:outline-none focus:border-blue-500 shadow-2xs"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <label className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-[9.5px] font-bold py-0.5 px-2 rounded-md cursor-pointer flex items-center gap-1 transition-all active:scale-95">
+                            <UploadCloud className="w-3 h-3 text-slate-600" />
+                            <span>{isUploadingManualImage ? 'Subiendo...' : 'Subir'}</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) handleUploadImageFile(file, 'edit');
+                              }}
+                            />
+                          </label>
+
+                          <button
+                            type="button"
+                            disabled={isGeneratingAiImage || !editDesc.trim()}
+                            onClick={async () => {
+                              if (!editDesc.trim()) {
+                                showAlert('Escriba una descripción primero para que la IA sepa qué imagen generar.', 'Descripción Requerida', 'warning');
+                                return;
+                              }
+                              setIsGeneratingAiImage(true);
+                              try {
+                                const res = await fetch(`${getApiBaseUrl()}/ai/generate-product-image`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ description: editDesc, category: editCat, barcode: editBarcode, saveLocal: true })
+                                });
+                                const data = await res.json();
+                                if (data.success && data.imageUrl) {
+                                  setEditImageUrl(data.imageUrl);
+                                  showToast('✨ Imagen generada con IA para este producto.');
+                                } else {
+                                  showAlert('No se pudo generar la imagen para este producto.', 'Error IA', 'warning');
+                                }
+                              } catch (err: any) {
+                                showAlert(`Error: ${err.message}`, 'Error IA', 'warning');
+                              } finally {
+                                setIsGeneratingAiImage(false);
+                              }
+                            }}
+                            className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 text-white text-[9.5px] font-bold py-0.5 px-2 rounded-md flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
+                            title="Generar imagen automáticamente basada en la descripción"
+                          >
+                            <Sparkles className="w-3 h-3 text-amber-300" />
+                            <span>{isGeneratingAiImage ? 'Generando...' : 'Generar IA'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Bloque Control de Inventario y Empaque (Ubicado debajo de las imágenes) */}
+                  <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-2.5 space-y-1.5">
+                    <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
+                      Control de Inventario y Empaque
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {/* Stock Mínimo */}
+                      <div className="bg-white border border-slate-200 rounded-lg p-1.5 shadow-2xs">
+                        <label className="text-[9.5px] font-bold text-slate-700 block mb-0.5 whitespace-nowrap">Stock Mínimo</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={editMinStock}
+                          onChange={(e) => setEditMinStock(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-xs text-slate-900 focus:outline-none font-mono text-center font-bold"
+                        />
+                      </div>
+
+                      {/* Cant. Mayorista */}
+                      <div className="bg-white border border-slate-200 rounded-lg p-1.5 shadow-2xs">
+                        <label className="text-[9.5px] font-bold text-slate-700 block mb-0.5 whitespace-nowrap">Cant. Mayor</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={editWholesaleQty}
+                          onChange={(e) => setEditWholesaleQty(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-xs text-slate-900 focus:outline-none font-mono text-center font-bold"
+                        />
+                      </div>
+
+                      {/* Cant. por Bulto */}
+                      <div className="bg-white border border-amber-200 rounded-lg p-1.5 shadow-2xs">
+                        <label className="text-[9.5px] font-bold text-amber-900 block mb-0.5 whitespace-nowrap">Unids / Bulto</label>
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="0"
+                          value={editCantBulto}
+                          onChange={(e) => setEditCantBulto(e.target.value)}
+                          className="w-full bg-white border border-amber-300 rounded px-1.5 py-1 text-xs text-slate-900 focus:outline-none font-mono text-center font-bold"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
                 </div>
+
+                {/* === COLUMNA DERECHA: PRECIOS Y AUXILIAR (8 Cols - Prioridad Máxima 66.7%) === */}
+                <div className="lg:col-span-8 space-y-2.5 flex flex-col">
+                  
+                  {/* AUXILIAR DE CÁLCULO DE PRECIOS */}
+                  <div className="flex-shrink-0">
+                    <AuxiliarCalculoPrecios
+                      initialCost={editCost}
+                      initialDetail={editDetail}
+                      initialMayor={editMayor}
+                      initialBulto={editBulto}
+                      cantBulto={parseInt(editCantBulto) || 1}
+                      tasaBCV={bcvRateUSD || parseFloat(localStorage.getItem('pos_bcv_usd') || '0') || 0}
+                      tasaFallback={tasaDia || parseFloat(localStorage.getItem('pos_tasa_activa') || '0') || 0}
+                      taxActive={editTaxActive}
+                      taxPct={parseFloat(editTaxPct) || 16}
+                      onApplyPrices={({ cost, detail, mayor, bulto }) => {
+                        setEditCost(cost);
+                        setEditDetail(detail);
+                        setEditMayor(mayor);
+                        setEditBulto(bulto);
+                      }}
+                    />
+                  </div>
+
+                  {/* ESTRATEGIA DE PRECIOS ($ USD - 4 COLUMNAS ESPACIOSAS) */}
+                  <div className="bg-slate-50/80 border border-slate-200 rounded-xl p-2.5 space-y-1.5 shadow-2xs">
+                    <div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
+                      <span>Estrategia de Precios ($ USD)</span>
+                      <span className="text-[9px] text-slate-400 font-normal">Jerarquía: Costo &lt; Bulto &lt; Mayor &lt; Detalle</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                      {/* Costo */}
+                      <div className="bg-white border border-yellow-200 rounded-lg p-1.5 shadow-2xs">
+                        <label className="text-[9.5px] font-bold text-amber-800 block mb-0.5 whitespace-nowrap">Precio Costo ($)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={editCost}
+                          onChange={(e) => setEditCost(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-xs text-yellow-700 font-mono font-bold focus:bg-white focus:outline-none"
+                        />
+                      </div>
+
+                      {/* Detalle */}
+                      <div className="bg-white border border-emerald-200 rounded-lg p-1.5 shadow-2xs">
+                        <label className="text-[9.5px] font-bold text-emerald-800 block mb-0.5 whitespace-nowrap">Venta Detalle ($)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={editDetail}
+                          onChange={(e) => setEditDetail(e.target.value)}
+                          className="w-full bg-slate-50 border border-emerald-300 rounded px-1.5 py-1 text-xs text-emerald-700 font-mono font-black focus:bg-white focus:outline-none"
+                        />
+                        <span className="text-[8px] text-slate-400 block mt-0.5 font-mono truncate">
+                          {editTaxActive 
+                            ? `+IVA: $${((parseFloat(editDetail) || 0) * (1 + (parseFloat(editTaxPct) || 0) / 100)).toFixed(2)}` 
+                            : 'Exento'}
+                        </span>
+                      </div>
+
+                      {/* Mayor */}
+                      <div className="bg-white border border-purple-200 rounded-lg p-1.5 shadow-2xs">
+                        <label className="text-[9.5px] font-bold text-purple-800 block mb-0.5 whitespace-nowrap">Precio Mayor ($)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={editMayor}
+                          onChange={(e) => setEditMayor(e.target.value)}
+                          className="w-full bg-slate-50 border border-purple-300 rounded px-1.5 py-1 text-xs text-purple-800 font-mono font-bold focus:bg-white focus:outline-none"
+                        />
+                        <span className="text-[8px] text-slate-400 block mt-0.5 font-mono truncate">
+                          {editTaxActive 
+                            ? `+IVA: $${((parseFloat(editMayor) || 0) * (1 + (parseFloat(editTaxPct) || 0) / 100)).toFixed(2)}` 
+                            : 'Exento'}
+                        </span>
+                      </div>
+
+                      {/* Bulto */}
+                      <div className="bg-white border border-amber-200 rounded-lg p-1.5 shadow-2xs">
+                        <label className="text-[9.5px] font-bold text-amber-900 block mb-0.5 whitespace-nowrap">Bulto / Caja ($)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={editBulto}
+                          onChange={(e) => setEditBulto(e.target.value)}
+                          className="w-full bg-slate-50 border border-amber-300 rounded px-1.5 py-1 text-xs text-amber-950 font-mono font-black focus:bg-white focus:outline-none"
+                        />
+                        <span className="text-[8px] text-amber-700 block mt-0.5 font-bold">
+                          Opcional
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+
               </div>
 
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowEditProdModal(false)}
-                  className="w-1/3 bg-slate-100 border border-slate-250 text-slate-600 py-2.5 rounded font-sans text-xs hover:bg-slate-200 transition-all"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="w-2/3 bg-slate-700 hover:bg-slate-800 text-white py-2.5 rounded font-bold font-sans text-xs tracking-wider transition-all"
-                >
-                  GUARDAR CAMBIOS
-                </button>
+              {/* FOOTER ACTIONS */}
+              <div className="border-t border-slate-200 pt-2 flex flex-col sm:flex-row justify-between items-center gap-2">
+                <span className="text-[10px] text-slate-400">
+                  * Cambios en precios y empaque se actualizarán inmediatamente en la base de datos.
+                </span>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={() => setShowEditProdModal(false)}
+                    className="flex-1 sm:flex-none px-4 py-1.5 bg-slate-100 border border-slate-300 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 sm:flex-none px-6 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold tracking-wider transition-all shadow-md active:scale-95 cursor-pointer"
+                  >
+                    GUARDAR CAMBIOS
+                  </button>
+                </div>
               </div>
             </form>
           </div>

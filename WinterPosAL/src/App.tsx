@@ -34,7 +34,7 @@ import ManualAccesoMovilModal from './components/ManualAccesoMovilModal';
 import { 
   ShoppingBag, Package, Users, Truck,
   TrendingUp, Settings, LogOut, Globe, Cpu, History, Printer, CheckCircle2, ShieldCheck, Briefcase,
-  Smartphone, QrCode
+  Smartphone, QrCode, PauseCircle, Play
 } from 'lucide-react';
 import { printTicketReceipt, formatBs, formatUSD, getApiBaseUrl } from './utils';
 
@@ -254,6 +254,40 @@ export default function App() {
   const [showMasterPassModal, setShowMasterPassModal] = useState(false);
   const [inversionesUnlocked, setInversionesUnlocked] = useState(false);
   const [inversionesSubTab, setInversionesSubTab] = useState<'matriz' | 'historial' | 'utilidades' | 'accionistas'>('matriz');
+
+  // Persistent Paused Product Draft across all tabs (F1-F10)
+  const [pausedProductDraft, setPausedProductDraft] = useState<any>(() => {
+    try {
+      const saved = localStorage.getItem('pos_paused_product_draft');
+      return saved ? JSON.parse(saved) : null;
+    } catch (_) {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    const handleDraftUpdate = () => {
+      try {
+        const saved = localStorage.getItem('pos_paused_product_draft');
+        setPausedProductDraft(saved ? JSON.parse(saved) : null);
+      } catch (_) {
+        setPausedProductDraft(null);
+      }
+    };
+    window.addEventListener('pos_paused_draft_changed', handleDraftUpdate);
+    window.addEventListener('storage', handleDraftUpdate);
+    return () => {
+      window.removeEventListener('pos_paused_draft_changed', handleDraftUpdate);
+      window.removeEventListener('storage', handleDraftUpdate);
+    };
+  }, []);
+
+  const handleGlobalResumePausedDraft = () => {
+    setActiveTab('inventario');
+    setTimeout(() => {
+      window.dispatchEvent(new Event('pos_resume_product_draft'));
+    }, 120);
+  };
 
   // Mobile mode detection (screen size < 768px or query parameter ?mode=mobile)
   const [isMobileMode, setIsMobileMode] = useState<boolean>(() => {
@@ -2192,6 +2226,10 @@ const cleanProductObject = (p: any): Product => ({
   const confirmLogoutUser = () => {
     sessionStorage.removeItem('pos_inventory_search_term');
     sessionStorage.removeItem('pos_caja_search_term');
+    try {
+      localStorage.removeItem('pos_paused_product_draft');
+      window.dispatchEvent(new Event('pos_paused_draft_changed'));
+    } catch (_) {}
     setCurrentUser(null);
     setActiveTab('caja');
   };
@@ -3340,6 +3378,34 @@ const cleanProductObject = (p: any): Product => ({
         onClose={() => setShowManualAccesoModal(false)}
         lanIp={lanIP}
       />
+
+      {/* DOCK FLOTANTE GLOBAL PARA REANUDAR PRODUCTO PAUSADO DESDE CUALQUIER MÓDULO (F1 - F10) */}
+      {pausedProductDraft && currentUser && (
+        <div 
+          onClick={handleGlobalResumePausedDraft}
+          className="fixed bottom-5 right-5 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white pl-4 pr-5 py-3 rounded-2xl shadow-2xl z-[999] flex items-center gap-3.5 cursor-pointer border border-amber-500/50 hover:border-amber-400 select-none group transition-all animate-bounce"
+          title="Haga clic para reanudar el registro/edición del producto pausado"
+        >
+          <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-400 flex items-center justify-center text-amber-400 font-black">
+            <PauseCircle className="w-4 h-4 text-amber-400 animate-pulse" />
+          </div>
+          <div className="flex flex-col">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-400">
+                {pausedProductDraft.type === 'new' ? 'REGISTRO EN PAUSA' : 'EDICIÓN EN PAUSA'}
+              </span>
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+            </div>
+            <div className="text-xs font-mono font-bold text-slate-100 max-w-[220px] truncate">
+              {pausedProductDraft.data?.desc?.toUpperCase() || pausedProductDraft.data?.clave?.toUpperCase() || 'Producto...'}
+            </div>
+          </div>
+          <div className="bg-amber-500 group-hover:bg-amber-400 text-slate-950 text-[10px] font-black uppercase px-2.5 py-1.5 rounded-lg flex items-center gap-1 shadow-xs ml-1 transition-all">
+            <Play className="w-3 h-3 fill-current" />
+            <span>Reanudar</span>
+          </div>
+        </div>
+      )}
 
     </div>
   );
