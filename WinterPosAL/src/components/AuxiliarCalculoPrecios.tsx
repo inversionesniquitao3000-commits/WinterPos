@@ -140,15 +140,22 @@ export default function AuxiliarCalculoPrecios({
   const mayorWithIva = calculatedMayorUSD * taxMultiplier;
   const bultoWithIva = calculatedBultoUSD * taxMultiplier;
 
+  // Precios finales a transferir a la ficha técnica:
+  // Si el producto es gravable (IVA activo), se transfiere el PVP con IVA incluido para que la Caja cobre el total correcto.
+  // Si el producto es exento, se transfiere la base calculada.
+  const finalDetailToApply = taxActive && taxPct > 0 ? detailWithIva : calculatedDetailUSD;
+  const finalMayorToApply = taxActive && taxPct > 0 ? mayorWithIva : calculatedMayorUSD;
+  const finalBultoToApply = taxActive && taxPct > 0 ? bultoWithIva : calculatedBultoUSD;
+
   const [appliedToast, setAppliedToast] = useState(false);
 
   const handleManualApply = () => {
     if (unitCostUSD >= 0) {
       onApplyPrices({
         cost: unitCostUSD.toFixed(2),
-        detail: calculatedDetailUSD.toFixed(2),
-        mayor: calculatedMayorUSD.toFixed(2),
-        bulto: calculatedBultoUSD.toFixed(2)
+        detail: finalDetailToApply.toFixed(2),
+        mayor: finalMayorToApply.toFixed(2),
+        bulto: finalBultoToApply.toFixed(2)
       });
       setAppliedToast(true);
       setTimeout(() => setAppliedToast(false), 2500);
@@ -544,12 +551,16 @@ export default function AuxiliarCalculoPrecios({
                     </span>
                     <span className="text-emerald-600 font-extrabold text-xs">➡️</span>
                     <span className="text-emerald-900 font-black text-xs bg-emerald-100 px-1 py-0.5 rounded">
-                      ${calculatedDetailUSD.toFixed(2)}
+                      ${finalDetailToApply.toFixed(2)}
                     </span>
                   </div>
-                  {taxActive && taxPct > 0 && (
-                    <span className="text-[9px] font-bold text-blue-700 block font-mono">
-                      +IVA: ${detailWithIva.toFixed(2)}
+                  {taxActive && taxPct > 0 ? (
+                    <span className="text-[8.5px] font-bold text-blue-700 block font-mono">
+                      (Base: ${calculatedDetailUSD.toFixed(2)} + IVA)
+                    </span>
+                  ) : (
+                    <span className="text-[8.5px] font-bold text-slate-500 block font-mono">
+                      Exento de IVA
                     </span>
                   )}
                 </div>
@@ -563,12 +574,16 @@ export default function AuxiliarCalculoPrecios({
                     </span>
                     <span className="text-purple-600 font-extrabold text-xs">➡️</span>
                     <span className="text-purple-900 font-black text-xs bg-purple-100 px-1 py-0.5 rounded">
-                      ${calculatedMayorUSD.toFixed(2)}
+                      ${finalMayorToApply.toFixed(2)}
                     </span>
                   </div>
-                  {taxActive && taxPct > 0 && (
-                    <span className="text-[9px] font-bold text-blue-700 block font-mono">
-                      +IVA: ${mayorWithIva.toFixed(2)}
+                  {taxActive && taxPct > 0 ? (
+                    <span className="text-[8.5px] font-bold text-blue-700 block font-mono">
+                      (Base: ${calculatedMayorUSD.toFixed(2)} + IVA)
+                    </span>
+                  ) : (
+                    <span className="text-[8.5px] font-bold text-slate-500 block font-mono">
+                      Exento de IVA
                     </span>
                   )}
                 </div>
@@ -582,12 +597,16 @@ export default function AuxiliarCalculoPrecios({
                     </span>
                     <span className="text-amber-600 font-extrabold text-xs">➡️</span>
                     <span className="text-amber-900 font-black text-xs bg-amber-100 px-1 py-0.5 rounded">
-                      ${calculatedBultoUSD.toFixed(2)}
+                      ${finalBultoToApply.toFixed(2)}
                     </span>
                   </div>
-                  {taxActive && taxPct > 0 && (
-                    <span className="text-[9px] font-bold text-blue-700 block font-mono">
-                      +IVA: ${bultoWithIva.toFixed(2)}
+                  {taxActive && taxPct > 0 ? (
+                    <span className="text-[8.5px] font-bold text-blue-700 block font-mono">
+                      (Base: ${calculatedBultoUSD.toFixed(2)} + IVA)
+                    </span>
+                  ) : (
+                    <span className="text-[8.5px] font-bold text-slate-500 block font-mono">
+                      Exento de IVA
                     </span>
                   )}
                 </div>

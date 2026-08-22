@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Product, InventoryMovement, PriceAdjustmentHistory, User, CompanyConfig } from '../types';
-import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator, PauseCircle, Play, Trash2, Wand2, Sparkles, ShieldAlert, RotateCcw, BarChart3, TrendingUp, Award, DollarSign, Calendar, X, Image as ImageIcon, Link as LinkIcon, UploadCloud, Check, Loader2, Building2, QrCode, Truck, AlertOctagon, Clock, Copy, ClipboardCheck } from 'lucide-react';
+import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator, PauseCircle, Play, Trash2, Wand2, Sparkles, ShieldAlert, RotateCcw, BarChart3, TrendingUp, Award, DollarSign, X, Image as ImageIcon, Link as LinkIcon, UploadCloud, Check, Loader2, Building2, QrCode, Truck, AlertOctagon, Clock, Copy, ClipboardCheck } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr, getApiBaseUrl, formatImageUrl } from '../utils';
 import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
@@ -1108,13 +1108,49 @@ export default function Inventario({
   // History page filters
   const [historySearch, setHistorySearch] = useState('');
   
-  // Sub-navegación y Filtros Kardex
+  const getTodayLocalDateStr = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Sub-navegación y Filtros Kardex (Rango de fechas activo por defecto en Hoy)
   const [kardexView, setKardexView] = useState<'detallada' | 'resumen'>('detallada');
   const [kardexSearchTerm, setKardexSearchTerm] = useState('');
-  const [kardexDateFilter, setKardexDateFilter] = useState('');
+  const [kardexFilterByRange, setKardexFilterByRange] = useState(true);
+  const [kardexStartDate, setKardexStartDate] = useState(getTodayLocalDateStr);
+  const [kardexEndDate, setKardexEndDate] = useState(getTodayLocalDateStr);
   const [kardexTypeFilter, setKardexTypeFilter] = useState('todos');
   const [kardexOperatorFilter, setKardexOperatorFilter] = useState('todos');
   const [selectedGroupedMovements, setSelectedGroupedMovements] = useState<InventoryMovement[] | null>(null);
+
+  const handleSetKardexDatePreset = (preset: 'hoy' | 'ayer' | '7dias' | 'mes') => {
+    const now = new Date();
+    const todayStr = getTodayLocalDateStr();
+    setKardexFilterByRange(true);
+    if (preset === 'hoy') {
+      setKardexStartDate(todayStr);
+      setKardexEndDate(todayStr);
+    } else if (preset === 'ayer') {
+      const yesterday = new Date(now);
+      yesterday.setDate(now.getDate() - 1);
+      const yStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+      setKardexStartDate(yStr);
+      setKardexEndDate(yStr);
+    } else if (preset === '7dias') {
+      const past7 = new Date(now);
+      past7.setDate(now.getDate() - 6);
+      const pStr = `${past7.getFullYear()}-${String(past7.getMonth() + 1).padStart(2, '0')}-${String(past7.getDate()).padStart(2, '0')}`;
+      setKardexStartDate(pStr);
+      setKardexEndDate(todayStr);
+    } else if (preset === 'mes') {
+      const firstDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+      setKardexStartDate(firstDay);
+      setKardexEndDate(todayStr);
+    }
+  };
 
   const ALL_STATS_MONTHS = [
     { id: 1, name: 'Enero', short: 'Ene' },
@@ -1200,14 +1236,6 @@ export default function Inventario({
     } else {
       setStatsMonths([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     }
-  };
-
-  const getTodayLocalDateStr = () => {
-    const d = new Date();
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
   };
 
   const [historyStartDate, setHistoryStartDate] = useState(getTodayLocalDateStr);
@@ -1992,10 +2020,22 @@ export default function Inventario({
       );
     }
 
-    // Filtro por Fecha
-    if (kardexDateFilter.trim() !== '') {
-      const dateTerm = kardexDateFilter.trim();
-      result = result.filter(m => (m.date || '').includes(dateTerm));
+    // Filtro por Rango de Fechas (Desde - Hasta)
+    if (kardexFilterByRange) {
+      if (kardexStartDate) {
+        result = result.filter(m => {
+          if (!m.date) return false;
+          const mDate = m.date.substring(0, 10);
+          return mDate >= kardexStartDate;
+        });
+      }
+      if (kardexEndDate) {
+        result = result.filter(m => {
+          if (!m.date) return false;
+          const mDate = m.date.substring(0, 10);
+          return mDate <= kardexEndDate;
+        });
+      }
     }
 
     // Filtro por Tipo de Movimiento
@@ -2016,7 +2056,7 @@ export default function Inventario({
     }
 
     return result;
-  }, [safeMovements, kardexSearchTerm, kardexDateFilter, kardexTypeFilter, kardexOperatorFilter]);
+  }, [safeMovements, kardexSearchTerm, kardexFilterByRange, kardexStartDate, kardexEndDate, kardexTypeFilter, kardexOperatorFilter]);
 
   const groupedMovements = useMemo(() => {
     const groups: Record<string, {
@@ -4907,19 +4947,22 @@ export default function Inventario({
               </div>
 
               <div className="flex items-center gap-2">
-                {(kardexSearchTerm || kardexDateFilter || kardexTypeFilter !== 'todos' || kardexOperatorFilter !== 'todos') && (
+                {(kardexSearchTerm || !kardexFilterByRange || kardexStartDate !== getTodayLocalDateStr() || kardexEndDate !== getTodayLocalDateStr() || kardexTypeFilter !== 'todos' || kardexOperatorFilter !== 'todos') && (
                   <button
                     type="button"
                     onClick={() => {
                       setKardexSearchTerm('');
-                      setKardexDateFilter('');
+                      setKardexFilterByRange(true);
+                      setKardexStartDate(getTodayLocalDateStr());
+                      setKardexEndDate(getTodayLocalDateStr());
                       setKardexTypeFilter('todos');
                       setKardexOperatorFilter('todos');
                     }}
-                    className="text-[10px] text-rose-600 hover:text-rose-800 font-sans font-bold bg-rose-50 border border-rose-200 px-2 py-0.5 rounded flex items-center gap-1 cursor-pointer"
+                    className="text-[10px] text-rose-600 hover:text-rose-800 font-sans font-bold bg-rose-50 border border-rose-200 px-2 py-0.5 rounded flex items-center gap-1 cursor-pointer transition-all active:scale-95"
+                    title="Restablecer búsqueda a movimientos del día de hoy"
                   >
                     <X className="w-3 h-3" />
-                    Limpiar Filtros
+                    Restablecer (Hoy)
                   </button>
                 )}
                 <span className="text-[10px] bg-slate-200 border border-slate-300 px-2.5 py-0.5 rounded text-slate-600 font-sans font-bold">
@@ -4929,9 +4972,9 @@ export default function Inventario({
             </div>
 
             {/* BARRA DE BÚSQUEDA Y FILTROS KARDEX */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 font-sans text-xs pt-1 border-t border-slate-200/80">
+            <div className="flex flex-wrap items-center gap-2.5 font-sans text-xs pt-1 border-t border-slate-200/80">
               {/* Buscador de Producto / Código / Motivo */}
-              <div className="relative flex items-center">
+              <div className="relative flex-1 min-w-[200px] flex items-center">
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 pointer-events-none" />
                 <input
                   type="text"
@@ -4942,24 +4985,86 @@ export default function Inventario({
                 />
               </div>
 
-              {/* Buscador / Filtro por Fecha */}
-              <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2 py-1 shadow-xs">
-                <Calendar className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                <input
-                  type="date"
-                  value={kardexDateFilter}
-                  onChange={(e) => setKardexDateFilter(e.target.value)}
-                  className="w-full text-[11px] font-mono text-slate-800 bg-transparent focus:outline-none"
-                />
-                {kardexDateFilter && (
-                  <button type="button" onClick={() => setKardexDateFilter('')} className="text-slate-400 hover:text-slate-600">
-                    <X className="w-3 h-3" />
+              {/* SHARED DATE RANGE FILTER (Desde - Hasta con Presets) */}
+              <div className="flex flex-wrap items-center gap-2 bg-white border border-slate-300 rounded-lg px-2.5 py-1 shadow-xs">
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    id="enable-kardex-date-filter"
+                    checked={kardexFilterByRange}
+                    onChange={(e) => setKardexFilterByRange(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded text-winter-blueBtn focus:ring-winter-blueBtn cursor-pointer"
+                  />
+                  <label htmlFor="enable-kardex-date-filter" className="text-[11px] font-bold text-slate-600 cursor-pointer select-none">
+                    Filtrar por Rango:
+                  </label>
+                </div>
+
+                <div className="flex items-center gap-1 font-sans">
+                  <span className="text-[11px] text-slate-500">Desde:</span>
+                  <input
+                    type="date"
+                    value={kardexStartDate}
+                    onChange={(e) => setKardexStartDate(e.target.value)}
+                    disabled={!kardexFilterByRange}
+                    className="bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-[11px] outline-none focus:border-winter-blueBtn text-slate-700 font-mono disabled:opacity-40"
+                  />
+                </div>
+
+                <div className="flex items-center gap-1 font-sans">
+                  <span className="text-[11px] text-slate-500">Hasta:</span>
+                  <input
+                    type="date"
+                    value={kardexEndDate}
+                    onChange={(e) => setKardexEndDate(e.target.value)}
+                    disabled={!kardexFilterByRange}
+                    className="bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-[11px] outline-none focus:border-winter-blueBtn text-slate-700 font-mono disabled:opacity-40"
+                  />
+                </div>
+
+                {/* Presets Rápidos */}
+                <div className="flex items-center gap-1 pl-1.5 border-l border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => handleSetKardexDatePreset('hoy')}
+                    className={`px-2 py-0.5 text-[10px] rounded font-bold transition-all cursor-pointer ${
+                      kardexFilterByRange && kardexStartDate === getTodayLocalDateStr() && kardexEndDate === getTodayLocalDateStr()
+                        ? 'bg-slate-800 text-white shadow-2xs'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                    }`}
+                    title="Ver solo movimientos del día actual"
+                  >
+                    Hoy
                   </button>
-                )}
+                  <button
+                    type="button"
+                    onClick={() => handleSetKardexDatePreset('ayer')}
+                    className="px-1.5 py-0.5 text-[10px] rounded font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all cursor-pointer"
+                    title="Ver movimientos de ayer"
+                  >
+                    Ayer
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSetKardexDatePreset('7dias')}
+                    className="px-1.5 py-0.5 text-[10px] rounded font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all cursor-pointer"
+                    title="Últimos 7 días"
+                  >
+                    7d
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSetKardexDatePreset('mes')}
+                    className="px-1.5 py-0.5 text-[10px] rounded font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 transition-all cursor-pointer"
+                    title="Este mes completo"
+                  >
+                    Mes
+                  </button>
+                </div>
               </div>
 
               {/* Filtro por Tipo de Movimiento */}
-              <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2 py-1 shadow-xs">
+              <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2 py-1 shadow-xs min-w-[130px]">
                 <span className="text-[10px] text-slate-400 font-bold uppercase flex-shrink-0">Tipo:</span>
                 <select
                   value={kardexTypeFilter}
@@ -4977,7 +5082,7 @@ export default function Inventario({
               </div>
 
               {/* Filtro por Operador */}
-              <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2 py-1 shadow-xs">
+              <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2 py-1 shadow-xs min-w-[140px]">
                 <span className="text-[10px] text-slate-400 font-bold uppercase flex-shrink-0">Operador:</span>
                 <select
                   value={kardexOperatorFilter}
@@ -5002,9 +5107,9 @@ export default function Inventario({
                     <th className="px-4 py-3 font-sans uppercase">Código</th>
                     <th className="px-4 py-3 font-sans uppercase">Producto</th>
                     <th className="px-4 py-3 text-center font-sans uppercase">Tipo Mov.</th>
-                    <th className="px-4 py-3 text-right font-sans uppercase">Cantidad</th>
-                    <th className="px-4 py-3 text-right font-sans uppercase">Stock Ant.</th>
-                    <th className="px-4 py-3 text-right font-sans uppercase">Stock Post.</th>
+                    <th className="px-4 py-3 text-center font-sans uppercase">Cantidad</th>
+                    <th className="px-4 py-3 text-center font-sans uppercase">Stock Ant.</th>
+                    <th className="px-4 py-3 text-center font-sans uppercase">Stock Post.</th>
                     <th className="px-4 py-3 font-sans uppercase">Justificación / Motivo</th>
                     <th className="px-4 py-3 font-sans uppercase">Operador</th>
                     <th className="px-4 py-3 text-center font-sans uppercase">Detalle</th>
@@ -5045,11 +5150,11 @@ export default function Inventario({
                               {m.type}
                             </span>
                           </td>
-                          <td className={`px-4 py-2.5 text-right font-black font-mono ${m.type === 'Salida' || m.type === 'Merma' ? 'text-red-600' : (m.qty > 0 ? 'text-green-600' : 'text-red-600')}`}>
+                          <td className={`px-4 py-2.5 text-center font-black font-mono ${m.type === 'Salida' || m.type === 'Merma' ? 'text-red-600' : (m.qty > 0 ? 'text-green-600' : 'text-red-600')}`}>
                             {m.type === 'Salida' || m.type === 'Merma' ? `-${Math.abs(m.qty)}` : formatKardexVal(m.qty, true)}
                           </td>
-                          <td className="px-4 py-2.5 text-right font-mono text-slate-450">{formatKardexVal(m.stock_anterior)}</td>
-                          <td className="px-4 py-2.5 text-right font-mono text-slate-600">{formatKardexVal(m.stock_posterior)}</td>
+                          <td className="px-4 py-2.5 text-center font-mono text-slate-450">{formatKardexVal(m.stock_anterior)}</td>
+                          <td className="px-4 py-2.5 text-center font-mono text-slate-600">{formatKardexVal(m.stock_posterior)}</td>
                           <td className="px-4 py-2.5 text-slate-655 italic font-sans">{m.motivo}</td>
                           <td className="px-4 py-2.5 font-sans">{m.usuario}</td>
                           <td className="px-4 py-2.5 text-center">
@@ -5072,10 +5177,10 @@ export default function Inventario({
                 <thead className="sticky top-0 bg-slate-55 border-b border-slate-200 text-slate-550">
                   <tr>
                     <th className="px-4 py-3 font-sans uppercase">Fecha/Hora (Minuto)</th>
-                    <th className="px-4 py-3 font-sans uppercase">Tipo Mov.</th>
+                    <th className="px-4 py-3 text-center font-sans uppercase">Tipo Mov.</th>
                     <th className="px-4 py-3 font-sans uppercase">Justificación / Motivo</th>
-                    <th className="px-4 py-3 text-right font-sans uppercase">Total Ítems</th>
-                    <th className="px-4 py-3 text-right font-sans uppercase">Cantidad Total</th>
+                    <th className="px-4 py-3 text-center font-sans uppercase">Total Ítems</th>
+                    <th className="px-4 py-3 text-center font-sans uppercase">Cantidad Total</th>
                     <th className="px-4 py-3 font-sans uppercase">Operador</th>
                     <th className="px-4 py-3 text-center font-sans uppercase">Detalle</th>
                   </tr>
@@ -5098,14 +5203,14 @@ export default function Inventario({
                       return (
                         <tr key={g.key} className="hover:bg-slate-55/50">
                           <td className="px-4 py-2.5 font-mono text-slate-450">{g.date}</td>
-                          <td className="px-4 py-2.5">
+                          <td className="px-4 py-2.5 text-center">
                             <span className={`px-2 py-0.5 rounded border text-[9px] ${typeColor}`}>
                               {g.type}
                             </span>
                           </td>
                           <td className="px-4 py-2.5 text-slate-655 italic font-sans font-bold">{g.motivo}</td>
-                          <td className="px-4 py-2.5 text-right font-mono font-bold text-slate-600">{g.totalItems}</td>
-                          <td className={`px-4 py-2.5 text-right font-black font-mono ${g.type === 'Salida' || g.type === 'Merma' ? 'text-red-600' : (g.totalQty > 0 ? 'text-green-600' : 'text-red-600')}`}>
+                          <td className="px-4 py-2.5 text-center font-mono font-bold text-slate-600">{g.totalItems}</td>
+                          <td className={`px-4 py-2.5 text-center font-black font-mono ${g.type === 'Salida' || g.type === 'Merma' ? 'text-red-600' : (g.totalQty > 0 ? 'text-green-600' : 'text-red-600')}`}>
                             {g.type === 'Salida' || g.type === 'Merma' ? `-${Math.abs(g.totalQty)}` : (g.totalQty > 0 ? `+${g.totalQty}` : g.totalQty)}
                           </td>
                           <td className="px-4 py-2.5 font-sans">{g.usuario}</td>
@@ -5113,7 +5218,7 @@ export default function Inventario({
                             <button
                               type="button"
                               onClick={() => setSelectedGroupedMovements(g.movements)}
-                              className="bg-sky-50 border border-sky-250 text-sky-700 hover:bg-sky-100/80 px-2.5 py-1 rounded font-bold font-sans text-[10px] active:scale-95 transition-all shadow-sm"
+                              className="bg-sky-50 border border-sky-250 text-sky-700 hover:bg-sky-100/80 px-2.5 py-1 rounded font-bold font-sans text-[10px] active:scale-95 transition-all shadow-sm cursor-pointer"
                             >
                               Ver Detalle
                             </button>
@@ -5161,9 +5266,9 @@ export default function Inventario({
                   <tr>
                     <th className="px-4 py-2">Código</th>
                     <th className="px-4 py-2">Producto</th>
-                    <th className="px-4 py-2 text-right">Cantidad</th>
-                    <th className="px-4 py-2 text-right">Stock Ant.</th>
-                    <th className="px-4 py-2 text-right">Stock Post.</th>
+                    <th className="px-4 py-2 text-center">Cantidad</th>
+                    <th className="px-4 py-2 text-center">Stock Ant.</th>
+                    <th className="px-4 py-2 text-center">Stock Post.</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-sans text-slate-700">
@@ -5182,11 +5287,11 @@ export default function Inventario({
                       <tr key={m.id} className="hover:bg-slate-55/30">
                         <td className="px-4 py-2 font-mono font-bold text-slate-500">{m.productCode}</td>
                         <td className="px-4 py-2">{m.productDescription}</td>
-                        <td className={`px-4 py-2 text-right font-bold font-mono ${m.qty > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        <td className={`px-4 py-2 text-center font-bold font-mono ${m.qty > 0 ? 'text-green-600' : 'text-red-600'}`}>
                           {formatKardexVal(m.qty, true)}
                         </td>
-                        <td className="px-4 py-2 text-right font-mono text-slate-400">{formatKardexVal(m.stock_anterior)}</td>
-                        <td className="px-4 py-2 text-right font-mono text-slate-600">{formatKardexVal(m.stock_posterior)}</td>
+                        <td className="px-4 py-2 text-center font-mono text-slate-400">{formatKardexVal(m.stock_anterior)}</td>
+                        <td className="px-4 py-2 text-center font-mono text-slate-600">{formatKardexVal(m.stock_posterior)}</td>
                       </tr>
                     );
                   })}
@@ -6503,10 +6608,10 @@ export default function Inventario({
                           onChange={(e) => setNewDetail(e.target.value)}
                           className="w-full bg-slate-50 border border-emerald-300 rounded px-1.5 py-1 text-xs text-emerald-700 font-mono font-black focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-slate-400 block mt-0.5 font-mono truncate">
+                        <span className="text-[8px] text-slate-500 block mt-0.5 font-mono truncate font-semibold">
                           {newTaxActive 
-                            ? `+IVA: $${((parseFloat(newDetail) || 0) * (1 + (parseFloat(newTaxPct) || 0) / 100)).toFixed(2)}` 
-                            : 'Exento'}
+                            ? `Base: $${((parseFloat(newDetail) || 0) / (1 + (parseFloat(newTaxPct) || 16) / 100)).toFixed(2)} + IVA` 
+                            : 'Exento de IVA'}
                         </span>
                       </div>
 
@@ -6522,10 +6627,10 @@ export default function Inventario({
                           onChange={(e) => setNewMayor(e.target.value)}
                           className="w-full bg-slate-50 border border-purple-300 rounded px-1.5 py-1 text-xs text-purple-800 font-mono font-bold focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-slate-400 block mt-0.5 font-mono truncate">
+                        <span className="text-[8px] text-slate-500 block mt-0.5 font-mono truncate font-semibold">
                           {newTaxActive 
-                            ? `+IVA: $${((parseFloat(newMayor) || 0) * (1 + (parseFloat(newTaxPct) || 0) / 100)).toFixed(2)}` 
-                            : 'Exento'}
+                            ? `Base: $${((parseFloat(newMayor) || 0) / (1 + (parseFloat(newTaxPct) || 16) / 100)).toFixed(2)} + IVA` 
+                            : 'Exento de IVA'}
                         </span>
                       </div>
 
@@ -6541,8 +6646,10 @@ export default function Inventario({
                           onChange={(e) => setNewBulto(e.target.value)}
                           className="w-full bg-slate-50 border border-amber-300 rounded px-1.5 py-1 text-xs text-amber-950 font-mono font-black focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-amber-700 block mt-0.5 font-bold">
-                          Opcional
+                        <span className="text-[8px] text-slate-500 block mt-0.5 font-mono truncate font-semibold">
+                          {newTaxActive && (parseFloat(newBulto) || 0) > 0
+                            ? `Base: $${((parseFloat(newBulto) || 0) / (1 + (parseFloat(newTaxPct) || 16) / 100)).toFixed(2)} + IVA` 
+                            : 'Opcional'}
                         </span>
                       </div>
                     </div>
@@ -6983,10 +7090,10 @@ export default function Inventario({
                           onChange={(e) => setEditDetail(e.target.value)}
                           className="w-full bg-slate-50 border border-emerald-300 rounded px-1.5 py-1 text-xs text-emerald-700 font-mono font-black focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-slate-400 block mt-0.5 font-mono truncate">
+                        <span className="text-[8px] text-slate-500 block mt-0.5 font-mono truncate font-semibold">
                           {editTaxActive 
-                            ? `+IVA: $${((parseFloat(editDetail) || 0) * (1 + (parseFloat(editTaxPct) || 0) / 100)).toFixed(2)}` 
-                            : 'Exento'}
+                            ? `Base: $${((parseFloat(editDetail) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA` 
+                            : 'Exento de IVA'}
                         </span>
                       </div>
 
@@ -7002,10 +7109,10 @@ export default function Inventario({
                           onChange={(e) => setEditMayor(e.target.value)}
                           className="w-full bg-slate-50 border border-purple-300 rounded px-1.5 py-1 text-xs text-purple-800 font-mono font-bold focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-slate-400 block mt-0.5 font-mono truncate">
+                        <span className="text-[8px] text-slate-500 block mt-0.5 font-mono truncate font-semibold">
                           {editTaxActive 
-                            ? `+IVA: $${((parseFloat(editMayor) || 0) * (1 + (parseFloat(editTaxPct) || 0) / 100)).toFixed(2)}` 
-                            : 'Exento'}
+                            ? `Base: $${((parseFloat(editMayor) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA` 
+                            : 'Exento de IVA'}
                         </span>
                       </div>
 
@@ -7021,8 +7128,10 @@ export default function Inventario({
                           onChange={(e) => setEditBulto(e.target.value)}
                           className="w-full bg-slate-50 border border-amber-300 rounded px-1.5 py-1 text-xs text-amber-950 font-mono font-black focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-amber-700 block mt-0.5 font-bold">
-                          Opcional
+                        <span className="text-[8px] text-slate-500 block mt-0.5 font-mono truncate font-semibold">
+                          {editTaxActive && (parseFloat(editBulto) || 0) > 0
+                            ? `Base: $${((parseFloat(editBulto) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA` 
+                            : 'Opcional'}
                         </span>
                       </div>
                     </div>

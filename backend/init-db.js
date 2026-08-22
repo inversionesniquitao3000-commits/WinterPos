@@ -166,9 +166,14 @@ export async function initDatabase() {
         CREATE INDEX IF NOT EXISTS idx_documentos_categoria ON Documentos_Empresa(categoria);
         CREATE INDEX IF NOT EXISTS idx_documentos_vencimiento ON Documentos_Empresa(fecha_vencimiento);
 
-        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS precio_bulto_usd NUMERIC(12, 2) DEFAULT 0 CHECK (precio_bulto_usd >= 0);
-        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS cant_bulto INT DEFAULT 0 CHECK (cant_bulto >= 0);
+        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS precio_bulto_usd NUMERIC(12, 2) DEFAULT 0;
+        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS cant_bulto INT DEFAULT 0;
         ALTER TABLE Productos ADD COLUMN IF NOT EXISTS ganancia_bulto NUMERIC(8, 2) DEFAULT 0;
+        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS porcentaje_impuesto NUMERIC(5, 2) DEFAULT 0;
+        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS a_granel BOOLEAN DEFAULT FALSE;
+        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(50);
+        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS estado VARCHAR(10) DEFAULT 'Activo';
+        ALTER TABLE Productos ALTER COLUMN imagen_url TYPE TEXT;
       `).catch(err => console.warn('[Migration Documentos_Empresa / Productos]', err.message));
     }
     return true;

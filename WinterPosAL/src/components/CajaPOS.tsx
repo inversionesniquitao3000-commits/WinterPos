@@ -7,12 +7,13 @@ import {
   Clock, ListOrdered, Plus, AlertCircle, DollarSign, RotateCcw, Printer,
   Calendar, Lock, Coins, RefreshCw, ShieldCheck, FileText,
   Banknote, Eye, LogOut, X, Image as ImageIcon, ZoomIn,
-  Edit, Minus, Sparkles, Package, Upload
+  Edit, Minus, Sparkles, Package, QrCode, UploadCloud, Link as LinkIcon, Save
 } from 'lucide-react';
 import { formatNumberToWordsUSD, printTicketReceipt, formatBs } from '../utils';
 import { useDialog } from '../hooks/useDialog';
 import CambioDivisasModal from './CambioDivisasModal';
 import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
+import { BarcodeVisualizer } from './BarcodeVisualizer';
 
 interface CajaPOSProps {
   products: Product[];
@@ -144,13 +145,29 @@ export default function CajaPOS({
   const [editCost, setEditCost] = useState('0');
   const [editDetail, setEditDetail] = useState('0');
   const [editMayor, setEditMayor] = useState('0');
+  const [editBulto, setEditBulto] = useState('0');
+  const [editCantBulto, setEditCantBulto] = useState('0');
+  const [editGananciaBulto, setEditGananciaBulto] = useState('0');
   const [editMinStock, setEditMinStock] = useState('5');
   const [editWholesaleQty, setEditWholesaleQty] = useState('6');
   const [editImageUrl, setEditImageUrl] = useState('');
-  const [isAuxExpandedEdit, setIsAuxExpandedEdit] = useState(false);
+  const [isUploadingManualImage, setIsUploadingManualImage] = useState(false);
   const [showQuickAddCatModal, setShowQuickAddCatModal] = useState(false);
   const [newCatInputName, setNewCatInputName] = useState('');
   const [customCategories, setCustomCategories] = useState<string[]>([]);
+
+  const handleUploadImageFile = (file: File) => {
+    setIsUploadingManualImage(true);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setEditImageUrl(reader.result as string);
+      setIsUploadingManualImage(false);
+    };
+    reader.onerror = () => {
+      setIsUploadingManualImage(false);
+    };
+    reader.readAsDataURL(file);
+  };
 
   const allCategories = useMemo(() => {
     const set = new Set<string>();
@@ -174,6 +191,9 @@ export default function CajaPOS({
       setEditCost(editingProduct.precio_costo_usd?.toString() || '0');
       setEditDetail(editingProduct.precio_detalle_usd?.toString() || '0');
       setEditMayor(editingProduct.precio_mayor_usd?.toString() || '0');
+      setEditBulto(editingProduct.precio_bulto_usd?.toString() || '0');
+      setEditCantBulto((editingProduct.cant_bulto || 0).toString());
+      setEditGananciaBulto((editingProduct.ganancia_bulto || 0).toString());
       setEditMinStock(editingProduct.stock_minimo?.toString() || '5');
       setEditWholesaleQty(editingProduct.cantidad_mayorista?.toString() || '6');
       setEditImageUrl(editingProduct.imagen_url || '');
@@ -193,6 +213,9 @@ export default function CajaPOS({
     const cost = parseFloat(editCost) || 0;
     const detail = parseFloat(editDetail) || 0;
     const mayor = parseFloat(editMayor) || 0;
+    const bulto = parseFloat(editBulto) || 0;
+    const cantBulto = parseInt(editCantBulto) || 0;
+    const gananciaBulto = parseFloat(editGananciaBulto) || 0;
     const minStock = parseInt(editMinStock) || 5;
     const wholesaleQty = parseInt(editWholesaleQty) || 6;
     const taxPctNum = editTaxActive ? (parseFloat(editTaxPct) || 16) : 0;
@@ -209,6 +232,9 @@ export default function CajaPOS({
       precio_costo_usd: cost,
       precio_detalle_usd: detail,
       precio_mayor_usd: mayor,
+      precio_bulto_usd: bulto,
+      cant_bulto: cantBulto,
+      ganancia_bulto: gananciaBulto,
       stock_minimo: minStock,
       cantidad_mayorista: wholesaleQty,
       imagen_url: editImageUrl.trim()
@@ -1487,7 +1513,11 @@ export default function CajaPOS({
       showDevolucionModal ||
       showQuickClientModal ||
       showCambioDivisasModal ||
-      showAperturaModal;
+      showAperturaModal ||
+      editingProduct !== null ||
+      showQuickAddCatModal ||
+      imageManagerProduct !== null ||
+      zoomedProduct !== null;
 
     if (isModalOpen) return;
 
@@ -1513,6 +1543,22 @@ export default function CajaPOS({
         e.preventDefault();
         searchInputRef.current?.focus();
       } else if (e.key === 'Escape') {
+        if (showQuickAddCatModal) {
+          setShowQuickAddCatModal(false);
+          return;
+        }
+        if (editingProduct !== null) {
+          setEditingProduct(null);
+          return;
+        }
+        if (imageManagerProduct !== null) {
+          setImageManagerProduct(null);
+          return;
+        }
+        if (zoomedProduct !== null) {
+          setZoomedProduct(null);
+          return;
+        }
         setShowCheckoutModal(false);
         setShowMovementsModal(false);
         setShowCierreModal(false);
@@ -1526,11 +1572,12 @@ export default function CajaPOS({
         setCierreResult(null);
         setShowDevolucionModal(false);
         setShowQuickClientModal(false);
+        setShowCambioDivisasModal(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [editingProduct, showQuickAddCatModal, imageManagerProduct, zoomedProduct]);
 
   // Focus Trap for Caja Abono Modal
   useEffect(() => {
@@ -1628,7 +1675,11 @@ export default function CajaPOS({
           showOnHoldModal ||
           showDevolucionModal ||
           showQuickClientModal ||
-          showCambioDivisasModal;
+          showCambioDivisasModal ||
+          editingProduct !== null ||
+          showQuickAddCatModal ||
+          imageManagerProduct !== null ||
+          zoomedProduct !== null;
 
         if (!isModalOpen) {
           e.preventDefault();
@@ -1658,6 +1709,10 @@ export default function CajaPOS({
     showDevolucionModal,
     showQuickClientModal,
     showCambioDivisasModal,
+    editingProduct,
+    showQuickAddCatModal,
+    imageManagerProduct,
+    zoomedProduct,
     focusSearchInput
   ]);
 
@@ -7615,322 +7670,460 @@ export default function CajaPOS({
         </div>
       )}
 
-      {/* MODAL: MODIFICAR FICHA DE PRODUCTO (EXACT DESIGN MATCH) */}
+      {/* MODAL: MODIFICAR FICHA DE PRODUCTO - 2 Column Responsive Grid matching Inventario */}
       {editingProduct && (
-        <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-sans text-slate-800">
-          <div className={`bg-white border border-slate-200 rounded-xl overflow-hidden w-full ${isAuxExpandedEdit ? 'max-w-2xl sm:max-w-3xl' : 'max-w-xl'} shadow-2xl p-6 space-y-4 transition-all duration-300 max-h-[92vh] overflow-y-auto`}>
+        <div className="fixed inset-0 bg-slate-955/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50 animate-fade-in font-sans text-slate-800">
+          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden w-full max-w-[1380px] shadow-2xl transition-all duration-300 max-h-[94vh] flex flex-col">
             
-            <div className="flex justify-between items-center border-b border-slate-200 pb-3">
-              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
-                <Edit className="w-4 h-4 text-slate-600 bg-slate-100 rounded-full p-0.5" />
-                MODIFICAR FICHA DE PRODUCTO
-              </h3>
-              <button type="button" onClick={() => setEditingProduct(null)} className="text-slate-400 hover:text-slate-700">✕</button>
+            {/* Header */}
+            <div className="flex justify-between items-center border-b border-slate-200 px-6 py-3.5 bg-slate-50 flex-shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 bg-slate-200 text-slate-700 rounded-lg">
+                  <Edit className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900 tracking-wide flex items-center gap-2">
+                    MODIFICAR FICHA DE PRODUCTO
+                    <span className="bg-indigo-100 text-indigo-800 text-[10px] font-black px-2 py-0.5 rounded-full font-mono">ID: {editingProduct.id}</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500 font-medium">
+                    Actualice los precios, códigos de barras, empaques y características del artículo.
+                  </p>
+                </div>
+              </div>
+
+              {/* Botón Cerrar */}
+              <div className="flex items-center gap-1.5">
+                <button 
+                  type="button" 
+                  onClick={() => setEditingProduct(null)} 
+                  className="text-slate-400 hover:text-red-600 p-1.5 hover:bg-red-50 rounded-lg transition-all"
+                  title="Cerrar ventana (Esc)"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
-            <form onSubmit={handleUpdateProductSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Clave del Producto <span className="text-red-500">*</span></label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ej. HARINA-PAN-1K"
-                    value={editClave.toUpperCase()}
-                    onChange={(e) => {
-                      const val = e.target.value.toUpperCase();
-                      if (editBarcode === editClave || editBarcode === '') {
-                        setEditBarcode(val);
-                      }
-                      setEditClave(val);
-                    }}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-855 focus:bg-white focus:border-blue-600 focus:outline-none uppercase font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Código de Barras</label>
-                  <input
-                    type="text"
-                    placeholder="Vacío = usar Clave"
-                    value={editBarcode}
-                    onChange={(e) => setEditBarcode(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-blue-600 focus:outline-none font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Categoría</label>
-                  <div className="flex gap-2">
-                    <select
-                      value={editCat}
-                      onChange={(e) => setEditCat(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-blue-600 focus:outline-none font-bold"
-                    >
-                      {allCategories.map(cat => (
-                        <option key={cat} value={cat}>{cat}</option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => setShowQuickAddCatModal(true)}
-                      className="bg-red-800 hover:bg-red-900 text-white px-3 py-2.5 rounded text-xs font-bold font-mono transition-all flex items-center justify-center shadow-sm"
-                      title="Agregar nueva categoría"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Impuesto</label>
-                  <div className="flex items-center gap-2 bg-slate-50 border border-slate-350 rounded p-2 text-xs select-none h-[38px]">
-                    <label className="flex items-center gap-1.5 cursor-pointer font-sans font-bold text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={editTaxActive}
-                        onChange={(e) => setEditTaxActive(e.target.checked)}
-                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-4 h-4"
-                      />
-                      <span>Si</span>
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="IVA"
-                      disabled={!editTaxActive}
-                      value={editTaxName}
-                      onChange={(e) => setEditTaxName(e.target.value.toUpperCase())}
-                      className="w-full bg-white border border-slate-300 rounded p-1 text-[11px] font-sans font-bold text-slate-800 uppercase disabled:opacity-40 disabled:bg-slate-100"
-                    />
-                    <span className="font-bold text-slate-500 font-sans">%</span>
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      disabled={!editTaxActive}
-                      value={editTaxPct}
-                      onChange={(e) => setEditTaxPct(e.target.value)}
-                      className="w-12 text-center bg-white border border-slate-300 rounded p-1 font-bold font-mono text-[11px] text-slate-855 disabled:opacity-40 disabled:bg-slate-100"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-500 block mb-1 font-sans">Descripción del Artículo <span className="text-red-500">*</span></label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Descripción del artículo..."
-                  value={editDesc.toUpperCase()}
-                  onChange={(e) => setEditDesc(e.target.value.toUpperCase())}
-                  className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-855 focus:bg-white focus:border-blue-600 focus:outline-none font-sans font-bold uppercase"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Forma de Venta</label>
-                  <select
-                    value={editAGranel ? 'granel' : 'unidad'}
-                    onChange={(e) => setEditAGranel(e.target.value === 'granel')}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-blue-600 focus:outline-none font-sans font-semibold"
-                  >
-                    <option value="unidad">Venta por Unidad / Entero</option>
-                    <option value="granel">Venta a Granel (Peso / Kg / Fraccional)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Fecha de Vencimiento (Opcional)</label>
-                  <input
-                    type="date"
-                    value={editVencimiento}
-                    onChange={(e) => setEditVencimiento(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2 text-xs text-slate-800 focus:bg-white focus:border-blue-600 focus:outline-none font-sans font-medium"
-                  />
-                </div>
-              </div>
-
-              {/* AUXILIAR DE CÁLCULO DE PRECIOS */}
-              <AuxiliarCalculoPrecios
-                initialCost={editCost}
-                initialDetail={editDetail}
-                initialMayor={editMayor}
-                tasaBCV={tasaDia}
-                tasaFallback={tasaDia}
-                taxActive={editTaxActive}
-                taxPct={parseFloat(editTaxPct) || 16}
-                onToggleExpand={(expanded) => setIsAuxExpandedEdit(expanded)}
-                onApplyPrices={({ cost, detail, mayor }) => {
-                  setEditCost(cost);
-                  setEditDetail(detail);
-                  setEditMayor(mayor);
-                }}
-              />
-
-              <div className="grid grid-cols-3 gap-3 bg-slate-50 border border-slate-200 rounded-lg p-3">
-                <div>
-                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Costo ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    required
-                    value={editCost}
-                    onChange={(e) => setEditCost(e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded p-1.5 text-xs font-mono font-bold focus:ring-1 focus:ring-blue-600 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Detalle ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    required
-                    value={editDetail}
-                    onChange={(e) => setEditDetail(e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded p-1.5 text-xs font-mono font-bold focus:ring-1 focus:ring-blue-600 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Mayor ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    required
-                    value={editMayor}
-                    onChange={(e) => setEditMayor(e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded p-1.5 text-xs font-mono font-bold focus:ring-1 focus:ring-blue-600 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Stock Mínimo (Alerta)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    required
-                    value={editMinStock}
-                    onChange={(e) => setEditMinStock(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-blue-600 focus:outline-none font-mono text-center font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 block mb-1 font-sans">Cant. Mayorista</label>
-                  <input
-                    type="number"
-                    min="1"
-                    required
-                    value={editWholesaleQty}
-                    onChange={(e) => setEditWholesaleQty(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-blue-600 focus:outline-none font-mono text-center font-bold"
-                  />
-                </div>
-              </div>
-
-              {/* SECCIÓN DE IMAGEN DEL PRODUCTO (MANUAL / IA) */}
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-700 uppercase font-sans flex items-center gap-1.5">
-                    <ImageIcon className="w-3.5 h-3.5 text-blue-600" />
-                    <span>IMAGEN DEL PRODUCTO</span>
-                  </label>
-                  {editImageUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setEditImageUrl('')}
-                      className="text-[10px] text-red-600 hover:text-red-800 font-bold underline"
-                    >
-                      Quitar Imagen
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-3">
-                  {/* Vista Previa */}
-                  <div className="w-16 h-16 rounded-lg bg-white border border-slate-300 flex items-center justify-center flex-shrink-0 overflow-hidden relative shadow-inner">
-                    <div className="text-center p-1">
-                      <ImageIcon className="w-5 h-5 text-slate-300 mx-auto" />
-                      <span className="text-[8px] text-slate-400 font-bold block">Sin Foto</span>
-                    </div>
-                    {editImageUrl && (
-                      <img 
-                        key={`edit-prod-img-${editImageUrl}`}
-                        src={editImageUrl} 
-                        alt="Preview" 
-                        className="w-full h-full object-cover absolute inset-0 bg-white" 
-                        onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
-                        onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
-                      />
-                    )}
-                  </div>
-
-                  <div className="flex-1 space-y-2">
-                    <div className="flex items-center gap-2">
+            {/* Form Body - 2 Columns Grid (4 Cols Izq / 8 Cols Der para máxima prioridad al Auxiliar) */}
+            <form onSubmit={handleUpdateProductSubmit} className="p-4 overflow-y-auto space-y-3 flex-1">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+                
+                {/* === COLUMNA IZQUIERDA: CÓDIGO, DATOS GENERALES, IMAGEN Y CONTROL DE STOCK (4 Cols) === */}
+                <div className="lg:col-span-4 space-y-2.5">
+                  
+                  {/* Bloque Identificación & Código de Barras */}
+                  <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-2.5 space-y-2">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-700 block mb-0.5">
+                        Código / Clave del Producto <span className="text-red-500">*</span>
+                      </label>
                       <input
                         type="text"
-                        placeholder="Pegar URL de imagen (https://...)"
-                        value={editImageUrl}
-                        onChange={(e) => setEditImageUrl(e.target.value)}
-                        className="w-full bg-white border border-slate-300 rounded p-1.5 text-xs text-slate-800 font-mono focus:border-blue-600 focus:outline-none"
+                        required
+                        maxLength={15}
+                        value={editClave.toUpperCase()}
+                        onChange={(e) => {
+                          const val = e.target.value.toUpperCase().slice(0, 15);
+                          setEditClave(val);
+                          setEditBarcode(val);
+                        }}
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs text-slate-900 focus:border-blue-600 focus:outline-none uppercase font-bold shadow-2xs font-mono tracking-wider"
                       />
                     </div>
 
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <label className="bg-slate-200 hover:bg-slate-300 text-slate-800 px-3 py-1.5 rounded text-xs font-bold font-sans cursor-pointer transition-all flex items-center gap-1">
-                        <Upload className="w-3.5 h-3.5" />
-                        <span>Subir desde PC</span>
-                        <input 
-                          type="file" 
-                          accept="image/*" 
-                          className="hidden" 
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              const reader = new FileReader();
-                              reader.onload = () => {
-                                setEditImageUrl(reader.result as string);
-                              };
-                              reader.readAsDataURL(file);
-                            }
-                          }}
-                        />
-                      </label>
+                    {/* Visor Dinámico de Código de Barras */}
+                    <div>
+                      <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1 flex items-center gap-1">
+                        <QrCode className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>Vista Previa del Código de Barras (Escaneable)</span>
+                      </div>
+                      <BarcodeVisualizer
+                        value={editBarcode || editClave}
+                        description={editDesc}
+                        compact={true}
+                      />
+                    </div>
+                  </div>
 
-                      {editingProduct && (
+                  {/* Bloque Datos del Artículo */}
+                  <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-2.5 space-y-2">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-700 block mb-0.5">
+                        Descripción del Artículo <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={editDesc.toUpperCase()}
+                        onChange={(e) => setEditDesc(e.target.value.toUpperCase())}
+                        className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs text-slate-900 focus:border-blue-600 focus:outline-none font-bold uppercase shadow-2xs"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10.5px] font-bold text-slate-700 block mb-0.5">Categoría</label>
+                        <div className="flex gap-1">
+                          <select
+                            value={editCat}
+                            onChange={(e) => setEditCat(e.target.value)}
+                            className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-800 focus:border-blue-600 focus:outline-none font-medium shadow-2xs"
+                          >
+                            {allCategories.map(cat => (
+                              <option key={cat} value={cat}>{cat}</option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => setShowQuickAddCatModal(true)}
+                            className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded-lg text-xs font-bold transition-all flex items-center justify-center shadow-2xs cursor-pointer"
+                            title="Agregar nueva categoría"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-[10.5px] font-bold text-slate-700 block mb-0.5">Impuesto IVA</label>
+                        <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs select-none shadow-2xs h-[30px]">
+                          <label className="flex items-center gap-1 cursor-pointer font-bold text-slate-700 text-xs">
+                            <input
+                              type="checkbox"
+                              checked={editTaxActive}
+                              onChange={(e) => setEditTaxActive(e.target.checked)}
+                              className="rounded border-slate-300 text-blue-600 focus:ring-blue-600 w-3.5 h-3.5"
+                            />
+                            <span>Sí</span>
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="IVA"
+                            disabled={!editTaxActive}
+                            value={editTaxName}
+                            onChange={(e) => setEditTaxName(e.target.value.toUpperCase())}
+                            className="w-10 bg-slate-50 border border-slate-200 rounded px-1 py-0.5 text-[10px] font-bold text-slate-800 uppercase disabled:opacity-40"
+                          />
+                          <span className="font-bold text-slate-400 text-[10px]">%</span>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            disabled={!editTaxActive}
+                            value={editTaxPct}
+                            onChange={(e) => setEditTaxPct(e.target.value)}
+                            className="w-9 text-center bg-slate-50 border border-slate-200 rounded px-0.5 py-0.5 font-bold font-mono text-[10px] text-slate-900 disabled:opacity-40"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10.5px] font-bold text-slate-700 block mb-0.5">Forma de Venta</label>
+                        <select
+                          value={editAGranel ? 'granel' : 'unidad'}
+                          onChange={(e) => setEditAGranel(e.target.value === 'granel')}
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-800 focus:border-blue-600 focus:outline-none font-medium shadow-2xs"
+                        >
+                          <option value="unidad">Por Unidad</option>
+                          <option value="granel">A Granel (Kg)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-[10.5px] font-bold text-slate-700 block mb-0.5">Vencimiento (Opcional)</label>
+                        <input
+                          type="date"
+                          min={new Date().toISOString().split('T')[0]}
+                          value={editVencimiento}
+                          onChange={(e) => setEditVencimiento(e.target.value)}
+                          className="w-full bg-white border border-slate-300 rounded-lg px-2 py-0.5 text-xs text-slate-800 focus:border-blue-600 focus:outline-none font-mono shadow-2xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Bloque Imagen del Producto */}
+                  <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-2 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10.5px] font-bold text-slate-700 uppercase flex items-center gap-1">
+                        <ImageIcon className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Imagen del Producto (Opcional)</span>
+                      </label>
+                      {editImageUrl && (
                         <button
                           type="button"
-                          onClick={() => handleGenerateAiImageForProduct(editingProduct)}
-                          disabled={isGeneratingAiImage}
-                          className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-3 py-1.5 rounded text-xs font-bold font-sans transition-all flex items-center gap-1 shadow-sm"
+                          onClick={() => setEditImageUrl('')}
+                          className="text-[9.5px] text-red-600 hover:text-red-800 font-bold underline cursor-pointer"
                         >
-                          <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                          <span>{isGeneratingAiImage ? 'Generando...' : 'Generar con IA'}</span>
+                          Quitar
                         </button>
                       )}
                     </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="w-10 h-10 rounded-lg bg-white border border-slate-300 flex items-center justify-center flex-shrink-0 overflow-hidden relative shadow-2xs">
+                        <div className="text-center p-0.5">
+                          <ImageIcon className="w-3.5 h-3.5 text-slate-300 mx-auto" />
+                          <span className="text-[6.5px] text-slate-400 font-bold block">Sin Foto</span>
+                        </div>
+                        {editImageUrl && (
+                          <img 
+                            key={`edit-prod-img-${editImageUrl}`}
+                            src={editImageUrl} 
+                            alt="Preview" 
+                            className="w-full h-full object-cover absolute inset-0 bg-white" 
+                            onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
+                            onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
+                          />
+                        )}
+                      </div>
+
+                      <div className="flex-1 space-y-1">
+                        <div className="relative flex items-center">
+                          <LinkIcon className="w-3 h-3 text-slate-400 absolute left-2" />
+                          <input
+                            type="text"
+                            placeholder="URL de imagen (https://...)"
+                            value={editImageUrl}
+                            onChange={(e) => setEditImageUrl(e.target.value)}
+                            className="w-full bg-white border border-slate-300 rounded-lg pl-6 pr-2 py-0.5 text-[10px] text-slate-800 focus:outline-none focus:border-blue-500 shadow-2xs"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <label className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-[9.5px] font-bold py-0.5 px-2 rounded-md cursor-pointer flex items-center gap-1 transition-all active:scale-95">
+                            <UploadCloud className="w-3 h-3 text-slate-600" />
+                            <span>{isUploadingManualImage ? 'Subiendo...' : 'Subir'}</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) handleUploadImageFile(file);
+                              }}
+                            />
+                          </label>
+
+                          <button
+                            type="button"
+                            disabled={isGeneratingAiImage || !editDesc.trim()}
+                            onClick={async () => {
+                              if (!editDesc.trim()) {
+                                showAlert('Escriba una descripción primero para que la IA sepa qué imagen generar.', 'Descripción Requerida', 'warning');
+                                return;
+                              }
+                              setIsGeneratingAiImage(true);
+                              try {
+                                const res = await fetch(getApiUrl('/ai/generate-product-image'), {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ description: editDesc, category: editCat, barcode: editBarcode, saveLocal: true })
+                                });
+                                const data = await res.json();
+                                if (data.success && data.imageUrl) {
+                                  setEditImageUrl(data.imageUrl);
+                                  showToast('✨ Imagen generada con IA para este producto.', 'success');
+                                } else {
+                                  showAlert('No se pudo generar la imagen para este producto.', 'Error IA', 'warning');
+                                }
+                              } catch (err: any) {
+                                showAlert(`Error: ${err.message}`, 'Error IA', 'warning');
+                              } finally {
+                                setIsGeneratingAiImage(false);
+                              }
+                            }}
+                            className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 text-white text-[9.5px] font-bold py-0.5 px-2 rounded-md flex items-center gap-1 shadow-xs transition-all active:scale-95 cursor-pointer"
+                            title="Generar imagen automáticamente basada en la descripción"
+                          >
+                            <Sparkles className="w-3 h-3 text-amber-300" />
+                            <span>{isGeneratingAiImage ? 'Generando...' : 'Generar IA'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
+
+                  {/* Bloque Control de Inventario y Empaque */}
+                  <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-2.5 space-y-1.5">
+                    <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
+                      Control de Inventario y Empaque
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {/* Stock Mínimo */}
+                      <div className="bg-white border border-slate-200 rounded-lg p-1.5 shadow-2xs">
+                        <label className="text-[9.5px] font-bold text-slate-700 block mb-0.5 whitespace-nowrap">Stock Mínimo</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={editMinStock}
+                          onChange={(e) => setEditMinStock(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-xs text-slate-900 focus:outline-none font-mono text-center font-bold"
+                        />
+                      </div>
+
+                      {/* Cant. Mayorista */}
+                      <div className="bg-white border border-slate-200 rounded-lg p-1.5 shadow-2xs">
+                        <label className="text-[9.5px] font-bold text-slate-700 block mb-0.5 whitespace-nowrap">Cant. Mayor</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={editWholesaleQty}
+                          onChange={(e) => setEditWholesaleQty(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-xs text-slate-900 focus:outline-none font-mono text-center font-bold"
+                        />
+                      </div>
+
+                      {/* Cant. por Bulto */}
+                      <div className="bg-white border border-amber-200 rounded-lg p-1.5 shadow-2xs">
+                        <label className="text-[9.5px] font-bold text-amber-900 block mb-0.5 whitespace-nowrap">Unids / Bulto</label>
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="0"
+                          value={editCantBulto}
+                          onChange={(e) => setEditCantBulto(e.target.value)}
+                          className="w-full bg-white border border-amber-300 rounded px-1.5 py-1 text-xs text-slate-900 focus:outline-none font-mono text-center font-bold"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
                 </div>
+
+                {/* === COLUMNA DERECHA: PRECIOS Y AUXILIAR (8 Cols - Prioridad Máxima 66.7%) === */}
+                <div className="lg:col-span-8 space-y-2.5 flex flex-col">
+                  
+                  {/* AUXILIAR DE CÁLCULO DE PRECIOS */}
+                  <div className="flex-shrink-0">
+                    <AuxiliarCalculoPrecios
+                      initialCost={editCost}
+                      initialDetail={editDetail}
+                      initialMayor={editMayor}
+                      initialBulto={editBulto}
+                      cantBulto={parseInt(editCantBulto) || 1}
+                      tasaBCV={tasaDia}
+                      tasaFallback={tasaDia}
+                      taxActive={editTaxActive}
+                      taxPct={parseFloat(editTaxPct) || 16}
+                      onApplyPrices={({ cost, detail, mayor, bulto }) => {
+                        setEditCost(cost);
+                        setEditDetail(detail);
+                        setEditMayor(mayor);
+                        setEditBulto(bulto);
+                      }}
+                    />
+                  </div>
+
+                  {/* ESTRATEGIA DE PRECIOS ($ USD - 4 COLUMNAS ESPACIOSAS) */}
+                  <div className="bg-slate-50/80 border border-slate-200 rounded-xl p-2.5 space-y-1.5 shadow-2xs">
+                    <div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
+                      <span>Estrategia de Precios ($ USD)</span>
+                      <span className="text-[9px] text-slate-400 font-normal">Jerarquía: Costo &lt; Bulto &lt; Mayor &lt; Detalle</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                      {/* Costo */}
+                      <div className="bg-white border border-yellow-200 rounded-lg p-1.5 shadow-2xs">
+                        <label className="text-[9.5px] font-bold text-amber-800 block mb-0.5 whitespace-nowrap">Precio Costo ($)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={editCost}
+                          onChange={(e) => setEditCost(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-xs text-yellow-700 font-mono font-bold focus:bg-white focus:outline-none"
+                        />
+                      </div>
+
+                      {/* Detalle */}
+                      <div className="bg-white border border-emerald-200 rounded-lg p-1.5 shadow-2xs">
+                        <label className="text-[9.5px] font-bold text-emerald-800 block mb-0.5 whitespace-nowrap">Venta Detalle ($)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={editDetail}
+                          onChange={(e) => setEditDetail(e.target.value)}
+                          className="w-full bg-slate-50 border border-emerald-300 rounded px-1.5 py-1 text-xs text-emerald-700 font-mono font-black focus:bg-white focus:outline-none"
+                        />
+                        <span className="text-[8px] text-slate-500 block mt-0.5 font-mono truncate font-semibold">
+                          {editTaxActive 
+                            ? `Base: $${((parseFloat(editDetail) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA` 
+                            : 'Exento de IVA'}
+                        </span>
+                      </div>
+
+                      {/* Mayor */}
+                      <div className="bg-white border border-purple-200 rounded-lg p-1.5 shadow-2xs">
+                        <label className="text-[9.5px] font-bold text-purple-800 block mb-0.5 whitespace-nowrap">Precio Mayor ($)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={editMayor}
+                          onChange={(e) => setEditMayor(e.target.value)}
+                          className="w-full bg-slate-50 border border-purple-300 rounded px-1.5 py-1 text-xs text-purple-800 font-mono font-bold focus:bg-white focus:outline-none"
+                        />
+                        <span className="text-[8px] text-slate-500 block mt-0.5 font-mono truncate font-semibold">
+                          {editTaxActive 
+                            ? `Base: $${((parseFloat(editMayor) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA` 
+                            : 'Exento de IVA'}
+                        </span>
+                      </div>
+
+                      {/* Bulto */}
+                      <div className="bg-white border border-amber-200 rounded-lg p-1.5 shadow-2xs">
+                        <label className="text-[9.5px] font-bold text-amber-900 block mb-0.5 whitespace-nowrap">Bulto / Caja ($)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={editBulto}
+                          onChange={(e) => setEditBulto(e.target.value)}
+                          className="w-full bg-slate-50 border border-amber-300 rounded px-1.5 py-1 text-xs text-amber-950 font-mono font-black focus:bg-white focus:outline-none"
+                        />
+                        <span className="text-[8px] text-slate-500 block mt-0.5 font-mono truncate font-semibold">
+                          {editTaxActive && (parseFloat(editBulto) || 0) > 0
+                            ? `Base: $${((parseFloat(editBulto) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA` 
+                            : 'Opcional'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+
               </div>
 
-              <div className="flex justify-end gap-3 pt-3 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setEditingProduct(null)}
-                  className="px-4 py-2.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold font-sans"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-6 py-2.5 rounded bg-slate-800 hover:bg-slate-900 text-white text-xs font-black font-sans uppercase shadow-md"
-                >
-                  GUARDAR CAMBIOS
-                </button>
+              {/* FOOTER ACTIONS */}
+              <div className="border-t border-slate-200 pt-2 flex flex-col sm:flex-row justify-between items-center gap-2">
+                <span className="text-[10px] text-slate-400">
+                  * Cambios en precios y empaque se actualizarán inmediatamente en la base de datos.
+                </span>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={() => setEditingProduct(null)}
+                    className="flex-1 sm:flex-none px-4 py-1.5 bg-slate-100 border border-slate-300 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 sm:flex-none px-5 py-1.5 bg-slate-900 hover:bg-slate-950 text-white rounded-xl text-xs font-black shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Save className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>GUARDAR CAMBIOS</span>
+                  </button>
+                </div>
               </div>
             </form>
           </div>

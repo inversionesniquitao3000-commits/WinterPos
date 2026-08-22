@@ -191,8 +191,13 @@ try {
     ALTER TABLE IF EXISTS Movimientos_Caja ADD COLUMN IF NOT EXISTS metodo_pago VARCHAR(50) DEFAULT 'EFECTIVO';
     ALTER TABLE IF EXISTS Movimientos_Caja ADD COLUMN IF NOT EXISTS comision_ves NUMERIC DEFAULT 0;
     ALTER TABLE IF EXISTS Movimientos_Caja ADD COLUMN IF NOT EXISTS comision_usd NUMERIC DEFAULT 0;
+    ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS precio_bulto_usd NUMERIC(12, 2) DEFAULT 0;
+    ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS cant_bulto INT DEFAULT 0;
+    ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS ganancia_bulto NUMERIC(8, 2) DEFAULT 0;
+    ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS porcentaje_impuesto NUMERIC(5, 2) DEFAULT 0;
     ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS a_granel BOOLEAN DEFAULT FALSE;
     ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(50);
+    ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS estado VARCHAR(10) DEFAULT 'Activo';
     ALTER TABLE IF EXISTS Productos ALTER COLUMN imagen_url TYPE TEXT;
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS permitir_multisesion BOOLEAN DEFAULT TRUE;
     CREATE TABLE IF NOT EXISTS Gastos_Operativos (
@@ -2070,11 +2075,11 @@ export async function restoreDatabase(data) {
         for (const p of data.products) {
           await pool.query(
             `INSERT INTO Productos (id, codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, 
-             precio_costo_usd, precio_detalle_usd, precio_mayor_usd, cantidad_mayorista, exento_impuesto, imagen_url, 
+             precio_costo_usd, precio_detalle_usd, precio_mayor_usd, precio_bulto_usd, cantidad_mayorista, cant_bulto, ganancia_bulto, exento_impuesto, imagen_url, 
              estado, a_granel, fecha_vencimiento, porcentaje_impuesto) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
             [p.id, p.barcode || p.codigo_barras_clave, p.description || p.descripcion, p.category || p.categoria, p.stock_actual, p.stock_minimo,
-             p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.cantidad_mayorista, p.exento_impuesto, p.imagen_url || '',
+             p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.precio_bulto_usd || 0, p.cantidad_mayorista || 12, p.cant_bulto || 0, p.ganancia_bulto || 0, p.exento_impuesto, p.imagen_url || '',
              p.estado || 'Activo', p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
           );
         }
@@ -3723,8 +3728,8 @@ export async function saveProductsBulk(products) {
         const stockMinimo = isGranel ? (p.stock_minimo || 0) : Math.round(p.stock_minimo || 0);
 
         const res = await pool.query(
-          `INSERT INTO Productos (codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, precio_costo_usd, precio_detalle_usd, precio_mayor_usd, cantidad_mayorista, exento_impuesto, imagen_url, estado, a_granel, fecha_vencimiento, porcentaje_impuesto)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+          `INSERT INTO Productos (codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, precio_costo_usd, precio_detalle_usd, precio_mayor_usd, precio_bulto_usd, cantidad_mayorista, cant_bulto, ganancia_bulto, exento_impuesto, imagen_url, estado, a_granel, fecha_vencimiento, porcentaje_impuesto)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
            ON CONFLICT (codigo_barras_clave) 
            DO UPDATE SET 
              descripcion = EXCLUDED.descripcion,
@@ -3734,14 +3739,17 @@ export async function saveProductsBulk(products) {
              precio_costo_usd = EXCLUDED.precio_costo_usd,
              precio_detalle_usd = EXCLUDED.precio_detalle_usd,
              precio_mayor_usd = EXCLUDED.precio_mayor_usd,
+             precio_bulto_usd = EXCLUDED.precio_bulto_usd,
              cantidad_mayorista = EXCLUDED.cantidad_mayorista,
+             cant_bulto = EXCLUDED.cant_bulto,
+             ganancia_bulto = EXCLUDED.ganancia_bulto,
              exento_impuesto = EXCLUDED.exento_impuesto,
              estado = EXCLUDED.estado,
              a_granel = EXCLUDED.a_granel,
              fecha_vencimiento = EXCLUDED.fecha_vencimiento,
              porcentaje_impuesto = EXCLUDED.porcentaje_impuesto
            RETURNING id`,
-          [p.barcode, p.description, p.category || '', stockActual, stockMinimo, p.precio_costo_usd || 0, p.precio_detalle_usd || 0, p.precio_mayor_usd || 0, p.cantidad_mayorista || 12, p.exento_impuesto || false, p.imagen_url || '', p.estado || 'Activo', p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
+          [p.barcode, p.description, p.category || '', stockActual, stockMinimo, p.precio_costo_usd || 0, p.precio_detalle_usd || 0, p.precio_mayor_usd || 0, p.precio_bulto_usd || 0, p.cantidad_mayorista || 12, p.cant_bulto || 0, p.ganancia_bulto || 0, p.exento_impuesto || false, p.imagen_url || '', p.estado || 'Activo', p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
         );
         savedList.push({ ...p, id: res.rows[0].id, stock_actual: stockActual, stock_minimo: stockMinimo });
       }
