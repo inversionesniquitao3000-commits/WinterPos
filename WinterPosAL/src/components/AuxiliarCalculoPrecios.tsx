@@ -12,6 +12,7 @@ interface AuxiliarCalculoPreciosProps {
   cantBulto?: number;
   taxActive?: boolean;
   taxPct?: number;
+  storageKey?: string;
   onToggleExpand?: (expanded: boolean) => void;
 }
 
@@ -26,9 +27,10 @@ export default function AuxiliarCalculoPrecios({
   cantBulto = 1,
   taxActive = false,
   taxPct = 16,
+  storageKey = 'pos_aux_general_draft',
   onToggleExpand
 }: AuxiliarCalculoPreciosProps) {
-  const [isEnabled, setIsEnabled] = useState(false);
+  const effectiveStorageKey = storageKey || 'pos_aux_general_draft';
 
   // Determine effective rate
   const isBcvAvailable = tasaBCV > 0;
@@ -36,17 +38,144 @@ export default function AuxiliarCalculoPrecios({
     ? tasaBCV 
     : (tasaFallback > 0 ? tasaFallback : 742.23);
 
+  // Initialize states with saved draft from storage if available
+  const [isEnabled, setIsEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(effectiveStorageKey);
+      if (saved) {
+        const d = JSON.parse(saved);
+        if (typeof d.isEnabled === 'boolean') return d.isEnabled;
+      }
+    } catch (_) {}
+    return false;
+  });
+
   // Cost calculation states
-  const [totalCost, setTotalCost] = useState('');
-  const [currency, setCurrency] = useState<'USD' | 'VES'>('USD');
-  const [units, setUnits] = useState('1');
-  const [customRate, setCustomRate] = useState<string>(effectiveRate.toFixed(2));
-  const [isCustomEditing, setIsCustomEditing] = useState<boolean>(false);
+  const [totalCost, setTotalCost] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(effectiveStorageKey);
+      if (saved) {
+        const d = JSON.parse(saved);
+        if (typeof d.totalCost === 'string') return d.totalCost;
+      }
+    } catch (_) {}
+    return '';
+  });
+
+  const [currency, setCurrency] = useState<'USD' | 'VES'>(() => {
+    try {
+      const saved = localStorage.getItem(effectiveStorageKey);
+      if (saved) {
+        const d = JSON.parse(saved);
+        if (d.currency === 'USD' || d.currency === 'VES') return d.currency;
+      }
+    } catch (_) {}
+    return 'USD';
+  });
+
+  const [units, setUnits] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(effectiveStorageKey);
+      if (saved) {
+        const d = JSON.parse(saved);
+        if (typeof d.units === 'string') return d.units;
+      }
+    } catch (_) {}
+    return '1';
+  });
+
+  const [customRate, setCustomRate] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(effectiveStorageKey);
+      if (saved) {
+        const d = JSON.parse(saved);
+        if (typeof d.customRate === 'string') return d.customRate;
+      }
+    } catch (_) {}
+    return effectiveRate.toFixed(2);
+  });
+
+  const [isCustomEditing, setIsCustomEditing] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(effectiveStorageKey);
+      if (saved) {
+        const d = JSON.parse(saved);
+        if (typeof d.isCustomEditing === 'boolean') return d.isCustomEditing;
+      }
+    } catch (_) {}
+    return false;
+  });
   
   // Profit margin states (%)
-  const [marginDetail, setMarginDetail] = useState('30');
-  const [marginMayor, setMarginMayor] = useState('15');
-  const [marginBulto, setMarginBulto] = useState('8');
+  const [marginDetail, setMarginDetail] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(effectiveStorageKey);
+      if (saved) {
+        const d = JSON.parse(saved);
+        if (typeof d.marginDetail === 'string') return d.marginDetail;
+      }
+    } catch (_) {}
+    return '30';
+  });
+
+  const [marginMayor, setMarginMayor] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(effectiveStorageKey);
+      if (saved) {
+        const d = JSON.parse(saved);
+        if (typeof d.marginMayor === 'string') return d.marginMayor;
+      }
+    } catch (_) {}
+    return '15';
+  });
+
+  const [marginBulto, setMarginBulto] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(effectiveStorageKey);
+      if (saved) {
+        const d = JSON.parse(saved);
+        if (typeof d.marginBulto === 'string') return d.marginBulto;
+      }
+    } catch (_) {}
+    return '8';
+  });
+
+  // Auto-save any changes to storage
+  useEffect(() => {
+    try {
+      localStorage.setItem(effectiveStorageKey, JSON.stringify({
+        isEnabled,
+        totalCost,
+        currency,
+        units,
+        customRate,
+        isCustomEditing,
+        marginDetail,
+        marginMayor,
+        marginBulto,
+        updatedAt: new Date().toISOString()
+      }));
+    } catch (_) {}
+  }, [effectiveStorageKey, isEnabled, totalCost, currency, units, customRate, isCustomEditing, marginDetail, marginMayor, marginBulto]);
+
+  // If effectiveStorageKey changes, reload values for that key
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(effectiveStorageKey);
+      if (saved) {
+        const d = JSON.parse(saved);
+        if (typeof d.isEnabled === 'boolean') setIsEnabled(d.isEnabled);
+        if (typeof d.totalCost === 'string') setTotalCost(d.totalCost);
+        if (d.currency === 'USD' || d.currency === 'VES') setCurrency(d.currency);
+        if (typeof d.units === 'string') setUnits(d.units);
+        if (typeof d.customRate === 'string') setCustomRate(d.customRate);
+        if (typeof d.isCustomEditing === 'boolean') setIsCustomEditing(d.isCustomEditing);
+        if (typeof d.marginDetail === 'string') setMarginDetail(d.marginDetail);
+        if (typeof d.marginMayor === 'string') setMarginMayor(d.marginMayor);
+        if (typeof d.marginBulto === 'string') setMarginBulto(d.marginBulto);
+      }
+    } catch (_) {}
+  }, [effectiveStorageKey]);
 
   // Initial previous prices for comparison guide
   const prevCost = parseFloat(initialCost) || 0;

@@ -897,6 +897,30 @@ export default function CajaPOS({
     }
   };
 
+  // Helper to find generic / default client (Consumidor Final / Publico General)
+  const defaultClient: Client = useMemo(() => {
+    if (!clients || clients.length === 0) {
+      return {
+        id: 1,
+        cedula_rif: 'V-00000000',
+        nombre: 'CONSUMIDOR FINAL',
+        telefono: '',
+        direccion: 'LOCAL',
+        limite_credito: 0,
+        credito_disponible: 0,
+        porcentaje_descuento: 0,
+        estado: 'Activo' as const,
+        saldo_pendiente: 0
+      };
+    }
+    const found = clients.find(c => {
+      const doc = (c.cedula_rif || '').trim().toUpperCase();
+      const nom = (c.nombre || '').trim().toLowerCase();
+      return doc === 'V-00000000' || doc === 'V-0' || doc === '00000000' || /consumidor\s*final|publico\s*general|público\s*general|cliente\s*ocasional/i.test(nom);
+    });
+    return found || clients[0];
+  }, [clients]);
+
   // POS State
   const [selectedClient, setSelectedClient] = useState<Client>(() => {
     try {
@@ -908,8 +932,20 @@ export default function CajaPOS({
     } catch (e) {
       console.error(e);
     }
-    return clients.find(c => c.cedula_rif === 'V-00000000') || clients[0];
+    return defaultClient;
   });
+
+  // Whenever clients list updates, ensure selectedClient is synchronized if it became invalid
+  useEffect(() => {
+    if (clients && clients.length > 0) {
+      setSelectedClient(prev => {
+        if (!prev || !clients.some(c => c.id === prev.id)) {
+          return defaultClient;
+        }
+        return prev;
+      });
+    }
+  }, [clients, defaultClient]);
   
   // Searchable Client Combobox State
   const [clientSearchTerm, setClientSearchTerm] = useState<string>('');
@@ -8000,6 +8036,7 @@ export default function CajaPOS({
                   {/* AUXILIAR DE CÁLCULO DE PRECIOS */}
                   <div className="flex-shrink-0">
                     <AuxiliarCalculoPrecios
+                      storageKey={editingProduct ? `pos_aux_draft_prod_${editingProduct.id}` : 'pos_aux_draft_cajapos'}
                       initialCost={editCost}
                       initialDetail={editDetail}
                       initialMayor={editMayor}

@@ -426,11 +426,13 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
     });
   }, [filteredSales, salesSearchTerm, salesSortField, salesSortDir]);
 
-  // Calculate totals and utility for the filtered sales
+  // Calculate totals and real net utility (without IVA) for the filtered sales
   const filteredSalesTotals = useMemo(() => {
     let totalBrutas = 0;
     let totalVentas = 0;
     let totalCosto = 0;
+    let totalUtilidadRealSinIVA = 0;
+    let totalIVA = 0;
     
     finalFilteredSales.forEach(s => {
       const isDev = s.factura_nro.startsWith('DEV-');
@@ -441,18 +443,36 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
       }
       
       totalVentas += val;
+      
+      let saleCost = 0;
+      let saleVentaSinIVA = 0;
       (s.items ?? []).forEach(item => {
-        const itemCost = item.product?.precio_costo_usd ?? 0;
-        totalCosto += itemCost * (item.qty ?? 0) * (isDev ? -1 : 1);
+        const itemCost = item.product?.precio_costo_usd ?? (item as any)?.precio_costo_usd ?? (item as any)?.costo_usd ?? 0;
+        const qty = item.qty ?? (item as any)?.cantidad ?? 0;
+        const unitPrice = item.priceUSD ?? (item as any)?.precio_unitario_usd ?? (qty > 0 ? (item.totalUSD ?? (item as any)?.total_fila_usd ?? 0) / qty : 0);
+        const lineSale = unitPrice * qty;
+        
+        const isExempt = item.product?.exento_impuesto === true || (item.product?.porcentaje_impuesto !== undefined && item.product?.porcentaje_impuesto === 0) || (item as any)?.exento_impuesto === true || ((item.product?.description || '').toLowerCase().includes('harina pan'));
+        const lineSaleSinIVA = isExempt ? lineSale : (lineSale / 1.16);
+        
+        saleCost += itemCost * qty;
+        saleVentaSinIVA += lineSaleSinIVA;
       });
+      
+      const factor = isDev ? -1 : 1;
+      totalCosto += saleCost * factor;
+      totalUtilidadRealSinIVA += (saleVentaSinIVA - saleCost) * factor;
+      totalIVA += (val - saleVentaSinIVA) * factor;
     });
     
-    const totalUtilidad = totalVentas - totalCosto;
+    const totalUtilidadConIVA = totalVentas - totalCosto;
     return {
       totalBrutas,
       totalVentas,
       totalCosto,
-      totalUtilidad
+      totalUtilidad: totalUtilidadRealSinIVA,
+      totalUtilidadConIVA,
+      totalIVA
     };
   }, [finalFilteredSales]);
 
@@ -669,13 +689,66 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
     });
   }, [filteredCierres, cierresSearchTerm, cierresSortField, cierresSortDir]);
 
-  const totalUtilidadFiltered = useMemo(() => {
-    return finalFilteredCierres.reduce((sum, c) => {
-      const ventaTotalUsd = c.ventaTotalUsd ?? 0;
-      const val = c.utilidadUsd ?? (ventaTotalUsd - (c.costoTotalUsd ?? 0));
-      return sum + val;
-    }, 0);
-  }, [finalFilteredCierres]);
+  const filteredCierresTotals = useMemo(() => {
+    let totalUtilidadSinIVA = 0;
+    let totalUtilidadConIVA = 0;
+    
+    finalFilteredCierres.forEach(c => {
+      const cUser = c.usuario ? c.usuario.toLowerCase().trim() : '';
+      const fAperturaMs = c.fechaApertura ? new Date(c.fechaApertura).getTime() : 0;
+      const fCierreMs = (c.fechaCierre || c.fecha) ? new Date(c.fechaCierre || c.fecha).getTime() : Date.now();
+
+      const shiftSales = (sales || []).filter(s => {
+        if (cUser && s.usuario && s.usuario.toLowerCase().trim() !== cUser) return false;
+        const sTime = new Date(s.fecha).getTime();
+        if (isNaN(sTime)) return true;
+        const startBoundary = fAperturaMs > 0 ? fAperturaMs - 120000 : 0;
+        const endBoundary = fCierreMs > 0 ? fCierreMs + 120000 : Date.now();
+        return sTime >= startBoundary && sTime <= endBoundary;
+      });
+
+      let cSinIVA = 0;
+      let cConIVA = 0;
+      
+      if (shiftSales.length > 0) {
+        shiftSales.forEach(s => {
+          const isDev = s.factura_nro?.startsWith('DEV-');
+          const mult = isDev ? -1 : 1;
+          let saleCost = 0;
+          let saleVentaSinIVA = 0;
+          
+          (s.items || []).forEach(item => {
+            const itemCost = item.product?.precio_costo_usd ?? (item as any)?.precio_costo_usd ?? (item as any)?.costo_usd ?? 0;
+            const qty = typeof item.qty === 'number' ? item.qty : (parseFloat(String(item.qty)) || 0);
+            const unitPrice = item.priceUSD ?? (item as any)?.precio_unitario_usd ?? (qty > 0 ? (item.totalUSD ?? (item as any)?.total_fila_usd ?? 0) / qty : 0);
+            const lineSale = unitPrice * qty;
+            const isExempt = item.product?.exento_impuesto === true || (item.product?.porcentaje_impuesto !== undefined && item.product?.porcentaje_impuesto === 0) || (item as any)?.exento_impuesto === true || ((item.product?.description || '').toLowerCase().includes('harina pan'));
+            const lineSaleSinIVA = isExempt ? lineSale : (lineSale / 1.16);
+
+            saleCost += itemCost * qty;
+            saleVentaSinIVA += lineSaleSinIVA;
+          });
+
+          const totalUSD = Math.abs(s.totalUSD || 0);
+          cSinIVA += (saleVentaSinIVA - saleCost) * mult;
+          cConIVA += (totalUSD - saleCost) * mult;
+        });
+      } else {
+        const ventaTotalUsd = c.ventaTotalUsd ?? 0;
+        const costoTotalUsd = c.costoTotalUsd ?? 0;
+        cConIVA = ventaTotalUsd - costoTotalUsd;
+        cSinIVA = typeof c.utilidadUsd === 'number' && c.utilidadUsd > 0 ? c.utilidadUsd : (cConIVA / 1.16);
+      }
+
+      totalUtilidadSinIVA += cSinIVA;
+      totalUtilidadConIVA += cConIVA;
+    });
+
+    return {
+      totalUtilidadSinIVA,
+      totalUtilidadConIVA
+    };
+  }, [finalFilteredCierres, sales]);
 
   // Escape key listener to close details modal
   useEffect(() => {
@@ -1682,8 +1755,11 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                 <span className="bg-slate-100 text-slate-700 px-3 py-1 rounded-md border border-slate-250 font-medium">
                   Ventas Netas: <strong className="font-mono text-sm text-winter-blueBtn font-extrabold ml-0.5">${filteredSalesTotals.totalVentas.toFixed(2)}</strong>
                 </span>
-                <span className="bg-emerald-50 text-emerald-900 px-3 py-1 rounded-md border border-emerald-200 font-medium">
-                  Utilidad Filtro: <strong className="font-mono text-sm font-extrabold text-emerald-600 ml-0.5">${filteredSalesTotals.totalUtilidad.toFixed(2)}</strong>
+                <span className="bg-emerald-50 text-emerald-900 px-3 py-1 rounded-md border border-emerald-200 font-medium" title="Utilidad Neta Real descontando el IVA para fines fiscales o declaraciones">
+                  Utilidad (Sin IVA): <strong className="font-mono text-sm font-extrabold text-emerald-600 ml-0.5">${filteredSalesTotals.totalUtilidad.toFixed(2)}</strong>
+                </span>
+                <span className="bg-teal-50 text-teal-900 px-3 py-1 rounded-md border border-teal-200 font-medium" title="Margen Bruto de Caja total (Ventas Netas menos Costos de Mercancía)">
+                  Margen Caja (Con IVA): <strong className="font-mono text-sm font-extrabold text-teal-700 ml-0.5">${filteredSalesTotals.totalUtilidadConIVA.toFixed(2)}</strong>
                 </span>
               </div>
             </div>
@@ -2022,8 +2098,11 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] bg-emerald-50 text-emerald-700 font-extrabold px-2.5 py-1 rounded border border-emerald-200/60 font-sans">
-                  Utilidad Total: <span className="font-mono text-emerald-800 text-xs">${totalUtilidadFiltered.toFixed(2)}</span>
+                <span className="text-[10px] bg-emerald-50 text-emerald-800 font-extrabold px-2.5 py-1 rounded border border-emerald-200/80 font-sans" title="Utilidad Neta Real descontando el IVA para fines fiscales o declaraciones">
+                  Utilidad (Sin IVA): <span className="font-mono text-emerald-700 text-xs font-black ml-0.5">${filteredCierresTotals.totalUtilidadSinIVA.toFixed(2)}</span>
+                </span>
+                <span className="text-[10px] bg-teal-50 text-teal-900 font-extrabold px-2.5 py-1 rounded border border-teal-200 font-sans" title="Margen Bruto de Caja total (Ventas Netas menos Costos)">
+                  Margen Caja (Con IVA): <span className="font-mono text-teal-700 text-xs font-black ml-0.5">${filteredCierresTotals.totalUtilidadConIVA.toFixed(2)}</span>
                 </span>
                 <span className="text-[10px] bg-slate-200 text-slate-600 font-bold px-2 py-0.5 rounded border border-slate-300">
                   {finalFilteredCierres.length} cierres
@@ -2092,9 +2171,9 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                         <CierresSortIcon field="diffUsd" />
                       </div>
                     </th>
-                    <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2 text-right font-bold font-sans text-emerald-600 cursor-pointer select-none" onClick={() => handleCierresSort('utilidadUsd')}>
+                    <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2 text-right font-bold font-sans text-emerald-700 cursor-pointer select-none" onClick={() => handleCierresSort('utilidadUsd')}>
                       <div className="flex items-center justify-end gap-1">
-                        <span>UTILIDAD</span>
+                        <span title="Utilidad Neta Real (Sin IVA) y Margen Bruto de Caja (Con IVA)">UTILIDAD (SIN / CON IVA)</span>
                         <CierresSortIcon field="utilidadUsd" />
                       </div>
                     </th>
@@ -2123,8 +2202,10 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                       const aperturaUsd = c.aperturaUsd ?? 0;
                       const aperturaVes = c.aperturaVes ?? 0;
                       const ventaTotalUsd = c.ventaTotalUsd ?? 0;
-                      let rowUtilidadUsd = typeof c.utilidadUsd === 'number' && c.utilidadUsd > 0 ? c.utilidadUsd : 0;
-                      if (rowUtilidadUsd === 0 && sales && sales.length > 0) {
+                      let rowUtilidadSinIVA = 0;
+                      let rowUtilidadConIVA = 0;
+
+                      if (sales && sales.length > 0) {
                         const cUser = c.usuario ? c.usuario.toLowerCase().trim() : '';
                         const fAperturaMs = c.fechaApertura ? new Date(c.fechaApertura).getTime() : 0;
                         const fCierreMs = (c.fechaCierre || c.fecha) ? new Date(c.fechaCierre || c.fecha).getTime() : Date.now();
@@ -2138,21 +2219,36 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                           return sTime >= startBoundary && sTime <= endBoundary;
                         });
 
-                        rowUtilidadUsd = shiftSales.reduce((acc, s) => {
-                          const isDev = s.factura_nro?.startsWith('DEV-');
-                          const mult = isDev ? -1 : 1;
-                          const saleCost = (s.items || []).reduce((itemAcc, item) => {
-                            let unitCost = 0;
-                            if (typeof item.product?.precio_costo_usd === 'number' && item.product.precio_costo_usd > 0) unitCost = item.product.precio_costo_usd;
-                            else if (typeof (item as any).precio_costo_usd === 'number' && (item as any).precio_costo_usd > 0) unitCost = (item as any).precio_costo_usd;
-                            else if (typeof (item as any).costo_usd === 'number' && (item as any).costo_usd > 0) unitCost = (item as any).costo_usd;
-                            
-                            const qty = typeof item.qty === 'number' && !isNaN(item.qty) ? item.qty : (parseFloat(String(item.qty)) || 0);
-                            return itemAcc + (unitCost * qty);
-                          }, 0);
-                          const saleNet = (s.totalUSD || 0) * mult;
-                          return acc + (saleNet - (saleCost * mult));
-                        }, 0);
+                        if (shiftSales.length > 0) {
+                          shiftSales.forEach(s => {
+                            const isDev = s.factura_nro?.startsWith('DEV-');
+                            const mult = isDev ? -1 : 1;
+                            let saleCost = 0;
+                            let saleVentaSinIVA = 0;
+
+                            (s.items || []).forEach(item => {
+                              const itemCost = item.product?.precio_costo_usd ?? (item as any)?.precio_costo_usd ?? (item as any)?.costo_usd ?? 0;
+                              const qty = typeof item.qty === 'number' ? item.qty : (parseFloat(String(item.qty)) || 0);
+                              const unitPrice = item.priceUSD ?? (item as any)?.precio_unitario_usd ?? (qty > 0 ? (item.totalUSD ?? (item as any)?.total_fila_usd ?? 0) / qty : 0);
+                              const lineSale = unitPrice * qty;
+                              const isExempt = item.product?.exento_impuesto === true || (item.product?.porcentaje_impuesto !== undefined && item.product?.porcentaje_impuesto === 0) || (item as any)?.exento_impuesto === true || ((item.product?.description || '').toLowerCase().includes('harina pan'));
+                              const lineSaleSinIVA = isExempt ? lineSale : (lineSale / 1.16);
+
+                              saleCost += itemCost * qty;
+                              saleVentaSinIVA += lineSaleSinIVA;
+                            });
+
+                            const totalUSD = Math.abs(s.totalUSD || 0);
+                            rowUtilidadSinIVA += (saleVentaSinIVA - saleCost) * mult;
+                            rowUtilidadConIVA += (totalUSD - saleCost) * mult;
+                          });
+                        } else {
+                          rowUtilidadConIVA = ventaTotalUsd - (c.costoTotalUsd ?? 0);
+                          rowUtilidadSinIVA = typeof c.utilidadUsd === 'number' && c.utilidadUsd > 0 ? c.utilidadUsd : (rowUtilidadConIVA / 1.16);
+                        }
+                      } else {
+                        rowUtilidadConIVA = ventaTotalUsd - (c.costoTotalUsd ?? 0);
+                        rowUtilidadSinIVA = typeof c.utilidadUsd === 'number' && c.utilidadUsd > 0 ? c.utilidadUsd : (rowUtilidadConIVA / 1.16);
                       }
 
                       const isSelected = selectedCierreRow?.id === c.id;
@@ -2224,8 +2320,13 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                           <td className={`px-4 py-2.5 text-right font-mono font-bold ${diffUsd >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                             ${diffUsd.toFixed(2)}
                           </td>
-                          <td className="px-4 py-2.5 text-right font-mono text-emerald-600 font-extrabold">
-                            ${rowUtilidadUsd.toFixed(2)}
+                          <td className="px-4 py-2.5 text-right font-mono">
+                            <div className="text-emerald-700 font-black text-xs" title="Utilidad Neta Real (Sin IVA / Fiscal)">
+                              ${rowUtilidadSinIVA.toFixed(2)}
+                            </div>
+                            <div className="text-[9.5px] text-teal-700 font-bold" title="Margen Bruto de Caja (Con IVA / Socios)">
+                              +${rowUtilidadConIVA.toFixed(2)} caja
+                            </div>
                           </td>
                           <td className="px-3 py-2.5 text-center font-sans">
                             {c.status === 'Abierta' ? (
@@ -2838,25 +2939,26 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                     {(() => {
                       const comisionVes = selectedCierre.ventaEfectivoComisionVes ?? (selectedCierre as any).venta_efectivo_comision_ves ?? 0;
                       const comisionUsd = selectedCierre.ventaEfectivoComisionUsd ?? (selectedCierre as any).venta_efectivo_comision_usd ?? (tasaDia > 0 ? comisionVes / tasaDia : 0);
-                      const utilidadProductos = (subtotalNetoUsd ?? 0) - (costoTotalUsd ?? 0);
-                      const utilidadTotalCierre = utilidadProductos + comisionUsd;
+                      const utilidadNetaSinIVA = (subtotalNetoUsd ?? 0) - (costoTotalUsd ?? 0) + comisionUsd;
+                      const margenTotalConIVA = (ventaTotalUsd ?? 0) - (costoTotalUsd ?? 0) + comisionUsd;
                       
                       return (
                         <div className="pt-2.5 font-sans space-y-2 text-[11.5px] text-slate-700 bg-emerald-50/50 p-3 rounded border border-emerald-100 mt-2 select-text">
-                          <div className="font-bold text-[10px] text-emerald-855 uppercase border-b border-emerald-200/60 pb-1">
-                            CÁLCULO DE UTILIDAD DEL CIERRE
+                          <div className="font-bold text-[10px] text-emerald-855 uppercase border-b border-emerald-200/60 pb-1 flex justify-between items-center">
+                            <span>RENTABILIDAD Y UTILIDADES DEL CIERRE</span>
+                            <span className="text-[9px] text-slate-500 font-normal font-sans">(Fiscal / Caja)</span>
+                          </div>
+                          <div className="flex justify-between font-mono">
+                            <span>Venta Total Facturada (con IVA):</span>
+                            <span className="font-bold text-slate-800">$ {(ventaTotalUsd ?? 0).toFixed(2)}</span>
                           </div>
                           <div className="flex justify-between font-mono">
                             <span>Ventas Netas (sin IVA):</span>
-                            <span className="font-bold text-slate-800">$ {(subtotalNetoUsd ?? 0).toFixed(2)}</span>
+                            <span className="font-bold text-slate-700">$ {(subtotalNetoUsd ?? 0).toFixed(2)}</span>
                           </div>
                           <div className="flex justify-between font-mono">
-                            <span>Costo de Mercancía:</span>
+                            <span>Costo Total de Mercancía:</span>
                             <span className="font-bold text-red-600">- $ {(costoTotalUsd ?? 0).toFixed(2)}</span>
-                          </div>
-                          <div className="flex justify-between font-mono text-[11.5px] border-t border-emerald-300/80 pt-1 mt-1 font-bold text-emerald-800">
-                            <span>Utilidad Bruta por Productos:</span>
-                            <span className="font-black">$ {utilidadProductos.toFixed(2)}</span>
                           </div>
                           {comisionVes > 0 && (
                             <div className="flex justify-between font-mono text-emerald-900 font-extrabold bg-emerald-100/70 p-1.5 rounded border border-emerald-300">
@@ -2864,9 +2966,17 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                               <span>+ Bs {comisionVes.toFixed(2)} (+${comisionUsd.toFixed(2)})</span>
                             </div>
                           )}
-                          <div className="flex justify-between font-mono text-[13px] border-t-2 border-emerald-500 pt-1.5 mt-1 font-black text-emerald-950 bg-emerald-200/60 p-2 rounded-lg shadow-sm">
-                            <span>UTILIDAD NETA TOTAL CIERRE:</span>
-                            <span className="text-lg font-black text-emerald-700">$ {utilidadTotalCierre.toFixed(2)}</span>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-emerald-200">
+                            <div className="bg-emerald-100/80 p-2 rounded-lg border border-emerald-300">
+                              <span className="block text-[9.5px] font-bold text-emerald-900 uppercase">Utilidad Neta (Sin IVA / Fiscal):</span>
+                              <span className="text-base font-black text-emerald-800 font-mono">$ {utilidadNetaSinIVA.toFixed(2)}</span>
+                              <span className="block text-[8px] text-emerald-700 font-sans mt-0.5">Reservando el IVA para SENIAT</span>
+                            </div>
+                            <div className="bg-teal-100/80 p-2 rounded-lg border border-teal-300">
+                              <span className="block text-[9.5px] font-bold text-teal-900 uppercase">Margen Caja (Con IVA / Socios):</span>
+                              <span className="text-base font-black text-teal-800 font-mono">$ {margenTotalConIVA.toFixed(2)}</span>
+                              <span className="block text-[8px] text-teal-700 font-sans mt-0.5">Total recaudado menos costo</span>
+                            </div>
                           </div>
                         </div>
                       );
@@ -3251,9 +3361,13 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                           <td className="px-4 py-2.5 font-sans">
                             <span className={`font-bold block text-[12px] ${item.isFullyReturned ? 'line-through text-slate-400' : 'text-slate-800'}`}>
                               {item.product?.description}
-                              {isItemExempt(item) && (
-                                <span className="ml-1.5 bg-emerald-50 text-emerald-700 border border-emerald-300 px-1 py-0.2 rounded text-[10px] font-bold font-sans inline-block">
+                              {isItemExempt(item) ? (
+                                <span className="ml-1.5 bg-emerald-50 text-emerald-700 border border-emerald-300 px-1.5 py-0.2 rounded text-[10px] font-black font-mono inline-block shadow-2xs" title="Producto Exento de IVA (0%)">
                                   (E)
+                                </span>
+                              ) : (
+                                <span className="ml-1.5 bg-blue-50 text-blue-700 border border-blue-300 px-1.5 py-0.2 rounded text-[10px] font-black font-mono inline-block shadow-2xs" title="Producto Gravable con IVA (16%)">
+                                  (G)
                                 </span>
                               )}
                             </span>
@@ -3322,26 +3436,28 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                     </div>
 
                     <div className="space-y-1.5 text-[11px] text-slate-700 font-mono">
-                      <div className="flex justify-between">
-                        <span className="font-sans font-medium">{isDev ? 'Subtotal Devuelto:' : 'Subtotal USD Neto:'}</span>
-                        <span className="font-bold">{isDev ? '-' : ''}$ {Math.abs(subtotal).toFixed(2)}</span>
-                      </div>
-                      {netExempt > 0 && (
+                      {grossTaxable > 0 && (
                         <div className="flex justify-between text-slate-700">
+                          <span className="font-sans font-medium">Base Imponible (Gravable 16%):</span>
+                          <span className="font-bold">$ {baseImponible.toFixed(2)}</span>
+                        </div>
+                      )}
+                      {netExempt > 0 && (
+                        <div className="flex justify-between text-emerald-800">
                           <span className="font-sans font-medium">Monto Exento (0% IVA):</span>
-                          <span>$ {netExempt.toFixed(2)}</span>
+                          <span className="font-bold">$ {netExempt.toFixed(2)}</span>
                         </div>
                       )}
                       {iva > 0 && (
-                        <div className="flex justify-between text-slate-700">
-                          <span className="font-sans font-medium">IVA (16%) USD:</span>
-                          <span>$ {iva.toFixed(2)}</span>
+                        <div className="flex justify-between text-amber-800">
+                          <span className="font-sans font-medium">Impuesto IVA (16% SENIAT):</span>
+                          <span className="font-bold text-amber-700">+ $ {iva.toFixed(2)}</span>
                         </div>
                       )}
                       {descuento > 0 && (
-                        <div className="flex justify-between text-red-550">
-                          <span className="font-sans font-medium">Descuentos USD:</span>
-                          <span>- $ {descuento.toFixed(2)}</span>
+                        <div className="flex justify-between text-red-600">
+                          <span className="font-sans font-medium">Descuentos Aplicados:</span>
+                          <span className="font-bold text-red-600">- $ {descuento.toFixed(2)}</span>
                         </div>
                       )}
                       <div className="flex justify-between font-black text-slate-900 border-t border-dashed border-slate-200 pt-2 font-sans text-[13px] items-baseline">

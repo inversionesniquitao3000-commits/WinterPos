@@ -941,13 +941,13 @@ export async function updateProduct(p) {
     }
   }
   const products = readJsonFile('products.json', mockProducts);
-  const duplicate = products.find(item => item.id !== prodId && (item.barcode || '').trim().toUpperCase() === barcode.toUpperCase());
+  const duplicate = barcode ? products.find(item => String(item.id) !== String(prodId) && String(item.id) !== String(p.id) && (item.barcode || item.codigo_barras_clave || '').trim().toUpperCase() === barcode.toUpperCase()) : null;
   if (duplicate) {
     const err = new Error(`Ya existe otro producto registrado con la clave o código '${barcode}'`);
     err.code = '23505';
     throw err;
   }
-  const idx = products.findIndex(item => item.id === prodId || item.id == p.id);
+  const idx = products.findIndex(item => String(item.id) === String(prodId) || String(item.id) === String(p.id));
   if (idx !== -1) {
     products[idx] = { ...products[idx], ...p, category, barcode, description, stock_minimo: stockMinimo, stock_actual: stockActual };
     writeJsonFile('products.json', products);
@@ -1109,7 +1109,38 @@ export async function getClients() {
   if (usePostgres) {
     try {
       const res = await pool.query('SELECT * FROM Clientes ORDER BY id ASC');
-      return res.rows.map(r => ({
+      let rows = res.rows;
+      
+      // Auto-heal: Ensure Consumidor Final (V-00000000) always exists in DB
+      const hasGeneric = rows.some(r => 
+        (r.cedula_rif && r.cedula_rif.trim().toUpperCase() === 'V-00000000') ||
+        (r.nombre && /consumidor\s*final|publico\s*general|público\s*general|cliente\s*ocasional/i.test(r.nombre))
+      );
+
+      if (!hasGeneric) {
+        try {
+          const insertRes = await pool.query(
+            `INSERT INTO Clientes (cedula_rif, nombre, telefono, direccion, limite_credito, credito_disponible, porcentaje_descuento, estado, aplica_precio_costo)
+             VALUES ('V-00000000', 'CONSUMIDOR FINAL', '', 'LOCAL', 0, 0, 0, 'Activo', false) RETURNING *`
+          );
+          if (insertRes.rows.length > 0) {
+            rows.unshift(insertRes.rows[0]);
+          }
+        } catch (_) {}
+      }
+
+      // Sort so generic client (V-00000000 / Consumidor Final) is ALWAYS at index 0
+      rows.sort((a, b) => {
+        const aDoc = (a.cedula_rif || '').trim().toUpperCase();
+        const bDoc = (b.cedula_rif || '').trim().toUpperCase();
+        const aIsGen = aDoc === 'V-00000000' || /consumidor\s*final|publico\s*general|público\s*general/i.test(a.nombre || '');
+        const bIsGen = bDoc === 'V-00000000' || /consumidor\s*final|publico\s*general|público\s*general/i.test(b.nombre || '');
+        if (aIsGen && !bIsGen) return -1;
+        if (!aIsGen && bIsGen) return 1;
+        return a.id - b.id;
+      });
+
+      return rows.map(r => ({
         id: r.id,
         cedula_rif: r.cedula_rif,
         nombre: r.nombre,
@@ -1127,8 +1158,13 @@ export async function getClients() {
     }
   }
   const genericClient = { id: 1, cedula_rif: 'V-00000000', nombre: 'Consumidor Final', limite_credito: 0, credito_disponible: 0, porcentaje_descuento: 0, estado: 'Activo' };
-  const clients = readJsonFile('clients.json', null);
+  let clients = readJsonFile('clients.json', null);
   if (!clients || clients.length === 0) return [genericClient];
+  const hasGeneric = clients.some(c => (c.cedula_rif || '').trim().toUpperCase() === 'V-00000000');
+  if (!hasGeneric) {
+    clients.unshift(genericClient);
+    writeJsonFile('clients.json', clients);
+  }
   return clients;
 }
 

@@ -10,5 +10,8 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 ScriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
 WshShell.CurrentDirectory = ScriptDir
 
+' Forzar variable de entorno DEBUG_MODE en false para garantizar inicio 100% silencioso
+WshShell.Environment("PROCESS")("DEBUG_MODE") = "false"
+
 ' Ejecuta el script de arranque en modo oculto (0) de forma asincrona (False)
 WshShell.Run "cmd /c Iniciar_WinterPos.bat", 0, False

@@ -32,7 +32,7 @@ import { verifyLicense, activateLicense, registerTerminalActivity } from './lice
 import { processFiscalSale, emitReporteX, emitReporteZ, checkFiscalStatus } from './fiscal-service.js';
 import { getDriveConfig, saveDriveConfig, uploadBackupToGoogleDrive } from './gdrive-service.js';
 import { getManagerKPIs, getManagerCajasLive, getManagerInventoryAlerts, getManagerFinancialSummary } from './manager-service.js';
-import { generateProductImage, saveUploadedImageBase64, IMAGES_DIR } from './ai-image-service.js';
+import { generateProductImage, saveUploadedImageBase64, searchProductImageCandidates, downloadAndSaveProductImage, IMAGES_DIR, getAllCandidateImageDirectories } from './ai-image-service.js';
 
 import path from 'path';
 import fs from 'fs';
@@ -178,24 +178,64 @@ app.post('/api/license/activate', (req, res) => {
   res.json(result);
 });
 
+// -------------------------------------------------------------
+// AI & WEB PRODUCT IMAGE ASSISTANT ENDPOINTS
+// -------------------------------------------------------------
+app.post('/api/ai/generate-product-image', async (req, res) => {
+  try {
+    const { description, category, barcode, saveLocal } = req.body || {};
+    const result = await generateProductImage(description, category, barcode, saveLocal !== false);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/ai/search-candidates', async (req, res) => {
+  try {
+    const { description, category, barcode } = req.body || {};
+    const candidates = await searchProductImageCandidates(description, category, barcode);
+    res.json({ success: true, candidates });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/ai/save-candidate-image', async (req, res) => {
+  try {
+    const { remoteUrl, description } = req.body || {};
+    const result = await downloadAndSaveProductImage(remoteUrl, description);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/ai/upload-manual-image', async (req, res) => {
+  try {
+    const { base64Data, filename } = req.body || {};
+    const result = saveUploadedImageBase64(base64Data, filename);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Serve product images publicly with CORS headers for all client terminals & browsers (multi-folder fallback)
 app.use('/api/ai/images', (req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
   res.setHeader('Cache-Control', 'public, max-age=86400');
   next();
-}, express.static(IMAGES_DIR));
+});
 
-app.use('/api/ai/images', express.static(path.join(__dirname, 'data', 'product_images')));
-app.use('/api/ai/images', express.static(path.resolve(process.cwd(), 'backend', 'data', 'product_images')));
-app.use('/api/ai/images', express.static(path.resolve(process.cwd(), 'data', 'product_images')));
-if (process.env.APPDATA) {
-  app.use('/api/ai/images', express.static(path.join(process.env.APPDATA, 'WinterPos', 'data', 'product_images')));
+const candidateImageDirs = typeof getAllCandidateImageDirectories === 'function' ? getAllCandidateImageDirectories() : [IMAGES_DIR];
+for (const cDir of candidateImageDirs) {
+  try {
+    if (!fs.existsSync(cDir)) fs.mkdirSync(cDir, { recursive: true });
+  } catch (_) {}
+  app.use('/api/ai/images', express.static(cDir));
 }
-if (process.env.LOCALAPPDATA) {
-  app.use('/api/ai/images', express.static(path.join(process.env.LOCALAPPDATA, 'WinterPos', 'data', 'product_images')));
-}
-app.use('/api/ai/images', express.static(path.resolve(__dirname, '../data/product_images')));
 
 // Enforce License Validation on all business APIs
 app.use((req, res, next) => {

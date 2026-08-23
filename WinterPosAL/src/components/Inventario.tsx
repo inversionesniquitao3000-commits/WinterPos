@@ -98,6 +98,30 @@ export default function Inventario({
   const [bulkAiLogs, setBulkAiLogs] = useState<Array<{ id: number; description: string; barcode: string; imageUrl: string; success: boolean; discarded: boolean }>>([]);
   const isBulkAiCancelledRef = useRef(false);
 
+  // Floating Context Menu for items in Bulk AI Modal
+  const [bulkAiContextMenu, setBulkAiContextMenu] = useState<{
+    x: number;
+    y: number;
+    item: { id: number; description: string; barcode: string; imageUrl: string; discarded: boolean };
+  } | null>(null);
+
+  // Interactive Candidate Picker Submodal (Choose between 8 real internet photos)
+  const [candidatePicker, setCandidatePicker] = useState<{
+    isOpen: boolean;
+    item: { id: number; description: string; barcode: string; imageUrl: string } | null;
+    searchQuery: string;
+    isLoading: boolean;
+    candidates: Array<{ url: string; title?: string; source?: string }>;
+  }>({
+    isOpen: false,
+    item: null,
+    searchQuery: '',
+    isLoading: false,
+    candidates: []
+  });
+
+  const [regeneratingSingleItemId, setRegeneratingSingleItemId] = useState<number | null>(null);
+
   const availableCategories = useMemo(() => {
     const set = new Set<string>();
     products.forEach(p => {
@@ -116,10 +140,16 @@ export default function Inventario({
   } | null>(null);
 
   useEffect(() => {
-    const handleCloseContextMenu = () => setContextMenu(null);
+    const handleCloseContextMenu = () => {
+      setContextMenu(null);
+      setBulkAiContextMenu(null);
+    };
     window.addEventListener('click', handleCloseContextMenu);
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setContextMenu(null);
+      if (e.key === 'Escape') {
+        setContextMenu(null);
+        setBulkAiContextMenu(null);
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => {
@@ -367,6 +397,147 @@ export default function Inventario({
 
   const handleToggleDiscardBulkAiItem = (id: number) => {
     setBulkAiLogs(prev => prev.map(item => item.id === id ? { ...item, discarded: !item.discarded } : item));
+  };
+
+  const handleOpenCandidatePicker = async (item: { id: number; description: string; barcode: string; imageUrl: string }) => {
+    setBulkAiContextMenu(null);
+    setCandidatePicker({
+      isOpen: true,
+      item,
+      searchQuery: item.description,
+      isLoading: true,
+      candidates: []
+    });
+
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/ai/search-candidates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: item.description,
+          barcode: item.barcode
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.candidates) {
+        setCandidatePicker(prev => ({ ...prev, isLoading: false, candidates: data.candidates }));
+      } else {
+        setCandidatePicker(prev => ({ ...prev, isLoading: false, candidates: [] }));
+      }
+    } catch (_) {
+      setCandidatePicker(prev => ({ ...prev, isLoading: false, candidates: [] }));
+    }
+  };
+
+  const handleSearchCustomCandidates = async (queryText: string) => {
+    if (!candidatePicker.item) return;
+    setCandidatePicker(prev => ({ ...prev, isLoading: true, searchQuery: queryText }));
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/ai/search-candidates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: queryText,
+          barcode: candidatePicker.item.barcode
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.candidates) {
+        setCandidatePicker(prev => ({ ...prev, isLoading: false, candidates: data.candidates }));
+      } else {
+        setCandidatePicker(prev => ({ ...prev, isLoading: false, candidates: [] }));
+      }
+    } catch (_) {
+      setCandidatePicker(prev => ({ ...prev, isLoading: false, candidates: [] }));
+    }
+  };
+
+  const handleSelectCandidateImage = async (remoteUrl: string) => {
+    if (!candidatePicker.item) return;
+    const targetItem = candidatePicker.item;
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/ai/save-candidate-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          remoteUrl,
+          description: targetItem.description
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.imageUrl) {
+        setBulkAiLogs(prev => prev.map(log => 
+          log.id === targetItem.id ? { ...log, imageUrl: data.imageUrl, success: true, discarded: false } : log
+        ));
+        showToast('✅ Foto seleccionada y guardada localmente.');
+        setCandidatePicker({ isOpen: false, item: null, searchQuery: '', isLoading: false, candidates: [] });
+      } else {
+        showAlert('No se pudo guardar la imagen: ' + (data.error || 'Error de descarga'), 'Error', 'warning');
+      }
+    } catch (err: any) {
+      showAlert('Error al procesar la foto: ' + err.message, 'Error', 'warning');
+    }
+  };
+
+  const handleRegenerateSingleBulkItem = async (item: { id: number; description: string; barcode: string }) => {
+    setBulkAiContextMenu(null);
+    setRegeneratingSingleItemId(item.id);
+    try {
+      const prod = products.find(p => p.id === item.id);
+      const res = await fetch(`${getApiBaseUrl()}/ai/generate-product-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: item.description,
+          category: prod?.category || '',
+          barcode: item.barcode,
+          saveLocal: true
+        })
+      });
+      const data = await res.json();
+      if (data && data.success && data.imageUrl) {
+        setBulkAiLogs(prev => prev.map(log => 
+          log.id === item.id ? { ...log, imageUrl: data.imageUrl, success: true, discarded: false } : log
+        ));
+        showToast(`✨ Foto de "${item.description}" actualizada con éxito.`);
+      } else {
+        showToast('⚠️ No se pudo regenerar la foto.');
+      }
+    } catch (_) {
+      showToast('⚠️ Error al regenerar la foto.');
+    } finally {
+      setRegeneratingSingleItemId(null);
+    }
+  };
+
+  const handleUploadManualBulkItem = async (item: { id: number; description: string }, file: File) => {
+    setBulkAiContextMenu(null);
+    if (!file) return;
+    try {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const base64Data = e.target?.result as string;
+        if (!base64Data) return;
+        const res = await fetch(`${getApiBaseUrl()}/ai/upload-manual-image`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            base64Data,
+            filename: `${item.description}.jpg`
+          })
+        });
+        const data = await res.json();
+        if (data.success && data.imageUrl) {
+          setBulkAiLogs(prev => prev.map(log => 
+            log.id === item.id ? { ...log, imageUrl: data.imageUrl, success: true, discarded: false } : log
+          ));
+          showToast('📸 Foto personalizada guardada.');
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (_) {
+      showToast('⚠️ Error al cargar la foto manual.');
+    }
   };
 
   const handleApplyBulkAiSelected = async () => {
@@ -6556,6 +6727,7 @@ export default function Inventario({
                   {/* AUXILIAR DE CÁLCULO DE PRECIOS */}
                   <div className="flex-shrink-0">
                     <AuxiliarCalculoPrecios
+                      storageKey="pos_aux_draft_new"
                       initialCost={newCost}
                       initialDetail={newDetail}
                       initialMayor={newMayor}
@@ -7038,6 +7210,7 @@ export default function Inventario({
                   {/* AUXILIAR DE CÁLCULO DE PRECIOS */}
                   <div className="flex-shrink-0">
                     <AuxiliarCalculoPrecios
+                      storageKey={selectedProduct ? `pos_aux_draft_prod_${selectedProduct.id}` : 'pos_aux_draft_edit'}
                       initialCost={editCost}
                       initialDetail={editDetail}
                       initialMayor={editMayor}
@@ -11593,10 +11766,10 @@ export default function Inventario({
         </div>
       )}
 
-      {/* MODAL: GENERACIÓN MASIVA DE FOTOS CON IA */}
+      {/* MODAL: GENERACIÓN MASIVA DE FOTOS CON IA (PANORÁMICO ULTRA ANCHO) */}
       {showBulkAiModal && (
-        <div className="fixed inset-0 bg-slate-955/85 backdrop-blur-md z-[88] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-indigo-200 max-w-2xl w-full overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200 font-sans text-slate-800 max-h-[90vh]">
+        <div className="fixed inset-0 bg-slate-955/85 backdrop-blur-md z-[88] flex items-center justify-center p-3 sm:p-5">
+          <div className="bg-white rounded-2xl shadow-2xl border border-indigo-200 max-w-6xl w-full overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200 font-sans text-slate-800 max-h-[92vh]">
             {/* Header */}
             <div className="bg-gradient-to-r from-indigo-950 via-blue-900 to-slate-950 px-6 py-4 flex justify-between items-center text-white">
               <div className="flex items-center gap-3">
@@ -11605,10 +11778,10 @@ export default function Inventario({
                 </div>
                 <div>
                   <h3 className="text-sm font-black uppercase tracking-wider font-mono flex items-center gap-2">
-                    Generador Masivo de Fotos con IA
+                    Generador Masivo de Fotos con IA y Búsqueda Web
                   </h3>
                   <p className="text-[11px] text-indigo-200 font-medium">
-                    Asigna fotos fotográficas automáticas a todo tu inventario en un solo clic
+                    Asigna fotos comerciales de alta fidelidad. Clic izquierdo para conservar/descartar, clic derecho o 🔍 para elegir entre opciones de internet.
                   </p>
                 </div>
               </div>
@@ -11616,36 +11789,32 @@ export default function Inventario({
                 type="button"
                 disabled={isBulkAiRunning}
                 onClick={() => setShowBulkAiModal(false)}
-                className="text-white/70 hover:text-white text-lg font-bold disabled:opacity-30"
+                className="text-white/70 hover:text-white text-lg font-bold disabled:opacity-30 cursor-pointer"
               >
                 ✕
               </button>
             </div>
 
             {/* Body */}
-            <div className="p-6 space-y-5 overflow-y-auto">
-              {/* Summary Badges */}
-              <div className="grid grid-cols-2 gap-3 font-mono">
-                <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 flex items-center justify-between">
-                  <span className="text-xs text-sky-800 font-sans font-bold">Total en Catálogo:</span>
-                  <span className="text-base font-black text-sky-900">{products.length}</span>
-                </div>
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center justify-between">
-                  <span className="text-xs text-amber-800 font-sans font-bold">Productos Sin Foto:</span>
-                  <span className="text-base font-black text-amber-900">
-                    {products.filter(p => !p.imagen_url || p.imagen_url.trim() === '').length}
-                  </span>
-                </div>
-              </div>
-
-              {/* Scope Selection */}
+            <div className="p-5 space-y-4 overflow-y-auto">
+              {/* Summary Badges & Scope */}
               {!isBulkAiRunning && (
-                <div className="space-y-2">
-                  <label className="text-xs font-extrabold uppercase tracking-wider text-slate-700 font-mono block">
-                    Alcance del Procesamiento
-                  </label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <label className={`border-2 rounded-xl p-3.5 cursor-pointer flex items-start gap-3 transition-all ${
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
+                  <div className="lg:col-span-4 grid grid-cols-2 gap-2 font-mono">
+                    <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 flex flex-col justify-center">
+                      <span className="text-[10px] text-sky-800 font-sans font-bold">Total Catálogo:</span>
+                      <span className="text-xl font-black text-sky-900">{products.length}</span>
+                    </div>
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex flex-col justify-center">
+                      <span className="text-[10px] text-amber-800 font-sans font-bold">Sin Foto:</span>
+                      <span className="text-xl font-black text-amber-900">
+                        {products.filter(p => !p.imagen_url || p.imagen_url.trim() === '').length}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="lg:col-span-8 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <label className={`border-2 rounded-xl p-2.5 cursor-pointer flex items-start gap-2.5 transition-all ${
                       bulkAiScope === 'sin_foto'
                         ? 'border-indigo-600 bg-indigo-50/50 shadow-sm'
                         : 'border-slate-200 hover:border-slate-300 bg-white'
@@ -11658,14 +11827,14 @@ export default function Inventario({
                         className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
                       />
                       <div>
-                        <strong className="text-xs text-slate-900 block font-bold">Solo Productos Sin Foto</strong>
-                        <span className="text-[11px] text-slate-500 block mt-0.5 font-normal">
-                          Procesa únicamente los {products.filter(p => !p.imagen_url || p.imagen_url.trim() === '').length} productos que aún no tienen imagen (Recomendado).
+                        <strong className="text-[11px] text-slate-900 block font-bold">Solo Sin Foto</strong>
+                        <span className="text-[9.5px] text-slate-500 block leading-tight">
+                          {products.filter(p => !p.imagen_url || p.imagen_url.trim() === '').length} productos
                         </span>
                       </div>
                     </label>
 
-                    <label className={`border-2 rounded-xl p-3.5 cursor-pointer flex items-start gap-3 transition-all ${
+                    <label className={`border-2 rounded-xl p-2.5 cursor-pointer flex items-start gap-2.5 transition-all ${
                       bulkAiScope === 'todos'
                         ? 'border-indigo-600 bg-indigo-50/50 shadow-sm'
                         : 'border-slate-200 hover:border-slate-300 bg-white'
@@ -11678,15 +11847,14 @@ export default function Inventario({
                         className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
                       />
                       <div>
-                        <strong className="text-xs text-slate-900 block font-bold">Todos los Productos ({products.length})</strong>
-                        <span className="text-[11px] text-slate-500 block mt-0.5 font-normal">
-                          Regenera y actualiza las imágenes de todo el catálogo completo.
+                        <strong className="text-[11px] text-slate-900 block font-bold">Todo el Catálogo</strong>
+                        <span className="text-[9.5px] text-slate-500 block leading-tight">
+                          {products.length} productos
                         </span>
                       </div>
                     </label>
 
-                    {/* OPTION 3: POR CATEGORÍA ESPECÍFICA */}
-                    <label className={`border-2 rounded-xl p-3.5 cursor-pointer flex items-start gap-3 transition-all sm:col-span-2 ${
+                    <label className={`border-2 rounded-xl p-2.5 cursor-pointer flex items-start gap-2.5 transition-all ${
                       bulkAiScope === 'categoria'
                         ? 'border-indigo-600 bg-indigo-50/50 shadow-sm'
                         : 'border-slate-200 hover:border-slate-300 bg-white'
@@ -11703,43 +11871,64 @@ export default function Inventario({
                         }}
                         className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
                       />
-                      <div className="flex-1">
-                        <strong className="text-xs text-slate-900 block font-bold">Por Categoría Específica</strong>
-                        <span className="text-[11px] text-slate-500 block mt-0.5 font-normal">
-                          Genera o actualiza fotos con IA únicamente para los productos de una categoría del inventario.
-                        </span>
-
-                        {bulkAiScope === 'categoria' && (
-                          <div className="mt-3 space-y-2 bg-white p-3 rounded-xl border border-indigo-200 shadow-xs" onClick={(e) => e.stopPropagation()}>
-                            <label className="text-[10px] font-bold uppercase text-slate-700 block">Seleccionar Categoría:</label>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <strong className="text-[11px] text-slate-900 block font-bold">Por Categoría</strong>
+                          {bulkAiScope === 'categoria' && selectedBulkCategory && (() => {
+                            const catProducts = products.filter(p => (p.category || '').trim().toUpperCase() === selectedBulkCategory.toUpperCase());
+                            const noPhotoCount = catProducts.filter(p => !p.imagen_url || p.imagen_url.trim() === '').length;
+                            return (
+                              <span className="text-[9px] font-mono font-black text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded">
+                                {noPhotoCount} sin foto
+                              </span>
+                            );
+                          })()}
+                        </div>
+                        {bulkAiScope === 'categoria' ? (
+                          <div className="space-y-1 mt-1">
                             <select
                               value={selectedBulkCategory}
                               onChange={(e) => setSelectedBulkCategory(e.target.value)}
-                              className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-xs px-3 py-2 rounded-lg font-bold outline-none focus:border-indigo-500 shadow-2xs"
+                              onClick={(e) => e.stopPropagation()}
+                              className="w-full bg-white border border-indigo-300 text-slate-900 text-[10px] px-1.5 py-0.5 rounded font-bold outline-none shadow-2xs cursor-pointer"
                             >
                               {availableCategories.map(cat => {
-                                const countTotal = products.filter(p => (p.category || '').toUpperCase() === cat).length;
-                                const countNoImg = products.filter(p => (p.category || '').toUpperCase() === cat && (!p.imagen_url || p.imagen_url.trim() === '')).length;
+                                const catProducts = products.filter(p => (p.category || '').trim().toUpperCase() === cat.toUpperCase());
+                                const noPhotoCount = catProducts.filter(p => !p.imagen_url || p.imagen_url.trim() === '').length;
                                 return (
                                   <option key={cat} value={cat}>
-                                    {cat} — ({countTotal} productos | {countNoImg} sin foto)
+                                    {cat} — ({noPhotoCount} sin foto de {catProducts.length})
                                   </option>
                                 );
                               })}
                             </select>
 
-                            <label className="flex items-center gap-2 pt-1 cursor-pointer select-none">
-                              <input
-                                type="checkbox"
-                                checked={bulkCategoryNoPhotoOnly}
-                                onChange={(e) => setBulkCategoryNoPhotoOnly(e.target.checked)}
-                                className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                              />
-                              <span className="text-xs text-slate-800 font-bold">
-                                Procesar únicamente productos sin foto en esta categoría
-                              </span>
-                            </label>
+                            <div className="flex items-center justify-between pt-0.5">
+                              <label className="flex items-center gap-1 cursor-pointer select-none" onClick={(e) => e.stopPropagation()}>
+                                <input
+                                  type="checkbox"
+                                  checked={bulkCategoryNoPhotoOnly}
+                                  onChange={(e) => setBulkCategoryNoPhotoOnly(e.target.checked)}
+                                  className="w-3 h-3 text-indigo-600 rounded cursor-pointer"
+                                />
+                                <span className="text-[9px] text-slate-700 font-bold">Solo sin foto</span>
+                              </label>
+
+                              {selectedBulkCategory && (() => {
+                                const catProducts = products.filter(p => (p.category || '').trim().toUpperCase() === selectedBulkCategory.toUpperCase());
+                                const noPhotoCount = catProducts.filter(p => !p.imagen_url || p.imagen_url.trim() === '').length;
+                                return (
+                                  <span className="text-[8.5px] font-mono text-indigo-700 font-bold">
+                                    {bulkCategoryNoPhotoOnly ? `${noPhotoCount} a procesar` : `${catProducts.length} a procesar`}
+                                  </span>
+                                );
+                              })()}
+                            </div>
                           </div>
+                        ) : (
+                          <span className="text-[9.5px] text-slate-500 block leading-tight">
+                            Filtrar por rubro ({availableCategories.length} categorías)
+                          </span>
                         )}
                       </div>
                     </label>
@@ -11749,19 +11938,18 @@ export default function Inventario({
 
               {/* Progress & Live Processing Bar */}
               {isBulkAiRunning && (
-                <div className="bg-slate-900 text-white rounded-xl p-4 space-y-3 shadow-lg animate-in fade-in">
+                <div className="bg-slate-900 text-white rounded-xl p-3.5 space-y-2 shadow-lg animate-in fade-in">
                   <div className="flex justify-between items-center text-xs font-mono">
                     <span className="text-amber-300 font-bold flex items-center gap-1.5">
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      Procesando catálogo con IA...
+                      Procesando catálogo con IA y Motores Web...
                     </span>
                     <span className="font-extrabold text-white">
                       {bulkAiProgress.current} / {bulkAiProgress.total} ({bulkAiProgress.percent}%)
                     </span>
                   </div>
 
-                  {/* Progress bar container */}
-                  <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden p-0.5 border border-slate-700">
+                  <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden p-0.5 border border-slate-700">
                     <div 
                       className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400 rounded-full transition-all duration-300"
                       style={{ width: `${bulkAiProgress.percent}%` }}
@@ -11770,16 +11958,16 @@ export default function Inventario({
                 </div>
               )}
 
-              {/* Live Card Gallery of Generated Items with One-Click Discard */}
+              {/* Live Card Gallery of Generated Items */}
               {bulkAiLogs.length > 0 && (
-                <div className="space-y-2.5">
-                  <div className="flex justify-between items-center bg-slate-100 p-2.5 rounded-xl border border-slate-200">
-                    <div className="flex items-center gap-2">
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center bg-slate-100 px-3 py-2 rounded-xl border border-slate-200">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h4 className="text-[11px] font-mono font-black uppercase tracking-wider text-slate-700">
-                        Resultados de Fotos ({bulkAiLogs.filter(l => l.success && !l.discarded).length} Conservadas / {bulkAiLogs.filter(l => l.discarded).length} Descartadas):
+                        Resultados ({bulkAiLogs.filter(l => l.success && !l.discarded).length} Conservadas / {bulkAiLogs.filter(l => l.discarded).length} Descartadas):
                       </h4>
                       <span className="text-[10px] text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded font-bold font-sans">
-                        💡 Haga clic en cualquier foto para descartarla o conservarla
+                        💡 Clic izquierdo: descartar/conservar | Clic derecho o 🔍: elegir entre opciones web
                       </span>
                     </div>
 
@@ -11787,35 +11975,58 @@ export default function Inventario({
                       <button
                         type="button"
                         onClick={() => setBulkAiLogs(prev => prev.map(i => i.success ? { ...i, discarded: false } : i))}
-                        className="text-[10px] font-bold font-sans text-emerald-700 hover:text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded shadow-2xs hover:bg-emerald-100 transition-all cursor-pointer"
+                        className="text-[10px] font-bold font-sans text-emerald-700 hover:text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded shadow-2xs hover:bg-emerald-100 transition-all cursor-pointer"
                       >
                         ✓ Conservar Todas
                       </button>
                       <button
                         type="button"
                         onClick={() => setBulkAiLogs(prev => prev.map(i => ({ ...i, discarded: true })))}
-                        className="text-[10px] font-bold font-sans text-red-700 hover:text-red-800 bg-red-50 border border-red-200 px-2 py-0.5 rounded shadow-2xs hover:bg-red-100 transition-all cursor-pointer"
+                        className="text-[10px] font-bold font-sans text-red-700 hover:text-red-800 bg-red-50 border border-red-200 px-2.5 py-1 rounded shadow-2xs hover:bg-red-100 transition-all cursor-pointer"
                       >
                         ✕ Descartar Todas
                       </button>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 max-h-64 overflow-y-auto p-1.5 bg-slate-50 border border-slate-200 rounded-xl">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 max-h-[460px] overflow-y-auto p-2 bg-slate-50 border border-slate-200 rounded-xl">
                     {bulkAiLogs.map((log) => {
                       const isDiscarded = log.discarded;
+                      const isRegenerating = regeneratingSingleItemId === log.id;
                       return (
                         <div 
                           key={log.id} 
                           onClick={() => log.success && handleToggleDiscardBulkAiItem(log.id)}
-                          className={`bg-white border rounded-xl p-2.5 flex flex-col items-center text-center shadow-xs transition-all relative select-none cursor-pointer group hover:scale-[1.02] ${
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setBulkAiContextMenu({
+                              x: Math.min(e.clientX, window.innerWidth - 240),
+                              y: Math.min(e.clientY, window.innerHeight - 200),
+                              item: log
+                            });
+                          }}
+                          className={`bg-white border rounded-xl p-2 flex flex-col items-center text-center shadow-xs transition-all relative select-none cursor-pointer group hover:scale-[1.02] ${
                             isDiscarded 
                               ? 'border-red-400 bg-red-50/40 opacity-55 ring-1 ring-red-400' 
                               : 'border-emerald-500 bg-white ring-2 ring-emerald-500/80 shadow-sm'
                           }`}
-                          title={isDiscarded ? "Haga clic para CONSERVAR esta foto" : "Haga clic para DESCARTAR esta foto"}
+                          title="Clic izquierdo: Conservar/Descartar | Clic derecho: Opciones de internet"
                         >
-                          {/* Badge Corner Status */}
+                          {/* Quick Action Button (Top-Left) */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenCandidatePicker(log);
+                            }}
+                            className="absolute top-1.5 left-1.5 z-10 bg-slate-900/80 hover:bg-indigo-600 text-white text-[9px] p-1 rounded-md shadow backdrop-blur transition-all flex items-center gap-0.5"
+                            title="Ver opciones de fotos de internet"
+                          >
+                            <Search className="w-3 h-3 text-amber-300" />
+                          </button>
+
+                          {/* Badge Corner Status (Top-Right) */}
                           <div className="absolute top-1.5 right-1.5 z-10">
                             {isDiscarded ? (
                               <span className="bg-red-600 text-white text-[8px] font-extrabold font-mono px-1.5 py-0.5 rounded-full shadow flex items-center gap-0.5">
@@ -11832,24 +12043,35 @@ export default function Inventario({
                             )}
                           </div>
 
-                          <div className="w-20 h-20 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center mb-1.5 flex-shrink-0 relative shadow-inner">
-                            <ImageIcon className="w-6 h-6 text-slate-300" />
-                            {log.imageUrl && (
-                              <img 
-                                key={`bulk-ai-img-${log.id}-${log.imageUrl}`}
-                                src={formatImageUrl(log.imageUrl)} 
-                                alt={log.description} 
-                                className={`w-full h-full object-cover absolute inset-0 bg-white transition-all ${isDiscarded ? 'grayscale opacity-75' : ''}`}
-                                onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
-                                onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
-                              />
+                          {/* Image Box */}
+                          <div className="w-full h-24 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center mb-1.5 flex-shrink-0 relative shadow-inner">
+                            {isRegenerating ? (
+                              <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-xs flex flex-col items-center justify-center text-white z-20">
+                                <Loader2 className="w-5 h-5 animate-spin text-amber-400 mb-1" />
+                                <span className="text-[8px] font-bold">Buscando...</span>
+                              </div>
+                            ) : (
+                              <>
+                                <ImageIcon className="w-6 h-6 text-slate-300" />
+                                {log.imageUrl && (
+                                  <img 
+                                    key={`bulk-ai-img-${log.id}-${log.imageUrl}`}
+                                    src={formatImageUrl(log.imageUrl)} 
+                                    alt={log.description} 
+                                    className={`w-full h-full object-contain p-1 absolute inset-0 bg-white transition-all ${isDiscarded ? 'grayscale opacity-75' : ''}`}
+                                    onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
+                                    onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
+                                  />
+                                )}
+                              </>
                             )}
                           </div>
-                          <span className="text-[10px] font-extrabold text-slate-850 uppercase truncate w-full block leading-tight">
+
+                          <span className="text-[10px] font-extrabold text-slate-850 uppercase truncate w-full block leading-tight" title={log.description}>
                             {log.description}
                           </span>
-                          <span className="text-[8.5px] font-mono text-slate-400 block truncate w-full">
-                            {log.barcode}
+                          <span className="text-[8.5px] font-mono text-slate-400 block truncate w-full mt-0.5">
+                            {log.barcode || 'Sin código'}
                           </span>
                         </div>
                       );
@@ -11862,7 +12084,7 @@ export default function Inventario({
               <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-xs text-indigo-900 leading-relaxed font-sans flex items-start gap-2.5">
                 <Sparkles className="w-4 h-4 text-indigo-600 flex-shrink-0 mt-0.5" />
                 <span>
-                  <strong>Almacenamiento Local Optimizado:</strong> Las fotos generadas se descargan y almacenan localmente en el servidor, garantizando que el punto de venta (POS) y los celulares carguen las imágenes de forma instantánea sin gastar datos ni depender de conexión a internet.
+                  <strong>Control Total de Imágenes:</strong> Haz <strong>clic derecho</strong> o pulsa en <strong>🔍</strong> sobre cualquier producto para abrir la galería de opciones web, regenerar con IA o buscar con un nombre personalizado.
                 </span>
               </div>
             </div>
@@ -11873,7 +12095,7 @@ export default function Inventario({
                 type="button"
                 disabled={isBulkAiRunning}
                 onClick={() => setShowBulkAiModal(false)}
-                className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs px-4 py-2 rounded-lg transition-all disabled:opacity-50"
+                className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs px-4 py-2 rounded-lg transition-all disabled:opacity-50 cursor-pointer"
               >
                 Cerrar
               </button>
@@ -11883,7 +12105,7 @@ export default function Inventario({
                   <button
                     type="button"
                     onClick={() => { isBulkAiCancelledRef.current = true; }}
-                    className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs px-4 py-2 rounded-lg transition-all flex items-center gap-1.5 shadow"
+                    className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs px-4 py-2 rounded-lg transition-all flex items-center gap-1.5 shadow cursor-pointer"
                   >
                     <PauseCircle className="w-4 h-4" /> Pausar Proceso
                   </button>
@@ -11892,15 +12114,15 @@ export default function Inventario({
                     <button
                       type="button"
                       onClick={handleStartBulkAiGeneration}
-                      className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs px-5 py-2 rounded-lg transition-all shadow flex items-center gap-1.5"
+                      className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs px-5 py-2 rounded-lg transition-all shadow flex items-center gap-1.5 cursor-pointer"
                     >
-                      <Sparkles className="w-4 h-4" /> {bulkAiLogs.length > 0 ? 'Re-Generar Fotos' : 'Iniciar Generación Masiva con IA'}
+                      <Sparkles className="w-4 h-4" /> {bulkAiLogs.length > 0 ? 'Re-Generar Todo' : 'Iniciar Generación con IA'}
                     </button>
                     {bulkAiLogs.filter(l => l.success && l.imageUrl && !l.discarded).length > 0 && (
                       <button
                         type="button"
                         onClick={handleApplyBulkAiSelected}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-5 py-2 rounded-lg transition-all shadow flex items-center gap-1.5"
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-5 py-2 rounded-lg transition-all shadow flex items-center gap-1.5 cursor-pointer"
                       >
                         <CheckCircle2 className="w-4 h-4" /> Aplicar Fotos Conservadas ({bulkAiLogs.filter(l => l.success && l.imageUrl && !l.discarded).length})
                       </button>
@@ -11908,6 +12130,194 @@ export default function Inventario({
                   </>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MENÚ CONTEXTUAL FLOTANTE PARA PRODUCTO EN EL GENERADOR MASIVO */}
+      {bulkAiContextMenu && (
+        <div 
+          onClick={(e) => e.stopPropagation()}
+          style={{ top: `${bulkAiContextMenu.y}px`, left: `${bulkAiContextMenu.x}px` }}
+          className="fixed z-[120] w-64 bg-white/95 backdrop-blur-md border border-slate-200 rounded-xl shadow-2xl overflow-hidden py-1 text-slate-700 font-sans text-xs animate-in fade-in zoom-in-95 duration-150"
+        >
+          <div className="px-3 py-2 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex items-center gap-2 border-b border-slate-700">
+            <Sparkles className="w-4 h-4 text-amber-400" />
+            <div className="min-w-0 flex-1">
+              <span className="text-[10px] font-black uppercase block truncate">{bulkAiContextMenu.item.description}</span>
+              <span className="text-[8.5px] text-indigo-300 font-mono block">{bulkAiContextMenu.item.barcode || 'Sin código'}</span>
+            </div>
+          </div>
+
+          <div className="py-1">
+            <button
+              type="button"
+              onClick={() => handleOpenCandidatePicker(bulkAiContextMenu.item)}
+              className="w-full px-3 py-2 text-left hover:bg-indigo-50 hover:text-indigo-700 flex items-center gap-2 font-bold cursor-pointer transition-colors"
+            >
+              <Search className="w-4 h-4 text-indigo-600" />
+              <span>Elegir entre fotos de internet</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleRegenerateSingleBulkItem(bulkAiContextMenu.item)}
+              className="w-full px-3 py-2 text-left hover:bg-blue-50 hover:text-blue-700 flex items-center gap-2 font-bold cursor-pointer transition-colors"
+            >
+              <RefreshCw className="w-4 h-4 text-blue-600" />
+              <span>Re-generar esta foto con IA</span>
+            </button>
+
+            <label className="w-full px-3 py-2 text-left hover:bg-emerald-50 hover:text-emerald-700 flex items-center gap-2 font-bold cursor-pointer transition-colors">
+              <Upload className="w-4 h-4 text-emerald-600" />
+              <span>Subir foto desde mi equipo</span>
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleUploadManualBulkItem(bulkAiContextMenu.item, f);
+                }}
+              />
+            </label>
+
+            <div className="border-t border-slate-100 my-1" />
+
+            <button
+              type="button"
+              onClick={() => {
+                handleToggleDiscardBulkAiItem(bulkAiContextMenu.item.id);
+                setBulkAiContextMenu(null);
+              }}
+              className={`w-full px-3 py-2 text-left flex items-center gap-2 font-bold cursor-pointer transition-colors ${
+                bulkAiContextMenu.item.discarded 
+                  ? 'hover:bg-emerald-50 text-emerald-700' 
+                  : 'hover:bg-red-50 text-red-700'
+              }`}
+            >
+              {bulkAiContextMenu.item.discarded ? (
+                <>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>Conservar esta foto</span>
+                </>
+              ) : (
+                <>
+                  <X className="w-4 h-4 text-red-600" />
+                  <span>Descartar esta foto</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* SUBMODAL: GALERÍA DE OPCIONES DE INTERNET (IMAGE PICKER) */}
+      {candidatePicker.isOpen && candidatePicker.item && (
+        <div className="fixed inset-0 bg-slate-955/90 backdrop-blur-md z-[130] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-indigo-300 max-w-3xl w-full overflow-hidden flex flex-col animate-in fade-in zoom-in duration-150 font-sans max-h-[90vh]">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 px-5 py-3.5 flex justify-between items-center text-white">
+              <div className="flex items-center gap-2.5">
+                <Search className="w-4 h-4 text-amber-400" />
+                <div>
+                  <h4 className="text-xs font-black uppercase tracking-wider font-mono">
+                    Galería de Opciones de Internet
+                  </h4>
+                  <p className="text-[10px] text-indigo-200">
+                    Producto: <strong>{candidatePicker.item.description}</strong>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCandidatePicker({ isOpen: false, item: null, searchQuery: '', isLoading: false, candidates: [] })}
+                className="text-white/70 hover:text-white text-base font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Search Input Bar */}
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex gap-2">
+              <input
+                type="text"
+                value={candidatePicker.searchQuery}
+                onChange={(e) => setCandidatePicker(prev => ({ ...prev, searchQuery: e.target.value }))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSearchCustomCandidates(candidatePicker.searchQuery);
+                }}
+                placeholder="Escribe el nombre o marca para buscar..."
+                className="flex-1 bg-white border border-slate-300 text-slate-900 text-xs px-3 py-2 rounded-xl font-bold outline-none focus:border-indigo-500 shadow-2xs"
+              />
+              <button
+                type="button"
+                disabled={candidatePicker.isLoading || !candidatePicker.searchQuery.trim()}
+                onClick={() => handleSearchCustomCandidates(candidatePicker.searchQuery)}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2 rounded-xl shadow transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+              >
+                {candidatePicker.isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                <span>Buscar</span>
+              </button>
+            </div>
+
+            {/* Candidates Grid */}
+            <div className="p-4 overflow-y-auto max-h-[460px]">
+              {candidatePicker.isLoading ? (
+                <div className="py-16 flex flex-col items-center justify-center text-slate-500 space-y-2">
+                  <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+                  <span className="text-xs font-bold font-mono">Buscando fotos comerciales en internet...</span>
+                </div>
+              ) : candidatePicker.candidates.length === 0 ? (
+                <div className="py-12 text-center text-slate-500 space-y-3">
+                  <p className="text-xs font-bold">No se encontraron fotos con ese término exacto.</p>
+                  <p className="text-[11px] text-slate-400">Intenta escribir una marca o descripción más detallada en la barra de búsqueda superior.</p>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-[11px] text-slate-500 font-bold mb-3">
+                    💡 Haz clic en la fotografía que mejor represente a tu producto para seleccionarla:
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {candidatePicker.candidates.map((cand, idx) => (
+                      <div
+                        key={`candidate-${idx}-${cand.url}`}
+                        onClick={() => handleSelectCandidateImage(cand.url)}
+                        className="bg-white border-2 border-slate-200 hover:border-indigo-600 rounded-xl p-2 flex flex-col items-center text-center cursor-pointer shadow-xs hover:shadow-lg transition-all group hover:scale-[1.03]"
+                      >
+                        <div className="w-full h-32 rounded-lg bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center mb-2 relative">
+                          <img
+                            src={cand.url}
+                            alt={cand.title || 'Opción'}
+                            className="w-full h-full object-contain p-1.5"
+                            onError={(e) => {
+                              (e.currentTarget.parentElement as HTMLElement).style.display = 'none';
+                            }}
+                          />
+                        </div>
+                        <span className="text-[9px] font-bold text-slate-700 truncate w-full block" title={cand.title}>
+                          {cand.title || 'Foto comercial'}
+                        </span>
+                        <span className="text-[8px] font-mono text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded mt-1">
+                          {cand.source || 'Web'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="bg-slate-50 px-5 py-3 border-t border-slate-200 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setCandidatePicker({ isOpen: false, item: null, searchQuery: '', isLoading: false, candidates: [] })}
+                className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs px-4 py-1.5 rounded-lg transition-all cursor-pointer"
+              >
+                Cerrar
+              </button>
             </div>
           </div>
         </div>

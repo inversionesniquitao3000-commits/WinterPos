@@ -6,49 +6,77 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-function getWritableImagesDirectory() {
-  const candidateDirs = [
-    path.join(__dirname, 'data', 'product_images'),
-    path.resolve(process.cwd(), 'backend', 'data', 'product_images'),
-    path.resolve(process.cwd(), 'data', 'product_images'),
-    path.resolve(__dirname, '..', 'data', 'product_images')
-  ];
+/**
+ * Resolves all candidate writable image directories, prioritizing Windows user-writable folders (%LOCALAPPDATA%, %APPDATA%, User Profile)
+ */
+function getAllCandidateImageDirectories() {
+  const dirs = [];
 
-  if (process.env.APPDATA) {
-    candidateDirs.push(path.join(process.env.APPDATA, 'WinterPos', 'data', 'product_images'));
-  }
   if (process.env.LOCALAPPDATA) {
-    candidateDirs.push(path.join(process.env.LOCALAPPDATA, 'WinterPos', 'data', 'product_images'));
+    dirs.push(path.join(process.env.LOCALAPPDATA, 'WinterPos', 'data', 'product_images'));
+  }
+  if (process.env.APPDATA) {
+    dirs.push(path.join(process.env.APPDATA, 'WinterPos', 'data', 'product_images'));
   }
   try {
     if (os.homedir()) {
-      candidateDirs.push(path.join(os.homedir(), '.winterpos', 'data', 'product_images'));
+      dirs.push(path.join(os.homedir(), '.winterpos', 'data', 'product_images'));
+      dirs.push(path.join(os.homedir(), 'WinterPos', 'data', 'product_images'));
     }
   } catch (_) {}
+
+  dirs.push(path.join(__dirname, 'data', 'product_images'));
+  dirs.push(path.resolve(process.cwd(), 'backend', 'data', 'product_images'));
+  dirs.push(path.resolve(process.cwd(), 'data', 'product_images'));
+  dirs.push(path.resolve(__dirname, '..', 'data', 'product_images'));
+
+  try {
+    dirs.push(path.join(os.tmpdir(), 'winterpos_product_images'));
+  } catch (_) {}
+
+  return dirs;
+}
+
+export function getWritableImagesDirectory() {
+  const candidateDirs = getAllCandidateImageDirectories();
 
   for (const dirPath of candidateDirs) {
     try {
       if (!fs.existsSync(dirPath)) {
         fs.mkdirSync(dirPath, { recursive: true });
       }
-      const testFile = path.join(dirPath, `.write_test_${Date.now()}.tmp`);
+      const testFile = path.join(dirPath, `.write_test_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.tmp`);
       fs.writeFileSync(testFile, 'test');
-      fs.unlinkSync(testFile);
-      console.log(`[AI Image Service] Directorio de imágenes verificado y listo: ${dirPath}`);
+      if (fs.existsSync(testFile)) {
+        fs.unlinkSync(testFile);
+      }
+      console.log(`[AI Image Service] Directorio de imágenes 100% verificado y con permisos de escritura: ${dirPath}`);
       return dirPath;
     } catch (err) {
       console.warn(`[AI Image Service] Ruta no escribible (${dirPath}): ${err.message}`);
     }
   }
 
-  const fallback = path.resolve('./data/product_images');
+  const fallback = path.join(os.tmpdir(), 'winterpos_product_images');
   try {
     fs.mkdirSync(fallback, { recursive: true });
   } catch (_) {}
   return fallback;
 }
 
-const IMAGES_DIR = getWritableImagesDirectory();
+let IMAGES_DIR = getWritableImagesDirectory();
+
+export function ensureImagesDir() {
+  try {
+    if (!fs.existsSync(IMAGES_DIR)) {
+      fs.mkdirSync(IMAGES_DIR, { recursive: true });
+    }
+    return IMAGES_DIR;
+  } catch (_) {
+    IMAGES_DIR = getWritableImagesDirectory();
+    return IMAGES_DIR;
+  }
+}
 
 // Complete semantic dictionary for supermarket, bodega, hardware, pharmacy & retail
 const KEYWORD_MAP = [
@@ -109,9 +137,9 @@ function getMapping(desc = '', category = '') {
 }
 
 /**
- * Generates a clean vector SVG graphic file saved on local disk with pure white background
+ * Generates a clean vector SVG graphic with pure white background, saving to disk or returning Data URI
  */
-function createLocalSvgFallback(description = 'Producto', category = 'General', filename = 'fallback.svg') {
+export function createLocalSvgFallback(description = 'Producto', category = 'General', filename = 'fallback.svg') {
   const initials = description
     .split(' ')
     .filter(Boolean)
@@ -150,15 +178,21 @@ function createLocalSvgFallback(description = 'Producto', category = 'General', 
   <text x="200" y="322" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="800" fill="#ffffff" text-anchor="middle">${safeCat.toUpperCase()}</text>
 </svg>`.trim();
 
-  const filePath = path.join(IMAGES_DIR, filename);
-  fs.writeFileSync(filePath, svg, 'utf-8');
-  return `/api/ai/images/${filename}`;
+  try {
+    const activeDir = ensureImagesDir();
+    const filePath = path.join(activeDir, filename);
+    fs.writeFileSync(filePath, svg, 'utf-8');
+    return `/api/ai/images/${filename}`;
+  } catch (err) {
+    console.warn(`[AI Image Service] No se pudo guardar archivo SVG en disco (${err.message}). Retornando Data URI directo.`);
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  }
 }
 
 /**
- * Downloads a remote image and saves directly to local disk
+ * Downloads a remote image and saves directly to local disk with fallback directories
  */
-async function downloadRemoteImage(remoteUrl, localFilePath) {
+async function downloadRemoteImage(remoteUrl, filename) {
   try {
     const res = await fetch(remoteUrl, {
       signal: AbortSignal.timeout(4500),
@@ -166,19 +200,139 @@ async function downloadRemoteImage(remoteUrl, localFilePath) {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       }
     });
-    if (!res.ok) return false;
+    if (!res.ok) return null;
     const arrayBuf = await res.arrayBuffer();
     const buffer = Buffer.from(arrayBuf);
-    if (buffer.length < 1500) return false;
-    fs.writeFileSync(localFilePath, buffer);
-    return true;
+    if (buffer.length < 1500) return null;
+
+    const candidateDirs = getAllCandidateImageDirectories();
+    for (const dir of candidateDirs) {
+      try {
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        const localFilePath = path.join(dir, filename);
+        fs.writeFileSync(localFilePath, buffer);
+        return `/api/ai/images/${filename}`;
+      } catch (_) {}
+    }
+
+    // Direct Base64 Fallback if all filesystem writes fail
+    const base64 = buffer.toString('base64');
+    const mime = filename.endsWith('.png') ? 'image/png' : 'image/jpeg';
+    return `data:${mime};base64,${base64}`;
   } catch (err) {
-    return false;
+    return null;
   }
 }
 
 /**
- * Looks up official product photos by Barcode across global open product databases (EAN/UPC)
+ * Validates whether a remote image URL belongs to a real product image rather than generic stock/wallpaper
+ */
+function isValidProductImageUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  const lower = url.toLowerCase();
+  const blacklist = [
+    'alamy.com', 'wallpaper', 'gettyimages', 'shutterstock', 'depositphotos',
+    'dreamstime', '123rf', 'freepik', 'vector', 'cartoon', 'illustration',
+    'lookaside.instagram.com', 'facebook.com/tr', 'pinterest.com/pin'
+  ];
+  if (blacklist.some(b => lower.includes(b))) return false;
+  return true;
+}
+
+/**
+ * Intelligent Query Expansion for retail & regional supermarket products
+ */
+function buildSearchQueries(description, category = '') {
+  const queries = [];
+  const cleanDesc = (description || '').trim();
+
+  let expanded = cleanDesc;
+  if (/refresco\s+sun\b/i.test(cleanDesc)) {
+    expanded = cleanDesc.replace(/refresco\s+sun\b/i, 'refresco the sun cola');
+  } else if (/\bsun\s+(\d+.*)/i.test(cleanDesc) && /bebida|refresco/i.test(category + cleanDesc)) {
+    expanded = cleanDesc.replace(/\bsun\b/i, 'sun cola');
+  } else if (/boka\s+en\s+sobre/i.test(cleanDesc)) {
+    expanded = cleanDesc.replace(/boka\s+en\s+sobre/i, 'refresco en sobre boka quala');
+  } else if (/revolcon(es)?/i.test(cleanDesc)) {
+    expanded = `${cleanDesc} caramelo`;
+  } else if (/rockstar/i.test(cleanDesc)) {
+    expanded = `${cleanDesc} bebida energetica`;
+  }
+
+  queries.push(`${expanded} producto`);
+  queries.push(`${expanded}`);
+  queries.push(`${cleanDesc} empaque`);
+
+  return [...new Set(queries.filter(Boolean))];
+}
+
+/**
+ * High-accuracy DuckDuckGo Commercial Product Image Search
+ */
+async function searchDuckDuckGoImages(query) {
+  try {
+    const searchUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`;
+    const initRes = await fetch(searchUrl, {
+      signal: AbortSignal.timeout(4000),
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+      }
+    });
+    const html = await initRes.text();
+    const vqdMatch = html.match(/vqd=["']?([^&"'\s]+)/i) || html.match(/vqd=([^&"'\s]+)/i);
+    if (!vqdMatch) return [];
+
+    const vqd = vqdMatch[1];
+    const imgApiUrl = `https://duckduckgo.com/i.js?l=es-es&o=json&q=${encodeURIComponent(query)}&vqd=${vqd}&f=,,,type:photo,&p=1`;
+    const apiRes = await fetch(imgApiUrl, {
+      signal: AbortSignal.timeout(4000),
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Referer': 'https://duckduckgo.com/'
+      }
+    });
+    if (!apiRes.ok) return [];
+    const data = await apiRes.json();
+    return (data.results || [])
+      .map(r => r.image || r.thumbnail)
+      .filter(url => isValidProductImageUrl(url));
+  } catch (_) {
+    return [];
+  }
+}
+
+/**
+ * High-accuracy Bing Commercial Product Image Search
+ */
+async function searchBingImages(query) {
+  try {
+    const searchUrl = `https://www.bing.com/images/search?q=${encodeURIComponent(query + ' producto empaque')}&form=HDRSC2&first=1&tsc=ImageHoverTitle`;
+    const res = await fetch(searchUrl, {
+      signal: AbortSignal.timeout(4000),
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8'
+      }
+    });
+    if (!res.ok) return [];
+    const html = await res.text();
+    const urls = [];
+    const murlMatches = html.match(/murl&quot;:&quot;(https?:[^&]+)&quot;/g) || [];
+    for (const m of murlMatches) {
+      const match = m.match(/murl&quot;:&quot;(https?:[^&]+)&quot;/);
+      if (match && match[1]) {
+        const cleaned = match[1].replace(/\\/g, '');
+        if (isValidProductImageUrl(cleaned)) urls.push(cleaned);
+      }
+    }
+    return urls;
+  } catch (_) {
+    return [];
+  }
+}
+
+/**
+ * Looks up official product photos by Barcode across global open product databases (EAN/UPC) and web indexes
  */
 async function searchByBarcode(barcode) {
   if (!barcode) return null;
@@ -234,6 +388,12 @@ async function searchByBarcode(barcode) {
     }
   } catch (_) {}
 
+  // 4. Web index search for barcode
+  try {
+    const ddgBarcodeUrls = await searchDuckDuckGoImages(cleanCode);
+    if (ddgBarcodeUrls.length > 0) return ddgBarcodeUrls[0];
+  } catch (_) {}
+
   return null;
 }
 
@@ -257,12 +417,26 @@ export function saveUploadedImageBase64(base64Data, originalName = 'upload.jpg')
 
     const cleanBase = originalName.toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 20);
     const filename = `manual_${cleanBase}_${Date.now()}.${ext}`;
-    const filePath = path.join(IMAGES_DIR, filename);
 
-    fs.writeFileSync(filePath, buffer);
+    const candidateDirs = getAllCandidateImageDirectories();
+    for (const dir of candidateDirs) {
+      try {
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        const filePath = path.join(dir, filename);
+        fs.writeFileSync(filePath, buffer);
+        return {
+          success: true,
+          imageUrl: `/api/ai/images/${filename}`,
+          filename
+        };
+      } catch (_) {}
+    }
+
+    // Direct Data URI if no disk write permissions
+    const mime = ext === 'png' ? 'image/png' : 'image/jpeg';
     return {
       success: true,
-      imageUrl: `/api/ai/images/${filename}`,
+      imageUrl: `data:${mime};base64,${buffer.toString('base64')}`,
       filename
     };
   } catch (err) {
@@ -272,42 +446,32 @@ export function saveUploadedImageBase64(base64Data, originalName = 'upload.jpg')
 }
 
 /**
- * Intelligent Multi-Source Product Image Engine (White Studio Background Priority):
- * 1. Exact Barcode Match (OpenFoodFacts / OpenBeautyFacts / OpenProductsFacts) -> Official commercial photo!
- * 2. Exact Brand/Product Text Search (OpenFoodFacts text query)
- * 3. Wikimedia Commons Commercial Product Catalog (White Background Isolated Photos)
- * 4. Pollinations AI Commercial Diffusion Engine (Isolated Product on Pure White Background)
- * 5. LoremFlickr Retail Category Photography
- * 6. Local Vector SVG Generator (Guaranteed 100% offline fallback with white studio background)
+ * Intelligent Multi-Source Real Product Image Engine:
+ * 1. Exact Barcode Match (OpenFoodFacts / OpenBeautyFacts / OpenProductsFacts / Web Barcode) -> Official photo
+ * 2. High-Accuracy Web Commercial Image Search (DuckDuckGo Image Index) -> Exact real product photo from web
+ * 3. High-Accuracy Bing Commercial Image Search -> Exact product package photo
+ * 4. Open Food Facts Text Catalog Search by brand / description
+ * 5. Wikimedia Commons Isolated Product Catalog
+ * 6. Pollinations AI Commercial Product Diffusion (Studio Lighting on White)
+ * 7. Local Vector SVG Generator (Guaranteed 100% clean offline fallback)
  */
 export async function generateProductImage(description, category = '', barcode = '', saveLocal = true) {
-  if (!description || !description.trim()) {
-    const fallbackFilename = `fallback_${Date.now()}.svg`;
-    const fallbackUrl = createLocalSvgFallback('Producto', category, fallbackFilename);
-    return {
-      success: true,
-      imageUrl: fallbackUrl,
-      source: 'fallback'
-    };
-  }
-
-  const cleanDesc = description.trim();
+  const cleanDesc = (description || 'Producto').trim();
   const cleanCat = (category || '').trim();
   const cleanCode = (barcode || '').trim();
   const map = getMapping(cleanDesc, cleanCat);
   const safeFilename = `prod_${cleanDesc.toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 24)}_${Date.now()}.jpg`;
-  const localFilePath = path.join(IMAGES_DIR, safeFilename);
 
-  // --- TIER 1: Exact Barcode Lookup ---
+  // --- TIER 1: Exact Barcode Lookup (Databases & Web Index) ---
   if (cleanCode) {
     try {
       const barcodeImgUrl = await searchByBarcode(cleanCode);
       if (barcodeImgUrl) {
-        const saved = await downloadRemoteImage(barcodeImgUrl, localFilePath);
-        if (saved) {
+        const savedUrl = await downloadRemoteImage(barcodeImgUrl, safeFilename);
+        if (savedUrl) {
           return {
             success: true,
-            imageUrl: `/api/ai/images/${safeFilename}`,
+            imageUrl: savedUrl,
             source: 'barcode_official',
             barcode: cleanCode
           };
@@ -316,7 +480,41 @@ export async function generateProductImage(description, category = '', barcode =
     } catch (_) {}
   }
 
-  // --- TIER 2: Open Food Facts Search by Description / Brand ---
+  // --- TIER 2: Intelligent Multi-Query Commercial Web Image Search ---
+  const searchQueries = buildSearchQueries(cleanDesc, cleanCat);
+  for (const q of searchQueries) {
+    try {
+      const webResults = await searchDuckDuckGoImages(q);
+      for (const url of webResults.slice(0, 2)) {
+        const savedUrl = await downloadRemoteImage(url, safeFilename);
+        if (savedUrl) {
+          return {
+            success: true,
+            imageUrl: savedUrl,
+            source: 'web_search_duckduckgo',
+            keyword: q
+          };
+        }
+      }
+    } catch (_) {}
+
+    try {
+      const bingResults = await searchBingImages(q);
+      for (const url of bingResults.slice(0, 2)) {
+        const savedUrl = await downloadRemoteImage(url, safeFilename);
+        if (savedUrl) {
+          return {
+            success: true,
+            imageUrl: savedUrl,
+            source: 'web_search_bing',
+            keyword: q
+          };
+        }
+      }
+    } catch (_) {}
+  }
+
+  // --- TIER 3: Open Food Facts Search by Description / Brand ---
   try {
     const offUrl = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(cleanDesc)}&search_simple=1&action=process&json=1&page_size=3`;
     const res = await fetch(offUrl, {
@@ -328,11 +526,11 @@ export async function generateProductImage(description, category = '', barcode =
       const match = data.products?.find(p => p.image_front_url || p.image_url);
       if (match) {
         const imgUrl = match.image_front_url || match.image_url;
-        const saved = await downloadRemoteImage(imgUrl, localFilePath);
-        if (saved) {
+        const savedUrl = await downloadRemoteImage(imgUrl, safeFilename);
+        if (savedUrl) {
           return {
             success: true,
-            imageUrl: `/api/ai/images/${safeFilename}`,
+            imageUrl: savedUrl,
             source: 'openfoodfacts_text_search',
             keyword: cleanDesc
           };
@@ -341,7 +539,7 @@ export async function generateProductImage(description, category = '', barcode =
     }
   } catch (_) {}
 
-  // --- TIER 3: Wikimedia Commons White Background Studio Product Photo Search ---
+  // --- TIER 5: Wikimedia Commons White Background Studio Product Photo Search ---
   try {
     const wikiUrl = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=${encodeURIComponent(map.wiki + ' isolated white background product packaging filetype:bitmap')}&gsrlimit=3&prop=imageinfo&iiprop=url&iiurlwidth=400&format=json`;
     const res = await fetch(wikiUrl, {
@@ -355,11 +553,11 @@ export async function generateProductImage(description, category = '', barcode =
         for (const page of Object.values(pages)) {
           const thumb = page?.imageinfo?.[0]?.thumburl || page?.imageinfo?.[0]?.url;
           if (thumb && !thumb.endsWith('.svg.png') && !thumb.includes('icon') && !thumb.includes('logo')) {
-            const saved = await downloadRemoteImage(thumb, localFilePath);
-            if (saved) {
+            const savedUrl = await downloadRemoteImage(thumb, safeFilename);
+            if (savedUrl) {
               return {
                 success: true,
-                imageUrl: `/api/ai/images/${safeFilename}`,
+                imageUrl: savedUrl,
                 source: 'wikimedia_photo',
                 keyword: map.wiki
               };
@@ -370,36 +568,22 @@ export async function generateProductImage(description, category = '', barcode =
     }
   } catch (_) {}
 
-  // --- TIER 4: Pollinations AI Commercial Product Photography (Pure White Background) ---
+  // --- TIER 6: Pollinations AI Commercial Product Photography (Pure White Background) ---
   try {
     const prompt = `high resolution studio commercial product photograph of ${cleanDesc} ${map.wiki}, isolated centered on solid pure white background, studio 4k lighting, crisp product packaging, commercial photography`;
     const pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=400&height=400&nologo=true`;
-    const saved = await downloadRemoteImage(pollUrl, localFilePath);
-    if (saved) {
+    const savedUrl = await downloadRemoteImage(pollUrl, safeFilename);
+    if (savedUrl) {
       return {
         success: true,
-        imageUrl: `/api/ai/images/${safeFilename}`,
+        imageUrl: savedUrl,
         source: 'pollinations_ai_white_bg',
         keyword: map.wiki
       };
     }
   } catch (_) {}
 
-  // --- TIER 5: LoremFlickr Retail Category Photography ---
-  try {
-    const flickrUrl = `https://loremflickr.com/400/400/${encodeURIComponent(map.tag)}/all`;
-    const saved = await downloadRemoteImage(flickrUrl, localFilePath);
-    if (saved) {
-      return {
-        success: true,
-        imageUrl: `/api/ai/images/${safeFilename}`,
-        source: 'loremflickr_photo',
-        keyword: map.tag
-      };
-    }
-  } catch (_) {}
-
-  // --- TIER 6: Guaranteed Local Vector SVG Fallback with Studio White Card ---
+  // --- TIER 7: Guaranteed Local Vector SVG Fallback with Studio White Card ---
   const svgFilename = `prod_${cleanDesc.toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 24)}_${Date.now()}.svg`;
   const localSvgUrl = createLocalSvgFallback(cleanDesc, cleanCat, svgFilename);
 
@@ -411,4 +595,98 @@ export async function generateProductImage(description, category = '', barcode =
   };
 }
 
-export { IMAGES_DIR };
+/**
+ * Searches multiple real product image candidates across internet engines (Parallel + High-Reliability Fallbacks)
+ */
+export async function searchProductImageCandidates(description, category = '', barcode = '') {
+  const cleanDesc = (description || 'Producto').trim();
+  const cleanCat = (category || '').trim();
+  const cleanCode = (barcode || '').trim();
+  const candidates = [];
+  const seenUrls = new Set();
+  const map = getMapping(cleanDesc, cleanCat);
+
+  function addCandidate(c) {
+    if (c && c.url && !seenUrls.has(c.url) && isValidProductImageUrl(c.url)) {
+      seenUrls.add(c.url);
+      candidates.push(c);
+    }
+  }
+
+  // 1. Barcode official image if available
+  if (cleanCode) {
+    try {
+      const barcodeImg = await searchByBarcode(cleanCode);
+      if (barcodeImg) {
+        addCandidate({ url: barcodeImg, title: `Foto Oficial de Código ${cleanCode}`, source: 'Código de Barras' });
+      }
+    } catch (_) {}
+  }
+
+  // 2. Parallel Search queries in DuckDuckGo, Bing & OpenFoodFacts
+  const queries = buildSearchQueries(cleanDesc, cleanCat);
+  const searchPromises = [];
+
+  for (const q of queries) {
+    searchPromises.push(
+      searchDuckDuckGoImages(q).then(results => {
+        results.forEach(r => addCandidate({ url: r, title: cleanDesc, source: 'Web / DuckDuckGo' }));
+      }).catch(() => {})
+    );
+    searchPromises.push(
+      searchBingImages(q).then(results => {
+        results.forEach(r => addCandidate({ url: r, title: cleanDesc, source: 'Web / Bing' }));
+      }).catch(() => {})
+    );
+  }
+
+  // OpenFoodFacts Catalog Search
+  searchPromises.push(
+    (async () => {
+      try {
+        const offUrl = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(cleanDesc)}&search_simple=1&action=process&json=1&page_size=4`;
+        const res = await fetch(offUrl, {
+          signal: AbortSignal.timeout(4000),
+          headers: { 'User-Agent': 'WinterPOS-SmartPOS - contact@inversionesniquitao.com' }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          (data.products || []).forEach(p => {
+            const imgUrl = p.image_front_url || p.image_url;
+            if (imgUrl) addCandidate({ url: imgUrl, title: p.product_name || cleanDesc, source: 'Catálogo Oficial' });
+          });
+        }
+      } catch (_) {}
+    })()
+  );
+
+  await Promise.allSettled(searchPromises);
+
+  // 3. Fallback AI Studio Product Renders (Guarantees user always gets high quality options even with strict firewalls)
+  if (candidates.length < 4) {
+    const prompt1 = `commercial studio product photograph of ${cleanDesc} ${map.wiki}, isolated centered on solid pure white background, studio 4k lighting, crisp product packaging`;
+    const pollUrl1 = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt1)}?width=400&height=400&nologo=true&seed=101`;
+    const pollUrl2 = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt1 + ' alternative view')}?width=400&height=400&nologo=true&seed=202`;
+    
+    addCandidate({ url: pollUrl1, title: `${cleanDesc} (Foto Estudio IA)`, source: 'IA Estudio Fotográfico' });
+    addCandidate({ url: pollUrl2, title: `${cleanDesc} (Opción IA 2)`, source: 'IA Estudio Fotográfico' });
+  }
+
+  return candidates.slice(0, 8);
+}
+
+/**
+ * Downloads a chosen remote candidate image and saves it to local disk permanently
+ */
+export async function downloadAndSaveProductImage(remoteUrl, description = 'producto') {
+  if (!remoteUrl) return { success: false, error: 'URL requerida' };
+  const cleanDesc = String(description).trim().toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 24);
+  const safeFilename = `prod_${cleanDesc}_${Date.now()}.jpg`;
+  const localUrl = await downloadRemoteImage(remoteUrl, safeFilename);
+  if (localUrl) {
+    return { success: true, imageUrl: localUrl, filename: safeFilename };
+  }
+  return { success: false, error: 'No se pudo descargar la imagen seleccionada' };
+}
+
+export { IMAGES_DIR, getAllCandidateImageDirectories };

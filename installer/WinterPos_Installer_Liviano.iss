@@ -35,11 +35,13 @@ Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+Name: "firewallrules"; Description: "🛡️ Configurar reglas en Firewall de Windows (Puertos 5000 Web y 5432 Base de Datos para acceso en Red LAN)"; GroupDescription: "Configuración de Red y Seguridad:"; Flags: checkedonce
 Name: "debugmode"; Description: "⚙️ Activar Modo Depuración / Debugger (Muestra la consola CMD con logs en vivo)"; GroupDescription: "Opciones de Auditoría:"; Flags: unchecked
 
 [Files]
 ; Icono principal del sistema
 Source: "app_icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "wizard_card.bmp"; Flags: dontcopy
 
 ; Launchers and root scripts
 Source: "..\Iniciar_WinterPos.bat"; DestDir: "{app}"; Flags: ignoreversion
@@ -57,15 +59,15 @@ Source: "..\backend\node_modules\*"; DestDir: "{app}\backend\node_modules"; Flag
 Source: "..\WinterPosAL\dist\*"; DestDir: "{app}\WinterPosAL\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-; Modo Silencioso (Por defecto)
-Name: "{group}\WinterPosAL"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\app_icon.ico"; Check: not IsDebugModeSelected
-Name: "{autodesktop}\WinterPosAL"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; IconFilename: "{app}\app_icon.ico"; Check: not IsDebugModeSelected
+; Modo Silencioso Principal (Por defecto para Cajero / Operario) - Usa wscript para garantizar 0 ventanas de CMD
+Name: "{group}\WinterPosAL"; Filename: "wscript.exe"; Parameters: """{app}\{#MyAppExeName}"""; WorkingDir: "{app}"; IconFilename: "{app}\app_icon.ico"; IconIndex: 0
+Name: "{autodesktop}\WinterPosAL"; Filename: "wscript.exe"; Parameters: """{app}\{#MyAppExeName}"""; WorkingDir: "{app}"; Tasks: desktopicon; IconFilename: "{app}\app_icon.ico"; IconIndex: 0
 
-; Modo Depuración / Debugger (Si se selecciona la casilla Debugger)
-Name: "{autodesktop}\WinterPosAL"; Filename: "{app}\Iniciar_WinterPos.bat"; Tasks: desktopicon; IconFilename: "{app}\app_icon.ico"; Check: IsDebugModeSelected
+; Modo Depuración / Debugger (SOLO si se marca la casilla Debugger al instalar)
+Name: "{autodesktop}\WinterPosAL (Debug CMD)"; Filename: "{app}\Iniciar_WinterPos.bat"; Tasks: desktopicon; IconFilename: "{app}\app_icon.ico"; IconIndex: 0; Check: IsDebugModeSelected
 
 ; Acceso directo de diagnóstico permanente en Menú Inicio
-Name: "{group}\WinterPosAL - Modo Depuración (Logs CMD)"; Filename: "{app}\Iniciar_WinterPos.bat"; IconFilename: "{app}\app_icon.ico"
+Name: "{group}\WinterPosAL - Modo Depuración (Logs CMD)"; Filename: "{app}\Iniciar_WinterPos.bat"; IconFilename: "{app}\app_icon.ico"; IconIndex: 0
 [Dirs]
 Name: "{app}"; Permissions: users-full
 Name: "{app}\data"; Permissions: users-full
@@ -80,21 +82,18 @@ Filename: "icacls"; Parameters: """{app}"" /grant Users:(OI)(CI)F /T"; Flags: ru
 ; Register Windows Service automatically (Runs silently in background)
 Filename: "cmd.exe"; Parameters: "/c node ""{app}\backend\service\install_service.js"""; Flags: runhidden; StatusMsg: "Registrando servicio de segundo plano WinterPos..."; Check: IsServerModeSelected
 
-; Add Firewall Rule for WinterPos Web Server (Port 5000)
-Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""WinterPos Server (Puerto 5000)"" dir=in action=allow protocol=TCP localport=5000 profile=any"; Flags: runhidden; StatusMsg: "Configurando Cortafuegos de Windows (Puerto 5000)..."
+; Limpiar reglas duplicadas antiguas y configurar regla única para Servidor Web (Puerto 5000)
+Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""WinterPos Server (Puerto 5000)"""; Flags: runhidden; Check: IsFirewallTaskSelected
+Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""WinterPos Server (Puerto 5000)"" dir=in action=allow protocol=TCP localport=5000 profile=any"; Flags: runhidden; StatusMsg: "Configurando Cortafuegos de Windows (Puerto 5000)..."; Check: IsFirewallTaskSelected
 
-; Add Firewall Rule for PostgreSQL Database (Port 5432)
-Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""PostgreSQL Server (Puerto 5432)"" dir=in action=allow protocol=TCP localport=5432 profile=any"; Flags: runhidden; StatusMsg: "Configurando Cortafuegos de Windows (Puerto 5432)..."
+; Limpiar reglas duplicadas antiguas y configurar regla única para PostgreSQL (Puerto 5432)
+Filename: "netsh"; Parameters: "advfirewall firewall delete rule name=""PostgreSQL Server (Puerto 5432)"""; Flags: runhidden; Check: ShouldConfigurePgFirewall
+Filename: "netsh"; Parameters: "advfirewall firewall add rule name=""PostgreSQL Server (Puerto 5432)"" dir=in action=allow protocol=TCP localport=5432 profile=any"; Flags: runhidden; StatusMsg: "Configurando Cortafuegos de Windows (Puerto 5432)..."; Check: ShouldConfigurePgFirewall
 
 ; Launch program
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: shellexec postinstall skipifsilent
 
 [Code]
-function IsDebugModeSelected: Boolean;
-begin
-  Result := WizardIsTaskSelected('debugmode');
-end;
-
 var
   AuthPage: TWizardPage;
   UserEdit: TNewEdit;
@@ -107,6 +106,26 @@ var
   IpEdit: TNewEdit;
   IpLabel: TNewStaticText;
   HelpText: TNewStaticText;
+
+function IsDebugModeSelected: Boolean;
+begin
+  Result := WizardIsTaskSelected('debugmode');
+end;
+
+function IsFirewallTaskSelected: Boolean;
+begin
+  Result := WizardIsTaskSelected('firewallrules');
+end;
+
+function IsServerModeSelected: Boolean;
+begin
+  Result := (ServerRadio <> nil) and ServerRadio.Checked;
+end;
+
+function ShouldConfigurePgFirewall: Boolean;
+begin
+  Result := IsFirewallTaskSelected and IsServerModeSelected;
+end;
 
 procedure OnShowPassCheckClick(Sender: TObject);
 begin
@@ -134,100 +153,124 @@ begin
   end;
 end;
 
-function IsServerModeSelected: Boolean;
-begin
-  Result := (ServerRadio <> nil) and ServerRadio.Checked;
-end;
-
 procedure InitializeWizard;
 var
   InfoLabel: TNewStaticText;
   UserLabel: TNewStaticText;
   PassLabel: TNewStaticText;
+  CardImage: TBitmapImage;
+  CardImage2: TBitmapImage;
+  CardFile: string;
 begin
+  ExtractTemporaryFile('wizard_card.bmp');
+  CardFile := ExpandConstant('{tmp}\wizard_card.bmp');
+
   // Page 0: Autenticación de Seguridad de Instalador
   AuthPage := CreateCustomPage(wpWelcome, '🔒 Autenticación de Seguridad del Instalador', 'Ingrese las credenciales autorizadas del técnico para desbloquear la instalación.');
 
+  // Visual card branding preview
+  CardImage := TBitmapImage.Create(AuthPage);
+  CardImage.Parent := AuthPage.Surface;
+  CardImage.Left := ScaleX(290);
+  CardImage.Top := ScaleY(10);
+  CardImage.Width := ScaleX(175);
+  CardImage.Height := ScaleY(205);
+  CardImage.Stretch := True;
+  CardImage.AutoSize := False;
+  if FileExists(CardFile) then
+    CardImage.Bitmap.LoadFromFile(CardFile);
+
   InfoLabel := TNewStaticText.Create(AuthPage);
   InfoLabel.Parent := AuthPage.Surface;
-  InfoLabel.Left := ScaleX(16);
+  InfoLabel.Left := ScaleX(10);
   InfoLabel.Top := ScaleY(10);
-  InfoLabel.Width := ScaleX(440);
+  InfoLabel.Width := ScaleX(270);
   InfoLabel.WordWrap := True;
-  InfoLabel.Caption := 'Este paquete de instalación está protegido. Para continuar con la instalación de WinterPos en este equipo, introduzca el usuario y la contraseña de instalación:';
+  InfoLabel.Caption := 'Este paquete de instalación está protegido. Para continuar con la instalación de WinterPos en este equipo, introduzca las credenciales autorizadas:';
 
   UserLabel := TNewStaticText.Create(AuthPage);
   UserLabel.Parent := AuthPage.Surface;
-  UserLabel.Left := ScaleX(16);
+  UserLabel.Left := ScaleX(10);
   UserLabel.Top := ScaleY(65);
   UserLabel.Caption := 'Usuario de Instalación:';
   UserLabel.Font.Style := [fsBold];
 
   UserEdit := TNewEdit.Create(AuthPage);
   UserEdit.Parent := AuthPage.Surface;
-  UserEdit.Left := ScaleX(16);
+  UserEdit.Left := ScaleX(10);
   UserEdit.Top := ScaleY(85);
-  UserEdit.Width := ScaleX(280);
+  UserEdit.Width := ScaleX(265);
   UserEdit.Text := '';
 
   PassLabel := TNewStaticText.Create(AuthPage);
   PassLabel.Parent := AuthPage.Surface;
-  PassLabel.Left := ScaleX(16);
+  PassLabel.Left := ScaleX(10);
   PassLabel.Top := ScaleY(125);
   PassLabel.Caption := 'Contraseña de Acceso:';
   PassLabel.Font.Style := [fsBold];
 
   PassEdit := TNewEdit.Create(AuthPage);
   PassEdit.Parent := AuthPage.Surface;
-  PassEdit.Left := ScaleX(16);
+  PassEdit.Left := ScaleX(10);
   PassEdit.Top := ScaleY(145);
-  PassEdit.Width := ScaleX(280);
+  PassEdit.Width := ScaleX(265);
   PassEdit.PasswordChar := '*';
   PassEdit.Text := '';
 
   ShowPassCheck := TNewCheckBox.Create(AuthPage);
   ShowPassCheck.Parent := AuthPage.Surface;
-  ShowPassCheck.Left := ScaleX(16);
+  ShowPassCheck.Left := ScaleX(10);
   ShowPassCheck.Top := ScaleY(180);
-  ShowPassCheck.Width := ScaleX(280);
+  ShowPassCheck.Width := ScaleX(265);
   ShowPassCheck.Caption := '👁️ Mostrar contraseña';
   ShowPassCheck.OnClick := @OnShowPassCheckClick;
 
   // Page 1: Role Selection
   RolePage := CreateCustomPage(AuthPage.ID, 'Modo de Instalación (Liviano)', 'Seleccione el rol de este equipo en el sistema de ventas.');
   
+  CardImage2 := TBitmapImage.Create(RolePage);
+  CardImage2.Parent := RolePage.Surface;
+  CardImage2.Left := ScaleX(295);
+  CardImage2.Top := ScaleY(10);
+  CardImage2.Width := ScaleX(170);
+  CardImage2.Height := ScaleY(205);
+  CardImage2.Stretch := True;
+  CardImage2.AutoSize := False;
+  if FileExists(CardFile) then
+    CardImage2.Bitmap.LoadFromFile(CardFile);
+
   ServerRadio := TRadioButton.Create(RolePage);
   ServerRadio.Parent := RolePage.Surface;
-  ServerRadio.Left := ScaleX(16);
-  ServerRadio.Top := ScaleY(16);
-  ServerRadio.Width := ScaleX(400);
+  ServerRadio.Left := ScaleX(10);
+  ServerRadio.Top := ScaleY(10);
+  ServerRadio.Width := ScaleX(275);
   ServerRadio.Caption := '🖥️ Servidor Principal (Caja 1 / Central)';
   ServerRadio.Font.Style := [fsBold];
   ServerRadio.Checked := True;
 
   HelpText := TNewStaticText.Create(RolePage);
   HelpText.Parent := RolePage.Surface;
-  HelpText.Left := ScaleX(36);
-  HelpText.Top := ScaleY(40);
-  HelpText.Width := ScaleX(420);
+  HelpText.Left := ScaleX(26);
+  HelpText.Top := ScaleY(34);
+  HelpText.Width := ScaleX(260);
   HelpText.WordWrap := True;
-  HelpText.Caption := 'Configura la PC central con la Base de Datos PostgreSQL, scraper BCV y Bot de WhatsApp. Utiliza PostgreSQL existente o descargado.';
+  HelpText.Caption := 'Configura la PC central con la Base de Datos PostgreSQL, scraper BCV y Bot de WhatsApp.';
 
   ClientRadio := TRadioButton.Create(RolePage);
   ClientRadio.Parent := RolePage.Surface;
-  ClientRadio.Left := ScaleX(16);
-  ClientRadio.Top := ScaleY(100);
-  ClientRadio.Width := ScaleX(400);
-  ClientRadio.Caption := '💻 Caja Secundaria (Terminal Cliente LAN)';
+  ClientRadio.Left := ScaleX(10);
+  ClientRadio.Top := ScaleY(105);
+  ClientRadio.Width := ScaleX(275);
+  ClientRadio.Caption := '💻 Caja Secundaria (Terminal LAN)';
   ClientRadio.Font.Style := [fsBold];
 
   HelpText := TNewStaticText.Create(RolePage);
   HelpText.Parent := RolePage.Surface;
-  HelpText.Left := ScaleX(36);
-  HelpText.Top := ScaleY(124);
-  HelpText.Width := ScaleX(420);
+  HelpText.Left := ScaleX(26);
+  HelpText.Top := ScaleY(129);
+  HelpText.Width := ScaleX(260);
   HelpText.WordWrap := True;
-  HelpText.Caption := 'Se conecta a la PC Servidor por la red local (Wi-Fi o Cable Ethernet) para facturar de forma simultánea.';
+  HelpText.Caption := 'Se conecta a la PC Servidor por la red local (Wi-Fi o Cable Ethernet) para facturación concurrente.';
 
   // Page 2: Server IP Configuration
   IpPage := CreateCustomPage(RolePage.ID, 'Configuración de Red Local (LAN)', 'Especifique la IP del Servidor Principal.');

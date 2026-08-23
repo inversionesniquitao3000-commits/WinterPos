@@ -38,5 +38,13 @@
     "usuario": "SISTEMA (Auto BCV €)",
     "id": 1787146322070,
     "fecha_actualizacion": "2026-08-19 09:32"
+  },
+  {
+    "tasa_cobro": 916.01,
+    "tasa_vuelto": 916.01,
+    "usuarioId": "1",
+    "usuario": "SISTEMA (Auto BCV €)",
+    "id": 1787515676261,
+    "fecha_actualizacion": "2026-08-23 16:07"
   }
 ]

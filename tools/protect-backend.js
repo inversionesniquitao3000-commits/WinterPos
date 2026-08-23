@@ -28,6 +28,8 @@ const distRootDir = path.join(rootDir, 'dist_root');
 const explicitFiles = [
   'server.js',
   'db-store.js',
+  'ai-image-service.js',
+  'manager-service.js',
   'license-manager.js',
   'whatsapp-service.js',
   'fiscal-service.js',
