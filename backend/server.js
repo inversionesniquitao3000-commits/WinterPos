@@ -724,9 +724,9 @@ app.get('/api/sync/poll', async (req, res) => {
 
     // Company config sync: check in-memory cached company config
     const companyConfig = await getCompanyConfig();
-    const clientConfigName = req.query.config_name || '';
-    const clientConfigRif = req.query.config_rif || '';
-    if (companyConfig && (companyConfig.nombre_comercio !== clientConfigName || companyConfig.rif !== clientConfigRif)) {
+    const clientConfigSig = req.query.config_sig || '';
+    const serverConfigSig = `${companyConfig?.nombre_comercio || ''}_${companyConfig?.rif || ''}_${companyConfig?.tamano_foto_buscador_pos || 'mediana'}_${companyConfig?.mostrar_fotos_en_buscador_pos !== false}_${companyConfig?.limite_productos_buscador_pos || 5}`;
+    if (companyConfig && (clientConfigSig ? clientConfigSig !== serverConfigSig : (companyConfig.nombre_comercio !== req.query.config_name || companyConfig.rif !== req.query.config_rif))) {
       result.config = companyConfig;
     }
 

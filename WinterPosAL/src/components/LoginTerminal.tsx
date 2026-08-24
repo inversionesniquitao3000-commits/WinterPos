@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { Shield, Network, Eye, EyeOff, ShieldCheck } from 'lucide-react';
+import { Shield, Network, Eye, EyeOff, ShieldCheck, Headphones, MessageCircle, Mail, Copy, Check, ExternalLink, X, LifeBuoy } from 'lucide-react';
 import { User, CompanyConfig } from '../types';
 import { useDialog } from '../hooks/useDialog';
 import { getApiBaseUrl } from '../utils';
+import { APP_VERSION } from '../version';
 
 interface LoginTerminalProps {
   onLoginSuccess: (user: User) => void;
@@ -42,6 +43,135 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showSupportModal, setShowSupportModal] = useState(false);
+  const [copiedType, setCopiedType] = useState<'whatsapp' | 'email' | null>(null);
+
+  const handleCopy = (text: string, type: 'whatsapp' | 'email') => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+    }
+    setCopiedType(type);
+    setTimeout(() => setCopiedType(null), 2500);
+  };
+
+  const renderSupportModal = () => {
+    if (!showSupportModal) return null;
+    return (
+      <div 
+        className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200 font-sans"
+        onClick={() => setShowSupportModal(false)}
+      >
+        <div 
+          className="bg-gradient-to-b from-[#0f3562] to-[#071c35] border border-blue-400/40 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 text-white font-sans relative overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Decorative glowing background gradients */}
+          <div className="absolute -top-12 -right-12 w-40 h-40 bg-blue-500/20 rounded-full blur-3xl pointer-events-none"></div>
+          <div className="absolute -bottom-12 -left-12 w-40 h-40 bg-emerald-500/20 rounded-full blur-3xl pointer-events-none"></div>
+
+          {/* Header */}
+          <div className="flex items-start justify-between border-b border-white/10 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/30 flex-shrink-0">
+                <Headphones className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-white tracking-wide">Centro de Asistencia y Soporte</h3>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span className="text-[11px] text-emerald-300 font-semibold">Atención y Asesoría Técnica</span>
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowSupportModal(false)}
+              className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <p className="text-xs text-slate-300 leading-relaxed">
+            ¿Requieres asistencia técnica, configuración de red, soporte o activación de licencia? Comunícate directamente con nuestro desarrollador:
+          </p>
+
+          {/* Contact Cards */}
+          <div className="space-y-3">
+            {/* WhatsApp Card */}
+            <div className="bg-slate-900/70 border border-emerald-500/40 rounded-xl p-3.5 flex items-center justify-between gap-3 hover:border-emerald-400 transition-all shadow-md group">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 flex-shrink-0 group-hover:scale-105 transition-transform">
+                  <MessageCircle className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">WhatsApp Soporte</div>
+                  <div className="text-sm font-mono font-black text-white tracking-wide truncate">0424-2042877</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleCopy('04242042877', 'whatsapp')}
+                  className="p-2 rounded-lg bg-white/5 hover:bg-white/15 text-slate-300 hover:text-white text-xs font-semibold transition-all border border-white/10 flex items-center gap-1 cursor-pointer"
+                  title="Copiar número"
+                >
+                  {copiedType === 'whatsapp' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+                <a
+                  href="https://wa.me/584242042877?text=Hola%20Anderson,%20solicito%20asistencia%20técnica%20con%20el%20Sistema%20WinterPos."
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md shadow-emerald-900/40 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <span>Chatear</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            </div>
+
+            {/* Email Card */}
+            <div className="bg-slate-900/70 border border-sky-500/40 rounded-xl p-3.5 flex items-center justify-between gap-3 hover:border-sky-400 transition-all shadow-md group">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-sky-500/20 border border-sky-500/40 flex items-center justify-center text-sky-400 flex-shrink-0 group-hover:scale-105 transition-transform">
+                  <Mail className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[10px] text-sky-400 font-bold uppercase tracking-wider">Correo Electrónico</div>
+                  <div className="text-xs font-mono font-bold text-white tracking-tight truncate">andersonangellaguna@gmail.com</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleCopy('andersonangellaguna@gmail.com', 'email')}
+                  className="p-2 rounded-lg bg-white/5 hover:bg-white/15 text-slate-300 hover:text-white text-xs font-semibold transition-all border border-white/10 flex items-center gap-1 cursor-pointer"
+                  title="Copiar correo"
+                >
+                  {copiedType === 'email' ? <Check className="w-3.5 h-3.5 text-sky-400" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+                <a
+                  href="mailto:andersonangellaguna@gmail.com?subject=Soporte%20Técnico%20WinterPos"
+                  className="px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold transition-all shadow-md shadow-sky-900/40 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <span>Escribir</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            </div>
+          </div>
+
+          {/* Footer info */}
+          <div className="pt-2 border-t border-white/10 flex items-center justify-between text-[10px] text-slate-400 font-medium">
+            <span>Desarrollado y Asistido por <strong className="text-yellow-400 font-bold">Anderson Laguna</strong></span>
+            <span className="text-emerald-300 font-semibold flex items-center gap-1">
+              <LifeBuoy className="w-3 h-3 text-emerald-400" /> WinterPos AL
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  };
   const [isTestingConnection, setIsTestingConnection] = useState(false);
 
   // Auto-focus username input on load, refresh, or window focus
@@ -61,10 +191,18 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
     };
   }, [showConfig]);
 
-  // Monitor key press Ctrl + Alt + P for LAN settings and F9 for License
+  // Monitor key press: ESC to close modal, Ctrl + Alt + P for LAN settings, F9 for License
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'p') {
+      if (e.key === 'Escape') {
+        if (showSupportModal) {
+          e.preventDefault();
+          setShowSupportModal(false);
+        } else if (showConfig) {
+          e.preventDefault();
+          setShowConfig(false);
+        }
+      } else if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
         setShowConfig(prev => !prev);
       } else if (e.key === 'F9') {
@@ -74,7 +212,7 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onOpenLicenseModal]);
+  }, [onOpenLicenseModal, showSupportModal, showConfig]);
 
   const handleLogoClick = () => {
     const newCount = clickCount + 1;
@@ -223,6 +361,15 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
               )}
               <button 
                 type="button"
+                onClick={() => setShowSupportModal(true)}
+                className="text-emerald-300 hover:text-white px-2 py-0.5 rounded bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-500/30 transition-all font-mono text-[9px] flex items-center gap-1 cursor-pointer"
+                title="Contactar a Soporte Técnico (WhatsApp / Correo)"
+              >
+                <Headphones className="w-3 h-3 text-emerald-400" />
+                <span>Soporte</span>
+              </button>
+              <button 
+                type="button"
                 onClick={() => setShowConfig(prev => !prev)}
                 className="text-slate-300 hover:text-white p-1 rounded hover:bg-white/10"
                 title="Ajustes de Red LAN"
@@ -311,7 +458,7 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
 
                 <button
                   type="submit"
-                  className="w-full bg-[#08284c] hover:bg-[#061f3b] text-white py-3 rounded text-xs font-black tracking-wider transition-all duration-200 border border-slate-700/30 flex items-center justify-center gap-2 font-sans shadow"
+                  className="w-full bg-[#08284c] hover:bg-[#061f3b] text-white py-3 rounded text-xs font-black tracking-wider transition-all duration-200 border border-slate-700/30 flex items-center justify-center gap-2 font-sans shadow cursor-pointer"
                   disabled={isLoading}
                 >
                   {isLoading ? (
@@ -397,10 +544,11 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
             )}
           </div>
 
-          <div className="text-center space-y-1 border-t border-white/10 pt-4 text-[9px] text-slate-300 leading-relaxed font-sans relative">
+          {/* Footer Area: Info Centered with dynamic year */}
+          <div className="text-center space-y-0.5 border-t border-white/10 pt-3 text-[9px] text-slate-300 leading-relaxed font-sans relative">
             <div>Módulo Punto de Venta</div>
-            <div>Pos Venta Version : 3.7</div>
-            <div>Derechos Reservados : 2027</div>
+            <div>Pos Venta Versión : {APP_VERSION}</div>
+            <div>Derechos Reservados : {new Date().getFullYear()}</div>
           </div>
         </div>
 
@@ -411,6 +559,9 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
         >
           <div className="absolute inset-0 bg-slate-900/10"></div>
         </div>
+
+        {/* Technical Support Modal */}
+        {renderSupportModal()}
       </div>
     );
   }
@@ -439,6 +590,15 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
                 <span>Licencia (F9)</span>
               </button>
             )}
+            <button 
+              type="button"
+              onClick={() => setShowSupportModal(true)}
+              className="text-emerald-300 hover:text-white px-2 py-0.5 rounded bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-500/30 transition-all font-mono text-[9px] flex items-center gap-1 cursor-pointer"
+              title="Contactar a Soporte Técnico (WhatsApp / Correo)"
+            >
+              <Headphones className="w-3 h-3 text-emerald-400" />
+              <span>Soporte</span>
+            </button>
             <button 
               type="button"
               onClick={() => setShowConfig(prev => !prev)}
@@ -553,7 +713,7 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
               {/* Login submit button - dark navy */}
               <button
                 type="submit"
-                className="w-full bg-[#0a325c] hover:bg-[#072444] active:scale-[0.99] text-white py-2.5 rounded text-xs font-black tracking-wider transition-all duration-200 border border-slate-600/40 flex items-center justify-center gap-2 font-sans shadow-md"
+                className="w-full bg-[#0a325c] hover:bg-[#072444] active:scale-[0.99] text-white py-2.5 rounded text-xs font-black tracking-wider transition-all duration-200 border border-slate-600/40 flex items-center justify-center gap-2 font-sans shadow-md cursor-pointer"
                 disabled={isLoading}
               >
                 {isLoading ? (
@@ -562,7 +722,6 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
                   'Iniciar sesión'
                 )}
               </button>
-
             </form>
           ) : (
             <form className="space-y-2 bg-[#0d345e] p-3 rounded border border-yellow-500/30 shadow-inner" onSubmit={handleSaveConfig}>
@@ -641,19 +800,19 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
 
         </div>
 
-        {/* Footer brand info */}
+        {/* Footer Area: Info Centered with dynamic year (Desktop Layout) */}
         <div className="text-center space-y-0.5 border-t border-white/10 pt-2.5 text-[9px] text-slate-300 leading-relaxed font-sans relative">
           <div>Módulo Punto de Venta</div>
-          <div>Pos Venta Version : 3.7</div>
-          <div>Derechos Reservados : 2027</div>
-          
-          {/* Circle X icon bottom right style */}
+          <div>Pos Venta Versión : {APP_VERSION}</div>
+          <div>Derechos Reservados : {new Date().getFullYear()}</div>
+
+          {/* Circle X icon close app */}
           <div 
-            className="absolute bottom-0 right-0 text-white/80 hover:text-white transition-all cursor-pointer p-1" 
+            className="absolute bottom-0 right-0 text-white/70 hover:text-white transition-all cursor-pointer p-1 rounded-md hover:bg-white/10" 
             onClick={() => window.close()}
             title="Cerrar aplicación"
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
               <path strokeLinecap="round" strokeLinejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
@@ -669,6 +828,8 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
         <div className="absolute inset-0 bg-slate-900/10"></div>
       </div>
 
+      {/* Technical Support Modal */}
+      {renderSupportModal()}
     </div>
   );
 }

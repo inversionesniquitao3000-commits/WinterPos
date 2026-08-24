@@ -9,6 +9,7 @@ import {
   Sale, CierreCaja, Abono, CierreDetails,
   Proveedor, Compra, PagoProveedor, CotizacionProveedor
 } from './types';
+import { APP_VERSION } from './version';
 
 // Helper to get local date and time string in YYYY-MM-DD HH:MM format
 export function getLocalISODateString(d = new Date()) {
@@ -168,6 +169,37 @@ export default function App() {
     localStorage.setItem('pos_theme_mode', themeMode);
     localStorage.setItem('pos_theme_palette', themePalette);
   }, [themeMode, themePalette]);
+
+  // Station Font Scale (Personalización de tamaño de texto por Estación / Máquina)
+  const [stationFontScale, setStationFontScale] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('pos_station_font_scale');
+      const parsed = saved ? parseInt(saved, 10) : 100;
+      return !isNaN(parsed) && parsed >= 75 && parsed <= 140 ? parsed : 100;
+    } catch {
+      return 100;
+    }
+  });
+
+  useEffect(() => {
+    const ratio = stationFontScale / 100;
+    document.documentElement.setAttribute('data-font-scale', stationFontScale.toString());
+    document.documentElement.style.setProperty('--station-font-scale-ratio', ratio.toString());
+    document.documentElement.style.fontSize = '';
+    localStorage.setItem('pos_station_font_scale', stationFontScale.toString());
+  }, [stationFontScale]);
+
+  const handleDecreaseFontSize = () => {
+    setStationFontScale(prev => Math.max(75, prev - 5));
+  };
+
+  const handleIncreaseFontSize = () => {
+    setStationFontScale(prev => Math.min(135, prev + 5));
+  };
+
+  const handleResetFontSize = () => {
+    setStationFontScale(100);
+  };
 
   const handleResetThemeDefault = () => {
     setThemeMode('light');
@@ -519,6 +551,7 @@ export default function App() {
         if (configRes.ok) {
           const configData = await configRes.json();
           setCompanyConfig(configData);
+          localStorage.setItem('pos_biz_info', JSON.stringify(configData));
         }
       } catch (err) {
         console.warn('⚠️ No se pudo obtener la configuración del negocio al iniciar.');
@@ -813,6 +846,7 @@ const cleanProductObject = (p: any): Product => ({
           abonos_sig: String(abonosSig),
           config_name: companyConfigRef.current?.nombre_comercio || '',
           config_rif: companyConfigRef.current?.rif || '',
+          config_sig: `${companyConfigRef.current?.nombre_comercio || ''}_${companyConfigRef.current?.rif || ''}_${companyConfigRef.current?.tamano_foto_buscador_pos || 'mediana'}_${companyConfigRef.current?.mostrar_fotos_en_buscador_pos !== false}_${companyConfigRef.current?.limite_productos_buscador_pos || 5}`,
           terminal: myTerminal,
           usuario: user ? (user.nombre || user.usuario) : '',
           usuario_id: user ? String(user.id) : '',
@@ -2817,11 +2851,10 @@ const cleanProductObject = (p: any): Product => ({
           <button
             type="button"
             onClick={() => setShowThemeModal(true)}
-            className="px-2.5 py-1.5 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-amber-300 border border-slate-700/80 shadow-xs transition-all active:scale-95 cursor-pointer flex items-center gap-1.5 text-xs font-bold font-sans"
+            className="p-2 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-amber-300 border border-slate-700/80 shadow-xs transition-all active:scale-95 cursor-pointer flex items-center gap-1 text-xs font-bold font-sans"
             title="Personalización Visual: Paleta de Colores y Modo Claro / Oscuro"
           >
             <Palette className="w-4 h-4 text-amber-400" />
-            <span className="text-[11px] text-slate-200 hidden md:inline">Temas</span>
             {themeMode === 'dark' ? (
               <Moon className="w-3.5 h-3.5 text-indigo-300" />
             ) : (
@@ -2848,6 +2881,40 @@ const cleanProductObject = (p: any): Product => ({
               </button>
             </>
           )}
+
+          {/* Selector de Tamaño de Fuentes de la Estación */}
+          <div className="flex items-center bg-slate-900/90 border border-slate-700/80 rounded-lg p-0.5 shadow-xs gap-0.5 ml-1">
+            <button
+              type="button"
+              onClick={handleDecreaseFontSize}
+              disabled={stationFontScale <= 75}
+              className="px-2 py-1 rounded text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-all active:scale-95 cursor-pointer flex items-center gap-0.5 font-sans"
+              title="Disminuir tamaño de letras en esta estación (A-)"
+            >
+              <span className="text-[12px] font-black leading-none">A</span>
+              <span className="text-[11px] font-black text-rose-400 leading-none">−</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleResetFontSize}
+              className="px-1.5 py-0.5 text-[9px] font-mono font-bold text-slate-400 hover:text-yellow-400 hover:bg-slate-800 rounded transition-all cursor-pointer select-none"
+              title="Clic para restablecer tamaño al 100%"
+            >
+              {stationFontScale}%
+            </button>
+
+            <button
+              type="button"
+              onClick={handleIncreaseFontSize}
+              disabled={stationFontScale >= 135}
+              className="px-2 py-1 rounded text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-all active:scale-95 cursor-pointer flex items-center gap-0.5 font-sans"
+              title="Aumentar tamaño de letras en esta estación (A+)"
+            >
+              <span className="text-[12px] font-black leading-none">A</span>
+              <span className="text-[11px] font-black text-emerald-400 leading-none">+</span>
+            </button>
+          </div>
         </div>
       </nav>
 
@@ -3129,7 +3196,7 @@ const cleanProductObject = (p: any): Product => ({
       <footer className="bg-slate-900 border-t border-slate-800 py-3 px-6 select-none flex justify-between items-center text-[9px] text-slate-450 text-white flex-shrink-0">
         <span>Licencia activa para {companyConfig.nombre_comercio || 'su empresa'}</span>
         <span>Operador: {currentUser.nombre} (Turno Activo)</span>
-        <span>SISTEMA WINTERPOS-AL v4.1.0</span>
+        <span>SISTEMA WINTERPOS-AL v{APP_VERSION}</span>
       </footer>
 
       {/* MODAL DE REIMPRESIÓN DE TICKET */}

@@ -316,3 +316,70 @@
 ::-webkit-scrollbar-thumb:hover {
   filter: brightness(0.8);
 }
+
+/* ==========================================================================
+   STATION TYPOGRAPHY SCALING SYSTEM (A- / A+)
+   Scales text font-size purely without altering component padding/layout
+   ========================================================================== */
+
+:root {
+  --station-font-scale-ratio: 1;
+}
+
+html[data-font-scale] table td,
+html[data-font-scale] table th {
+  font-size: calc(13.5px * var(--station-font-scale-ratio, 1)) !important;
+}
+
+html[data-font-scale] input:not([type="checkbox"]):not([type="radio"]),
+html[data-font-scale] select,
+html[data-font-scale] textarea {
+  font-size: calc(13.5px * var(--station-font-scale-ratio, 1)) !important;
+}
+
+html[data-font-scale] .text-\[9px\],
+html[data-font-scale] .text-\[9\.5px\],
+html[data-font-scale] .text-\[10px\] {
+  font-size: calc(10.5px * var(--station-font-scale-ratio, 1)) !important;
+}
+
+html[data-font-scale] .text-\[11px\],
+html[data-font-scale] .text-\[11\.5px\],
+html[data-font-scale] .text-xs,
+html[data-font-scale] .text-\[12px\] {
+  font-size: calc(12.5px * var(--station-font-scale-ratio, 1)) !important;
+}
+
+html[data-font-scale] .text-\[13px\],
+html[data-font-scale] .text-sm,
+html[data-font-scale] .text-\[14px\] {
+  font-size: calc(14.5px * var(--station-font-scale-ratio, 1)) !important;
+}
+
+html[data-font-scale] .text-\[15px\],
+html[data-font-scale] .text-base,
+html[data-font-scale] .text-\[16px\] {
+  font-size: calc(16.5px * var(--station-font-scale-ratio, 1)) !important;
+}
+
+html[data-font-scale] .text-\[17px\],
+html[data-font-scale] .text-lg,
+html[data-font-scale] .text-\[18px\] {
+  font-size: calc(18.5px * var(--station-font-scale-ratio, 1)) !important;
+}
+
+html[data-font-scale] .text-xl,
+html[data-font-scale] .text-\[20px\] {
+  font-size: calc(21px * var(--station-font-scale-ratio, 1)) !important;
+}
+
+html[data-font-scale] .text-2xl,
+html[data-font-scale] .text-\[24px\] {
+  font-size: calc(25px * var(--station-font-scale-ratio, 1)) !important;
+}
+
+html[data-font-scale] .text-3xl,
+html[data-font-scale] .text-\[30px\] {
+  font-size: calc(31px * var(--station-font-scale-ratio, 1)) !important;
+}
+

@@ -4,7 +4,11 @@
 ; =====================================================================
 
 #define MyAppName "WinterPos Punto de Venta (Completo Offline)"
-#define MyAppVersion "1.0.0"
+#ifexist "version.iss"
+  #include "version.iss"
+#else
+  #define MyAppVersion "1.1.0"
+#endif
 #define MyAppPublisher "WinterPos AL"
 #define MyAppURL "https://winterpos.local"
 #define MyAppExeName "Iniciar_WinterPos.vbs"
@@ -36,6 +40,7 @@ Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+Name: "killnode"; Description: "🔄 Cerrar procesos Node.js en ejecución (Recomendado para aplicar actualizaciones limpias sin archivos bloqueados)"; GroupDescription: "Mantenimiento y Actualización:"; Flags: checkedonce
 Name: "installpg"; Description: "🐘 Instalar Motor de Base de Datos PostgreSQL 15 (Recomendado para Servidor Central)"; GroupDescription: "Componentes del Servidor:"
 Name: "installnode"; Description: "💚 Instalar Entorno de Ejecución Node.js v20 (Recomendado si la PC no posee Node.js previamente)"; GroupDescription: "Componentes del Servidor:"
 Name: "firewallrules"; Description: "🛡️ Configurar reglas en Firewall de Windows (Puertos 5000 Web y 5432 Base de Datos para acceso en Red LAN)"; GroupDescription: "Configuración de Red y Seguridad:"; Flags: checkedonce
@@ -365,7 +370,17 @@ var
   EnvContent: string;
   EnvFile: string;
   ServerHost: string;
+  ResultCode: Integer;
 begin
+  if CurStep = ssInstall then
+  begin
+    if WizardIsTaskSelected('killnode') then
+    begin
+      Exec('taskkill.exe', '/F /IM node.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      Sleep(400);
+    end;
+  end;
+
   if CurStep = ssPostInstall then
   begin
     if ServerRadio.Checked then

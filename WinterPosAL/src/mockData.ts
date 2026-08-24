@@ -109,7 +109,8 @@ export const mockConfig: CompanyConfig = {
   permitir_multisesion: true,
   compartir_apertura_caja: true,
   mostrar_fotos_en_buscador_pos: true,
-  tamano_foto_buscador_pos: 'mediana'
+  tamano_foto_buscador_pos: 'mediana',
+  limite_productos_buscador_pos: 5
 };
 
 export const mockMovements: InventoryMovement[] = [

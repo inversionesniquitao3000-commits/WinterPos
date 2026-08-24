@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS Configuracion_Empresa (
     whatsapp_config TEXT,
     moneda_ticket_default VARCHAR(10) DEFAULT 'USD',
     mostrar_fotos_en_buscador_pos BOOLEAN DEFAULT TRUE,
-    tamano_foto_buscador_pos VARCHAR(20) DEFAULT 'mediana'
+    tamano_foto_buscador_pos VARCHAR(20) DEFAULT 'mediana',
+    limite_productos_buscador_pos INT DEFAULT 5
 );
 
 -- ==========================================

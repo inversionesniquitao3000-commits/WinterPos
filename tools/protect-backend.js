@@ -160,6 +160,35 @@ if (fs.existsSync(launcherSrc)) {
   }
 }
 
+// 5. Synchronize App Version with Inno Setup (version.iss) and Frontend (src/version.ts)
+const frontendPkgPath = path.join(rootDir, 'WinterPosAL', 'package.json');
+let appVersion = '1.1.0';
+if (fs.existsSync(frontendPkgPath)) {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(frontendPkgPath, 'utf8'));
+    if (pkg.version) appVersion = pkg.version;
+  } catch (e) {}
+}
+
+// 5.1 Inno Setup version.iss
+const versionIssPath = path.join(rootDir, 'installer', 'version.iss');
+const versionIssContent = `; =====================================================================
+; ARCHIVO GENERADO AUTOMÁTICAMENTE POR TOOLS/PROTECT-BACKEND.JS
+; VERSIÓN SINCRONIZADA CON PACKAGE.JSON: ${appVersion}
+; =====================================================================
+#define MyAppVersion "${appVersion}"
+`;
+fs.writeFileSync(versionIssPath, versionIssContent, 'utf8');
+
+// 5.2 Frontend src/version.ts
+const frontendVersionTsPath = path.join(rootDir, 'WinterPosAL', 'src', 'version.ts');
+const frontendVersionTsContent = `// Central Application Version Definition (Synchronized with package.json)
+export const APP_VERSION = '${appVersion}';
+`;
+fs.writeFileSync(frontendVersionTsPath, frontendVersionTsContent, 'utf8');
+
+console.log(`\n📌 Sincronizada versión global del Sistema: v${appVersion} (Inno Setup & Frontend)`);
+
 console.log('\n==================================================================');
 console.log('  ✅ COMPILACIÓN Y PROTECCIÓN COMPLETADA CON ÉXITO');
 console.log('  La carpeta "dist_backend/" está lista para ser empaquetada.');

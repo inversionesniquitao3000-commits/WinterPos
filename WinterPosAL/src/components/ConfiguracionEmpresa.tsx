@@ -332,6 +332,7 @@ export default function ConfiguracionEmpresa({
     compartir_apertura_caja: config.compartir_apertura_caja !== false,
     mostrar_fotos_en_buscador_pos: config.mostrar_fotos_en_buscador_pos !== false,
     tamano_foto_buscador_pos: config.tamano_foto_buscador_pos || 'mediana',
+    limite_productos_buscador_pos: config.limite_productos_buscador_pos || 5,
     moneda_ticket_default: config.moneda_ticket_default || 'USD'
   }));
 
@@ -342,6 +343,7 @@ export default function ConfiguracionEmpresa({
       compartir_apertura_caja: config.compartir_apertura_caja !== false,
       mostrar_fotos_en_buscador_pos: config.mostrar_fotos_en_buscador_pos !== false,
       tamano_foto_buscador_pos: config.tamano_foto_buscador_pos || 'mediana',
+      limite_productos_buscador_pos: config.limite_productos_buscador_pos || 5,
       moneda_ticket_default: config.moneda_ticket_default || 'USD'
     });
   }, [config]);
@@ -2658,6 +2660,50 @@ export default function ConfiguracionEmpresa({
                                 <div className="text-[10px] text-slate-500 font-normal">Ultra detalle</div>
                               </div>
                             </button>
+                          </div>
+
+                          {/* Selector de Cantidad de Productos Visibles a Primera Vista */}
+                          <div className="mt-4 pt-3 border-t border-slate-200/80">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-2">
+                              <div>
+                                <label className="text-[11px] font-bold text-slate-700 block">
+                                  🔢 Productos Visibles a Primera Vista (Alto del Desplegable):
+                                </label>
+                                <span className="text-[9.5px] text-slate-450 block">
+                                  Define el alto inicial de la ventana; podrás deslizar (scroll) para ver todos los demás resultados.
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-slate-500 font-semibold flex-shrink-0">
+                                Vista: <span className="text-blue-700 font-bold font-mono">{formData.limite_productos_buscador_pos || 5} filas</span>
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 max-w-xl">
+                              {[2, 4, 5, 6, 8, 10].map((qty) => {
+                                const isSelected = (formData.limite_productos_buscador_pos || 5) === qty;
+                                return (
+                                  <button
+                                    key={qty}
+                                    type="button"
+                                    disabled={!isAdmin}
+                                    onClick={() => {
+                                      const updated = { ...formData, limite_productos_buscador_pos: qty };
+                                      setFormData(updated);
+                                      handleSavePoliticasDirect(updated);
+                                    }}
+                                    className={`py-2 px-3 rounded-lg border text-center transition-all ${
+                                      isSelected
+                                        ? 'bg-blue-600 border-blue-600 text-white font-bold shadow-sm ring-2 ring-blue-300'
+                                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100 font-semibold text-xs'
+                                    }`}
+                                  >
+                                    <div className="text-sm font-mono font-bold">{qty}</div>
+                                    <div className={`text-[9px] ${isSelected ? 'text-blue-100' : 'text-slate-400'} font-normal`}>
+                                      {qty === 5 ? 'Estándar ★' : `${qty} filas`}
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
                         </div>
                       )}

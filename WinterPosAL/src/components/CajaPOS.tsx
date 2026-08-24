@@ -1148,7 +1148,7 @@ export default function CajaPOS({
 
       // 4. Comparación rápida alfabética
       return a.description < b.description ? -1 : 1;
-    }).slice(0, 25); // Máximo 25 elementos en el DOM para evitar congelamiento de pantalla
+    }).slice(0, 35); // Límite de 35 resultados navegables con scroll y teclado
   }, [products, searchProdTerm, productsByBarcodeMap]);
 
   useEffect(() => {
@@ -1481,6 +1481,7 @@ export default function CajaPOS({
 
   // Search input ref and auto-focus handlers
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
   const checkoutModalRef = useRef<HTMLDivElement>(null);
 
   // Helper to re-focus the search / barcode input reliably
@@ -1532,6 +1533,24 @@ export default function CajaPOS({
       focusSearchInput();
     }
   }, [cajaAbierta, showAperturaModal, showCheckoutModal, showCierreModal, showMovementsModal, showTicketModal, focusSearchInput]);
+
+  // Close search suggestions on click outside (acting like ESC key)
+  useEffect(() => {
+    if (!searchProdTerm) return;
+
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
+        setSearchProdTerm('');
+        setSearchSelectedIndex(-1);
+        focusSearchInput();
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+    };
+  }, [searchProdTerm, focusSearchInput]);
 
   // Click on blank / whitespace areas of Caja POS to refocus search bar
   const handlePosContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -3232,7 +3251,7 @@ export default function CajaPOS({
           {/* SEARCH PRODUCT SELECTOR (4 Cols - 33.3% Width) */}
           <div className="md:col-span-1 lg:col-span-4 space-y-1">
             <label className="text-[10px] text-slate-500 font-sans block font-semibold">Buscar Producto (F6)</label>
-            <div className="relative">
+            <div ref={searchContainerRef} className="relative">
               <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-slate-400 pointer-events-none" />
               <input
                 ref={searchInputRef}
@@ -3256,7 +3275,11 @@ export default function CajaPOS({
                       setSearchSelectedIndex(prev => (prev > 0 ? prev - 1 : searchSuggestions.length - 1));
                     }
                   } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setSearchProdTerm('');
                     setSearchSelectedIndex(-1);
+                    focusSearchInput();
                   } else if (e.key === 'Enter') {
                     e.preventDefault();
                     e.stopPropagation();
@@ -3298,56 +3321,77 @@ export default function CajaPOS({
                 const showPhotos = companyConfig?.mostrar_fotos_en_buscador_pos !== false;
                 const photoSize = companyConfig?.tamano_foto_buscador_pos || 'mediana';
 
-                // Configuración de dimensiones según tamaño
+                // Configuración de dimensiones y tipografía armónica según tamaño
                 const sizeStyles = {
                   pequena: {
                     imgBox: 'w-8 h-8 rounded-md',
                     icon: 'w-3.5 h-3.5',
-                    btnPad: 'p-1.5 gap-2 text-[10.5px]',
-                    titleClass: 'text-[10.5px]',
-                    priceClass: 'text-[10.5px]',
-                    dropdownMaxH: 'max-h-64'
+                    btnPad: 'p-1.5 gap-2.5',
+                    titleClass: 'text-[11px]',
+                    priceUSDClass: 'text-[11.5px]',
+                    priceVESClass: 'text-[10px]',
+                    stockClass: 'text-[9.5px]',
+                    barcodeClass: 'text-[9.5px]',
+                    itemHeightPx: 48
                   },
                   mediana: {
                     imgBox: 'w-11 h-11 rounded-lg',
                     icon: 'w-5 h-5',
-                    btnPad: 'p-2 gap-2.5 text-[11px]',
-                    titleClass: 'text-[11px]',
-                    priceClass: 'text-[11.5px]',
-                    dropdownMaxH: 'max-h-80'
+                    btnPad: 'p-2 gap-3',
+                    titleClass: 'text-[12px]',
+                    priceUSDClass: 'text-[13px]',
+                    priceVESClass: 'text-[11px]',
+                    stockClass: 'text-[10.5px]',
+                    barcodeClass: 'text-[10px]',
+                    itemHeightPx: 64
                   },
                   grande: {
                     imgBox: 'w-14 h-14 rounded-xl',
                     icon: 'w-6 h-6',
-                    btnPad: 'p-2.5 gap-3 text-[11.5px]',
-                    titleClass: 'text-[12px]',
-                    priceClass: 'text-[12px]',
-                    dropdownMaxH: 'max-h-96'
+                    btnPad: 'p-2.5 gap-3.5',
+                    titleClass: 'text-[13.5px]',
+                    priceUSDClass: 'text-[14.5px]',
+                    priceVESClass: 'text-[12px]',
+                    stockClass: 'text-[11.5px]',
+                    barcodeClass: 'text-[11px]',
+                    itemHeightPx: 80
                   },
                   extragrande: {
                     imgBox: 'w-18 h-18 sm:w-20 sm:h-20 rounded-2xl',
                     icon: 'w-8 h-8',
-                    btnPad: 'p-3 gap-3.5 text-xs',
-                    titleClass: 'text-[12.5px] font-bold',
-                    priceClass: 'text-[12.5px]',
-                    dropdownMaxH: 'max-h-[440px]'
+                    btnPad: 'p-3 gap-4',
+                    titleClass: 'text-[15px] font-bold',
+                    priceUSDClass: 'text-[16.5px]',
+                    priceVESClass: 'text-[13.5px]',
+                    stockClass: 'text-[12.5px]',
+                    barcodeClass: 'text-[12px]',
+                    itemHeightPx: 100
                   }
                 }[photoSize] || {
                   imgBox: 'w-11 h-11 rounded-lg',
                   icon: 'w-5 h-5',
-                  btnPad: 'p-2 gap-2.5 text-[11px]',
-                  titleClass: 'text-[11px]',
-                  priceClass: 'text-[11.5px]',
-                  dropdownMaxH: 'max-h-80'
+                  btnPad: 'p-2 gap-3',
+                  titleClass: 'text-[12px]',
+                  priceUSDClass: 'text-[13px]',
+                  priceVESClass: 'text-[11px]',
+                  stockClass: 'text-[10.5px]',
+                  barcodeClass: 'text-[10px]',
+                  itemHeightPx: 64
                 };
+
+                const visibleRows = companyConfig?.limite_productos_buscador_pos || 5;
+                const dynamicMaxHeight = showPhotos
+                  ? `${visibleRows * sizeStyles.itemHeightPx + 4}px`
+                  : `${visibleRows * 42 + 4}px`;
 
                 return (
                   <div 
                     ref={searchDropdownRef}
+                    style={{ maxHeight: dynamicMaxHeight }}
                     className={`absolute left-0 top-11 bg-white border border-slate-250 rounded-xl overflow-y-auto z-40 shadow-2xl divide-y divide-slate-100 ${
                       showPhotos 
-                        ? `${sizeStyles.dropdownMaxH} w-full min-w-[320px] sm:min-w-[440px] md:min-w-[500px]` 
-                        : 'max-h-56 w-full'
+                        ? 'w-full min-w-[340px] sm:min-w-[460px] md:min-w-[540px]' 
+                        : 'w-full'
                     }`}
                   >
                     {searchSuggestions.map((p, idx) => {
@@ -3402,7 +3446,7 @@ export default function CajaPOS({
                             {/* Información del Producto */}
                             <div className="flex-1 min-w-0 pr-1">
                               <div className="flex items-center gap-1.5 mb-0.5">
-                                <span className="font-mono text-slate-500 font-bold text-[10px] tracking-tight">{p.barcode}</span>
+                                <span className={`font-mono text-slate-500 font-bold tracking-tight ${sizeStyles.barcodeClass}`}>{p.barcode}</span>
                                 {p.exento_impuesto === true ? (
                                   <span className="bg-amber-100 text-amber-900 border border-amber-300 font-extrabold text-[8px] px-1 py-0.2 rounded font-mono inline-block shadow-2xs" title="Producto Exento de IVA (0%)">
                                     (E)
@@ -3419,18 +3463,27 @@ export default function CajaPOS({
                             </div>
 
                             {/* Precios y Stock */}
-                            <div className="text-right flex-shrink-0 flex flex-col items-end">
+                            <div className="text-right flex-shrink-0 flex flex-col items-end justify-center">
                               {hasStock ? (
                                 <>
-                                  <div className={`text-emerald-600 font-bold font-mono ${sizeStyles.priceClass}`}>
-                                    ${p.precio_detalle_usd.toFixed(2)} <span className="text-slate-600 font-bold text-[10px]">/ {formatBs(priceVES)}</span>
+                                  <div className={`text-emerald-600 font-bold font-mono ${sizeStyles.priceUSDClass} leading-tight`}>
+                                    ${p.precio_detalle_usd.toFixed(2)}{' '}
+                                    <span className={`text-slate-600 font-bold font-mono ${sizeStyles.priceVESClass}`}>
+                                      / {formatBs(priceVES)}
+                                    </span>
                                   </div>
-                                  <span className="text-[9px] text-slate-500 font-sans font-semibold">Stock: {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}</span>
+                                  <span className={`${sizeStyles.stockClass} text-slate-500 font-sans font-semibold mt-0.5`}>
+                                    Stock: {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}
+                                  </span>
                                 </>
                               ) : (
                                 <>
-                                  <span className="text-red-500 font-bold font-mono text-[10.5px]">SIN STOCK</span>
-                                  <span className="text-[9px] text-slate-400 font-sans font-normal">Stock: {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}</span>
+                                  <span className={`text-red-500 font-bold font-mono ${sizeStyles.priceUSDClass} leading-tight`}>
+                                    SIN STOCK
+                                  </span>
+                                  <span className={`${sizeStyles.stockClass} text-slate-400 font-sans font-normal mt-0.5`}>
+                                    Stock: {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}
+                                  </span>
                                 </>
                               )}
                             </div>

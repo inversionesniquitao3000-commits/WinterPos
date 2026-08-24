@@ -153,6 +153,7 @@ export interface CompanyConfig {
   compartir_apertura_caja?: boolean;
   mostrar_fotos_en_buscador_pos?: boolean;
   tamano_foto_buscador_pos?: 'pequena' | 'mediana' | 'grande' | 'extragrande';
+  limite_productos_buscador_pos?: number;
   tasa_oficial_bcv?: number;
   logo_url?: string;
   moneda_ticket_default?: 'USD' | 'VES';

@@ -1,1 +1,19 @@
-null
+{
+  "rif": "J-41132631",
+  "nombre_comercio": "INVERSIONES NIQUITAO",
+  "direccion": "Caracas, Venezuela",
+  "telefono": "0424-2042877",
+  "correo": "niquitao@correo.com",
+  "moneda_base": "USD",
+  "mensaje_pie_ticket": "Gracias por su compra!",
+  "metodos_pago_activos": [
+    "efectivo_usd",
+    "efectivo_ves",
+    "debito",
+    "pago_movil",
+    "biopago",
+    "credito"
+  ],
+  "tamano_foto_buscador_pos": "extragrande",
+  "limite_productos_buscador_pos": 8
+}

@@ -2,12 +2,19 @@ import fs from 'fs';
 import path from 'path';
 import pg from 'pg';
 import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
 import { initDatabase } from './init-db.js';
 import { 
   mockUsers, mockProducts, mockClients, mockTasaHistory, mockConfig 
 } from './mockData.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 dotenv.config();
+if (!process.env.DB_PASSWORD && fs.existsSync(path.join(__dirname, '.env'))) {
+  dotenv.config({ path: path.join(__dirname, '.env') });
+}
 
 const { Pool, types } = pg;
 // Force pg to return timestamp strings directly without shifting to UTC Date objects
@@ -70,11 +77,11 @@ try {
   await initDatabase();
 
   pool = new Pool({
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    host: process.env.DB_HOST,
+    user: process.env.DB_USER || 'postgres',
+    password: String(process.env.DB_PASSWORD || 'postgres'),
+    host: process.env.DB_HOST || 'localhost',
     port: parseInt(process.env.DB_PORT || '5432'),
-    database: process.env.DB_DATABASE,
+    database: process.env.DB_DATABASE || 'Winter',
     max: 30,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 5000
@@ -217,6 +224,7 @@ try {
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS moneda_ticket_default VARCHAR(10) DEFAULT 'USD';
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS mostrar_fotos_en_buscador_pos BOOLEAN DEFAULT TRUE;
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS tamano_foto_buscador_pos VARCHAR(20) DEFAULT 'mediana';
+    ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS limite_productos_buscador_pos INT DEFAULT 5;
 
     CREATE TABLE IF NOT EXISTS Accionistas (
       id SERIAL PRIMARY KEY,
@@ -490,6 +498,7 @@ export async function getCompanyConfig() {
           compartir_apertura_caja: row.compartir_apertura_caja !== false,
           mostrar_fotos_en_buscador_pos: row.mostrar_fotos_en_buscador_pos !== false,
           tamano_foto_buscador_pos: row.tamano_foto_buscador_pos || 'mediana',
+          limite_productos_buscador_pos: parseInt(row.limite_productos_buscador_pos, 10) || 5,
           logo_url: row.logo_url || '',
           moneda_ticket_default: row.moneda_ticket_default || 'USD'
         };
@@ -517,6 +526,7 @@ export async function getCompanyConfig() {
     compartir_apertura_caja: c.compartir_apertura_caja !== false,
     mostrar_fotos_en_buscador_pos: c.mostrar_fotos_en_buscador_pos !== false,
     tamano_foto_buscador_pos: c.tamano_foto_buscador_pos || 'mediana',
+    limite_productos_buscador_pos: parseInt(c.limite_productos_buscador_pos, 10) || 5,
     logo_url: c.logo_url || '',
     moneda_ticket_default: c.moneda_ticket_default || 'USD'
   };
@@ -533,6 +543,7 @@ export async function saveCompanyConfig(config) {
       const cApertura = config.compartir_apertura_caja !== false;
       const mFotosPos = config.mostrar_fotos_en_buscador_pos !== false;
       const tFotoPos = config.tamano_foto_buscador_pos || 'mediana';
+      const lProdPos = parseInt(config.limite_productos_buscador_pos, 10) || 5;
       const mTicket = config.moneda_ticket_default || 'USD';
       if (existing.rowCount > 0) {
         await pool.query(
@@ -540,15 +551,15 @@ export async function saveCompanyConfig(config) {
             rif = $1, nombre_comercio = $2, direccion = $3, telefono = $4, 
             correo = $5, moneda_base = $6, mensaje_pie_ticket = $7, metodos_pago_activos = $8,
             permitir_multisesion = $9, compartir_apertura_caja = $10, logo_url = $11, moneda_ticket_default = $12,
-            mostrar_fotos_en_buscador_pos = $13, tamano_foto_buscador_pos = $14
-           WHERE id = $15`,
-          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura, config.logo_url || '', mTicket, mFotosPos, tFotoPos, existing.rows[0].id]
+            mostrar_fotos_en_buscador_pos = $13, tamano_foto_buscador_pos = $14, limite_productos_buscador_pos = $15
+           WHERE id = $16`,
+          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura, config.logo_url || '', mTicket, mFotosPos, tFotoPos, lProdPos, existing.rows[0].id]
         );
       } else {
         await pool.query(
-          `INSERT INTO Configuracion_Empresa (rif, nombre_comercio, direccion, telefono, correo, moneda_base, mensaje_pie_ticket, metodos_pago_activos, permitir_multisesion, compartir_apertura_caja, logo_url, moneda_ticket_default, mostrar_fotos_en_buscador_pos, tamano_foto_buscador_pos)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura, config.logo_url || '', mTicket, mFotosPos, tFotoPos]
+          `INSERT INTO Configuracion_Empresa (rif, nombre_comercio, direccion, telefono, correo, moneda_base, mensaje_pie_ticket, metodos_pago_activos, permitir_multisesion, compartir_apertura_caja, logo_url, moneda_ticket_default, mostrar_fotos_en_buscador_pos, tamano_foto_buscador_pos, limite_productos_buscador_pos)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura, config.logo_url || '', mTicket, mFotosPos, tFotoPos, lProdPos]
         );
       }
       return config;
