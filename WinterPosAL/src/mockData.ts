@@ -107,7 +107,9 @@ export const mockConfig: CompanyConfig = {
   mensaje_pie_ticket: '¡Gracias por su compra! Conserve su ticket.',
   metodos_pago_activos: ['efectivo_usd', 'efectivo_ves', 'tarjeta_ves', 'pago_movil', 'biopago', 'credito'],
   permitir_multisesion: true,
-  compartir_apertura_caja: true
+  compartir_apertura_caja: true,
+  mostrar_fotos_en_buscador_pos: true,
+  tamano_foto_buscador_pos: 'mediana'
 };
 
 export const mockMovements: InventoryMovement[] = [

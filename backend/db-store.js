@@ -215,6 +215,8 @@ try {
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS gdrive_config TEXT;
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS whatsapp_config TEXT;
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS moneda_ticket_default VARCHAR(10) DEFAULT 'USD';
+    ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS mostrar_fotos_en_buscador_pos BOOLEAN DEFAULT TRUE;
+    ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS tamano_foto_buscador_pos VARCHAR(20) DEFAULT 'mediana';
 
     CREATE TABLE IF NOT EXISTS Accionistas (
       id SERIAL PRIMARY KEY,
@@ -486,6 +488,8 @@ export async function getCompanyConfig() {
           metodos_pago_activos: row.metodos_pago_activos,
           permitir_multisesion: row.permitir_multisesion !== false,
           compartir_apertura_caja: row.compartir_apertura_caja !== false,
+          mostrar_fotos_en_buscador_pos: row.mostrar_fotos_en_buscador_pos !== false,
+          tamano_foto_buscador_pos: row.tamano_foto_buscador_pos || 'mediana',
           logo_url: row.logo_url || '',
           moneda_ticket_default: row.moneda_ticket_default || 'USD'
         };
@@ -511,6 +515,8 @@ export async function getCompanyConfig() {
     metodos_pago_activos: c.metodos_pago_activos || [],
     permitir_multisesion: c.permitir_multisesion !== false,
     compartir_apertura_caja: c.compartir_apertura_caja !== false,
+    mostrar_fotos_en_buscador_pos: c.mostrar_fotos_en_buscador_pos !== false,
+    tamano_foto_buscador_pos: c.tamano_foto_buscador_pos || 'mediana',
     logo_url: c.logo_url || '',
     moneda_ticket_default: c.moneda_ticket_default || 'USD'
   };
@@ -525,21 +531,24 @@ export async function saveCompanyConfig(config) {
       const existing = await pool.query('SELECT id FROM Configuracion_Empresa ORDER BY id DESC LIMIT 1');
       const pMulti = config.permitir_multisesion !== false;
       const cApertura = config.compartir_apertura_caja !== false;
+      const mFotosPos = config.mostrar_fotos_en_buscador_pos !== false;
+      const tFotoPos = config.tamano_foto_buscador_pos || 'mediana';
       const mTicket = config.moneda_ticket_default || 'USD';
       if (existing.rowCount > 0) {
         await pool.query(
           `UPDATE Configuracion_Empresa SET 
             rif = $1, nombre_comercio = $2, direccion = $3, telefono = $4, 
             correo = $5, moneda_base = $6, mensaje_pie_ticket = $7, metodos_pago_activos = $8,
-            permitir_multisesion = $9, compartir_apertura_caja = $10, logo_url = $11, moneda_ticket_default = $12
-           WHERE id = $13`,
-          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura, config.logo_url || '', mTicket, existing.rows[0].id]
+            permitir_multisesion = $9, compartir_apertura_caja = $10, logo_url = $11, moneda_ticket_default = $12,
+            mostrar_fotos_en_buscador_pos = $13, tamano_foto_buscador_pos = $14
+           WHERE id = $15`,
+          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura, config.logo_url || '', mTicket, mFotosPos, tFotoPos, existing.rows[0].id]
         );
       } else {
         await pool.query(
-          `INSERT INTO Configuracion_Empresa (rif, nombre_comercio, direccion, telefono, correo, moneda_base, mensaje_pie_ticket, metodos_pago_activos, permitir_multisesion, compartir_apertura_caja, logo_url, moneda_ticket_default)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura, config.logo_url || '', mTicket]
+          `INSERT INTO Configuracion_Empresa (rif, nombre_comercio, direccion, telefono, correo, moneda_base, mensaje_pie_ticket, metodos_pago_activos, permitir_multisesion, compartir_apertura_caja, logo_url, moneda_ticket_default, mostrar_fotos_en_buscador_pos, tamano_foto_buscador_pos)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura, config.logo_url || '', mTicket, mFotosPos, tFotoPos]
         );
       }
       return config;

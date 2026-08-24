@@ -330,6 +330,8 @@ export default function ConfiguracionEmpresa({
     ...config,
     permitir_multisesion: config.permitir_multisesion !== false,
     compartir_apertura_caja: config.compartir_apertura_caja !== false,
+    mostrar_fotos_en_buscador_pos: config.mostrar_fotos_en_buscador_pos !== false,
+    tamano_foto_buscador_pos: config.tamano_foto_buscador_pos || 'mediana',
     moneda_ticket_default: config.moneda_ticket_default || 'USD'
   }));
 
@@ -338,6 +340,8 @@ export default function ConfiguracionEmpresa({
       ...config,
       permitir_multisesion: config.permitir_multisesion !== false,
       compartir_apertura_caja: config.compartir_apertura_caja !== false,
+      mostrar_fotos_en_buscador_pos: config.mostrar_fotos_en_buscador_pos !== false,
+      tamano_foto_buscador_pos: config.tamano_foto_buscador_pos || 'mediana',
       moneda_ticket_default: config.moneda_ticket_default || 'USD'
     });
   }, [config]);
@@ -2514,6 +2518,150 @@ export default function ConfiguracionEmpresa({
                     >
                       {formData.compartir_apertura_caja !== false ? '🔗 Compartir Misma Caja (Habilitado)' : '🔒 Apertura Independiente por Estación'}
                     </button>
+                  </div>
+
+                  {/* 3. Mostrar Fotos en Buscador de Caja POS */}
+                  <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex flex-col justify-between space-y-4 shadow-xs md:col-span-2">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-800 text-xs block">
+                          🖼️ Mostrar Fotos de Productos en Buscador POS (Caja)
+                        </span>
+                        <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded-full">
+                          Asistente Visual
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Muestra la miniatura de cada producto directamente en el menú de sugerencias mientras el cajero escribe el nombre o código, permitiendo una confirmación visual inmediata del empaque/presentación para evitar errores al facturar.
+                      </p>
+                    </div>
+
+                    <div className="space-y-3 pt-1">
+                      {/* Botón Principal Activar/Desactivar */}
+                      <button
+                        type="button"
+                        disabled={!isAdmin}
+                        onClick={() => {
+                          const updated = { ...formData, mostrar_fotos_en_buscador_pos: formData.mostrar_fotos_en_buscador_pos === false };
+                          setFormData(updated);
+                          handleSavePoliticasDirect(updated);
+                        }}
+                        className={`w-full sm:w-auto px-6 py-2.5 rounded-lg font-bold text-xs transition-all shadow-sm flex items-center justify-center gap-2 ${
+                          !isAdmin ? 'opacity-60 cursor-not-allowed bg-slate-300 text-slate-600' :
+                          formData.mostrar_fotos_en_buscador_pos !== false
+                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                            : 'bg-slate-200 hover:bg-slate-300 text-slate-700'
+                        }`}
+                      >
+                        {formData.mostrar_fotos_en_buscador_pos !== false ? '✅ Vista Visual con Fotos (Habilitado)' : '📄 Vista Compacta de Solo Texto (Deshabilitado)'}
+                      </button>
+
+                      {/* Selector de Tamaño de Imagen (Solo visible si está habilitado) */}
+                      {formData.mostrar_fotos_en_buscador_pos !== false && (
+                        <div className="mt-3 pt-3 border-t border-slate-200/80">
+                          <label className="text-[11px] font-bold text-slate-700 block mb-2">
+                            📐 Tamaño de la Miniatura en el Buscador:
+                          </label>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 max-w-3xl">
+                            {/* Tamaño Pequeño */}
+                            <button
+                              type="button"
+                              disabled={!isAdmin}
+                              onClick={() => {
+                                const updated = { ...formData, tamano_foto_buscador_pos: 'pequena' as const };
+                                setFormData(updated);
+                                handleSavePoliticasDirect(updated);
+                              }}
+                              className={`p-2.5 rounded-lg border text-left transition-all flex items-center gap-2 ${
+                                (formData.tamano_foto_buscador_pos === 'pequena')
+                                  ? 'bg-blue-50 border-blue-400 text-blue-900 shadow-xs font-bold ring-2 ring-blue-300/50'
+                                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100 font-medium'
+                              }`}
+                            >
+                              <div className="w-7 h-7 rounded bg-slate-100 border border-slate-300 flex items-center justify-center text-[10px] text-slate-500 font-mono font-bold flex-shrink-0">
+                                32px
+                              </div>
+                              <div>
+                                <div className="text-xs font-semibold">Pequeña</div>
+                                <div className="text-[10px] text-slate-500 font-normal">Compacta</div>
+                              </div>
+                            </button>
+
+                            {/* Tamaño Mediano */}
+                            <button
+                              type="button"
+                              disabled={!isAdmin}
+                              onClick={() => {
+                                const updated = { ...formData, tamano_foto_buscador_pos: 'mediana' as const };
+                                setFormData(updated);
+                                handleSavePoliticasDirect(updated);
+                              }}
+                              className={`p-2.5 rounded-lg border text-left transition-all flex items-center gap-2 ${
+                                (!formData.tamano_foto_buscador_pos || formData.tamano_foto_buscador_pos === 'mediana')
+                                  ? 'bg-blue-50 border-blue-400 text-blue-900 shadow-xs font-bold ring-2 ring-blue-300/50'
+                                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100 font-medium'
+                              }`}
+                            >
+                              <div className="w-8 h-8 rounded bg-slate-100 border border-slate-300 flex items-center justify-center text-[10px] text-slate-500 font-mono font-bold flex-shrink-0">
+                                44px
+                              </div>
+                              <div>
+                                <div className="text-xs font-semibold">Mediana ★</div>
+                                <div className="text-[10px] text-slate-500 font-normal">Estándar</div>
+                              </div>
+                            </button>
+
+                            {/* Tamaño Grande */}
+                            <button
+                              type="button"
+                              disabled={!isAdmin}
+                              onClick={() => {
+                                const updated = { ...formData, tamano_foto_buscador_pos: 'grande' as const };
+                                setFormData(updated);
+                                handleSavePoliticasDirect(updated);
+                              }}
+                              className={`p-2.5 rounded-lg border text-left transition-all flex items-center gap-2 ${
+                                (formData.tamano_foto_buscador_pos === 'grande')
+                                  ? 'bg-blue-50 border-blue-400 text-blue-900 shadow-xs font-bold ring-2 ring-blue-300/50'
+                                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100 font-medium'
+                              }`}
+                            >
+                              <div className="w-9 h-9 rounded bg-slate-100 border border-slate-300 flex items-center justify-center text-[10px] text-slate-500 font-mono font-bold flex-shrink-0">
+                                56px
+                              </div>
+                              <div>
+                                <div className="text-xs font-semibold">Grande</div>
+                                <div className="text-[10px] text-slate-500 font-normal">Detallada</div>
+                              </div>
+                            </button>
+
+                            {/* Tamaño Extra Grande */}
+                            <button
+                              type="button"
+                              disabled={!isAdmin}
+                              onClick={() => {
+                                const updated = { ...formData, tamano_foto_buscador_pos: 'extragrande' as const };
+                                setFormData(updated);
+                                handleSavePoliticasDirect(updated);
+                              }}
+                              className={`p-2.5 rounded-lg border text-left transition-all flex items-center gap-2 ${
+                                (formData.tamano_foto_buscador_pos === 'extragrande')
+                                  ? 'bg-blue-50 border-blue-400 text-blue-900 shadow-xs font-bold ring-2 ring-blue-300/50'
+                                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100 font-medium'
+                              }`}
+                            >
+                              <div className="w-11 h-11 rounded-lg bg-slate-100 border border-slate-300 flex items-center justify-center text-[10px] text-slate-500 font-mono font-bold flex-shrink-0">
+                                72px
+                              </div>
+                              <div>
+                                <div className="text-xs font-semibold">Extra Grande</div>
+                                <div className="text-[10px] text-slate-500 font-normal">Ultra detalle</div>
+                              </div>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

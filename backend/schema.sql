@@ -18,7 +18,9 @@ CREATE TABLE IF NOT EXISTS Configuracion_Empresa (
     master_pass VARCHAR(255) DEFAULT '1234',
     gdrive_config TEXT,
     whatsapp_config TEXT,
-    moneda_ticket_default VARCHAR(10) DEFAULT 'USD'
+    moneda_ticket_default VARCHAR(10) DEFAULT 'USD',
+    mostrar_fotos_en_buscador_pos BOOLEAN DEFAULT TRUE,
+    tamano_foto_buscador_pos VARCHAR(20) DEFAULT 'mediana'
 );
 
 -- ==========================================

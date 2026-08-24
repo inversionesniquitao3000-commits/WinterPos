@@ -9,7 +9,7 @@ import {
   Banknote, Eye, LogOut, X, Image as ImageIcon, ZoomIn,
   Edit, Minus, Sparkles, Package, QrCode, UploadCloud, Link as LinkIcon, Save
 } from 'lucide-react';
-import { formatNumberToWordsUSD, printTicketReceipt, formatBs } from '../utils';
+import { formatNumberToWordsUSD, printTicketReceipt, formatBs, formatImageUrl } from '../utils';
 import { useDialog } from '../hooks/useDialog';
 import CambioDivisasModal from './CambioDivisasModal';
 import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
@@ -3293,65 +3293,201 @@ export default function CajaPOS({
                 className="w-full h-[38px] bg-slate-50 border border-slate-350 rounded-lg p-2 pl-9 text-xs outline-none text-slate-800 focus:bg-white focus:border-winter-blueBtn font-sans"
               />
               
-              {/* Autocomplete Dropdown - Light Styled */}
-              {searchProdTerm && searchSuggestions.length > 0 && (
-                <div 
-                  ref={searchDropdownRef}
-                  className="absolute left-0 right-0 top-11 bg-white border border-slate-250 rounded-lg max-h-48 overflow-y-auto z-40 shadow-2xl divide-y divide-slate-100"
-                >
-                  {searchSuggestions.map((p, idx) => {
-                    const hasStock = p.stock_actual > 0;
-                    const priceVES = p.precio_detalle_usd * tasaDia;
-                    const isSelected = idx === searchSelectedIndex;
+              {/* Autocomplete Dropdown - Light Styled with Visual Support */}
+              {searchProdTerm && searchSuggestions.length > 0 && (() => {
+                const showPhotos = companyConfig?.mostrar_fotos_en_buscador_pos !== false;
+                const photoSize = companyConfig?.tamano_foto_buscador_pos || 'mediana';
 
-                    return (
-                      <button
-                        key={p.id}
-                        type="button"
-                        disabled={!hasStock}
-                        onMouseEnter={() => setSearchSelectedIndex(idx)}
-                        onClick={() => {
-                          if (!hasStock) return;
-                          handleAddProduct(p);
-                          setSearchProdTerm('');
-                          setSearchSelectedIndex(-1);
-                          focusSearchInput();
-                        }}
-                        className={`w-full text-left p-2.5 text-[11px] font-sans block transition-all ${
-                          isSelected
-                            ? 'bg-blue-100 text-slate-900 border-l-4 border-winter-blueBtn font-semibold shadow-inner'
-                            : hasStock 
-                              ? 'hover:bg-slate-100 text-slate-800 hover:text-slate-900' 
-                              : 'opacity-50 cursor-not-allowed text-slate-400 bg-slate-50'
-                        }`}
-                      >
-                        <span className="font-mono text-slate-500 font-bold mr-1.5">{p.barcode}</span>
-                        <span className={`${!hasStock ? 'line-through' : ''}`}>{p.description}</span>
-                        {p.exento_impuesto === true ? (
-                          <span className="bg-amber-100 text-amber-900 border border-amber-300 font-extrabold text-[8.5px] px-1 py-0.2 rounded font-mono ml-1.5 inline-block shadow-2xs" title="Producto Exento de IVA (0%)">
-                            (E)
-                          </span>
-                        ) : (
-                          <span className="bg-sky-50 text-sky-800 border border-sky-200 font-bold text-[8px] px-1 py-0.2 rounded font-mono ml-1.5 inline-block" title="Producto Gravable con IVA">
-                            (G)
-                          </span>
-                        )}
-                        {hasStock ? (
-                          <span className="float-right text-emerald-600 font-bold font-mono text-right flex flex-col items-end">
-                            <span>${p.precio_detalle_usd.toFixed(2)} <span className="text-slate-600 font-bold text-[11px] font-mono">/ {formatBs(priceVES)}</span></span>
-                            <span className="text-[9px] text-slate-500 font-sans font-semibold">Stock: {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}</span>
-                          </span>
-                        ) : (
-                          <span className="float-right text-red-500 font-bold font-mono text-right flex flex-col items-end">
-                            <span>SIN STOCK</span>
-                            <span className="text-[9px] text-slate-400 font-sans font-normal">Stock: {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}</span>
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+                // Configuración de dimensiones según tamaño
+                const sizeStyles = {
+                  pequena: {
+                    imgBox: 'w-8 h-8 rounded-md',
+                    icon: 'w-3.5 h-3.5',
+                    btnPad: 'p-1.5 gap-2 text-[10.5px]',
+                    titleClass: 'text-[10.5px]',
+                    priceClass: 'text-[10.5px]',
+                    dropdownMaxH: 'max-h-64'
+                  },
+                  mediana: {
+                    imgBox: 'w-11 h-11 rounded-lg',
+                    icon: 'w-5 h-5',
+                    btnPad: 'p-2 gap-2.5 text-[11px]',
+                    titleClass: 'text-[11px]',
+                    priceClass: 'text-[11.5px]',
+                    dropdownMaxH: 'max-h-80'
+                  },
+                  grande: {
+                    imgBox: 'w-14 h-14 rounded-xl',
+                    icon: 'w-6 h-6',
+                    btnPad: 'p-2.5 gap-3 text-[11.5px]',
+                    titleClass: 'text-[12px]',
+                    priceClass: 'text-[12px]',
+                    dropdownMaxH: 'max-h-96'
+                  },
+                  extragrande: {
+                    imgBox: 'w-18 h-18 sm:w-20 sm:h-20 rounded-2xl',
+                    icon: 'w-8 h-8',
+                    btnPad: 'p-3 gap-3.5 text-xs',
+                    titleClass: 'text-[12.5px] font-bold',
+                    priceClass: 'text-[12.5px]',
+                    dropdownMaxH: 'max-h-[440px]'
+                  }
+                }[photoSize] || {
+                  imgBox: 'w-11 h-11 rounded-lg',
+                  icon: 'w-5 h-5',
+                  btnPad: 'p-2 gap-2.5 text-[11px]',
+                  titleClass: 'text-[11px]',
+                  priceClass: 'text-[11.5px]',
+                  dropdownMaxH: 'max-h-80'
+                };
+
+                return (
+                  <div 
+                    ref={searchDropdownRef}
+                    className={`absolute left-0 top-11 bg-white border border-slate-250 rounded-xl overflow-y-auto z-40 shadow-2xl divide-y divide-slate-100 ${
+                      showPhotos 
+                        ? `${sizeStyles.dropdownMaxH} w-full min-w-[320px] sm:min-w-[440px] md:min-w-[500px]` 
+                        : 'max-h-56 w-full'
+                    }`}
+                  >
+                    {searchSuggestions.map((p, idx) => {
+                      const hasStock = p.stock_actual > 0;
+                      const priceVES = p.precio_detalle_usd * tasaDia;
+                      const isSelected = idx === searchSelectedIndex;
+
+                      if (showPhotos) {
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            disabled={!hasStock}
+                            onMouseEnter={() => setSearchSelectedIndex(idx)}
+                            onClick={() => {
+                              if (!hasStock) return;
+                              handleAddProduct(p);
+                              setSearchProdTerm('');
+                              setSearchSelectedIndex(-1);
+                              focusSearchInput();
+                            }}
+                            className={`w-full text-left font-sans flex items-center transition-all ${sizeStyles.btnPad} ${
+                              isSelected
+                                ? 'bg-blue-50/90 text-slate-900 border-l-4 border-winter-blueBtn font-semibold shadow-inner'
+                                : hasStock 
+                                  ? 'hover:bg-slate-50 text-slate-800 hover:text-slate-900' 
+                                  : 'opacity-50 cursor-not-allowed text-slate-400 bg-slate-50'
+                            }`}
+                          >
+                            {/* Miniatura de Imagen Dinámica */}
+                            <div className={`${sizeStyles.imgBox} bg-white border border-slate-200 flex-shrink-0 overflow-hidden flex items-center justify-center relative shadow-2xs`}>
+                              {p.imagen_url ? (
+                                <img 
+                                  src={formatImageUrl(p.imagen_url)} 
+                                  alt={p.description} 
+                                  className="w-full h-full object-contain p-0.5"
+                                  onError={(e) => {
+                                    (e.currentTarget as HTMLElement).style.display = 'none';
+                                    const fb = (e.currentTarget.parentElement as HTMLElement)?.querySelector('.img-fallback');
+                                    if (fb) {
+                                      fb.classList.remove('hidden');
+                                      fb.classList.add('flex');
+                                    }
+                                  }}
+                                />
+                              ) : null}
+                              <div className={`img-fallback w-full h-full items-center justify-center text-slate-400 bg-slate-100 ${p.imagen_url ? 'hidden' : 'flex'}`}>
+                                <Package className={`${sizeStyles.icon} text-slate-400`} />
+                              </div>
+                            </div>
+
+                            {/* Información del Producto */}
+                            <div className="flex-1 min-w-0 pr-1">
+                              <div className="flex items-center gap-1.5 mb-0.5">
+                                <span className="font-mono text-slate-500 font-bold text-[10px] tracking-tight">{p.barcode}</span>
+                                {p.exento_impuesto === true ? (
+                                  <span className="bg-amber-100 text-amber-900 border border-amber-300 font-extrabold text-[8px] px-1 py-0.2 rounded font-mono inline-block shadow-2xs" title="Producto Exento de IVA (0%)">
+                                    (E)
+                                  </span>
+                                ) : (
+                                  <span className="bg-sky-50 text-sky-800 border border-sky-200 font-bold text-[7.5px] px-1 py-0.2 rounded font-mono inline-block" title="Producto Gravable con IVA">
+                                    (G)
+                                  </span>
+                                )}
+                              </div>
+                              <div className={`font-semibold text-slate-800 leading-snug truncate ${sizeStyles.titleClass} ${!hasStock ? 'line-through text-slate-400' : ''}`} title={p.description}>
+                                {p.description}
+                              </div>
+                            </div>
+
+                            {/* Precios y Stock */}
+                            <div className="text-right flex-shrink-0 flex flex-col items-end">
+                              {hasStock ? (
+                                <>
+                                  <div className={`text-emerald-600 font-bold font-mono ${sizeStyles.priceClass}`}>
+                                    ${p.precio_detalle_usd.toFixed(2)} <span className="text-slate-600 font-bold text-[10px]">/ {formatBs(priceVES)}</span>
+                                  </div>
+                                  <span className="text-[9px] text-slate-500 font-sans font-semibold">Stock: {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="text-red-500 font-bold font-mono text-[10.5px]">SIN STOCK</span>
+                                  <span className="text-[9px] text-slate-400 font-sans font-normal">Stock: {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}</span>
+                                </>
+                              )}
+                            </div>
+                          </button>
+                        );
+                      }
+
+                      // MODO COMPACTO TRADICIONAL (Sin Fotos)
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          disabled={!hasStock}
+                          onMouseEnter={() => setSearchSelectedIndex(idx)}
+                          onClick={() => {
+                            if (!hasStock) return;
+                            handleAddProduct(p);
+                            setSearchProdTerm('');
+                            setSearchSelectedIndex(-1);
+                            focusSearchInput();
+                          }}
+                          className={`w-full text-left p-2.5 text-[11px] font-sans block transition-all ${
+                            isSelected
+                              ? 'bg-blue-100 text-slate-900 border-l-4 border-winter-blueBtn font-semibold shadow-inner'
+                              : hasStock 
+                                ? 'hover:bg-slate-100 text-slate-800 hover:text-slate-900' 
+                                : 'opacity-50 cursor-not-allowed text-slate-400 bg-slate-50'
+                          }`}
+                        >
+                          <span className="font-mono text-slate-500 font-bold mr-1.5">{p.barcode}</span>
+                          <span className={`${!hasStock ? 'line-through' : ''}`}>{p.description}</span>
+                          {p.exento_impuesto === true ? (
+                            <span className="bg-amber-100 text-amber-900 border border-amber-300 font-extrabold text-[8.5px] px-1 py-0.2 rounded font-mono ml-1.5 inline-block shadow-2xs" title="Producto Exento de IVA (0%)">
+                              (E)
+                            </span>
+                          ) : (
+                            <span className="bg-sky-50 text-sky-800 border border-sky-200 font-bold text-[8px] px-1 py-0.2 rounded font-mono ml-1.5 inline-block" title="Producto Gravable con IVA">
+                              (G)
+                            </span>
+                          )}
+                          {hasStock ? (
+                            <span className="float-right text-emerald-600 font-bold font-mono text-right flex flex-col items-end">
+                              <span>${p.precio_detalle_usd.toFixed(2)} <span className="text-slate-600 font-bold text-[11px] font-mono">/ {formatBs(priceVES)}</span></span>
+                              <span className="text-[9px] text-slate-500 font-sans font-semibold">Stock: {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}</span>
+                            </span>
+                          ) : (
+                            <span className="float-right text-red-500 font-bold font-mono text-right flex flex-col items-end">
+                              <span>SIN STOCK</span>
+                              <span className="text-[9px] text-slate-400 font-sans font-normal">Stock: {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}</span>
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div>
           </div>
 
