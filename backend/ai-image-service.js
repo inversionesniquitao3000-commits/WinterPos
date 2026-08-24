@@ -267,35 +267,47 @@ function buildSearchQueries(description, category = '') {
 }
 
 /**
- * High-accuracy DuckDuckGo Commercial Product Image Search
+ * High-accuracy DuckDuckGo Commercial Product Image Search (Robust Session + Headers)
  */
 async function searchDuckDuckGoImages(query) {
   try {
     const searchUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`;
     const initRes = await fetch(searchUrl, {
-      signal: AbortSignal.timeout(4000),
+      signal: AbortSignal.timeout(6000),
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none'
       }
     });
     const html = await initRes.text();
+    const cookies = initRes.headers.get('set-cookie') || '';
     const vqdMatch = html.match(/vqd=["']?([^&"'\s]+)/i) || html.match(/vqd=([^&"'\s]+)/i);
     if (!vqdMatch) return [];
 
     const vqd = vqdMatch[1];
     const imgApiUrl = `https://duckduckgo.com/i.js?l=es-es&o=json&q=${encodeURIComponent(query)}&vqd=${vqd}&f=,,,type:photo,&p=1`;
     const apiRes = await fetch(imgApiUrl, {
-      signal: AbortSignal.timeout(4000),
+      signal: AbortSignal.timeout(6000),
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Referer': 'https://duckduckgo.com/'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'Referer': 'https://duckduckgo.com/',
+        'Cookie': cookies
       }
     });
     if (!apiRes.ok) return [];
     const data = await apiRes.json();
     return (data.results || [])
-      .map(r => r.image || r.thumbnail)
-      .filter(url => isValidProductImageUrl(url));
+      .map(r => ({
+        url: r.image || r.thumbnail,
+        title: r.title || query,
+        source: r.source || 'Web'
+      }))
+      .filter(r => r.url && isValidProductImageUrl(r.url));
   } catch (_) {
     return [];
   }
@@ -480,35 +492,24 @@ export async function generateProductImage(description, category = '', barcode =
     } catch (_) {}
   }
 
-  // --- TIER 2: Intelligent Multi-Query Commercial Web Image Search ---
+  // --- TIER 2: Intelligent Real Commercial Web Image Search ---
   const searchQueries = buildSearchQueries(cleanDesc, cleanCat);
   for (const q of searchQueries) {
     try {
       const webResults = await searchDuckDuckGoImages(q);
-      for (const url of webResults.slice(0, 2)) {
-        const savedUrl = await downloadRemoteImage(url, safeFilename);
-        if (savedUrl) {
-          return {
-            success: true,
-            imageUrl: savedUrl,
-            source: 'web_search_duckduckgo',
-            keyword: q
-          };
-        }
-      }
-    } catch (_) {}
-
-    try {
-      const bingResults = await searchBingImages(q);
-      for (const url of bingResults.slice(0, 2)) {
-        const savedUrl = await downloadRemoteImage(url, safeFilename);
-        if (savedUrl) {
-          return {
-            success: true,
-            imageUrl: savedUrl,
-            source: 'web_search_bing',
-            keyword: q
-          };
+      for (const item of webResults.slice(0, 4)) {
+        const url = typeof item === 'string' ? item : item.url;
+        if (url) {
+          const savedUrl = await downloadRemoteImage(url, safeFilename);
+          if (savedUrl) {
+            return {
+              success: true,
+              imageUrl: savedUrl,
+              source: 'web_search_real_photo',
+              keyword: q,
+              title: typeof item === 'object' ? item.title : q
+            };
+          }
         }
       }
     } catch (_) {}
@@ -516,14 +517,17 @@ export async function generateProductImage(description, category = '', barcode =
 
   // --- TIER 3: Open Food Facts Search by Description / Brand ---
   try {
-    const offUrl = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(cleanDesc)}&search_simple=1&action=process&json=1&page_size=3`;
+    const offUrl = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(cleanDesc)}&search_simple=1&action=process&json=1&page_size=4`;
     const res = await fetch(offUrl, {
       signal: AbortSignal.timeout(3500),
-      headers: { 'User-Agent': 'WinterPOS-SmartPOS - contact@inversionesniquitao.com' }
+      headers: {
+        'User-Agent': 'WinterPOS-SmartPOS - contact@inversionesniquitao.com',
+        'Accept': 'application/json'
+      }
     });
     if (res.ok) {
       const data = await res.json();
-      const match = data.products?.find(p => p.image_front_url || p.image_url);
+      const match = (data.products || []).find(p => p.image_front_url || p.image_url);
       if (match) {
         const imgUrl = match.image_front_url || match.image_url;
         const savedUrl = await downloadRemoteImage(imgUrl, safeFilename);
@@ -539,51 +543,7 @@ export async function generateProductImage(description, category = '', barcode =
     }
   } catch (_) {}
 
-  // --- TIER 5: Wikimedia Commons White Background Studio Product Photo Search ---
-  try {
-    const wikiUrl = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrnamespace=6&gsrsearch=${encodeURIComponent(map.wiki + ' isolated white background product packaging filetype:bitmap')}&gsrlimit=3&prop=imageinfo&iiprop=url&iiurlwidth=400&format=json`;
-    const res = await fetch(wikiUrl, {
-      signal: AbortSignal.timeout(3500),
-      headers: { 'User-Agent': 'WinterPOS-SmartEngine/1.0 (pos@inversionesniquitao.com)' }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      const pages = data.query?.pages;
-      if (pages) {
-        for (const page of Object.values(pages)) {
-          const thumb = page?.imageinfo?.[0]?.thumburl || page?.imageinfo?.[0]?.url;
-          if (thumb && !thumb.endsWith('.svg.png') && !thumb.includes('icon') && !thumb.includes('logo')) {
-            const savedUrl = await downloadRemoteImage(thumb, safeFilename);
-            if (savedUrl) {
-              return {
-                success: true,
-                imageUrl: savedUrl,
-                source: 'wikimedia_photo',
-                keyword: map.wiki
-              };
-            }
-          }
-        }
-      }
-    }
-  } catch (_) {}
-
-  // --- TIER 6: Pollinations AI Commercial Product Photography (Pure White Background) ---
-  try {
-    const prompt = `high resolution studio commercial product photograph of ${cleanDesc} ${map.wiki}, isolated centered on solid pure white background, studio 4k lighting, crisp product packaging, commercial photography`;
-    const pollUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=400&height=400&nologo=true`;
-    const savedUrl = await downloadRemoteImage(pollUrl, safeFilename);
-    if (savedUrl) {
-      return {
-        success: true,
-        imageUrl: savedUrl,
-        source: 'pollinations_ai_white_bg',
-        keyword: map.wiki
-      };
-    }
-  } catch (_) {}
-
-  // --- TIER 7: Guaranteed Local Vector SVG Fallback with Studio White Card ---
+  // --- TIER 4: Guaranteed Clean Local Vector SVG Card (Offline / No Web Match) ---
   const svgFilename = `prod_${cleanDesc.toLowerCase().replace(/[^a-z0-9]/g, '_').substring(0, 24)}_${Date.now()}.svg`;
   const localSvgUrl = createLocalSvgFallback(cleanDesc, cleanCat, svgFilename);
 
@@ -596,7 +556,7 @@ export async function generateProductImage(description, category = '', barcode =
 }
 
 /**
- * Searches multiple real product image candidates across internet engines (Parallel + High-Reliability Fallbacks)
+ * Searches multiple real product image candidates across internet commercial indexes
  */
 export async function searchProductImageCandidates(description, category = '', barcode = '') {
   const cleanDesc = (description || 'Producto').trim();
@@ -604,7 +564,6 @@ export async function searchProductImageCandidates(description, category = '', b
   const cleanCode = (barcode || '').trim();
   const candidates = [];
   const seenUrls = new Set();
-  const map = getMapping(cleanDesc, cleanCat);
 
   function addCandidate(c) {
     if (c && c.url && !seenUrls.has(c.url) && isValidProductImageUrl(c.url)) {
@@ -623,19 +582,14 @@ export async function searchProductImageCandidates(description, category = '', b
     } catch (_) {}
   }
 
-  // 2. Parallel Search queries in DuckDuckGo, Bing & OpenFoodFacts
+  // 2. Parallel Real Commercial Search queries
   const queries = buildSearchQueries(cleanDesc, cleanCat);
   const searchPromises = [];
 
   for (const q of queries) {
     searchPromises.push(
       searchDuckDuckGoImages(q).then(results => {
-        results.forEach(r => addCandidate({ url: r, title: cleanDesc, source: 'Web / DuckDuckGo' }));
-      }).catch(() => {})
-    );
-    searchPromises.push(
-      searchBingImages(q).then(results => {
-        results.forEach(r => addCandidate({ url: r, title: cleanDesc, source: 'Web / Bing' }));
+        results.forEach(r => addCandidate({ url: r.url, title: r.title || cleanDesc, source: 'Foto Comercial Web' }));
       }).catch(() => {})
     );
   }
@@ -647,7 +601,10 @@ export async function searchProductImageCandidates(description, category = '', b
         const offUrl = `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(cleanDesc)}&search_simple=1&action=process&json=1&page_size=4`;
         const res = await fetch(offUrl, {
           signal: AbortSignal.timeout(4000),
-          headers: { 'User-Agent': 'WinterPOS-SmartPOS - contact@inversionesniquitao.com' }
+          headers: {
+            'User-Agent': 'WinterPOS-SmartPOS - contact@inversionesniquitao.com',
+            'Accept': 'application/json'
+          }
         });
         if (res.ok) {
           const data = await res.json();
@@ -662,17 +619,7 @@ export async function searchProductImageCandidates(description, category = '', b
 
   await Promise.allSettled(searchPromises);
 
-  // 3. Fallback AI Studio Product Renders (Guarantees user always gets high quality options even with strict firewalls)
-  if (candidates.length < 4) {
-    const prompt1 = `commercial studio product photograph of ${cleanDesc} ${map.wiki}, isolated centered on solid pure white background, studio 4k lighting, crisp product packaging`;
-    const pollUrl1 = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt1)}?width=400&height=400&nologo=true&seed=101`;
-    const pollUrl2 = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt1 + ' alternative view')}?width=400&height=400&nologo=true&seed=202`;
-    
-    addCandidate({ url: pollUrl1, title: `${cleanDesc} (Foto Estudio IA)`, source: 'IA Estudio Fotográfico' });
-    addCandidate({ url: pollUrl2, title: `${cleanDesc} (Opción IA 2)`, source: 'IA Estudio Fotográfico' });
-  }
-
-  return candidates.slice(0, 8);
+  return candidates.slice(0, 12);
 }
 
 /**
