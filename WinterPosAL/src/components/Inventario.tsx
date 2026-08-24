@@ -94,7 +94,7 @@ export default function Inventario({
   const [selectedBulkCategory, setSelectedBulkCategory] = useState<string>('');
   const [bulkCategoryNoPhotoOnly, setBulkCategoryNoPhotoOnly] = useState<boolean>(true);
   const [isBulkAiRunning, setIsBulkAiRunning] = useState(false);
-  const [bulkAiProgress, setBulkAiProgress] = useState({ current: 0, total: 0, percent: 0 });
+  const [bulkAiProgress, setBulkAiProgress] = useState<{ current: number; total: number; percent: number; currentDesc?: string }>({ current: 0, total: 0, percent: 0, currentDesc: '' });
   const [bulkAiLogs, setBulkAiLogs] = useState<Array<{ id: number; description: string; barcode: string; imageUrl: string; success: boolean; discarded: boolean }>>([]);
   const isBulkAiCancelledRef = useRef(false);
 
@@ -332,17 +332,21 @@ export default function Inventario({
 
     setIsBulkAiRunning(true);
     isBulkAiCancelledRef.current = false;
-    setBulkAiProgress({ current: 0, total: targetProducts.length, percent: 0 });
+    setBulkAiProgress({ current: 0, total: targetProducts.length, percent: 0, currentDesc: targetProducts[0]?.description || '' });
     setBulkAiLogs([]);
 
+    const CONCURRENCY = 3;
     let processedCount = 0;
-    for (const prod of targetProducts) {
-      if (isBulkAiCancelledRef.current) break;
+    let activeIndex = 0;
+
+    const processItem = async (prod: Product) => {
+      if (isBulkAiCancelledRef.current) return;
 
       try {
         const res = await fetch(`${getApiBaseUrl()}/ai/generate-product-image`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(7500),
           body: JSON.stringify({
             description: prod.description,
             category: prod.category,
@@ -380,12 +384,29 @@ export default function Inventario({
           success: false,
           discarded: true
         }, ...prev]);
+      } finally {
+        processedCount++;
+        const pct = Math.round((processedCount / targetProducts.length) * 100);
+        setBulkAiProgress({
+          current: processedCount,
+          total: targetProducts.length,
+          percent: pct,
+          currentDesc: prod.description
+        });
       }
+    };
 
-      processedCount++;
-      const pct = Math.round((processedCount / targetProducts.length) * 100);
-      setBulkAiProgress({ current: processedCount, total: targetProducts.length, percent: pct });
-    }
+    // Parallel Worker Pool (Processes 3 items at a time without stalling)
+    const workers = Array.from({ length: Math.min(CONCURRENCY, targetProducts.length) }, async () => {
+      while (activeIndex < targetProducts.length && !isBulkAiCancelledRef.current) {
+        const indexToTake = activeIndex++;
+        if (indexToTake < targetProducts.length) {
+          await processItem(targetProducts[indexToTake]);
+        }
+      }
+    });
+
+    await Promise.allSettled(workers);
 
     setIsBulkAiRunning(false);
     if (!isBulkAiCancelledRef.current) {
@@ -11940,11 +11961,13 @@ export default function Inventario({
               {isBulkAiRunning && (
                 <div className="bg-slate-900 text-white rounded-xl p-3.5 space-y-2 shadow-lg animate-in fade-in">
                   <div className="flex justify-between items-center text-xs font-mono">
-                    <span className="text-amber-300 font-bold flex items-center gap-1.5">
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      Procesando catálogo con IA y Motores Web...
+                    <span className="text-amber-300 font-bold flex items-center gap-1.5 truncate max-w-[70%]">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin flex-shrink-0" />
+                      <span className="truncate">
+                        {bulkAiProgress.currentDesc ? `Procesando: ${bulkAiProgress.currentDesc}` : 'Procesando catálogo con IA y Motores Web...'}
+                      </span>
                     </span>
-                    <span className="font-extrabold text-white">
+                    <span className="font-extrabold text-white flex-shrink-0">
                       {bulkAiProgress.current} / {bulkAiProgress.total} ({bulkAiProgress.percent}%)
                     </span>
                   </div>
