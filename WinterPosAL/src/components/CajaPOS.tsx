@@ -321,6 +321,16 @@ export default function CajaPOS({
     return r.includes('admin') || r === 'administrador';
   }, [currentUser]);
 
+  const canApplyDiscounts = useMemo(() => {
+    if (!currentUser) return false;
+    return isAdmin || Boolean(currentUser.permisos?.caja?.aplicar_descuentos) || Boolean(currentUser.permisos?.caja?.admin);
+  }, [currentUser, isAdmin]);
+
+  const canViewAllSales = useMemo(() => {
+    if (!currentUser) return false;
+    return isAdmin || Boolean(currentUser.permisos?.caja?.ver_todas_facturas) || Boolean(currentUser.permisos?.caja?.admin);
+  }, [currentUser, isAdmin]);
+
   const [showCierreModal, setShowCierreModal] = useState(false);
   const [cierreRealUsd, setCierreRealUsd] = useState('0');
   const [cierreRealVes, setCierreRealVes] = useState('0');
@@ -556,8 +566,8 @@ export default function CajaPOS({
     const listToUse = allSalesList.length > 0 ? allSalesList : shiftSales;
 
     let sourceSales: Sale[] = [];
-    if (isAdmin) {
-      // Administrator can view all sales across dates, filtered by date selector if active
+    if (canViewAllSales) {
+      // Administrator or authorized users can view all sales across dates, filtered by date selector if active
       sourceSales = listToUse.filter(s => {
         if (!s || !s.factura_nro || s.factura_nro.startsWith('DEV-')) return false;
         if (devDateFilter.trim() !== '') {
@@ -567,7 +577,7 @@ export default function CajaPOS({
         return true;
       });
     } else {
-      // Non-admin users (Cajeros, Operadores, etc.) can ONLY view and return invoices from their current active open session
+      // Non-authorized users can ONLY view and return invoices from their current active open session
       sourceSales = shiftSales.filter(s => s && s.factura_nro && !s.factura_nro.startsWith('DEV-'));
     }
 
@@ -585,7 +595,7 @@ export default function CajaPOS({
       sale.client?.nombre?.toLowerCase().includes(term) ||
       sale.client?.cedula_rif?.toLowerCase().includes(term)
     );
-  }, [devSearchTerm, devDateFilter, allSalesList, shiftSales, isAdmin]);
+  }, [devSearchTerm, devDateFilter, allSalesList, shiftSales, canViewAllSales]);
 
   // Helper para auditar las devoluciones previamente aplicadas a una factura
   const getSaleReturnInfo = useCallback((sale: Sale, salesList: Sale[]) => {
@@ -4020,18 +4030,18 @@ export default function CajaPOS({
                   max="100"
                   value={discountPct}
                   onChange={(e) => {
-                    if (!isAdmin) return;
+                    if (!canApplyDiscounts) return;
                     setDiscountPct(Math.min(100, Math.max(0, parseInt(e.target.value) || 0)));
                   }}
-                  disabled={!isAdmin || (selectedClient && selectedClient.porcentaje_descuento > 0)}
+                  disabled={!canApplyDiscounts || (selectedClient && selectedClient.porcentaje_descuento > 0)}
                   className={`w-12 text-center rounded p-0.5 font-bold font-mono text-[10px] transition-all ${
-                    !isAdmin || (selectedClient && selectedClient.porcentaje_descuento > 0)
+                    !canApplyDiscounts || (selectedClient && selectedClient.porcentaje_descuento > 0)
                       ? 'bg-slate-200/80 border-slate-300 text-slate-500 cursor-not-allowed opacity-90 select-none'
                       : 'bg-slate-50 border-slate-300 text-emerald-700 hover:border-emerald-500 focus:border-emerald-600'
                   }`}
                   title={
-                    !isAdmin 
-                      ? "🔒 Solo los usuarios administradores pueden modificar el % de descuento" 
+                    !canApplyDiscounts 
+                      ? "🔒 Requiere permiso de Descuentos en Caja otorgado por el Administrador" 
                       : (selectedClient && selectedClient.porcentaje_descuento > 0)
                         ? "Descuento fijado automáticamente desde la ficha del cliente"
                         : "Porcentaje de descuento manual"
@@ -6863,13 +6873,13 @@ export default function CajaPOS({
                   />
                 </div>
 
-                {/* Date filter selector for Administrators */}
-                {isAdmin && (
+                {/* Date filter selector for Administrators or authorized users */}
+                {canViewAllSales && (
                   <div>
                     <div className="flex justify-between items-center mb-1">
                       <label className="text-[10px] text-slate-500 block font-sans font-bold uppercase flex items-center gap-1">
                         <Calendar className="w-3 h-3 text-rose-600" />
-                        Filtrar por Fecha (Admin)
+                        Filtrar por Fecha (Histórico Completo)
                       </label>
                       {devDateFilter && (
                         <button
@@ -6893,14 +6903,14 @@ export default function CajaPOS({
                 <div className="flex-grow overflow-y-auto space-y-2 pr-1 max-h-[350px]">
                   <div className="flex justify-between items-center border-b pb-1">
                     <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block font-mono">
-                      {isAdmin ? (devDateFilter ? `Facturas del ${devDateFilter}` : 'Todas las Facturas') : 'Facturas Turno Actual'}
+                      {canViewAllSales ? (devDateFilter ? `Facturas del ${devDateFilter}` : 'Todas las Facturas') : 'Facturas Turno Actual'}
                     </span>
                     <span className="text-[9px] text-slate-400 font-mono">Total: {filteredDevSales.length}</span>
                   </div>
 
                   {filteredDevSales.length === 0 ? (
                     <div className="text-center py-8 text-slate-400 text-[10px] font-sans">
-                      {isAdmin ? 'No se encontraron facturas para los filtros seleccionados.' : 'No se encontraron facturas en el turno de caja abierto actual.'}
+                      {canViewAllSales ? 'No se encontraron facturas para los filtros seleccionados.' : 'No se encontraron facturas en el turno de caja abierto actual.'}
                     </div>
                   ) : (
                     filteredDevSales.map(sale => {

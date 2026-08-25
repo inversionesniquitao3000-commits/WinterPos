@@ -52,6 +52,10 @@ export interface User {
       admin?: boolean;
       ver_costos?: boolean;
       emitir_no_fiscal?: boolean;
+      aplicar_descuentos?: boolean;
+      ver_todas_facturas?: boolean;
+      categorias?: boolean;
+      ajustes_avanzados?: boolean;
     }
   };
 }
@@ -68,6 +72,10 @@ export interface Role {
       admin?: boolean;
       ver_costos?: boolean;
       emitir_no_fiscal?: boolean;
+      aplicar_descuentos?: boolean;
+      ver_todas_facturas?: boolean;
+      categorias?: boolean;
+      ajustes_avanzados?: boolean;
     }
   };
 }

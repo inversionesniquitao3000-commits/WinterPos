@@ -1711,11 +1711,11 @@ export async function updateUser(id, u) {
 export async function deleteUser(id) {
   if (usePostgres) {
     try {
-      const checkRes = await pool.query('SELECT usuario FROM Usuarios WHERE id = $1', [id]);
-      if (checkRes.rows.length > 0 && (checkRes.rows[0].usuario || '').toLowerCase() === 'admin') {
-        throw new Error('El usuario principal "admin" es el administrador del sistema y está protegido contra eliminación.');
+      const checkRes = await pool.query('SELECT usuario, rol FROM Usuarios WHERE id = $1', [id]);
+      if (checkRes.rows.length > 0 && ((checkRes.rows[0].usuario || '').toLowerCase() === 'admin' || (checkRes.rows[0].rol || '').toLowerCase() === 'administrador')) {
+        throw new Error('El usuario Administrador está protegido por el sistema contra eliminación.');
       }
-      const res = await pool.query('DELETE FROM Usuarios WHERE id = $1 AND LOWER(usuario) <> \'admin\' RETURNING id', [id]);
+      const res = await pool.query('DELETE FROM Usuarios WHERE id = $1 AND LOWER(usuario) <> \'admin\' AND LOWER(rol) <> \'administrador\' RETURNING id', [id]);
       return res.rowCount > 0;
     } catch (err) {
       console.error('Error en deleteUser (Postgres):', err.message);
@@ -1725,8 +1725,8 @@ export async function deleteUser(id) {
   const users = readJsonFile('users.json', mockUsers);
   const idx = users.findIndex(user => user.id === parseInt(id) || user.id === id);
   if (idx !== -1) {
-    if ((users[idx].usuario || '').toLowerCase() === 'admin') {
-      throw new Error('El usuario principal "admin" es el administrador del sistema y está protegido contra eliminación.');
+    if ((users[idx].usuario || '').toLowerCase() === 'admin' || (users[idx].rol || '').toLowerCase() === 'administrador') {
+      throw new Error('El usuario Administrador está protegido por el sistema contra eliminación.');
     }
     users.splice(idx, 1);
     writeJsonFile('users.json', users);

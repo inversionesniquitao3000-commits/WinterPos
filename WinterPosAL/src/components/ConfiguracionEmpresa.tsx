@@ -5,7 +5,7 @@ import {
   Trash2, Edit, Plus, Download, Upload, ShieldAlert,
   Settings, CheckSquare, Square, Globe, ShieldCheck, Printer, FileText,
   LogOut, Unplug, KeyRound, Lock, Eye, EyeOff, DollarSign,
-  RefreshCw, Unlock, RotateCcw, AlertTriangle, Cloud
+  RefreshCw, Unlock, RotateCcw, AlertTriangle, Cloud, Tag, Layers, Percent, Calendar
 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr, formatBs } from '../utils';
@@ -816,8 +816,8 @@ export default function ConfiguracionEmpresa({
     MODULOS_PERMISOS.forEach(mod => {
       perms[mod.id] = { ver: true, crear: true, editar: true, eliminar: true, admin: true };
     });
-    perms.inventario = { ...perms.inventario, ver_costos: true };
-    perms.caja = { ...perms.caja, emitir_no_fiscal: true };
+    perms.inventario = { ...perms.inventario, ver_costos: true, categorias: true, ajustes_avanzados: true };
+    perms.caja = { ...perms.caja, emitir_no_fiscal: true, aplicar_descuentos: true, ver_todas_facturas: true };
     return perms;
   };
 
@@ -841,6 +841,11 @@ export default function ConfiguracionEmpresa({
   };
 
   const handleOpenEditUser = (u: User) => {
+    const isTargetUserAdmin = u.usuario?.toLowerCase() === 'admin' || u.rol?.toUpperCase() === 'ADMINISTRADOR';
+    if (!isAdmin && isTargetUserAdmin) {
+      showAlert('No posee permisos de Administrador para modificar las credenciales del usuario Administrador.', 'Operación Protegida', 'warning');
+      return;
+    }
     const isUserAdmin = u.usuario?.toLowerCase() === 'admin' || u.rol?.toUpperCase() === 'ADMINISTRADOR';
     setEditingUser(u);
     setUserForm({
@@ -858,6 +863,11 @@ export default function ConfiguracionEmpresa({
     e.preventDefault();
     if (!userForm.usuario.trim() || !userForm.nombre.trim()) {
       setErrorMsg('Usuario y nombre completo son requeridos.');
+      return;
+    }
+
+    if (!isAdmin && (userForm.rol?.toUpperCase() === 'ADMINISTRADOR' || userForm.usuario.toLowerCase().trim() === 'admin')) {
+      setErrorMsg('No posee permisos de Administrador para asignar o crear usuarios con rol ADMINISTRADOR.');
       return;
     }
 
@@ -899,6 +909,10 @@ export default function ConfiguracionEmpresa({
   const handleDeleteUser = async (id: number) => {
     const targetUser = userList.find(u => u.id === id);
     if (targetUser && (targetUser.usuario?.toLowerCase() === 'admin' || targetUser.rol?.toLowerCase() === 'administrador')) {
+      if (!isAdmin) {
+        showAlert('No posee permisos de Administrador para eliminar usuarios Administradores.', 'Operación Protegida', 'warning');
+        return;
+      }
       showAlert('El usuario principal "admin" es el administrador del sistema y está protegido contra eliminación.', 'Operación Protegida', 'warning');
       return;
     }
@@ -965,7 +979,7 @@ export default function ConfiguracionEmpresa({
     }
 
     const isRoleAdmin = roleForm.nombre.trim().toUpperCase() === 'ADMINISTRADOR';
-    if (isRoleAdmin && currentUser.usuario?.toLowerCase() !== 'admin' && currentUser.rol?.toUpperCase() !== 'ADMINISTRADOR') {
+    if (isRoleAdmin && !isAdmin) {
       setErrorMsg('Sólo el usuario Administrador principal del sistema puede modificar el perfil Administrador.');
       return;
     }
@@ -1607,18 +1621,16 @@ export default function ConfiguracionEmpresa({
         >
           Datos de la Empresa
         </button>
-        {isAdmin && (
-          <button
-            onClick={() => setActiveTab('usuarios')}
-            className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all ${
-              activeTab === 'usuarios'
-                ? 'bg-white border-slate-200 text-winter-configStart font-sans'
-                : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
-            }`}
-          >
-            Usuarios y Roles
-          </button>
-        )}
+        <button
+          onClick={() => setActiveTab('usuarios')}
+          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all ${
+            activeTab === 'usuarios'
+              ? 'bg-white border-slate-200 text-winter-configStart font-sans'
+              : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
+          }`}
+        >
+          Usuarios y Roles
+        </button>
         <button
           onClick={() => setActiveTab('perifericos')}
           className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all ${
@@ -1629,35 +1641,33 @@ export default function ConfiguracionEmpresa({
         >
           Básculas e Impresoras
         </button>
+        <button
+          onClick={() => setActiveTab('whatsapp')}
+          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all ${
+            activeTab === 'whatsapp'
+              ? 'bg-white border-slate-200 text-winter-configStart font-sans'
+              : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
+          }`}
+        >
+          Integración WhatsApp
+        </button>
         {isAdmin && (
-          <div className="flex gap-2">
-            <button
-              onClick={() => {
-                if (dbUnlocked) {
-                  setActiveTab('db');
-                } else {
-                  setShowMasterPassModal(true);
-                }
-              }}
-              className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all ${
-                activeTab === 'db'
-                  ? 'bg-white border-slate-200 text-winter-configStart font-sans'
-                  : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
-              }`}
-            >
-              Base de Datos
-            </button>
-            <button
-              onClick={() => setActiveTab('whatsapp')}
-              className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all ${
-                activeTab === 'whatsapp'
-                  ? 'bg-white border-slate-200 text-winter-configStart font-sans'
-                  : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
-              }`}
-            >
-              Integración WhatsApp
-            </button>
-          </div>
+          <button
+            onClick={() => {
+              if (dbUnlocked) {
+                setActiveTab('db');
+              } else {
+                setShowMasterPassModal(true);
+              }
+            }}
+            className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all ${
+              activeTab === 'db'
+                ? 'bg-white border-slate-200 text-winter-configStart font-sans'
+                : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
+            }`}
+          >
+            Base de Datos
+          </button>
         )}
       </div>
 
@@ -2044,7 +2054,7 @@ export default function ConfiguracionEmpresa({
         )}
 
         {/* TAB 2: USUARIOS Y ROLES */}
-        {activeTab === 'usuarios' && isAdmin && (
+        {activeTab === 'usuarios' && (
           <div className="space-y-6">
             
             {/* SUB TABS */}
@@ -2150,17 +2160,26 @@ export default function ConfiguracionEmpresa({
                             </span>
                           </td>
                           <td className="py-3 px-3 text-right flex justify-end gap-2">
-                            <button
-                              onClick={() => handleOpenEditUser(u)}
-                              className="text-slate-400 hover:text-sky-600 p-1 transition-all"
-                              title="Editar Usuario"
-                            >
-                              <Edit className="w-4 h-4" />
-                            </button>
-                            {u.usuario?.toLowerCase() === 'admin' ? (
+                            {(!isAdmin && (u.usuario?.toLowerCase() === 'admin' || u.rol?.toUpperCase() === 'ADMINISTRADOR')) ? (
                               <span
                                 className="text-slate-300 p-1 cursor-not-allowed flex items-center justify-center"
-                                title="El usuario principal admin es el administrador del sistema y está protegido contra eliminación."
+                                title="No posee permisos para modificar usuarios Administradores."
+                              >
+                                <Lock className="w-4 h-4 text-slate-400 opacity-60" />
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => handleOpenEditUser(u)}
+                                className="text-slate-400 hover:text-sky-600 p-1 transition-all"
+                                title="Editar Usuario"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                            )}
+                            {u.usuario?.toLowerCase() === 'admin' || (!isAdmin && u.rol?.toUpperCase() === 'ADMINISTRADOR') ? (
+                              <span
+                                className="text-slate-300 p-1 cursor-not-allowed flex items-center justify-center"
+                                title={u.usuario?.toLowerCase() === 'admin' ? "El usuario principal admin es el administrador del sistema y está protegido contra eliminación." : "Sólo un Administrador puede gestionar o eliminar a otros Administradores."}
                               >
                                 <Lock className="w-4 h-4 text-slate-400 opacity-60" />
                               </span>
@@ -2250,7 +2269,7 @@ export default function ConfiguracionEmpresa({
                                 )}
                               </td>
                               <td className="py-3 px-3 text-right flex justify-end gap-2">
-                                {isSystemAdmin && currentUser.usuario?.toLowerCase() !== 'admin' && currentUser.rol?.toUpperCase() !== 'ADMINISTRADOR' ? (
+                                {isSystemAdmin && !isAdmin ? (
                                   <span
                                     className="text-slate-300 p-1 cursor-not-allowed flex items-center justify-center"
                                     title="Sólo el usuario Administrador principal del sistema puede modificar la plantilla del perfil Administrador."
@@ -3900,7 +3919,7 @@ export default function ConfiguracionEmpresa({
       </div>
     )}
         {/* TAB 5: WHATSAPP INTEGRATION */}
-        {activeTab === 'whatsapp' && isAdmin && (
+        {activeTab === 'whatsapp' && (
           <div className="space-y-6 w-full px-2 lg:px-4 mx-auto animate-fade-in">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               
@@ -4560,7 +4579,7 @@ export default function ConfiguracionEmpresa({
                       className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-sans font-extrabold uppercase text-slate-800 disabled:bg-slate-100 disabled:text-slate-500 font-bold"
                     >
                       <option value="">Seleccione Rol Base...</option>
-                      {(editingUser?.usuario?.toLowerCase() === 'admin' || editingUser?.rol?.toUpperCase() === 'ADMINISTRADOR') && (
+                      {(isAdmin && (editingUser?.usuario?.toLowerCase() === 'admin' || editingUser?.rol?.toUpperCase() === 'ADMINISTRADOR')) && (
                         <option value="ADMINISTRADOR">ADMINISTRADOR (SISTEMA - ÚNICO)</option>
                       )}
                       {roleList
@@ -4606,11 +4625,18 @@ export default function ConfiguracionEmpresa({
 
                 {/* PERMISOS ESPECIALES */}
                 <div className="space-y-2.5">
-                  <span className="text-[11px] font-extrabold text-slate-700 uppercase block">
-                    Permisos Especiales
-                  </span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-extrabold text-slate-700 uppercase block">
+                      Permisos Especiales & Avanzados
+                    </span>
+                    {!isAdmin && (
+                      <span className="text-[9.5px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 font-bold flex items-center gap-1">
+                        <Lock className="w-2.5 h-2.5" /> Solo Admin puede modificar
+                      </span>
+                    )}
+                  </div>
 
-                  {/* PRECIO COSTO TOGGLE */}
+                  {/* 1. PRECIO COSTO TOGGLE */}
                   <div className="p-3 bg-amber-50/90 border border-amber-250 rounded-xl space-y-2 font-sans">
                     <div className="flex items-start gap-2">
                       <DollarSign className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
@@ -4619,7 +4645,7 @@ export default function ConfiguracionEmpresa({
                           Visualizar Precios de Costo (F2 Inventario)
                         </span>
                         <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
-                          Muestra la columna "P. Costo" y totales financieros.
+                          Muestra la columna "P. Costo" y totales financieros en Inventario.
                         </span>
                       </div>
                     </div>
@@ -4631,6 +4657,7 @@ export default function ConfiguracionEmpresa({
                     ) : (
                       <button
                         type="button"
+                        disabled={!isAdmin}
                         onClick={() => {
                           setUserForm(prev => {
                             const nextPerms = { ...prev.permisos };
@@ -4642,7 +4669,10 @@ export default function ConfiguracionEmpresa({
                             return { ...prev, permisos: nextPerms };
                           });
                         }}
-                        className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all cursor-pointer bg-white border-slate-300 hover:border-amber-500 text-slate-700 shadow-2xs font-bold text-xs"
+                        className={`w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all font-bold text-xs ${
+                          !isAdmin ? 'bg-slate-100 border-slate-250 text-slate-400 cursor-not-allowed' :
+                          'bg-white border-slate-300 hover:border-amber-500 text-slate-700 shadow-2xs cursor-pointer'
+                        }`}
                       >
                         {userForm.permisos?.inventario?.ver_costos ? (
                           <span className="flex items-center gap-1 text-emerald-700">
@@ -4657,7 +4687,109 @@ export default function ConfiguracionEmpresa({
                     )}
                   </div>
 
-                  {/* EMISION NO FISCAL TOGGLE */}
+                  {/* 2. GESTION DE CATEGORIAS TOGGLE */}
+                  <div className="p-3 bg-emerald-50/90 border border-emerald-250 rounded-xl space-y-2 font-sans">
+                    <div className="flex items-start gap-2">
+                      <Tag className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold text-slate-800 text-[11px] block">
+                          Gestión de Categorías (F2 Inventario)
+                        </span>
+                        <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
+                          Permite crear, renombrar y eliminar categorías del catálogo de productos.
+                        </span>
+                      </div>
+                    </div>
+
+                    {userForm.rol?.toUpperCase() === 'ADMINISTRADOR' ? (
+                      <span className="inline-block px-2.5 py-1 bg-emerald-100 border border-emerald-300 text-emerald-800 rounded font-bold text-[9.5px] uppercase">
+                        Autorizado (Admin)
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={!isAdmin}
+                        onClick={() => {
+                          setUserForm(prev => {
+                            const nextPerms = { ...prev.permisos };
+                            const currInv = nextPerms.inventario || { ver: false, crear: false, editar: false, eliminar: false };
+                            nextPerms.inventario = {
+                              ...currInv,
+                              categorias: !currInv.categorias
+                            };
+                            return { ...prev, permisos: nextPerms };
+                          });
+                        }}
+                        className={`w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all font-bold text-xs ${
+                          !isAdmin ? 'bg-slate-100 border-slate-250 text-slate-400 cursor-not-allowed' :
+                          'bg-white border-slate-300 hover:border-emerald-500 text-slate-700 shadow-2xs cursor-pointer'
+                        }`}
+                      >
+                        {userForm.permisos?.inventario?.categorias ? (
+                          <span className="flex items-center gap-1 text-emerald-700">
+                            <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> Habilitado (Permitido)
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-slate-500">
+                            <Square className="w-3.5 h-3.5 text-slate-400" /> Bloqueado (Denegado)
+                          </span>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* 3. AJUSTES AVANZADOS DE STOCK TOGGLE */}
+                  <div className="p-3 bg-purple-50/90 border border-purple-250 rounded-xl space-y-2 font-sans">
+                    <div className="flex items-start gap-2">
+                      <Layers className="w-4 h-4 text-purple-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold text-slate-800 text-[11px] block">
+                          Ajuste Masivo & General de Stock (F2)
+                        </span>
+                        <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
+                          Habilita la Toma Física de Stock simultánea y Ajustes Generales de inventario.
+                        </span>
+                      </div>
+                    </div>
+
+                    {userForm.rol?.toUpperCase() === 'ADMINISTRADOR' ? (
+                      <span className="inline-block px-2.5 py-1 bg-purple-100 border border-purple-300 text-purple-800 rounded font-bold text-[9.5px] uppercase">
+                        Autorizado (Admin)
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={!isAdmin}
+                        onClick={() => {
+                          setUserForm(prev => {
+                            const nextPerms = { ...prev.permisos };
+                            const currInv = nextPerms.inventario || { ver: false, crear: false, editar: false, eliminar: false };
+                            nextPerms.inventario = {
+                              ...currInv,
+                              ajustes_avanzados: !currInv.ajustes_avanzados
+                            };
+                            return { ...prev, permisos: nextPerms };
+                          });
+                        }}
+                        className={`w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all font-bold text-xs ${
+                          !isAdmin ? 'bg-slate-100 border-slate-250 text-slate-400 cursor-not-allowed' :
+                          'bg-white border-slate-300 hover:border-purple-500 text-slate-700 shadow-2xs cursor-pointer'
+                        }`}
+                      >
+                        {userForm.permisos?.inventario?.ajustes_avanzados ? (
+                          <span className="flex items-center gap-1 text-emerald-700">
+                            <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> Habilitado (Permitido)
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-slate-500">
+                            <Square className="w-3.5 h-3.5 text-slate-400" /> Bloqueado (Denegado)
+                          </span>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* 4. EMISION NO FISCAL TOGGLE */}
                   <div className="p-3 bg-blue-50/90 border border-blue-250 rounded-xl space-y-2 font-sans">
                     <div className="flex items-start gap-2">
                       <FileText className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
@@ -4666,7 +4798,7 @@ export default function ConfiguracionEmpresa({
                           Notas de Entrega / No Fiscal (F1 Caja)
                         </span>
                         <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
-                          Permite emitir comprobantes no fiscales sin pasar por la impresora fiscal.
+                          Permite emitir comprobantes de venta no fiscales sin pasar por la impresora fiscal.
                         </span>
                       </div>
                     </div>
@@ -4678,6 +4810,7 @@ export default function ConfiguracionEmpresa({
                     ) : (
                       <button
                         type="button"
+                        disabled={!isAdmin}
                         onClick={() => {
                           setUserForm(prev => {
                             const nextPerms = { ...prev.permisos };
@@ -4689,7 +4822,10 @@ export default function ConfiguracionEmpresa({
                             return { ...prev, permisos: nextPerms };
                           });
                         }}
-                        className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all cursor-pointer bg-white border-slate-300 hover:border-blue-500 text-slate-700 shadow-2xs font-bold text-xs"
+                        className={`w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all font-bold text-xs ${
+                          !isAdmin ? 'bg-slate-100 border-slate-250 text-slate-400 cursor-not-allowed' :
+                          'bg-white border-slate-300 hover:border-blue-500 text-slate-700 shadow-2xs cursor-pointer'
+                        }`}
                       >
                         {userForm.permisos?.caja?.emitir_no_fiscal ? (
                           <span className="flex items-center gap-1 text-emerald-700">
@@ -4698,6 +4834,108 @@ export default function ConfiguracionEmpresa({
                         ) : (
                           <span className="flex items-center gap-1 text-slate-500">
                             <Square className="w-3.5 h-3.5 text-slate-400" /> Bloqueado (Denegado)
+                          </span>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* 5. DESCUENTOS EN CAJA TOGGLE */}
+                  <div className="p-3 bg-rose-50/90 border border-rose-250 rounded-xl space-y-2 font-sans">
+                    <div className="flex items-start gap-2">
+                      <Percent className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold text-slate-800 text-[11px] block">
+                          Descuentos Manuales en Caja POS (F1)
+                        </span>
+                        <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
+                          Permite ingresar porcentaje de descuento (%) manual directo en la venta.
+                        </span>
+                      </div>
+                    </div>
+
+                    {userForm.rol?.toUpperCase() === 'ADMINISTRADOR' ? (
+                      <span className="inline-block px-2.5 py-1 bg-rose-100 border border-rose-300 text-rose-800 rounded font-bold text-[9.5px] uppercase">
+                        Autorizado (Admin)
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={!isAdmin}
+                        onClick={() => {
+                          setUserForm(prev => {
+                            const nextPerms = { ...prev.permisos };
+                            const currCaja = nextPerms.caja || { ver: false, crear: false, editar: false, eliminar: false };
+                            nextPerms.caja = {
+                              ...currCaja,
+                              aplicar_descuentos: !currCaja.aplicar_descuentos
+                            };
+                            return { ...prev, permisos: nextPerms };
+                          });
+                        }}
+                        className={`w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all font-bold text-xs ${
+                          !isAdmin ? 'bg-slate-100 border-slate-250 text-slate-400 cursor-not-allowed' :
+                          'bg-white border-slate-300 hover:border-rose-500 text-slate-700 shadow-2xs cursor-pointer'
+                        }`}
+                      >
+                        {userForm.permisos?.caja?.aplicar_descuentos ? (
+                          <span className="flex items-center gap-1 text-emerald-700">
+                            <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> Habilitado (Permitido)
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-slate-500">
+                            <Square className="w-3.5 h-3.5 text-slate-400" /> Bloqueado (Denegado)
+                          </span>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* 6. HISTORIAL DE FACTURAS EN DEVOLUCIONES TOGGLE */}
+                  <div className="p-3 bg-cyan-50/90 border border-cyan-250 rounded-xl space-y-2 font-sans">
+                    <div className="flex items-start gap-2">
+                      <Calendar className="w-4 h-4 text-cyan-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold text-slate-800 text-[11px] block">
+                          Historial de Facturas / Devoluciones (F1)
+                        </span>
+                        <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
+                          Permite buscar y filtrar facturas por fecha y ver todos los turnos/cajeros.
+                        </span>
+                      </div>
+                    </div>
+
+                    {userForm.rol?.toUpperCase() === 'ADMINISTRADOR' ? (
+                      <span className="inline-block px-2.5 py-1 bg-cyan-100 border border-cyan-300 text-cyan-800 rounded font-bold text-[9.5px] uppercase">
+                        Autorizado (Admin)
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={!isAdmin}
+                        onClick={() => {
+                          setUserForm(prev => {
+                            const nextPerms = { ...prev.permisos };
+                            const currCaja = nextPerms.caja || { ver: false, crear: false, editar: false, eliminar: false };
+                            nextPerms.caja = {
+                              ...currCaja,
+                              ver_todas_facturas: !currCaja.ver_todas_facturas
+                            };
+                            return { ...prev, permisos: nextPerms };
+                          });
+                        }}
+                        className={`w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all font-bold text-xs ${
+                          !isAdmin ? 'bg-slate-100 border-slate-250 text-slate-400 cursor-not-allowed' :
+                          'bg-white border-slate-300 hover:border-cyan-500 text-slate-700 shadow-2xs cursor-pointer'
+                        }`}
+                      >
+                        {userForm.permisos?.caja?.ver_todas_facturas ? (
+                          <span className="flex items-center gap-1 text-emerald-700">
+                            <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> Histórico Total (Permitido)
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-slate-500">
+                            <Square className="w-3.5 h-3.5 text-slate-400" /> Solo Turno Actual (Denegado)
                           </span>
                         )}
                       </button>
@@ -4940,13 +5178,20 @@ export default function ConfiguracionEmpresa({
                   </div>
                 </div>
 
-                {/* PERMISOS ESPECIALES */}
+                {/* PERMISOS ESPECIALES EN PERFIL */}
                 <div className="space-y-2.5">
-                  <span className="text-[11px] font-extrabold text-slate-700 uppercase block">
-                    Permisos Especiales
-                  </span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-extrabold text-slate-700 uppercase block">
+                      Permisos Especiales del Perfil
+                    </span>
+                    {!isAdmin && (
+                      <span className="text-[9.5px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 font-bold flex items-center gap-1">
+                        <Lock className="w-2.5 h-2.5" /> Solo Admin puede modificar
+                      </span>
+                    )}
+                  </div>
 
-                  {/* PRECIO COSTO TOGGLE */}
+                  {/* 1. PRECIO COSTO TOGGLE */}
                   <div className="p-3 bg-amber-50/90 border border-amber-250 rounded-xl space-y-2 font-sans">
                     <div className="flex items-start gap-2">
                       <DollarSign className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
@@ -4967,6 +5212,7 @@ export default function ConfiguracionEmpresa({
                     ) : (
                       <button
                         type="button"
+                        disabled={!isAdmin}
                         onClick={() => {
                           setRoleForm(prev => {
                             const nextPerms = { ...prev.permisos };
@@ -4978,7 +5224,10 @@ export default function ConfiguracionEmpresa({
                             return { ...prev, permisos: nextPerms };
                           });
                         }}
-                        className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all cursor-pointer bg-white border-slate-300 hover:border-amber-500 text-slate-700 shadow-2xs font-bold text-xs"
+                        className={`w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all font-bold text-xs ${
+                          !isAdmin ? 'bg-slate-100 border-slate-250 text-slate-400 cursor-not-allowed' :
+                          'bg-white border-slate-300 hover:border-amber-500 text-slate-700 shadow-2xs cursor-pointer'
+                        }`}
                       >
                         {roleForm.permisos?.inventario?.ver_costos ? (
                           <span className="flex items-center gap-1 text-emerald-700">
@@ -4993,7 +5242,109 @@ export default function ConfiguracionEmpresa({
                     )}
                   </div>
 
-                  {/* EMISION NO FISCAL TOGGLE */}
+                  {/* 2. GESTION DE CATEGORIAS TOGGLE */}
+                  <div className="p-3 bg-emerald-50/90 border border-emerald-250 rounded-xl space-y-2 font-sans">
+                    <div className="flex items-start gap-2">
+                      <Tag className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold text-slate-800 text-[11px] block">
+                          Gestión de Categorías (F2 Inventario)
+                        </span>
+                        <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
+                          Permite crear, renombrar y eliminar categorías del catálogo de productos.
+                        </span>
+                      </div>
+                    </div>
+
+                    {roleForm.nombre?.trim().toUpperCase() === 'ADMINISTRADOR' ? (
+                      <span className="inline-block px-2.5 py-1 bg-emerald-100 border border-emerald-300 text-emerald-800 rounded font-bold text-[9.5px] uppercase">
+                        Autorizado (Admin)
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={!isAdmin}
+                        onClick={() => {
+                          setRoleForm(prev => {
+                            const nextPerms = { ...prev.permisos };
+                            const currInv = nextPerms.inventario || { ver: false, crear: false, editar: false, eliminar: false };
+                            nextPerms.inventario = {
+                              ...currInv,
+                              categorias: !currInv.categorias
+                            };
+                            return { ...prev, permisos: nextPerms };
+                          });
+                        }}
+                        className={`w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all font-bold text-xs ${
+                          !isAdmin ? 'bg-slate-100 border-slate-250 text-slate-400 cursor-not-allowed' :
+                          'bg-white border-slate-300 hover:border-emerald-500 text-slate-700 shadow-2xs cursor-pointer'
+                        }`}
+                      >
+                        {roleForm.permisos?.inventario?.categorias ? (
+                          <span className="flex items-center gap-1 text-emerald-700">
+                            <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> Habilitado (Permitido)
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-slate-500">
+                            <Square className="w-3.5 h-3.5 text-slate-400" /> Bloqueado (Denegado)
+                          </span>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* 3. AJUSTES AVANZADOS DE STOCK TOGGLE */}
+                  <div className="p-3 bg-purple-50/90 border border-purple-250 rounded-xl space-y-2 font-sans">
+                    <div className="flex items-start gap-2">
+                      <Layers className="w-4 h-4 text-purple-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold text-slate-800 text-[11px] block">
+                          Ajuste Masivo & General de Stock (F2)
+                        </span>
+                        <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
+                          Habilita la Toma Física de Stock simultánea y Ajustes Generales de inventario.
+                        </span>
+                      </div>
+                    </div>
+
+                    {roleForm.nombre?.trim().toUpperCase() === 'ADMINISTRADOR' ? (
+                      <span className="inline-block px-2.5 py-1 bg-purple-100 border border-purple-300 text-purple-800 rounded font-bold text-[9.5px] uppercase">
+                        Autorizado (Admin)
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={!isAdmin}
+                        onClick={() => {
+                          setRoleForm(prev => {
+                            const nextPerms = { ...prev.permisos };
+                            const currInv = nextPerms.inventario || { ver: false, crear: false, editar: false, eliminar: false };
+                            nextPerms.inventario = {
+                              ...currInv,
+                              ajustes_avanzados: !currInv.ajustes_avanzados
+                            };
+                            return { ...prev, permisos: nextPerms };
+                          });
+                        }}
+                        className={`w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all font-bold text-xs ${
+                          !isAdmin ? 'bg-slate-100 border-slate-250 text-slate-400 cursor-not-allowed' :
+                          'bg-white border-slate-300 hover:border-purple-500 text-slate-700 shadow-2xs cursor-pointer'
+                        }`}
+                      >
+                        {roleForm.permisos?.inventario?.ajustes_avanzados ? (
+                          <span className="flex items-center gap-1 text-emerald-700">
+                            <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> Habilitado (Permitido)
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-slate-500">
+                            <Square className="w-3.5 h-3.5 text-slate-400" /> Bloqueado (Denegado)
+                          </span>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* 4. EMISION NO FISCAL TOGGLE */}
                   <div className="p-3 bg-blue-50/90 border border-blue-250 rounded-xl space-y-2 font-sans">
                     <div className="flex items-start gap-2">
                       <FileText className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
@@ -5014,6 +5365,7 @@ export default function ConfiguracionEmpresa({
                     ) : (
                       <button
                         type="button"
+                        disabled={!isAdmin}
                         onClick={() => {
                           setRoleForm(prev => {
                             const nextPerms = { ...prev.permisos };
@@ -5025,7 +5377,10 @@ export default function ConfiguracionEmpresa({
                             return { ...prev, permisos: nextPerms };
                           });
                         }}
-                        className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all cursor-pointer bg-white border-slate-300 hover:border-blue-500 text-slate-700 shadow-2xs font-bold text-xs"
+                        className={`w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all font-bold text-xs ${
+                          !isAdmin ? 'bg-slate-100 border-slate-250 text-slate-400 cursor-not-allowed' :
+                          'bg-white border-slate-300 hover:border-blue-500 text-slate-700 shadow-2xs cursor-pointer'
+                        }`}
                       >
                         {roleForm.permisos?.caja?.emitir_no_fiscal ? (
                           <span className="flex items-center gap-1 text-emerald-700">
@@ -5034,6 +5389,108 @@ export default function ConfiguracionEmpresa({
                         ) : (
                           <span className="flex items-center gap-1 text-slate-500">
                             <Square className="w-3.5 h-3.5 text-slate-400" /> Bloqueado (Denegado)
+                          </span>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* 5. DESCUENTOS EN CAJA TOGGLE */}
+                  <div className="p-3 bg-rose-50/90 border border-rose-250 rounded-xl space-y-2 font-sans">
+                    <div className="flex items-start gap-2">
+                      <Percent className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold text-slate-800 text-[11px] block">
+                          Descuentos Manuales en Caja POS (F1)
+                        </span>
+                        <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
+                          Permite ingresar porcentaje de descuento (%) manual directo en la venta.
+                        </span>
+                      </div>
+                    </div>
+
+                    {roleForm.nombre?.trim().toUpperCase() === 'ADMINISTRADOR' ? (
+                      <span className="inline-block px-2.5 py-1 bg-rose-100 border border-rose-300 text-rose-800 rounded font-bold text-[9.5px] uppercase">
+                        Autorizado (Admin)
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={!isAdmin}
+                        onClick={() => {
+                          setRoleForm(prev => {
+                            const nextPerms = { ...prev.permisos };
+                            const currCaja = nextPerms.caja || { ver: false, crear: false, editar: false, eliminar: false };
+                            nextPerms.caja = {
+                              ...currCaja,
+                              aplicar_descuentos: !currCaja.aplicar_descuentos
+                            };
+                            return { ...prev, permisos: nextPerms };
+                          });
+                        }}
+                        className={`w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all font-bold text-xs ${
+                          !isAdmin ? 'bg-slate-100 border-slate-250 text-slate-400 cursor-not-allowed' :
+                          'bg-white border-slate-300 hover:border-rose-500 text-slate-700 shadow-2xs cursor-pointer'
+                        }`}
+                      >
+                        {roleForm.permisos?.caja?.aplicar_descuentos ? (
+                          <span className="flex items-center gap-1 text-emerald-700">
+                            <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> Habilitado (Permitido)
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-slate-500">
+                            <Square className="w-3.5 h-3.5 text-slate-400" /> Bloqueado (Denegado)
+                          </span>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* 6. HISTORIAL DE FACTURAS EN DEVOLUCIONES TOGGLE */}
+                  <div className="p-3 bg-cyan-50/90 border border-cyan-250 rounded-xl space-y-2 font-sans">
+                    <div className="flex items-start gap-2">
+                      <Calendar className="w-4 h-4 text-cyan-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold text-slate-800 text-[11px] block">
+                          Historial de Facturas / Devoluciones (F1)
+                        </span>
+                        <span className="text-[10px] text-slate-600 block leading-tight mt-0.5">
+                          Permite buscar y filtrar facturas por fecha y ver todos los turnos/cajeros.
+                        </span>
+                      </div>
+                    </div>
+
+                    {roleForm.nombre?.trim().toUpperCase() === 'ADMINISTRADOR' ? (
+                      <span className="inline-block px-2.5 py-1 bg-cyan-100 border border-cyan-300 text-cyan-800 rounded font-bold text-[9.5px] uppercase">
+                        Autorizado (Admin)
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={!isAdmin}
+                        onClick={() => {
+                          setRoleForm(prev => {
+                            const nextPerms = { ...prev.permisos };
+                            const currCaja = nextPerms.caja || { ver: false, crear: false, editar: false, eliminar: false };
+                            nextPerms.caja = {
+                              ...currCaja,
+                              ver_todas_facturas: !currCaja.ver_todas_facturas
+                            };
+                            return { ...prev, permisos: nextPerms };
+                          });
+                        }}
+                        className={`w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all font-bold text-xs ${
+                          !isAdmin ? 'bg-slate-100 border-slate-250 text-slate-400 cursor-not-allowed' :
+                          'bg-white border-slate-300 hover:border-cyan-500 text-slate-700 shadow-2xs cursor-pointer'
+                        }`}
+                      >
+                        {roleForm.permisos?.caja?.ver_todas_facturas ? (
+                          <span className="flex items-center gap-1 text-emerald-700">
+                            <CheckSquare className="w-3.5 h-3.5 text-emerald-600" /> Histórico Total (Permitido)
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-slate-500">
+                            <Square className="w-3.5 h-3.5 text-slate-400" /> Solo Turno Actual (Denegado)
                           </span>
                         )}
                       </button>

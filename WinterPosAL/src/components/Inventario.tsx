@@ -75,6 +75,18 @@ export default function Inventario({
     return !!_currentUser.permisos?.inventario?.ver_costos;
   }, [_currentUser]);
 
+  const canManageCategories = useMemo(() => {
+    if (!_currentUser || !_currentUser.rol) return true;
+    if ((_currentUser.rol || '').toLowerCase() === 'administrador') return true;
+    return Boolean(_currentUser.permisos?.inventario?.categorias) || Boolean(_currentUser.permisos?.inventario?.admin);
+  }, [_currentUser]);
+
+  const canAdvancedStockAdjust = useMemo(() => {
+    if (!_currentUser || !_currentUser.rol) return true;
+    if ((_currentUser.rol || '').toLowerCase() === 'administrador') return true;
+    return Boolean(_currentUser.permisos?.inventario?.ajustes_avanzados) || Boolean(_currentUser.permisos?.inventario?.admin);
+  }, [_currentUser]);
+
   const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'movimientos' | 'precios' | 'estadisticas'>('catalogo');
   const [selectedMovementDetail, setSelectedMovementDetail] = useState<any>(null);
   const [successMsg, setSuccessMsg] = useState('');
@@ -4981,7 +4993,7 @@ export default function Inventario({
                   )}
 
                   {/* BUTTON: CATEGORIAS */}
-                  {_currentUser.rol.toLowerCase() === 'administrador' && (
+                  {canManageCategories && (
                     <button
                       onClick={() => setShowCategoriesModal(true)}
                       className="w-full bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all active:scale-95"
@@ -4992,7 +5004,7 @@ export default function Inventario({
                   )}
 
                   {/* BUTTON: AJUSTE GENERAL */}
-                  {_currentUser.rol.toLowerCase() === 'administrador' && (
+                  {canAdvancedStockAdjust && (
                     <button
                       onClick={() => {
                         setSelectedProductIds([]);
@@ -5016,12 +5028,12 @@ export default function Inventario({
                     <span>Resp. Inventario</span>
                   </button>
 
-                  {/* BUTTON 2: STOCK (CON ACCESO A AJUSTE MASIVO SI NO HAY PRODUCTO SELECCIONADO Y ES ADMIN) */}
+                  {/* BUTTON 2: STOCK (CON ACCESO A AJUSTE MASIVO SI NO HAY PRODUCTO SELECCIONADO Y ES ADMIN/AUTORIZADO) */}
                   <button
                     onClick={() => {
                       if (selectedProduct) {
                         handleOpenAdjust(selectedProduct);
-                      } else if (_currentUser.rol.toLowerCase() === 'administrador') {
+                      } else if (canAdvancedStockAdjust) {
                         setBulkStockCounts({});
                         setBulkStockSearch('');
                         setBulkStockReason('Toma de inventario físico de stock');
@@ -5030,9 +5042,9 @@ export default function Inventario({
                         showAlert('Debe seleccionar un producto de la tabla para ajustar su stock.', 'Seleccione Producto', 'warning');
                       }
                     }}
-                    disabled={!selectedProduct && _currentUser.rol.toLowerCase() !== 'administrador'}
+                    disabled={!selectedProduct && !canAdvancedStockAdjust}
                     className="w-full bg-cyan-600 hover:bg-cyan-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-350 text-white border border-cyan-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all enabled:active:scale-95 disabled:cursor-not-allowed"
-                    title={!selectedProduct ? (_currentUser.rol.toLowerCase() === 'administrador' ? "Abrir Ajuste Masivo de Stock Físico (Conteo Simultáneo)" : "Seleccione un producto para ajustar stock") : "Ajustar stock del producto seleccionado"}
+                    title={!selectedProduct ? (canAdvancedStockAdjust ? "Abrir Ajuste Masivo de Stock Físico (Conteo Simultáneo)" : "Seleccione un producto para ajustar stock") : "Ajustar stock del producto seleccionado"}
                   >
                     <RefreshCw className="w-4 h-4 bg-cyan-750/50 disabled:bg-transparent rounded-full p-0.5" />
                     <span>{selectedProduct ? 'Ajustar Stock' : 'Ajuste Masivo Stock 👑'}</span>
@@ -8249,9 +8261,9 @@ export default function Inventario({
         </div>
       )}
 
-      {/* MODAL AJUSTE MASIVO DE STOCK FÍSICO (SOLO ADMINISTRADOR) */}
+      {/* MODAL AJUSTE MASIVO DE STOCK FÍSICO (SOLO ADMINISTRADOR O AUTORIZADO) */}
       {showBulkStockAdjustModal && (() => {
-        if (_currentUser.rol.toLowerCase() !== 'administrador') {
+        if (!canAdvancedStockAdjust) {
           return null;
         }
 

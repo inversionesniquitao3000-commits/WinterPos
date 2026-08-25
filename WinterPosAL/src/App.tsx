@@ -1198,14 +1198,12 @@ const cleanProductObject = (p: any): Product => ({
       } else if (e.key === 'F5' && hasModulePermission('proveedores', 'ver')) {
         e.preventDefault();
         setActiveTab('proveedores');
-      } else if (e.key === 'F6') {
+      } else if (e.key === 'F6' && hasModulePermission('inversiones', 'ver')) {
         e.preventDefault();
-        if (currentUser && (currentUser.rol?.toLowerCase() === 'administrador' || currentUser.rol?.toLowerCase() === 'admin')) {
-          if (inversionesUnlocked) {
-            setActiveTab('inversiones');
-          } else {
-            setShowMasterPassModal(true);
-          }
+        if (inversionesUnlocked) {
+          setActiveTab('inversiones');
+        } else {
+          setShowMasterPassModal(true);
         }
       } else if (e.key === 'F7' && hasModulePermission('documentos', 'ver')) {
         e.preventDefault();
@@ -2780,7 +2778,7 @@ const cleanProductObject = (p: any): Product => ({
         )}
 
         {/* F6 Inversiones & Accionistas */}
-        {currentUser && (currentUser.rol?.toLowerCase() === 'administrador' || currentUser.rol?.toLowerCase() === 'admin') && (
+        {hasModulePermission('inversiones', 'ver') && (
           <button
             onClick={() => {
               if (inversionesUnlocked) {
@@ -2794,7 +2792,7 @@ const cleanProductObject = (p: any): Product => ({
                 ? 'tab-grad-inversiones text-white shadow-md ring-1 ring-white/20'
                 : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
             }`}
-            title="Módulo de Control de Inversiones y Accionistas [F6] (Solo Administrador)"
+            title="Módulo de Control de Inversiones y Accionistas [F6] (Requiere Master Pass)"
           >
             <Briefcase className="w-5 h-5 flex-shrink-0" />
             <span>F6 Inversiones</span>
