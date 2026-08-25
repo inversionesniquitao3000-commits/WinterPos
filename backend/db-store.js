@@ -445,7 +445,17 @@ export function readJsonFile(filename, defaultValue) {
       return defaultValue;
     }
     const content = fs.readFileSync(filePath, 'utf8');
-    return JSON.parse(content);
+    if (!content || !content.trim()) {
+      return defaultValue;
+    }
+    const parsed = JSON.parse(content);
+    if (parsed === null || parsed === undefined) {
+      return defaultValue;
+    }
+    if (Array.isArray(defaultValue) && !Array.isArray(parsed)) {
+      return defaultValue;
+    }
+    return parsed;
   } catch (err) {
     console.error(`Error al leer archivo JSON ${filename}:`, err);
     return defaultValue;
@@ -1201,7 +1211,8 @@ export async function saveClient(c) {
       console.error('Error en saveClient (Postgres):', err.message);
     }
   }
-  const clients = readJsonFile('clients.json', mockClients);
+  let clients = readJsonFile('clients.json', mockClients);
+  if (!Array.isArray(clients)) clients = [...mockClients];
   const newClient = { ...c, id: Date.now(), saldo_pendiente: (c.limite_credito || 0) - (c.credito_disponible || 0), aplica_precio_costo: !!c.aplica_precio_costo };
   clients.push(newClient);
   writeJsonFile('clients.json', clients);
@@ -1635,7 +1646,8 @@ export async function saveUser(u) {
       throw err;
     }
   }
-  const users = readJsonFile('users.json', mockUsers);
+  let users = readJsonFile('users.json', mockUsers);
+  if (!Array.isArray(users)) users = [...mockUsers];
   const newUser = {
     id: Date.now(),
     usuario: u.usuario,

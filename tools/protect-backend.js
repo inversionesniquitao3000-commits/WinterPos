@@ -130,6 +130,14 @@ if (fs.existsSync(schemaSrc)) {
   fs.copyFileSync(schemaSrc, path.join(distBackendDir, 'schema.sql'));
 }
 
+// Copy .env if exists or create default
+const envSrc = path.join(backendDir, '.env');
+if (fs.existsSync(envSrc)) {
+  fs.copyFileSync(envSrc, path.join(distBackendDir, '.env'));
+} else {
+  fs.writeFileSync(path.join(distBackendDir, '.env'), 'PORT=5000\nDB_USER=postgres\nDB_PASSWORD=postgres\nDB_HOST=localhost\nDB_PORT=5432\nDB_DATABASE=Winter\n');
+}
+
 // 3. Obfuscate backend files into dist_backend
 console.log('\n🛡️ Ofuscando y Cifrando módulos de backend en dist_backend/:');
 for (const file of backendFilesToProtect) {

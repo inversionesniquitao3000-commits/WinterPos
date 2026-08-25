@@ -1265,7 +1265,7 @@ app.post('/api/users/login-check', async (req, res) => {
 
     const users = await getUsers();
     const user = users.find(
-      u => u.usuario.toLowerCase() === username.trim().toLowerCase() && (password === u.clave || (u.usuario.toLowerCase() === 'admin' && (password === 'admin*' || password === 'admin')))
+      u => u.usuario.toLowerCase() === username.trim().toLowerCase() && password === (u.clave || 'admin*')
     );
 
     if (!user) {

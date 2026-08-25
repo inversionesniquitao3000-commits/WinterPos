@@ -359,7 +359,7 @@ export default function ConfiguracionEmpresa({
     usuario: '',
     nombre: '',
     rol: 'vendedor',
-    clave: 'admin',
+    clave: 'admin*',
     estado: 'Activo' as 'Activo' | 'Inactivo',
     permisos: {} as any
   });
