@@ -170,7 +170,10 @@ export default function Proveedores({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
         setShowAddProvModal(false);
+        setEditingProv(null);
         setShowNewCompraModal(false);
         setShowAbonoModal(false);
         setShowNewCotizacionModal(false);
@@ -181,8 +184,8 @@ export default function Proveedores({
         setIsCotProdSearchOpen(false);
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, []);
 
   // Form: Proveedor

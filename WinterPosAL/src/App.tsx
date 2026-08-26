@@ -36,12 +36,79 @@ import { ThemeSelectorModal, ThemeMode, ThemePalette } from './components/ThemeS
 import { 
   ShoppingBag, Package, Users, Truck,
   TrendingUp, Settings, LogOut, Globe, Cpu, History, Printer, CheckCircle2, ShieldCheck, Briefcase,
-  Smartphone, QrCode, PauseCircle, Play, Palette, Sun, Moon
+  Smartphone, QrCode, PauseCircle, Play, Palette, Sun, Moon,
+  Maximize2, Minimize2
 } from 'lucide-react';
 import { printTicketReceipt, formatBs, formatUSD, getApiBaseUrl } from './utils';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  
+  // Detección de entorno: Acceso directo Desktop vs Navegador Web estándar
+  const isDesktopMode = new URLSearchParams(window.location.search).get('mode') === 'desktop' || 
+    window.navigator.userAgent.includes('Electron') || 
+    window.matchMedia('(display-mode: standalone)').matches;
+
+  const [isFullscreen, setIsFullscreen] = useState(() => !!document.fullscreenElement);
+
+  useEffect(() => {
+    const handleFsChange = () => {
+      const isFs = !!document.fullscreenElement;
+      setIsFullscreen(isFs);
+      if (isFs) {
+        if ('keyboard' in navigator && (navigator as any).keyboard?.lock) {
+          (navigator as any).keyboard.lock(['Escape']).catch(() => {});
+        }
+      } else {
+        if ('keyboard' in navigator && (navigator as any).keyboard?.unlock) {
+          (navigator as any).keyboard.unlock();
+        }
+      }
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    if (document.fullscreenElement && 'keyboard' in navigator && (navigator as any).keyboard?.lock) {
+      (navigator as any).keyboard.lock(['Escape']).catch(() => {});
+    }
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFsChange);
+    };
+  }, []);
+
+  const handleToggleFullscreen = async () => {
+    if (document.fullscreenElement) {
+      if ('keyboard' in navigator && (navigator as any).keyboard?.unlock) {
+        (navigator as any).keyboard.unlock();
+      }
+      document.exitFullscreen().catch(() => {});
+      try {
+        window.resizeTo(980, 600);
+        const screenW = window.screen.availWidth || 1366;
+        const screenH = window.screen.availHeight || 768;
+        const left = Math.max(0, Math.round((screenW - 980) / 2));
+        const top = Math.max(0, Math.round((screenH - 600) / 2));
+        window.moveTo(left, top);
+      } catch (_) {}
+    } else {
+      try {
+        await document.documentElement.requestFullscreen();
+        if ('keyboard' in navigator && (navigator as any).keyboard?.lock) {
+          await (navigator as any).keyboard.lock(['Escape']);
+        }
+      } catch (_) {}
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F11') {
+        e.preventDefault();
+        handleToggleFullscreen();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const [terminalName] = useState<string>(() => {
     const saved = localStorage.getItem('pos_terminal_name');
     if (saved) return saved;
@@ -2543,22 +2610,41 @@ const cleanProductObject = (p: any): Product => ({
   const [showLicenseModalManually, setShowLicenseModalManually] = useState(false);
 
   useEffect(() => {
-    const handleGlobalF9 = (e: KeyboardEvent) => {
-      if (e.key === 'F9') {
-        e.preventDefault();
-        setShowLicenseModalManually(prev => !prev);
-      } else if (e.key === 'Escape') {
-        if (reprintSale) {
+    const handleGlobalEscapeAndShortcuts = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showLogoutConfirm) {
+          e.preventDefault();
+          e.stopPropagation();
+          setShowLogoutConfirm(false);
+        } else if (showMasterPassModal) {
+          e.preventDefault();
+          e.stopPropagation();
+          setShowMasterPassModal(false);
+        } else if (showManualAccesoModal) {
+          e.preventDefault();
+          e.stopPropagation();
+          setShowManualAccesoModal(false);
+        } else if (showThemeModal) {
+          e.preventDefault();
+          e.stopPropagation();
+          setShowThemeModal(false);
+        } else if (reprintSale) {
+          e.preventDefault();
+          e.stopPropagation();
           setReprintSale(null);
-        }
-        if (showLicenseModalManually) {
+        } else if (showLicenseModalManually) {
+          e.preventDefault();
+          e.stopPropagation();
           setShowLicenseModalManually(false);
         }
+      } else if (e.key === 'F9') {
+        e.preventDefault();
+        setShowLicenseModalManually(prev => !prev);
       }
     };
-    window.addEventListener('keydown', handleGlobalF9);
-    return () => window.removeEventListener('keydown', handleGlobalF9);
-  }, [reprintSale, showLicenseModalManually]);
+    window.addEventListener('keydown', handleGlobalEscapeAndShortcuts, true);
+    return () => window.removeEventListener('keydown', handleGlobalEscapeAndShortcuts, true);
+  }, [showLogoutConfirm, showMasterPassModal, showManualAccesoModal, showThemeModal, reprintSale, showLicenseModalManually]);
 
   // Render Mobile Executive App directly if on mobile device or ?mode=mobile (solo si tiene permiso movil)
   if (isMobileMode && hasModulePermission('movil', 'ver')) {
@@ -2587,7 +2673,13 @@ const cleanProductObject = (p: any): Product => ({
           setCurrentUser(user);
           // Activate Full Screen on Login Success
           if (!document.fullscreenElement) {
-            document.documentElement.requestFullscreen().catch(() => {});
+            document.documentElement.requestFullscreen()
+              .then(() => {
+                if ('keyboard' in navigator && (navigator as any).keyboard?.lock) {
+                  (navigator as any).keyboard.lock(['Escape']).catch(() => {});
+                }
+              })
+              .catch(() => {});
           }
         }} 
         systemUsers={users} 
@@ -2694,9 +2786,21 @@ const cleanProductObject = (p: any): Product => ({
             <span>LAN Mode: <strong className="text-yellow-300 uppercase font-mono">{dbMode}</strong> ({lanIP})</span>
           </div>
 
+          {/* Botón Restaurar / Pantalla Completa (Solo para Modo Desktop) */}
+          {isDesktopMode && (
+            <button
+              type="button"
+              onClick={handleToggleFullscreen}
+              className="p-2 bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white rounded transition-all cursor-pointer"
+              title={isFullscreen ? "Restaurar Ventana (F11)" : "Pantalla Completa POS (F11)"}
+            >
+              {isFullscreen ? <Minimize2 className="w-4 h-4 text-amber-400" /> : <Maximize2 className="w-4 h-4 text-emerald-400" />}
+            </button>
+          )}
+
           <button
             onClick={handleLogout}
-            className="p-2 bg-red-950/40 border border-red-900/30 text-red-400 hover:bg-red-900/40 hover:text-red-300 rounded transition-all"
+            className="p-2 bg-red-950/40 border border-red-900/30 text-red-400 hover:bg-red-900/40 hover:text-red-300 rounded transition-all cursor-pointer"
             title="Cerrar Sesión"
           >
             <LogOut className="w-4 h-4" />

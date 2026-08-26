@@ -22,6 +22,19 @@ export const BarcodeVisualizer: React.FC<BarcodeVisualizerProps> = ({
   const [labelQty, setLabelQty] = useState<number>(12);
   const [showPdfModal, setShowPdfModal] = useState(false);
 
+  useEffect(() => {
+    if (!showPdfModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowPdfModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [showPdfModal]);
+
   const cleanValue = (value || '').trim().toUpperCase();
 
   // Render Barcode dynamically whenever value changes

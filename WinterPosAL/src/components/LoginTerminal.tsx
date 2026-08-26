@@ -16,6 +16,12 @@ interface LoginTerminalProps {
 export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConfig, sessionNotice, onOpenLicenseModal }: LoginTerminalProps) {
   const { showAlert } = useDialog();
   const usernameInputRef = useRef<HTMLInputElement>(null);
+  
+  // Detección de entorno: Acceso directo Desktop vs Navegador Web estándar
+  const isDesktopMode = new URLSearchParams(window.location.search).get('mode') === 'desktop' || 
+    window.navigator.userAgent.includes('Electron') || 
+    window.matchMedia('(display-mode: standalone)').matches;
+
   const [showConfig, setShowConfig] = useState(false);
   const [clickCount, setClickCount] = useState(0);
   const [serverIP, setServerIP] = useState(() => {
@@ -191,15 +197,33 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
     };
   }, [showConfig]);
 
+  // Forzar tamaño compacto nativo y centrado cuando se ejecuta en modo desktop app
+  useEffect(() => {
+    if (isDesktopMode) {
+      try {
+        const targetW = 840;
+        const targetH = 520;
+        window.resizeTo(targetW, targetH);
+        const screenW = window.screen.availWidth || 1366;
+        const screenH = window.screen.availHeight || 768;
+        const left = Math.max(0, Math.round((screenW - targetW) / 2));
+        const top = Math.max(0, Math.round((screenH - targetH) / 2));
+        window.moveTo(left, top);
+      } catch (_) {}
+    }
+  }, [isDesktopMode]);
+
   // Monitor key press: ESC to close modal, Ctrl + Alt + P for LAN settings, F9 for License
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (showSupportModal) {
           e.preventDefault();
+          e.stopPropagation();
           setShowSupportModal(false);
         } else if (showConfig) {
           e.preventDefault();
+          e.stopPropagation();
           setShowConfig(false);
         }
       } else if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'p') {
@@ -210,8 +234,8 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
         if (onOpenLicenseModal) onOpenLicenseModal();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [onOpenLicenseModal, showSupportModal, showConfig]);
 
   const handleLogoClick = () => {
@@ -332,11 +356,6 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
     }
   };
 
-  // Detect if running in desktop app launcher mode or standard browser
-  const isDesktopMode = new URLSearchParams(window.location.search).get('mode') === 'desktop' || 
-    window.navigator.userAgent.includes('Electron') || 
-    window.matchMedia('(display-mode: standalone)').matches;
-
   if (!isDesktopMode) {
     // STANDARD BROWSER FULLSCREEN LOGIN LAYOUT (Previous Full Screen Design)
     return (
@@ -417,16 +436,32 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
             )}
 
             {!showConfig ? (
-              <form className="space-y-4" onSubmit={handleSubmit}>
+              <div 
+                className="space-y-4"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !isLoading) {
+                    e.preventDefault();
+                    handleSubmit(e);
+                  }
+                }}
+              >
                 <div className="space-y-1">
                   <div className="relative">
                     <input
                       ref={usernameInputRef}
                       autoFocus
                       type="text"
+                      name="wpos_operator_user"
+                      id="wpos_operator_user"
                       value={username}
                       onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ''))}
                       placeholder="Usuario"
+                      autoComplete="off"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      data-lpignore="true"
+                      data-form-type="other"
                       className="w-full bg-white text-slate-800 border-none rounded px-3 py-2.5 text-xs font-sans pr-8 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-yellow-400 font-bold"
                       disabled={isLoading}
                     />
@@ -437,17 +472,26 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
                 <div className="space-y-1">
                   <div className="relative">
                     <input
-                      type={showPassword ? 'text' : 'password'}
+                      type="text"
+                      name="wpos_operator_key"
+                      id="wpos_operator_key"
                       value={password}
                       onChange={(e) => setPassword(e.target.value.toLowerCase())}
                       placeholder="Contraseña"
+                      autoComplete="off"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      data-lpignore="true"
+                      data-form-type="other"
+                      style={{ WebkitTextSecurity: showPassword ? 'none' : 'disc' } as React.CSSProperties}
                       className="w-full bg-white text-slate-800 border-none rounded px-3 py-2.5 text-xs font-sans pr-12 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-yellow-400 font-bold"
                       disabled={isLoading}
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(prev => !prev)}
-                      className="absolute right-7 top-2 text-slate-400 hover:text-slate-655 outline-none z-10"
+                      className="absolute right-7 top-2 text-slate-400 hover:text-slate-600 outline-none z-10 cursor-pointer"
                       disabled={isLoading}
                     >
                       {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
@@ -457,7 +501,8 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
                 </div>
 
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={handleSubmit}
                   className="w-full bg-[#08284c] hover:bg-[#061f3b] text-white py-3 rounded text-xs font-black tracking-wider transition-all duration-200 border border-slate-700/30 flex items-center justify-center gap-2 font-sans shadow cursor-pointer"
                   disabled={isLoading}
                 >
@@ -467,7 +512,7 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
                     'Iniciar sesión'
                   )}
                 </button>
-              </form>
+              </div>
             ) : (
               <form className="space-y-3 bg-[#0a2f58] p-4 rounded border border-yellow-500/20" onSubmit={handleSaveConfig}>
                 <div className="flex justify-between items-center border-b border-white/10 pb-2">
@@ -668,7 +713,15 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
 
           {/* Configuration mode vs standard login */}
           {!showConfig ? (
-            <form className="space-y-3" onSubmit={handleSubmit}>
+            <div 
+              className="space-y-3"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !isLoading) {
+                  e.preventDefault();
+                  handleSubmit(e);
+                }
+              }}
+            >
               
               {/* Usuario Input */}
               <div className="space-y-1">
@@ -677,9 +730,17 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
                     ref={usernameInputRef}
                     autoFocus
                     type="text"
+                    name="wpos_operator_user_dk"
+                    id="wpos_operator_user_dk"
                     value={username}
                     onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ''))}
                     placeholder="Usuario"
+                    autoComplete="off"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    data-lpignore="true"
+                    data-form-type="other"
                     className="w-full bg-white text-slate-900 border-none rounded px-3 py-2 text-xs font-sans pr-8 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 font-bold shadow-inner"
                     disabled={isLoading}
                   />
@@ -691,17 +752,26 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
               <div className="space-y-1">
                 <div className="relative">
                   <input
-                    type={showPassword ? 'text' : 'password'}
+                    type="text"
+                    name="wpos_operator_key_dk"
+                    id="wpos_operator_key_dk"
                     value={password}
                     onChange={(e) => setPassword(e.target.value.toLowerCase())}
                     placeholder="Contraseña"
+                    autoComplete="off"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    data-lpignore="true"
+                    data-form-type="other"
+                    style={{ WebkitTextSecurity: showPassword ? 'none' : 'disc' } as React.CSSProperties}
                     className="w-full bg-white text-slate-900 border-none rounded px-3 py-2 text-xs font-sans pr-12 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 font-bold shadow-inner"
                     disabled={isLoading}
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(prev => !prev)}
-                    className="absolute right-7 top-2 text-slate-400 hover:text-slate-650 outline-none z-10"
+                    className="absolute right-7 top-2 text-slate-400 hover:text-slate-650 outline-none z-10 cursor-pointer"
                     disabled={isLoading}
                   >
                     {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
@@ -712,7 +782,8 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
 
               {/* Login submit button - dark navy */}
               <button
-                type="submit"
+                type="button"
+                onClick={handleSubmit}
                 className="w-full bg-[#0a325c] hover:bg-[#072444] active:scale-[0.99] text-white py-2.5 rounded text-xs font-black tracking-wider transition-all duration-200 border border-slate-600/40 flex items-center justify-center gap-2 font-sans shadow-md cursor-pointer"
                 disabled={isLoading}
               >
@@ -722,7 +793,7 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
                   'Iniciar sesión'
                 )}
               </button>
-            </form>
+            </div>
           ) : (
             <form className="space-y-2 bg-[#0d345e] p-3 rounded border border-yellow-500/30 shadow-inner" onSubmit={handleSaveConfig}>
               <div className="flex justify-between items-center border-b border-white/10 pb-1.5">

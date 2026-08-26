@@ -372,6 +372,32 @@ export default function ConfiguracionEmpresa({
     permisos: {} as any
   });
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showUserModal || editingUser) {
+          e.preventDefault(); e.stopPropagation();
+          setShowUserModal(false);
+          setEditingUser(null);
+          return;
+        }
+        if (showRoleModal || editingRole) {
+          e.preventDefault(); e.stopPropagation();
+          setShowRoleModal(false);
+          setEditingRole(null);
+          return;
+        }
+        if (showMasterPassModal) {
+          e.preventDefault(); e.stopPropagation();
+          setShowMasterPassModal(false);
+          return;
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [showUserModal, editingUser, showRoleModal, editingRole, showMasterPassModal]);
+
   // 3. Tab Perifericos - States
   const [printerConfig, setPrinterConfig] = useState<PrinterConfig>(() => {
     const saved = localStorage.getItem('pos_printer_config');

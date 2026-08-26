@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ShieldAlert, ShieldCheck, Copy, Check, MessageCircle, FileUp, Key, Lock, CheckCircle2, RefreshCw, X, Building2, Calendar, Monitor } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 
@@ -23,6 +23,18 @@ export default function LicenciaModal({ licenseStatus, onLicenseActivated, getAp
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [showUpdater, setShowUpdater] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && onClose) {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [onClose]);
 
   const isValid = licenseStatus?.isValid === true;
   const hwid = licenseStatus?.hwid || 'CULTIVATING_HWID...';

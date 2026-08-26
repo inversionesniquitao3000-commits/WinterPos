@@ -501,27 +501,6 @@ export default function CajaPOS({
   }>>([]);
   const [devExchangeDiffMethod, setDevExchangeDiffMethod] = useState<'Efectivo$' | 'EfectivoBs' | 'PagoMovil' | 'TarjetaBs' | 'Biopago' | 'CreditoCliente'>('Efectivo$');
 
-  // ESC key listener to close modals
-  useEffect(() => {
-    const handleEscKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (showAperturaModal) {
-          onLogout();
-          return;
-        }
-        setShowDevConfirmModal(false);
-        setShowDevolucionModal(false);
-        setShowCambioDivisasModal(false);
-        setShowQuickClientModal(false);
-        if (typeof setShowEntradaRapidaModal === 'function') {
-          setShowEntradaRapidaModal(false);
-        }
-      }
-    };
-    window.addEventListener('keydown', handleEscKey);
-    return () => window.removeEventListener('keydown', handleEscKey);
-  }, [showAperturaModal, onLogout]);
-
   const [devDateFilter, setDevDateFilter] = useState<string>(() => {
     const d = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
@@ -1536,6 +1515,78 @@ export default function CajaPOS({
     setToast({ text, type });
     setTimeout(() => setToast(null), 4000);
   };
+
+  // ESC key listener to close modals with priority (capture phase)
+  useEffect(() => {
+    const handleEscKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (contextMenu) {
+          e.preventDefault(); e.stopPropagation(); setContextMenu(null); return;
+        }
+        if (zoomedProduct) {
+          e.preventDefault(); e.stopPropagation(); setZoomedProduct(null); return;
+        }
+        if (showQuickAddCatModal) {
+          e.preventDefault(); e.stopPropagation(); setShowQuickAddCatModal(false); return;
+        }
+        if (editingProduct) {
+          e.preventDefault(); e.stopPropagation(); setEditingProduct(null); return;
+        }
+        if (imageManagerProduct) {
+          e.preventDefault(); e.stopPropagation(); setImageManagerProduct(null); return;
+        }
+        if (showQuickClientModal) {
+          e.preventDefault(); e.stopPropagation(); setShowQuickClientModal(false); return;
+        }
+        if (showDevConfirmModal) {
+          e.preventDefault(); e.stopPropagation(); setShowDevConfirmModal(false); return;
+        }
+        if (showDevolucionModal) {
+          e.preventDefault(); e.stopPropagation(); setShowDevolucionModal(false); return;
+        }
+        if (showCambioDivisasModal) {
+          e.preventDefault(); e.stopPropagation(); setShowCambioDivisasModal(false); return;
+        }
+        if (showBulkModal) {
+          e.preventDefault(); e.stopPropagation(); setShowBulkModal(false); return;
+        }
+        if (showQtyEditModal) {
+          e.preventDefault(); e.stopPropagation(); setShowQtyEditModal(false); return;
+        }
+        if (showHoldModal) {
+          e.preventDefault(); e.stopPropagation(); setShowHoldModal(false); return;
+        }
+        if (showCajaAbonoModal) {
+          e.preventDefault(); e.stopPropagation(); setShowCajaAbonoModal(false); return;
+        }
+        if (showMovementsModal) {
+          e.preventDefault(); e.stopPropagation(); setShowMovementsModal(false); return;
+        }
+        if (cierreResult) {
+          e.preventDefault(); e.stopPropagation(); setCierreResult(null); return;
+        }
+        if (showCierreModal) {
+          e.preventDefault(); e.stopPropagation(); setShowCierreModal(false); return;
+        }
+        if (showTicketModal) {
+          e.preventDefault(); e.stopPropagation(); setShowTicketModal(false); return;
+        }
+        if (showCheckoutModal) {
+          e.preventDefault(); e.stopPropagation(); setShowCheckoutModal(false); return;
+        }
+        if (searchProdTerm) {
+          e.preventDefault(); e.stopPropagation(); setSearchProdTerm(''); return;
+        }
+      }
+    };
+    window.addEventListener('keydown', handleEscKey, true);
+    return () => window.removeEventListener('keydown', handleEscKey, true);
+  }, [
+    contextMenu, zoomedProduct, showQuickAddCatModal, editingProduct, imageManagerProduct,
+    showQuickClientModal, showDevConfirmModal, showDevolucionModal, showCambioDivisasModal,
+    showBulkModal, showQtyEditModal, showHoldModal, showCajaAbonoModal, showMovementsModal,
+    cierreResult, showCierreModal, showTicketModal, showCheckoutModal, searchProdTerm
+  ]);
 
   // Auto-focus on state changes or mounting
   useEffect(() => {

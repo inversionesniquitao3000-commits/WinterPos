@@ -185,6 +185,8 @@ export default function Clientes({
       const isTyping = targetTag === 'INPUT' || targetTag === 'TEXTAREA' || targetTag === 'SELECT';
 
       if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
         setContextMenu(null);
         setShowAddModal(false);
         setShowEditModal(false);
@@ -198,10 +200,10 @@ export default function Clientes({
         handleClearFilters();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
     return () => {
       window.removeEventListener('click', handleCloseContextMenu);
-      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keydown', handleKeyDown, true);
     };
   }, []);
 

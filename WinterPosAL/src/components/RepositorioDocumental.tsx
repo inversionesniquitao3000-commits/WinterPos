@@ -204,15 +204,26 @@ export const RepositorioDocumental: React.FC<RepositorioDocumentalProps> = ({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (previewDoc) setPreviewDoc(null);
-        else if (editingDoc) setEditingDoc(null);
-        else if (isUploadOpen) setIsUploadOpen(false);
-        else if (showChecklistModal) setShowChecklistModal(false);
-        else if (showDossierModal) setShowDossierModal(false);
+        if (previewDoc) {
+          e.preventDefault(); e.stopPropagation();
+          setPreviewDoc(null);
+        } else if (editingDoc) {
+          e.preventDefault(); e.stopPropagation();
+          setEditingDoc(null);
+        } else if (isUploadOpen) {
+          e.preventDefault(); e.stopPropagation();
+          setIsUploadOpen(false);
+        } else if (showChecklistModal) {
+          e.preventDefault(); e.stopPropagation();
+          setShowChecklistModal(false);
+        } else if (showDossierModal) {
+          e.preventDefault(); e.stopPropagation();
+          setShowDossierModal(false);
+        }
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [previewDoc, editingDoc, isUploadOpen, showChecklistModal, showDossierModal]);
 
   useEffect(() => {

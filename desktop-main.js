@@ -2,27 +2,77 @@ import { spawn, exec } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import http from 'http';
+import net from 'net';
 import { fileURLToPath } from 'url';
+
+// 1. Control Anti-Doble Clic Rápido (Lockfile en TEMP con 3.5s de enfriamiento)
+const lockFilePath = path.join(os.tmpdir(), 'winterpos_launch.lock');
+try {
+  if (fs.existsSync(lockFilePath)) {
+    const stats = fs.statSync(lockFilePath);
+    const elapsed = Date.now() - stats.mtimeMs;
+    if (elapsed < 3500) {
+      process.exit(0); // Segunda ejecución descartada instantáneamente
+    }
+  }
+  fs.writeFileSync(lockFilePath, String(process.pid), 'utf8');
+} catch (_) {}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const backendDir = path.join(__dirname, 'backend');
-
 const isDebug = process.env.DEBUG_MODE === 'true';
 
 if (isDebug) {
   console.log('====================================================');
-  console.log('    INICIANDO WINTERPOS PUNTO DE VENTA (DEBUG CMD)  ');
+  console.log('    INICIANDO WINTERPOS PUNTO DE VENTA (DESKTOP)    ');
   console.log('====================================================');
 }
 
-// Start backend server and DB initialization silently unless DEBUG_MODE is set
-const serverProcess = spawn(process.execPath, ['setup-launcher.js'], {
-  cwd: backendDir,
-  stdio: isDebug ? 'inherit' : 'ignore',
-  windowsHide: !isDebug
-});
+// 2. Verificar si el puerto 5000 ya está ocupado por un backend en ejecución
+function checkPortInUse(port, host = '127.0.0.1') {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    socket.setTimeout(400);
+    socket.on('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.on('timeout', () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.on('error', () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.connect(port, host);
+  });
+}
+
+// 3. Esperar activamente a que el servidor HTTP responda antes de abrir la ventana
+function waitForServerReady(targetUrl, timeoutMs = 30000) {
+  const startTime = Date.now();
+  return new Promise((resolve) => {
+    const interval = setInterval(() => {
+      const req = http.get(targetUrl, (res) => {
+        clearInterval(interval);
+        resolve(true);
+      });
+      req.on('error', () => {
+        if (Date.now() - startTime > timeoutMs) {
+          clearInterval(interval);
+          resolve(false);
+        }
+      });
+      req.setTimeout(500, () => {
+        req.destroy();
+      });
+    }, 250);
+  });
+}
 
 function findBrowserExe() {
   if (process.platform !== 'win32') return null;
@@ -44,50 +94,98 @@ function findBrowserExe() {
   return null;
 }
 
-// Window Launcher - Opens dedicated Native App Window
-setTimeout(() => {
-  const targetUrl = 'http://localhost:5000?mode=desktop';
-  if (isDebug) {
-    console.log(`[Desktop App] Lanzando ventana nativa de escritorio para: ${targetUrl}`);
-  }
-  
+function launchAppWindow(targetUrl) {
   if (process.platform === 'win32') {
     const browserExe = findBrowserExe();
-    const cmd = browserExe
-      ? `start "" "${browserExe}" --app=${targetUrl} --window-size=920,540 --window-position=center`
-      : `start "" chrome --app=${targetUrl} --window-size=920,540 --window-position=center`;
-
-    exec(cmd, { windowsHide: true }, (err) => {
-      if (err) {
-        exec(`start ${targetUrl}`, { windowsHide: true });
+    const appDataDir = path.join(process.env.LOCALAPPDATA || os.tmpdir(), 'WinterPos', 'browser-data');
+    
+    try {
+      if (!fs.existsSync(appDataDir)) {
+        fs.mkdirSync(appDataDir, { recursive: true });
       }
-    });
+    } catch (_) {}
+
+    // Limpiar caché de ventana maximizada previa para garantizar que siempre abra compacta
+    try {
+      const prefFile = path.join(appDataDir, 'Default', 'Preferences');
+      if (fs.existsSync(prefFile)) {
+        const prefContent = JSON.parse(fs.readFileSync(prefFile, 'utf8'));
+        if (prefContent?.browser?.window_placement) {
+          delete prefContent.browser.window_placement;
+          fs.writeFileSync(prefFile, JSON.stringify(prefContent), 'utf8');
+        }
+      }
+    } catch (_) {}
+
+    const flags = [
+      `--app=${targetUrl}`,
+      `--user-data-dir="${appDataDir}"`,
+      '--window-size=840,520',
+      '--window-position=240,120',
+      '--disable-features=PasswordLeakDetection,PasswordCheck',
+      '--disable-save-password-bubble',
+      '--password-store=basic',
+      '--no-default-browser-check',
+      '--no-first-run'
+    ].join(' ');
+
+    const cmd = browserExe
+      ? `start "" "${browserExe}" ${flags}`
+      : `start "" chrome ${flags}`;
+
+    exec(cmd, { windowsHide: true });
   } else if (process.platform === 'darwin') {
-    exec(`open ${targetUrl}`);
+    exec(`open "${targetUrl}"`);
   } else {
-    exec(`xdg-open ${targetUrl}`);
+    exec(`xdg-open "${targetUrl}"`);
   }
-}, 4000);
+}
 
-// Keep the process alive while serverProcess runs
-serverProcess.on('close', (code) => {
-  if (isDebug) {
-    console.log(`\n[WinterPos] Servidor detenido con código ${code}`);
+async function start() {
+  const targetUrl = 'http://localhost:5000?mode=desktop';
+  const isAlreadyRunning = await checkPortInUse(5000);
+
+  let serverProcess = null;
+
+  if (!isAlreadyRunning) {
+    serverProcess = spawn(process.execPath, ['setup-launcher.js'], {
+      cwd: backendDir,
+      stdio: isDebug ? 'inherit' : 'ignore',
+      windowsHide: !isDebug
+    });
+
+    serverProcess.on('close', (code) => {
+      if (isDebug) {
+        console.log(`\n[WinterPos] Servidor detenido con código ${code}`);
+      }
+      process.exit(code || 0);
+    });
+
+    serverProcess.on('error', (err) => {
+      console.error('[WinterPos Error en Servidor]', err);
+    });
+
+    process.on('SIGINT', () => {
+      if (serverProcess) serverProcess.kill();
+      process.exit();
+    });
+
+    process.on('SIGTERM', () => {
+      if (serverProcess) serverProcess.kill();
+      process.exit();
+    });
   }
-  process.exit(code || 0);
-});
 
-serverProcess.on('error', (err) => {
-  console.error('[WinterPos Error en Servidor]', err);
-});
+  // Esperar a que el backend esté listo y abrir estrictamente 1 sola ventana
+  await waitForServerReady('http://localhost:5000');
+  launchAppWindow(targetUrl);
 
-process.on('SIGINT', () => {
-  if (serverProcess) serverProcess.kill();
-  process.exit();
-});
+  if (isAlreadyRunning) {
+    setTimeout(() => {
+      process.exit(0);
+    }, 1000);
+  }
+}
 
-process.on('SIGTERM', () => {
-  if (serverProcess) serverProcess.kill();
-  process.exit();
-});
+start();
 

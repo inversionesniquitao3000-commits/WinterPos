@@ -66,14 +66,45 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
     const handleCloseContextMenu = () => setContextMenu(null);
     window.addEventListener('click', handleCloseContextMenu);
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setContextMenu(null);
+      if (e.key === 'Escape') {
+        if (contextMenu) {
+          e.preventDefault(); e.stopPropagation();
+          setContextMenu(null);
+          return;
+        }
+        if (editingCierre) {
+          e.preventDefault(); e.stopPropagation();
+          setEditingCierre(null);
+          return;
+        }
+        if (cierreInvoicesModal) {
+          e.preventDefault(); e.stopPropagation();
+          setCierreInvoicesModal(null);
+          return;
+        }
+        if (selectedCierre) {
+          e.preventDefault(); e.stopPropagation();
+          setSelectedCierre(null);
+          return;
+        }
+        if (selectedSale) {
+          e.preventDefault(); e.stopPropagation();
+          setSelectedSale(null);
+          return;
+        }
+        if (capturingCierre) {
+          e.preventDefault(); e.stopPropagation();
+          setCapturingCierre(null);
+          return;
+        }
+      }
     };
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
     return () => {
       window.removeEventListener('click', handleCloseContextMenu);
-      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, []);
+  }, [contextMenu, editingCierre, cierreInvoicesModal, selectedCierre, selectedSale, capturingCierre]);
 
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
 

@@ -157,16 +157,8 @@ export default function Inventario({
       setBulkAiContextMenu(null);
     };
     window.addEventListener('click', handleCloseContextMenu);
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setContextMenu(null);
-        setBulkAiContextMenu(null);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('click', handleCloseContextMenu);
-      window.removeEventListener('keydown', handleKeyDown);
     };
   }, []);
 
@@ -1447,153 +1439,212 @@ export default function Inventario({
   const [historySortField, setHistorySortField] = useState<string>('date');
   const [historySortOrder, setHistorySortOrder] = useState<'asc' | 'desc'>('desc');
 
-  // Hierarchical Escape key listener (closes top-most open modal first)
+  // Hierarchical Escape key listener (closes top-most open modal first with priority)
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
 
-      // -2. Assistant Auxiliar de Precios Modal (z-[100])
+      if (contextMenu !== null) {
+        e.preventDefault(); e.stopPropagation();
+        setContextMenu(null);
+        return;
+      }
+
+      if (bulkAiContextMenu !== null) {
+        e.preventDefault(); e.stopPropagation();
+        setBulkAiContextMenu(null);
+        return;
+      }
+
+      if (candidatePicker?.isOpen) {
+        e.preventDefault(); e.stopPropagation();
+        setCandidatePicker({ isOpen: false, item: null, searchQuery: '', isLoading: false, candidates: [] });
+        return;
+      }
+
+      // Assistant Auxiliar de Precios Modal (z-[100])
       if (assistantAuxProduct !== null) {
+        e.preventDefault(); e.stopPropagation();
         setAssistantAuxProduct(null);
         return;
       }
 
-      // -1.8. Bulk Stock Adjust Modal (z-[91])
+      // Bulk Stock Adjust Modal (z-[91])
       if (showBulkStockAdjustModal) {
+        e.preventDefault(); e.stopPropagation();
         setShowBulkStockAdjustModal(false);
         return;
       }
 
-      // -1.6. Replenishment Advisor Modal (z-[93])
+      // Replenishment Advisor Modal (z-[93])
       if (showReplenishmentModal) {
+        e.preventDefault(); e.stopPropagation();
         setShowReplenishmentModal(false);
         return;
       }
 
-      // -1.5. Catalog Audit Assistant Modal (z-[92])
+      // Catalog Audit Assistant Modal (z-[92])
       if (showCatalogAuditModal) {
         if (isSavingAuditCorrections) return;
+        e.preventDefault(); e.stopPropagation();
         setShowCatalogAuditModal(false);
         return;
       }
 
-      // -1. Violation Assistant Modal (z-[95])
+      // Violation Assistant Modal (z-[95])
       if (showViolationAssistantModal) {
+        e.preventDefault(); e.stopPropagation();
         setShowViolationAssistantModal(false);
         return;
       }
 
-      // 0. Paused Invoices Modal (z-[90])
+      // Paused Invoices Modal (z-[90])
       if (showPausedInvoicesModal) {
+        e.preventDefault(); e.stopPropagation();
         setShowPausedInvoicesModal(false);
         return;
       }
 
-      // 0.5. Image Manager & Bulk AI Modals (z-[88])
+      // Salida Modal & Paused Salidas
+      if (showSalidaModal) {
+        e.preventDefault(); e.stopPropagation();
+        setShowSalidaModal(false);
+        return;
+      }
+      if (showPausedSalidasModal) {
+        e.preventDefault(); e.stopPropagation();
+        setShowPausedSalidasModal(false);
+        return;
+      }
+
+      // Image Manager & Bulk AI Modals (z-[88])
       if (showImageManagerModal) {
+        e.preventDefault(); e.stopPropagation();
         setShowImageManagerModal(false);
         return;
       }
       if (showBulkAiModal) {
-        if (!isBulkAiRunning) setShowBulkAiModal(false);
+        if (!isBulkAiRunning) {
+          e.preventDefault(); e.stopPropagation();
+          setShowBulkAiModal(false);
+        }
         return;
       }
 
-      // 1. Quick Add Category Modal (z-[80])
+      // Quick Add Category Modal (z-[80])
       if (showQuickAddModal) {
+        e.preventDefault(); e.stopPropagation();
         setShowQuickAddModal(false);
         return;
       }
 
-      // 2. Invoice Item Auxiliar de Precios Modal (z-[85])
+      // Invoice Item Auxiliar de Precios Modal (z-[85])
       if (invoiceAuxItemIndex !== null) {
+        e.preventDefault(); e.stopPropagation();
         setInvoiceAuxItemIndex(null);
         return;
       }
 
-      // 3. New Product Modal (z-[70])
+      // New Product Modal (z-[70])
       if (showNewProdModal) {
+        e.preventDefault(); e.stopPropagation();
         setShowNewProdModal(false);
         return;
       }
 
-      // 4. Grouped Kardex movements detail
+      // Grouped Kardex movements detail
       if (selectedGroupedMovements !== null) {
+        e.preventDefault(); e.stopPropagation();
         setSelectedGroupedMovements(null);
         return;
       }
 
-      // 5. Single Kardex movement detail
+      // Single Kardex movement detail
       if (selectedMovementDetail !== null) {
+        e.preventDefault(); e.stopPropagation();
         setSelectedMovementDetail(null);
         return;
       }
 
-      // 6. Invoice Load Modal (z-[50])
+      // Invoice Load Modal (z-[50])
       if (showInvoiceLoadModal) {
+        e.preventDefault(); e.stopPropagation();
         setShowInvoiceLoadModal(false);
         return;
       }
 
-      // 7. General Adjust Modal
+      // General Adjust Modal
       if (showGeneralAdjustModal) {
+        e.preventDefault(); e.stopPropagation();
         setShowGeneralAdjustModal(false);
         setGeneralAdjustSearch('');
         return;
       }
 
-      // 8. Categories Management Modal
+      // Categories Management Modal
       if (showCategoriesModal) {
+        e.preventDefault(); e.stopPropagation();
         setShowCategoriesModal(false);
         return;
       }
 
-      // 9. Bulk Import Modal
+      // Bulk Import Modal
       if (showBulkModal) {
+        e.preventDefault(); e.stopPropagation();
         setShowBulkModal(false);
         return;
       }
 
-      // 10. Edit Product Modal
+      // Edit Product Modal
       if (showEditProdModal) {
+        e.preventDefault(); e.stopPropagation();
         setShowEditProdModal(false);
         return;
       }
 
-      // 11. Adjust Stock Modal
+      // Adjust Stock Modal
       if (showAdjustModal) {
+        e.preventDefault(); e.stopPropagation();
         setShowAdjustModal(false);
         setSelectedProduct(null);
         return;
       }
 
-      // 12. Edit Price Modal
+      // Edit Price Modal
       if (showPriceModal) {
+        e.preventDefault(); e.stopPropagation();
         setShowPriceModal(false);
         setSelectedProduct(null);
         return;
       }
 
-      // 13. Dropdown menus
+      // Dropdown menus
       if (showCategoryMenu) {
+        e.preventDefault(); e.stopPropagation();
         setShowCategoryMenu(false);
         return;
       }
       if (showReportMenu) {
+        e.preventDefault(); e.stopPropagation();
         setShowReportMenu(false);
         return;
       }
     };
 
-    window.addEventListener('keydown', handleEsc);
-    return () => window.removeEventListener('keydown', handleEsc);
+    window.addEventListener('keydown', handleEsc, true);
+    return () => window.removeEventListener('keydown', handleEsc, true);
   }, [
+    contextMenu,
+    bulkAiContextMenu,
+    candidatePicker,
     assistantAuxProduct,
     showBulkStockAdjustModal,
     showReplenishmentModal,
     showCatalogAuditModal,
     showViolationAssistantModal,
     showPausedInvoicesModal,
+    showSalidaModal,
+    showPausedSalidasModal,
     showQuickAddModal,
     invoiceAuxItemIndex,
     showNewProdModal,

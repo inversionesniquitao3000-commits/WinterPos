@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Upload, Sparkles, CheckCircle2, AlertTriangle, Settings, RefreshCw, Wand2, ArrowRight, Eye, Trash2, Tag, Layers, Calculator, FileSpreadsheet, Search } from 'lucide-react';
 // Dynamic loader for XLSX (SheetJS)
 const loadXlsx = (): Promise<any> => {
@@ -78,6 +78,19 @@ export default function AsistenteImportacionPDF({
   existingProducts = []
 }: AsistenteImportacionPDFProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Close modal on Escape
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onCancel();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [onCancel]);
   
   // File & Parsing States
   const [file, setFile] = useState<File | null>(null);

@@ -49,16 +49,26 @@ function DialogModal({ config, onClose }: { config: DialogConfig; onClose: (resu
   const isConfirm = config.type === 'confirm';
   const hdrColor  = headerColor(config.type);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') { onClose(true); }
-    if (e.key === 'Escape') { onClose(false); }
-  };
+  React.useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose(false);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose(true);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown, true);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
+  }, [onClose]);
 
   return (
     <div
       className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
       style={{ backgroundColor: 'rgba(15,23,42,0.75)', backdropFilter: 'blur(4px)' }}
-      onKeyDown={handleKeyDown}
       tabIndex={-1}
     >
       {/* Click backdrop to cancel */}

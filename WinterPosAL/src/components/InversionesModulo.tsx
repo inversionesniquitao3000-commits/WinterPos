@@ -117,26 +117,32 @@ export const InversionesModulo: React.FC<InversionesModuloProps> = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (showWipeModal) {
+          e.preventDefault(); e.stopPropagation();
           setShowWipeModal(false);
           setWipeConfirmWord('');
         } else if (showAddInversionModal) {
+          e.preventDefault(); e.stopPropagation();
           setShowAddInversionModal(false);
           setEditingInversion(null);
         } else if (showAddAccionistaModal) {
+          e.preventDefault(); e.stopPropagation();
           setShowAddAccionistaModal(false);
           setEditingAccionista(null);
         } else if (showAddGastoModal) {
+          e.preventDefault(); e.stopPropagation();
           setShowAddGastoModal(false);
           setEditingGasto(null);
         } else if (deleteConfirm) {
+          e.preventDefault(); e.stopPropagation();
           setDeleteConfirm(null);
         } else if (!inline && onClose) {
+          e.preventDefault(); e.stopPropagation();
           onClose();
         }
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [isOpen, showWipeModal, showAddInversionModal, showAddAccionistaModal, showAddGastoModal, deleteConfirm, inline, onClose]);
 
   if (!isOpen) return null;
