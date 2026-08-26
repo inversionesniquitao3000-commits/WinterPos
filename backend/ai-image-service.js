@@ -178,15 +178,19 @@ export function createLocalSvgFallback(description = 'Producto', category = 'Gen
   <text x="200" y="322" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="800" fill="#ffffff" text-anchor="middle">${safeCat.toUpperCase()}</text>
 </svg>`.trim();
 
-  try {
-    const activeDir = ensureImagesDir();
-    const filePath = path.join(activeDir, filename);
-    fs.writeFileSync(filePath, svg, 'utf-8');
-    return `/api/ai/images/${filename}`;
-  } catch (err) {
-    console.warn(`[AI Image Service] No se pudo guardar archivo SVG en disco (${err.message}). Retornando Data URI directo.`);
-    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  const candidateDirs = getAllCandidateImageDirectories();
+  let savedSomewhere = false;
+  for (const dir of candidateDirs) {
+    try {
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, filename), svg, 'utf-8');
+      savedSomewhere = true;
+    } catch (_) {}
   }
+  if (savedSomewhere) {
+    return `/api/ai/images/${filename}`;
+  }
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
 /**
@@ -206,13 +210,18 @@ async function downloadRemoteImage(remoteUrl, filename) {
     if (buffer.length < 1500) return null;
 
     const candidateDirs = getAllCandidateImageDirectories();
+    let savedSomewhere = false;
     for (const dir of candidateDirs) {
       try {
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
         const localFilePath = path.join(dir, filename);
         fs.writeFileSync(localFilePath, buffer);
-        return `/api/ai/images/${filename}`;
+        savedSomewhere = true;
       } catch (_) {}
+    }
+
+    if (savedSomewhere) {
+      return `/api/ai/images/${filename}`;
     }
 
     // Direct Base64 Fallback if all filesystem writes fail
@@ -431,17 +440,22 @@ export function saveUploadedImageBase64(base64Data, originalName = 'upload.jpg')
     const filename = `manual_${cleanBase}_${Date.now()}.${ext}`;
 
     const candidateDirs = getAllCandidateImageDirectories();
+    let savedSomewhere = false;
     for (const dir of candidateDirs) {
       try {
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
         const filePath = path.join(dir, filename);
         fs.writeFileSync(filePath, buffer);
-        return {
-          success: true,
-          imageUrl: `/api/ai/images/${filename}`,
-          filename
-        };
+        savedSomewhere = true;
       } catch (_) {}
+    }
+
+    if (savedSomewhere) {
+      return {
+        success: true,
+        imageUrl: `/api/ai/images/${filename}`,
+        filename
+      };
     }
 
     // Direct Data URI if no disk write permissions
@@ -456,6 +470,38 @@ export function saveUploadedImageBase64(base64Data, originalName = 'upload.jpg')
     return { success: false, error: err.message };
   }
 }
+
+/**
+ * Automatically synchronizes all existing image files across all candidate directories
+ */
+export function syncAllImageDirectories() {
+  try {
+    const dirs = getAllCandidateImageDirectories();
+    const primary = IMAGES_DIR;
+    for (const srcDir of dirs) {
+      if (!fs.existsSync(srcDir)) continue;
+      const files = fs.readdirSync(srcDir);
+      for (const file of files) {
+        if (!file.match(/\.(jpg|jpeg|png|webp|gif|svg)$/i)) continue;
+        const srcPath = path.join(srcDir, file);
+        for (const targetDir of dirs) {
+          if (!fs.existsSync(targetDir)) {
+            try { fs.mkdirSync(targetDir, { recursive: true }); } catch (_) {}
+          }
+          const targetPath = path.join(targetDir, file);
+          if (!fs.existsSync(targetPath)) {
+            try { fs.copyFileSync(srcPath, targetPath); } catch (_) {}
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[AI Image Service] Error en sincronización de directorios:', err.message);
+  }
+}
+
+// Run initial sync on load
+syncAllImageDirectories();
 
 /**
  * Intelligent Multi-Source Real Product Image Engine:

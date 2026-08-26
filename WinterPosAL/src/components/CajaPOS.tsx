@@ -3486,9 +3486,18 @@ export default function CajaPOS({
                             <div className={`${sizeStyles.imgBox} bg-white border border-slate-200 flex-shrink-0 overflow-hidden flex items-center justify-center relative shadow-2xs`}>
                               {p.imagen_url ? (
                                 <img 
+                                  key={`pos-search-img-${p.id}-${p.imagen_url}`}
                                   src={formatImageUrl(p.imagen_url)} 
                                   alt={p.description} 
                                   className="w-full h-full object-contain p-0.5"
+                                  onLoad={(e) => {
+                                    (e.currentTarget as HTMLElement).style.display = 'block';
+                                    const fb = (e.currentTarget.parentElement as HTMLElement)?.querySelector('.img-fallback');
+                                    if (fb) {
+                                      fb.classList.remove('flex');
+                                      fb.classList.add('hidden');
+                                    }
+                                  }}
                                   onError={(e) => {
                                     (e.currentTarget as HTMLElement).style.display = 'none';
                                     const fb = (e.currentTarget.parentElement as HTMLElement)?.querySelector('.img-fallback');
@@ -3984,7 +3993,7 @@ export default function CajaPOS({
                   <>
                     <img 
                       key={`pos-item-img-${activeItem.id}-${activeItem.imagen_url}`}
-                      src={activeItem.imagen_url} 
+                      src={formatImageUrl(activeItem.imagen_url)} 
                       alt={activeItem.description} 
                       className="w-full h-full object-cover absolute inset-0 bg-white group-hover:scale-105 transition-transform" 
                       onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
@@ -5307,37 +5316,58 @@ export default function CajaPOS({
         };
 
         return (
-          <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-mono text-slate-800">
-            <div ref={abonoModalRef} className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-md shadow-2xl flex flex-col">
+          <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 z-50 animate-fade-in font-mono text-slate-800">
+            <div ref={abonoModalRef} className="bg-white border border-slate-200 rounded-2xl overflow-hidden w-full max-w-md shadow-2xl flex flex-col font-sans">
               
-              <div className="bg-slate-100 border-b border-slate-250 px-5 py-3.5 flex justify-between items-center">
-                <span className="text-xs font-black text-slate-700 tracking-widest uppercase flex items-center gap-1.5 font-sans">
-                  <DollarSign className="w-4 h-4 text-emerald-600" />
-                  Registrar Abono de Crédito
-                </span>
-                <button onClick={() => setShowCajaAbonoModal(false)} className="text-slate-400 hover:text-slate-700 focus:ring-2 focus:ring-winter-blueBtn focus:outline-none p-1 rounded">✕</button>
+              {/* Header */}
+              <div className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex justify-between items-center text-white">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-emerald-500/20 rounded-xl border border-emerald-400/30">
+                    <DollarSign className="w-5 h-5 text-emerald-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black uppercase tracking-wider font-mono">
+                      Registrar Abono de Crédito
+                    </h3>
+                    <p className="text-[11px] text-slate-300 font-medium">
+                      Cobranza y abono a cuentas por cobrar
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowCajaAbonoModal(false)} 
+                  className="text-white/70 hover:text-white text-lg font-bold transition-colors cursor-pointer"
+                >
+                  ✕
+                </button>
               </div>
 
-              <div className="p-5 space-y-4">
+              <div className="p-5 sm:p-6 space-y-4 bg-slate-50/40">
                 
                 {/* BÚSQUEDA DE CLIENTE DE CRÉDITO */}
                 {!abonoClient ? (
-                  <div className="space-y-2">
-                    <label className="text-[10px] text-slate-500 block font-sans font-bold uppercase tracking-wider">Buscar Cliente:</label>
+                  <div className="space-y-2.5">
+                    <label className="text-[11px] text-slate-600 block font-bold uppercase tracking-wide font-mono">
+                      Buscar Cliente con Deuda:
+                    </label>
                     <div className="relative">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                       <input
                         type="text"
                         value={abonoSearchTerm}
                         onChange={(e) => setAbonoSearchTerm(e.target.value)}
-                        placeholder="Cédula, RIF o Nombre..."
-                        className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-xs focus:bg-white focus:ring-2 focus:ring-winter-blueBtn focus:border-transparent focus:outline-none font-sans"
+                        placeholder="Buscar por cédula, RIF o nombre..."
+                        className="w-full bg-white border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 rounded-xl pl-9 pr-3 py-2.5 text-xs text-slate-900 focus:outline-none transition-all placeholder:text-slate-400 shadow-2xs font-medium"
                         autoFocus
                       />
                     </div>
                     
-                    <div className="border border-slate-200 rounded-lg max-h-40 overflow-y-auto divide-y divide-slate-100 text-xs font-sans">
+                    <div className="border border-slate-200 rounded-xl max-h-48 overflow-y-auto divide-y divide-slate-100 text-xs bg-white shadow-2xs">
                       {filteredAbonoClients.length === 0 ? (
-                        <div className="p-3 text-center text-slate-400 italic">No se encontraron clientes con deuda pendiente.</div>
+                        <div className="p-6 text-center text-slate-400 italic text-xs flex flex-col items-center gap-1.5">
+                          <DollarSign className="w-6 h-6 text-slate-300" />
+                          <span>No se encontraron clientes con deuda pendiente.</span>
+                        </div>
                       ) : (
                         filteredAbonoClients.map(c => (
                           <div 
@@ -5346,15 +5376,17 @@ export default function CajaPOS({
                               setAbonoClient(c);
                               setAbonoAmount(c.saldo_pendiente.toFixed(2));
                             }}
-                            className="p-2.5 hover:bg-slate-50 cursor-pointer flex justify-between items-center transition-colors"
+                            className="p-3 hover:bg-emerald-50/60 cursor-pointer flex justify-between items-center transition-colors group"
                           >
-                            <div className="flex flex-col">
-                              <span className="font-bold text-slate-800 uppercase">{c.nombre}</span>
-                              <span className="text-[10px] text-slate-450 font-mono">{c.cedula_rif}</span>
+                            <div className="flex flex-col min-w-0 pr-2">
+                              <span className="font-bold text-slate-900 uppercase group-hover:text-emerald-900 truncate">{c.nombre}</span>
+                              <span className="text-[10px] text-slate-500 font-mono font-medium">{c.cedula_rif}</span>
                             </div>
-                            <div className="text-right flex flex-col items-end">
-                              <span className={`font-mono font-bold ${c.saldo_pendiente > 0 ? 'text-red-600' : 'text-slate-500'}`}>Deuda: ${c.saldo_pendiente.toFixed(2)}</span>
-                              <span className="text-[9px] text-slate-400 font-mono">Bs {(c.saldo_pendiente * tasaDia).toFixed(2)}</span>
+                            <div className="text-right flex flex-col items-end flex-shrink-0">
+                              <span className="bg-rose-50 border border-rose-200 text-rose-700 font-mono font-black text-xs px-2 py-0.5 rounded">
+                                ${c.saldo_pendiente.toFixed(2)}
+                              </span>
+                              <span className="text-[9.5px] text-slate-400 font-mono mt-0.5">Bs {(c.saldo_pendiente * tasaDia).toFixed(2)}</span>
                             </div>
                           </div>
                         ))
@@ -5367,43 +5399,43 @@ export default function CajaPOS({
                   <div className="space-y-3.5">
                     
                     {/* TARJETA DE DEUDA DEL CLIENTE */}
-                    <div className="bg-sky-50 border border-sky-150 p-3.5 rounded-xl text-xs font-sans leading-tight shadow-sm space-y-1.5">
+                    <div className="bg-white border border-slate-200 p-3.5 rounded-xl text-xs font-sans leading-tight shadow-2xs space-y-2">
                       <div className="flex justify-between items-start">
                         <div>
-                          <div className="font-black uppercase text-sky-950 text-sm">{abonoClient.nombre}</div>
-                          <div className="font-mono text-slate-500 text-[10px] font-bold">{abonoClient.cedula_rif}</div>
+                          <div className="font-black uppercase text-slate-900 text-xs">{abonoClient.nombre}</div>
+                          <div className="font-mono text-slate-500 text-[10px] font-bold mt-0.5">{abonoClient.cedula_rif}</div>
                         </div>
                         <button
                           type="button"
                           onClick={() => { setAbonoClient(null); setAbonoPayments([]); setAbonoRef(''); setAbonoMode('unico'); }}
-                          className="text-[10px] text-sky-700 hover:text-sky-900 font-bold underline"
+                          className="text-[10px] text-blue-600 hover:text-blue-800 font-bold bg-blue-50 px-2 py-1 rounded border border-blue-100 transition-colors cursor-pointer"
                         >
                           Cambiar
                         </button>
                       </div>
 
-                      <div className="bg-white/80 border border-sky-200 p-2 rounded-lg flex justify-between items-center font-mono">
-                        <span className="font-sans text-[11px] font-bold text-slate-600">Deuda Pendiente:</span>
+                      <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-lg flex justify-between items-center font-mono">
+                        <span className="font-sans text-[11px] font-bold text-slate-600">Deuda Total:</span>
                         <div className="text-right">
-                          <span className="text-red-600 font-black text-sm block">${abonoClient.saldo_pendiente.toFixed(2)} USD</span>
+                          <span className="text-rose-600 font-black text-sm block">${abonoClient.saldo_pendiente.toFixed(2)} USD</span>
                           <span className="text-slate-500 text-[10px] font-bold block">Bs {(abonoClient.saldo_pendiente * tasaDia).toFixed(2)} VES</span>
                         </div>
                       </div>
                     </div>
 
                     {/* SELECTOR DE TIPO DE ABONO: PAGO ÚNICO vs PAGO MIXTO */}
-                    <div className="flex border border-slate-250 rounded-lg p-0.5 bg-slate-100 font-sans text-xs">
+                    <div className="flex border border-slate-200 rounded-xl p-1 bg-slate-100 font-sans text-xs gap-1">
                       <button
                         type="button"
                         onClick={() => { setAbonoMode('unico'); setAbonoPayments([]); }}
-                        className={`flex-1 py-1.5 rounded-md font-bold transition-all ${abonoMode === 'unico' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                        className={`flex-1 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${abonoMode === 'unico' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'}`}
                       >
                         💵 Pago Único
                       </button>
                       <button
                         type="button"
                         onClick={() => { setAbonoMode('mixto'); }}
-                        className={`flex-1 py-1.5 rounded-md font-bold transition-all ${abonoMode === 'mixto' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                        className={`flex-1 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${abonoMode === 'mixto' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-800'}`}
                       >
                         🔀 Pago Mixto / Combinado
                       </button>
@@ -5411,19 +5443,22 @@ export default function CajaPOS({
 
                     {/* MONTO PRINCIPAL A ABONAR */}
                     <div>
-                      <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold uppercase tracking-wider">Monto Total a Abonar ($ USD):</label>
+                      <label className="text-[10.5px] text-slate-600 block mb-1 font-bold uppercase tracking-wide font-mono">
+                        Monto Total a Abonar ($ USD):
+                      </label>
                       <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono font-black text-emerald-600 text-xs">$</span>
                         <input
                           type="number"
                           step="0.01"
                           value={abonoAmount}
                           onChange={(e) => setAbonoAmount(e.target.value)}
                           placeholder="0.00"
-                          className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-black font-mono text-emerald-700 focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                          className="w-full bg-white border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 rounded-xl pl-7 pr-24 py-2.5 text-xs font-black font-mono text-emerald-700 focus:outline-none shadow-2xs"
                           autoFocus
                         />
                         {totalAbono > 0 && (
-                          <span className="absolute right-3 top-2.5 text-[11px] font-mono text-slate-500 font-bold">
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono text-slate-500 font-bold bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                             = {formatBs(totalAbono * tasaDia)} VES
                           </span>
                         )}
@@ -5432,13 +5467,15 @@ export default function CajaPOS({
 
                     {/* VISTA 1: PAGO ÚNICO (UN SOLO MÉTODO DE PAGO) */}
                     {abonoMode === 'unico' && (
-                      <div className="space-y-3 bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                      <div className="space-y-2.5 bg-white border border-slate-200 p-3.5 rounded-xl shadow-2xs">
                         <div>
-                          <label className="text-[10px] text-slate-600 block mb-1 font-sans font-bold uppercase tracking-wider">Forma de Pago:</label>
+                          <label className="text-[10.5px] text-slate-600 block mb-1 font-bold uppercase tracking-wide font-mono">
+                            Forma de Pago:
+                          </label>
                           <select
                             value={abonoMethod}
                             onChange={(e) => setAbonoMethod(e.target.value as import('../types').MetodoPagoAbono)}
-                            className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-sans text-slate-800 font-bold focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                            className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-sans text-slate-800 font-bold focus:bg-white focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 focus:outline-none cursor-pointer"
                           >
                             <option value="Efectivo$">💵 Efectivo en Dólares ($ USD)</option>
                             <option value="EfectivoBs">🇻🇪 Efectivo en Bolívares (Bs VES)</option>
@@ -5453,22 +5490,24 @@ export default function CajaPOS({
 
                         {/* Mostrar equivalencia en Bs si es un método en Bolívares */}
                         {!isUsdMethod(abonoMethod) && (
-                          <div className="bg-emerald-50 border border-emerald-200 px-3 py-2 rounded-lg flex justify-between items-center text-xs font-mono">
+                          <div className="bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg flex justify-between items-center text-xs font-mono">
                             <span className="font-sans text-[10px] font-bold uppercase text-emerald-800">Cobrar en Bolívares:</span>
-                            <span className="font-black text-emerald-700 text-sm">{formatBs(totalAbono * tasaDia)} VES</span>
+                            <span className="font-black text-emerald-700 text-xs">{formatBs(totalAbono * tasaDia)} VES</span>
                           </div>
                         )}
 
                         {/* Número de Referencia (si aplica) */}
                         {abonoMethod !== 'Efectivo$' && abonoMethod !== 'EfectivoBs' && (
                           <div>
-                            <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold uppercase tracking-wider">Nº de Referencia / Transacción:</label>
+                            <label className="text-[10.5px] text-slate-600 block mb-1 font-bold uppercase tracking-wide font-mono">
+                              Nº de Referencia / Transacción:
+                            </label>
                             <input
                               type="text"
                               value={abonoRef}
                               onChange={(e) => setAbonoRef(e.target.value)}
                               placeholder="Ej: 123456"
-                              className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                              className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2 text-xs font-mono focus:bg-white focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 focus:outline-none"
                             />
                           </div>
                         )}
@@ -5477,20 +5516,20 @@ export default function CajaPOS({
 
                     {/* VISTA 2: PAGO MIXTO / COMBINADO (MÚLTIPLES LÍNEAS DE PAGO) */}
                     {abonoMode === 'mixto' && (
-                      <div className="space-y-3 bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                      <div className="space-y-3 bg-white border border-slate-200 p-3.5 rounded-xl shadow-2xs">
                         
                         {/* RESUMEN DE SALDO RESTANTE EN TIEMPO REAL */}
-                        <div className={`p-2.5 rounded-lg border text-xs font-sans flex justify-between items-center ${restanteUsd <= 0.01 ? 'bg-emerald-50 border-emerald-200 text-emerald-800 font-bold' : 'bg-amber-50 border-amber-200 text-amber-900 font-bold'}`}>
+                        <div className={`p-2.5 rounded-xl border text-xs font-sans flex justify-between items-center ${restanteUsd <= 0.01 ? 'bg-emerald-50 border-emerald-200 text-emerald-800 font-bold' : 'bg-amber-50 border-amber-200 text-amber-900 font-bold'}`}>
                           <span>Falta por Cubrir:</span>
                           <div className="text-right font-mono font-black">
-                            <span className="text-sm block">${restanteUsd.toFixed(2)} USD</span>
+                            <span className="text-xs block">${restanteUsd.toFixed(2)} USD</span>
                             <span className="text-[10px] block opacity-80">{formatBs(restanteVes)} VES</span>
                           </div>
                         </div>
 
                         {/* TABLA DE LÍNEAS DE PAGO INGRESADAS */}
                         {abonoPayments.length > 0 && (
-                          <div className="border border-slate-200 rounded-lg divide-y divide-slate-200 bg-white">
+                          <div className="border border-slate-200 rounded-xl divide-y divide-slate-200 bg-slate-50/50 overflow-hidden">
                             {abonoPayments.map((p, i) => (
                               <div key={i} className="p-2 flex justify-between items-center text-xs font-mono">
                                 <div>
@@ -5500,7 +5539,7 @@ export default function CajaPOS({
                                 <div className="flex items-center gap-2">
                                   {p.monto_usd > 0 && <span className="text-emerald-700 font-bold">${p.monto_usd.toFixed(2)}</span>}
                                   {p.monto_ves > 0 && <span className="text-blue-700 font-bold">{formatBs(p.monto_ves)}</span>}
-                                  <button onClick={() => setAbonoPayments(prev => prev.filter((_, j) => j !== i))} className="text-red-400 hover:text-red-600 text-xs p-1">✕</button>
+                                  <button onClick={() => setAbonoPayments(prev => prev.filter((_, j) => j !== i))} className="text-red-400 hover:text-red-600 text-xs p-1 cursor-pointer">✕</button>
                                 </div>
                               </div>
                             ))}
@@ -5509,7 +5548,7 @@ export default function CajaPOS({
 
                         {/* FORMULARIO PARA AGREGAR NUEVA LÍNEA EN PAGO MIXTO */}
                         {restanteUsd > 0.01 && (
-                          <div className="border border-dashed border-slate-300 rounded-lg p-2.5 space-y-2 bg-white">
+                          <div className="border border-dashed border-slate-300 rounded-xl p-2.5 space-y-2 bg-slate-50/50">
                             <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-slate-600 block">
                               ➕ Agregar pago desglosado:
                             </span>
@@ -5518,7 +5557,7 @@ export default function CajaPOS({
                               <select
                                 value={abonoMethod}
                                 onChange={(e) => setAbonoMethod(e.target.value as import('../types').MetodoPagoAbono)}
-                                className="bg-slate-50 border border-slate-300 rounded p-1.5 text-xs font-sans text-slate-800 font-bold focus:outline-none"
+                                className="bg-white border border-slate-300 rounded-lg p-1.5 text-xs font-sans text-slate-800 font-bold focus:outline-none"
                               >
                                 <option value="Efectivo$">💵 Efectivo $ USD</option>
                                 <option value="EfectivoBs">🇻🇪 Efectivo Bs VES</option>
@@ -5536,7 +5575,7 @@ export default function CajaPOS({
                                 value={abonoLineAmount}
                                 onChange={(e) => setAbonoLineAmount(e.target.value)}
                                 placeholder={isUsdMethod(abonoMethod) ? `Monto en $ (máx $${restanteUsd.toFixed(2)})` : `Monto en Bs (máx Bs ${restanteVes.toFixed(2)})`}
-                                className="bg-slate-50 border border-slate-300 rounded p-1.5 text-xs font-bold font-mono text-emerald-700 focus:outline-none"
+                                className="bg-white border border-slate-300 rounded-lg p-1.5 text-xs font-bold font-mono text-emerald-700 focus:outline-none"
                               />
                             </div>
 
@@ -5547,13 +5586,13 @@ export default function CajaPOS({
                                   value={abonoRef}
                                   onChange={(e) => setAbonoRef(e.target.value)}
                                   placeholder="Nº Referencia (Opcional)"
-                                  className="flex-1 bg-slate-50 border border-slate-300 rounded p-1.5 text-xs font-mono focus:outline-none"
+                                  className="flex-1 bg-white border border-slate-300 rounded-lg p-1.5 text-xs font-mono focus:outline-none"
                                 />
                               )}
                               <button
                                 type="button"
                                 onClick={handleAddPaymentLine}
-                                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded text-xs font-bold font-sans ml-auto"
+                                className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold font-sans ml-auto cursor-pointer"
                               >
                                 + Añadir Pago
                               </button>
@@ -5565,30 +5604,32 @@ export default function CajaPOS({
 
                     {/* OBSERVACIÓN OPCIONAL */}
                     <div>
-                      <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold uppercase tracking-wider">Observación / Nota (Opcional):</label>
+                      <label className="text-[10.5px] text-slate-600 block mb-1 font-bold uppercase tracking-wide font-mono">
+                        Observación / Nota (Opcional):
+                      </label>
                       <input
                         type="text"
                         value={abonoObservacion}
                         onChange={(e) => setAbonoObservacion(e.target.value)}
                         placeholder="Ej: Pago parcial correspondiente a factura FAC-0045"
-                        className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs font-sans focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                        className="w-full bg-white border border-slate-300 rounded-xl p-2 text-xs font-sans focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 focus:outline-none shadow-2xs"
                       />
                     </div>
                   </div>
                 )}
               </div>
 
-              <div className="bg-slate-50 px-5 py-3.5 border-t border-slate-250 flex justify-end gap-2.5">
+              <div className="bg-slate-50 px-6 py-3.5 border-t border-slate-200 flex justify-end gap-2.5">
                 <button
                   onClick={() => setShowCajaAbonoModal(false)}
-                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold font-sans transition-all active:scale-95 focus:outline-none"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold font-sans transition-all active:scale-95 cursor-pointer"
                 >
                   Cancelar
                 </button>
                 {abonoClient && (
                   <button
                     onClick={handleSaveCajaAbono}
-                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold font-sans tracking-wider transition-all active:scale-95 shadow-md focus:outline-none"
+                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold font-sans tracking-wider transition-all active:scale-95 shadow-sm cursor-pointer"
                   >
                     Registrar Abono
                   </button>
@@ -6624,84 +6665,114 @@ export default function CajaPOS({
         </div>
       )}
 
-      {/* MODAL: MANUAL CASH MOVEMENT - Light Styled */}
+      {/* MODAL: MANUAL CASH MOVEMENT - Professional Enterprise POS */}
       {showMovementsModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-slate-800">
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-md shadow-2xl p-6 space-y-4">
+        <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 z-50 font-mono text-slate-800 animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden w-full max-w-md shadow-2xl flex flex-col font-sans">
             
-            <div className="flex justify-between items-center border-b border-slate-200 pb-3">
-              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
-                <Ticket className="w-4 h-4 text-winter-blueBtn" />
-                MOVIMIENTO MANUAL DE CAJA
-              </h3>
-              <button onClick={() => setShowMovementsModal(false)} className="text-slate-400 hover:text-slate-700">✕</button>
+            {/* Header */}
+            <div className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex justify-between items-center text-white">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-500/20 rounded-xl border border-blue-400/30">
+                  <Ticket className="w-5 h-5 text-blue-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-wider font-mono">
+                    Movimiento Manual de Caja
+                  </h3>
+                  <p className="text-[11px] text-slate-300 font-medium">
+                    Registro de ingresos y egresos de efectivo
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowMovementsModal(false)} 
+                className="text-white/70 hover:text-white text-lg font-bold transition-colors cursor-pointer"
+              >
+                ✕
+              </button>
             </div>
 
-            <form onSubmit={handleSaveCajaMovement} className="space-y-4">
+            <form onSubmit={handleSaveCajaMovement} className="p-5 sm:p-6 space-y-4 bg-slate-50/40">
               <div>
-                <label className="text-xs text-slate-500 block mb-1 font-sans">Tipo de Movimiento</label>
+                <label className="text-[11px] text-slate-600 block mb-1.5 font-bold uppercase tracking-wide font-mono">
+                  Tipo de Movimiento
+                </label>
                 <select
                   value={movType}
                   onChange={(e) => setMovType(e.target.value as any)}
-                  className="w-full bg-slate-50 border border-slate-350 rounded p-2.5 text-xs text-slate-800 outline-none focus:bg-white focus:border-winter-blueBtn font-sans"
+                  className="w-full bg-white border border-slate-300 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 rounded-xl p-2.5 text-xs text-slate-900 outline-none font-bold transition-all cursor-pointer shadow-2xs"
                 >
-                  <option value="Entrada">Entrada (Aporte de Efectivo, Cambio inicial...)</option>
-                  <option value="Salida">Salida (Retiro de Efectivo, Pago a proveedores...)</option>
+                  <option value="Entrada">🟢 Entrada (Aporte de Efectivo, Cambio inicial...)</option>
+                  <option value="Salida">🔴 Salida (Retiro de Efectivo, Pago a proveedores...)</option>
                 </select>
               </div>
 
               <div>
-                <label className="text-xs text-slate-500 block mb-1 font-sans">Descripción / Concepto <span className="text-red-400">*</span></label>
+                <label className="text-[11px] text-slate-600 block mb-1.5 font-bold uppercase tracking-wide font-mono">
+                  Descripción / Concepto <span className="text-rose-500">*</span>
+                </label>
                 <input
                   type="text"
                   required
                   placeholder="Ej: Pago de flete a camión, reposición de caja chica..."
                   value={movDesc}
                   onChange={(e) => setMovDesc(e.target.value)}
-                  className="w-full bg-slate-55 border border-slate-350 rounded p-2.5 text-xs text-slate-800 outline-none focus:bg-white focus:border-winter-blueBtn font-sans"
+                  className="w-full bg-white border border-slate-300 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 rounded-xl p-2.5 text-xs text-slate-900 outline-none transition-all placeholder:text-slate-400 font-medium shadow-2xs"
+                  autoFocus
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Monto ($ USD)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="0.00"
-                    value={movUsd}
-                    onChange={(e) => setMovUsd(e.target.value)}
-                    className="w-full bg-slate-55 border border-slate-350 rounded p-2.5 text-xs text-emerald-600 font-bold focus:bg-white focus:border-winter-blueBtn focus:outline-none"
-                  />
+                  <label className="text-[10.5px] text-slate-600 block mb-1 font-bold uppercase tracking-wide font-mono">
+                    Monto ($ USD)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono font-black text-emerald-600 text-xs">$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="0.00"
+                      value={movUsd}
+                      onChange={(e) => setMovUsd(e.target.value)}
+                      className="w-full bg-white border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 rounded-xl pl-7 pr-3 py-2 text-xs text-emerald-700 font-black font-mono focus:outline-none shadow-2xs"
+                    />
+                  </div>
                 </div>
                 <div>
-                  <label className="text-[10px] text-slate-500 block mb-1 font-sans">Monto (Bs VES)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="0.00"
-                    value={movVes}
-                    onChange={(e) => setMovVes(e.target.value)}
-                    className="w-full bg-slate-55 border border-slate-350 rounded p-2.5 text-xs text-purple-700 font-bold focus:bg-white focus:border-winter-blueBtn focus:outline-none"
-                  />
+                  <label className="text-[10.5px] text-slate-600 block mb-1 font-bold uppercase tracking-wide font-mono">
+                    Monto (Bs VES)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono font-black text-purple-600 text-xs">Bs</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="0.00"
+                      value={movVes}
+                      onChange={(e) => setMovVes(e.target.value)}
+                      className="w-full bg-white border border-slate-300 focus:border-purple-600 focus:ring-2 focus:ring-purple-500/20 rounded-xl pl-8 pr-3 py-2 text-xs text-purple-700 font-black font-mono focus:outline-none shadow-2xs"
+                    />
+                  </div>
                 </div>
               </div>
 
-              <div className="flex gap-2 pt-2">
+              <div className="flex gap-2.5 pt-2 border-t border-slate-200">
                 <button
                   type="button"
                   onClick={() => setShowMovementsModal(false)}
-                  className="w-1/3 bg-slate-100 border border-slate-250 text-slate-600 py-2.5 rounded font-sans text-xs hover:bg-slate-200 transition-all"
+                  className="w-1/3 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-xl font-bold font-sans text-xs transition-all cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="w-2/3 bg-winter-blueBtn hover:bg-winter-blueBtnHover text-white py-2.5 rounded font-bold font-sans text-xs tracking-wider transition-all"
+                  className="w-2/3 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl font-bold font-sans text-xs uppercase tracking-wider transition-all shadow-sm active:scale-95 cursor-pointer"
                 >
-                  REGISTRAR MOVIMIENTO
+                  Registrar Movimiento
                 </button>
               </div>
             </form>
@@ -6768,39 +6839,56 @@ export default function CajaPOS({
         </div>
       )}
 
-      {/* MODAL: ENTRADA RÁPIDA */}
+      {/* MODAL: ENTRADA RÁPIDA (INVENTARIO) - Professional Enterprise POS */}
       {showEntradaRapidaModal && (
-        <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-slate-800 animate-fade-in">
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-sm shadow-2xl p-6 space-y-4">
+        <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 z-50 font-mono text-slate-800 animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden w-full max-w-md shadow-2xl flex flex-col font-sans">
             
-            <div className="flex justify-between items-center border-b border-slate-200 pb-3">
-              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
-                <Plus className="w-4 h-4 text-sky-500 bg-sky-50 rounded-full p-0.5" />
-                ENTRADA RÁPIDA (INVENTARIO)
-              </h3>
-              <button onClick={() => setShowEntradaRapidaModal(false)} className="text-slate-400 hover:text-slate-705">✕</button>
+            {/* Header */}
+            <div className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex justify-between items-center text-white">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-sky-500/20 rounded-xl border border-sky-400/30">
+                  <Plus className="w-5 h-5 text-sky-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-wider font-mono">
+                    Entrada Rápida de Inventario
+                  </h3>
+                  <p className="text-[11px] text-slate-300 font-medium">
+                    Reabastecimiento express directo a caja
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowEntradaRapidaModal(false)} 
+                className="text-white/70 hover:text-white text-lg font-bold transition-colors cursor-pointer"
+              >
+                ✕
+              </button>
             </div>
 
-            <div className="space-y-4">
+            <div className="p-5 sm:p-6 space-y-4 bg-slate-50/40">
               <div>
-                <label className="text-xs text-slate-500 block mb-1 font-sans font-bold">Clave (Código o Barras):</label>
+                <label className="text-[11px] text-slate-600 block mb-1.5 font-bold uppercase tracking-wide font-mono">
+                  Código de Barras o Clave
+                </label>
                 <div className="relative">
                   <input
                     type="text"
                     required
-                    placeholder="Escriba código..."
+                    placeholder="Escriba código o pase el lector..."
                     value={entradaBarcode}
                     onChange={(e) => setEntradaBarcode(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-350 rounded pl-3 pr-9 py-2 text-xs text-slate-800 focus:bg-white focus:border-slate-500 focus:outline-none"
+                    className="w-full bg-white border border-slate-300 focus:border-sky-600 focus:ring-2 focus:ring-sky-500/20 rounded-xl pl-3 pr-9 py-2.5 text-xs text-slate-900 font-medium focus:outline-none transition-all placeholder:text-slate-400 shadow-2xs"
                     autoFocus
                   />
                   <span className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-slate-400">
                     <Search className="w-4 h-4" />
                   </span>
 
-                  {/* Autocomplete Dropdown for Entrada Rápida */}
+                  {/* Autocomplete Dropdown */}
                   {showEntradaDropdown && filteredSearchProducts.length > 0 && (
-                    <div className="absolute left-0 right-0 top-10 bg-white border border-slate-250 rounded max-h-40 overflow-y-auto z-50 shadow-2xl divide-y divide-slate-100 font-sans">
+                    <div className="absolute left-0 right-0 top-11 bg-white border border-slate-200 rounded-xl max-h-48 overflow-y-auto z-50 shadow-xl divide-y divide-slate-100 font-sans">
                       {filteredSearchProducts.map(p => (
                         <button
                           key={p.id}
@@ -6809,11 +6897,15 @@ export default function CajaPOS({
                             setMatchedProduct(p);
                             setEntradaBarcode(p.barcode);
                           }}
-                          className="w-full text-left p-2.5 text-[11px] font-sans hover:bg-slate-100 text-slate-800 transition-all block"
+                          className="w-full text-left p-2.5 text-[11px] font-sans hover:bg-sky-50 text-slate-800 transition-all flex items-center justify-between cursor-pointer"
                         >
-                          <span className="font-mono text-slate-500 font-bold mr-1.5">{p.barcode}</span>
-                          <span>{p.description}</span>
-                          <span className="float-right text-slate-500 text-[9px] font-sans font-semibold">Stock: {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}</span>
+                          <div className="min-w-0 pr-2">
+                            <span className="font-mono text-slate-500 font-bold mr-1.5 block text-[10px]">{p.barcode}</span>
+                            <span className="font-semibold block truncate text-slate-900">{p.description}</span>
+                          </div>
+                          <span className="text-slate-500 text-[10px] font-mono font-bold bg-slate-100 px-2 py-0.5 rounded flex-shrink-0">
+                            Stock: {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}
+                          </span>
                         </button>
                       ))}
                     </div>
@@ -6822,77 +6914,88 @@ export default function CajaPOS({
               </div>
 
               {/* PRODUCT INFORMATION DISPLAY AREA */}
-              <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 min-h-[70px] flex flex-col justify-center text-xs">
+              <div className="bg-white p-3.5 rounded-xl border border-slate-200 min-h-[76px] flex flex-col justify-center text-xs shadow-2xs">
                 {entradaBarcode.trim() === "" ? (
-                  <div className="text-center text-slate-400 font-sans italic">
-                    Ingrese el código del producto para buscarlo.
+                  <div className="text-center text-slate-400 font-sans italic text-[11px]">
+                    Ingrese el código del producto o búsquelo arriba para seleccionarlo.
                   </div>
                 ) : matchedProduct ? (
-                  <div className="space-y-1">
-                    <div className="font-extrabold text-slate-800 uppercase font-sans">{matchedProduct.description}</div>
-                    <div className="text-[10px] text-slate-500">Categoría: {matchedProduct.category || 'N/A'}</div>
-                    <div className="text-[11px] font-bold text-slate-700 flex justify-between border-t border-slate-200 pt-1 mt-1 font-sans">
+                  <div className="space-y-1.5 font-sans">
+                    <div className="font-black text-slate-900 uppercase text-xs leading-snug">{matchedProduct.description}</div>
+                    <div className="flex items-center gap-2 text-[10px] text-slate-500 font-mono">
+                      <span>Cat: <strong className="text-slate-700">{matchedProduct.category || 'GENERAL'}</strong></span>
+                      <span>|</span>
+                      <span>Ref: <strong className="text-slate-700">${matchedProduct.precio_detalle_usd.toFixed(2)}</strong></span>
+                    </div>
+                    <div className="text-[11px] font-bold text-slate-700 flex justify-between border-t border-slate-100 pt-1.5 mt-1 font-sans">
                       <span>Existencia Actual:</span>
-                      <span className="font-mono text-blue-600 font-extrabold">{formatStockVal(matchedProduct.stock_actual, matchedProduct.a_granel)} {matchedProduct.a_granel ? 'kg' : 'uds'}</span>
+                      <span className="font-mono text-sky-700 font-black bg-sky-50 px-2 py-0.5 rounded border border-sky-200">
+                        {formatStockVal(matchedProduct.stock_actual, matchedProduct.a_granel)} {matchedProduct.a_granel ? 'kg' : 'uds'}
+                      </span>
                     </div>
                   </div>
                 ) : (
-                  <div className="text-center text-red-500 font-bold font-sans flex items-center justify-center gap-1">
-                    <AlertCircle className="w-4 h-4" />
-                    <span>El producto no está registrado en el sistema.</span>
+                  <div className="text-center text-rose-600 font-bold font-sans flex items-center justify-center gap-1.5 py-1 text-xs">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                    <span>El código ingresado no existe en el catálogo.</span>
                   </div>
                 )}
               </div>
 
               {/* QUANTITY INPUT */}
               <div>
-                <label className="text-xs text-slate-500 block mb-1 font-sans font-bold">Cantidad Entrada Inventario:</label>
-                <input
-                  type="number"
-                  step={matchedProduct?.a_granel ? "0.001" : "1"}
-                  min={matchedProduct?.a_granel ? "0.001" : "1"}
-                  required
-                  placeholder={matchedProduct?.a_granel ? "0.00" : "1"}
-                  value={entradaQty}
-                  onChange={(e) => setEntradaQty(e.target.value)}
-                  disabled={!matchedProduct}
-                  className="w-full bg-slate-50 border border-slate-350 rounded p-2 text-xs font-bold font-mono text-center text-slate-800 focus:bg-white focus:border-slate-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                />
+                <label className="text-[11px] text-slate-600 block mb-1.5 font-bold uppercase tracking-wide font-mono">
+                  Cantidad a Ingresar al Stock:
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    step={matchedProduct?.a_granel ? "0.001" : "1"}
+                    min={matchedProduct?.a_granel ? "0.001" : "1"}
+                    required
+                    placeholder={matchedProduct?.a_granel ? "0.000" : "1"}
+                    value={entradaQty}
+                    onChange={(e) => setEntradaQty(e.target.value)}
+                    disabled={!matchedProduct}
+                    className="w-full bg-white border border-slate-300 focus:border-sky-600 focus:ring-2 focus:ring-sky-500/20 rounded-xl p-2.5 text-sm font-black font-mono text-center text-slate-900 focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs"
+                  />
+                  <span className="text-xs font-mono font-bold text-slate-500 bg-slate-100 px-3 py-2.5 rounded-xl border border-slate-200">
+                    {matchedProduct?.a_granel ? 'KG' : 'UDS'}
+                  </span>
+                </div>
               </div>
 
               {/* ACTION BUTTONS */}
-              <div className="flex gap-2 pt-2">
+              <div className="flex gap-2.5 pt-2 border-t border-slate-200">
                 <button
                   type="button"
                   onClick={() => setShowEntradaRapidaModal(false)}
-                  className="w-1/3 bg-slate-100 border border-slate-250 text-slate-655 py-2.5 rounded font-sans text-xs hover:bg-slate-200 transition-all"
+                  className="w-1/3 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-xl font-bold font-sans text-xs transition-all cursor-pointer"
                 >
                   Regresar
                 </button>
                 <button
                   type="button"
                   onClick={handleExecuteEntradaRapida}
-                  disabled={!matchedProduct}
-                  className="w-2/3 bg-winter-blueBtn hover:bg-winter-blueBtnHover disabled:bg-slate-300 disabled:cursor-not-allowed text-white py-2.5 rounded font-bold font-sans text-xs tracking-wider transition-all flex items-center justify-center gap-1"
+                  disabled={!matchedProduct || !entradaQty || parseFloat(entradaQty) <= 0}
+                  className="w-2/3 bg-sky-600 hover:bg-sky-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white py-2.5 rounded-xl font-bold font-sans text-xs uppercase tracking-wider transition-all shadow-sm active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
                 >
-                  <Plus className="w-3.5 h-3.5" />
-                  AGREGAR
+                  <Plus className="w-4 h-4" />
+                  <span>Agregar al Stock</span>
                 </button>
               </div>
-
             </div>
-
           </div>
         </div>
       )}
 
       {/* MODAL: DEVOLUCIÓN DE PRODUCTOS (TICKET) */}
       {showDevolucionModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-mono text-slate-800 animate-fade-in">
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-4xl shadow-2xl flex flex-col max-h-[90vh]">
+        <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 z-50 font-mono text-slate-800 animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden w-full max-w-6xl shadow-2xl flex flex-col max-h-[92vh]">
             
-            <div className="bg-rose-50 border-b border-rose-100 px-6 py-4 flex justify-between items-center">
-              <span className="text-xs font-black text-rose-700 tracking-widest uppercase flex items-center gap-1.5">
+            <div className="bg-gradient-to-r from-rose-50 via-pink-50 to-slate-50 border-b border-rose-100 px-6 py-4 flex justify-between items-center">
+              <span className="text-xs font-black text-rose-700 tracking-widest uppercase flex items-center gap-2">
                 <RotateCcw className="w-4 h-4 text-rose-600" />
                 MÓDULO DE DEVOLUCIONES DE INVENTARIO Y CAJA
               </span>
@@ -6902,16 +7005,16 @@ export default function CajaPOS({
                   setDevSelectedSale(null);
                   setDevSearchTerm('');
                 }} 
-                className="text-slate-400 hover:text-slate-700 font-sans"
+                className="text-slate-400 hover:text-slate-700 font-sans text-xs font-bold transition-colors cursor-pointer"
               >
                 ✕ Cerrar [ESC]
               </button>
             </div>
 
-            <div className="flex-grow overflow-hidden flex flex-col md:flex-row min-h-[500px]">
+            <div className="flex-grow overflow-hidden flex flex-col md:flex-row min-h-[520px]">
               
               {/* Left Column: Search & Find Ticket */}
-              <div className="w-full md:w-2/5 border-r border-slate-200 p-5 flex flex-col space-y-4">
+              <div className="w-full md:w-[320px] lg:w-[360px] flex-shrink-0 border-r border-slate-200 p-5 flex flex-col space-y-4 bg-white">
                 <div>
                   <label className="text-[10px] text-slate-500 block mb-1.5 font-sans font-bold uppercase">Buscar Ticket Vendido</label>
                   <input
@@ -6951,7 +7054,7 @@ export default function CajaPOS({
                   </div>
                 )}
 
-                <div className="flex-grow overflow-y-auto space-y-2 pr-1 max-h-[350px]">
+                <div className="flex-grow overflow-y-auto space-y-2 pr-1 max-h-[360px]">
                   <div className="flex justify-between items-center border-b pb-1">
                     <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block font-mono">
                       {canViewAllSales ? (devDateFilter ? `Facturas del ${devDateFilter}` : 'Todas las Facturas') : 'Facturas Turno Actual'}
@@ -7030,7 +7133,7 @@ export default function CajaPOS({
               </div>
 
               {/* Right Column: Return Items and Refund Details */}
-              <div className="w-full md:w-3/5 p-5 flex flex-col justify-between bg-slate-50 overflow-y-auto">
+              <div className="w-full md:flex-1 min-w-0 p-5 lg:p-6 flex flex-col justify-between bg-slate-50 overflow-y-auto">
                 {devSelectedSale ? (() => {
                   const salesList = allSalesList.length > 0 ? allSalesList : shiftSales;
                   const selectedReturnInfo = getSaleReturnInfo(devSelectedSale, salesList);
@@ -7073,10 +7176,10 @@ export default function CajaPOS({
                         )}
 
                         {/* Ticket header info banner */}
-                        <div className="bg-white border border-slate-200 p-3 rounded-lg flex justify-between items-center text-xs font-sans shadow-xs">
+                        <div className="bg-white border border-slate-200 p-3.5 rounded-xl flex justify-between items-center text-xs font-sans shadow-xs">
                           <div>
-                            <span className="text-[9px] text-slate-400 block uppercase">Cliente</span>
-                            <strong className="text-slate-800 block uppercase">{devSelectedSale.client.nombre} ({devSelectedSale.client.cedula_rif})</strong>
+                            <span className="text-[9px] text-slate-400 block uppercase font-bold">Cliente</span>
+                            <strong className="text-slate-900 block uppercase text-sm font-black">{devSelectedSale.client.nombre} ({devSelectedSale.client.cedula_rif})</strong>
                             {devSelectedSale.usuario && (
                               <span className="text-[10px] text-sky-700 font-mono font-bold block mt-0.5">
                                 Emitida por: <strong className="text-slate-800">{devSelectedSale.usuario}</strong>
@@ -7084,13 +7187,13 @@ export default function CajaPOS({
                             )}
                           </div>
                           <div className="text-right">
-                            <span className="text-[9px] text-slate-400 block uppercase">Total Original</span>
-                            <strong className="text-slate-800 block font-mono">${devSelectedSale.totalUSD.toFixed(2)}</strong>
+                            <span className="text-[9px] text-slate-400 block uppercase font-bold">Total Original</span>
+                            <strong className="text-slate-900 block font-mono text-base font-black">${devSelectedSale.totalUSD.toFixed(2)}</strong>
                           </div>
                         </div>
 
                         {/* Método de Pago Original */}
-                        <div className="bg-slate-100 border border-slate-200 px-3 py-2 rounded-lg text-[10px] font-sans flex flex-col gap-1 shadow-xs">
+                        <div className="bg-slate-100/80 border border-slate-200 px-3.5 py-2.5 rounded-xl text-[10px] font-sans flex flex-col gap-1.5 shadow-xs">
                           <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block">Forma de Pago Original:</span>
                           <div className="flex flex-wrap gap-2.5 font-semibold text-slate-700">
                             {devSelectedSale.pagos?.map((p, pIdx) => {
@@ -7106,9 +7209,9 @@ export default function CajaPOS({
                               const formattedMonto = currency === '$' ? `$${p.monto.toFixed(2)}` : `Bs ${p.monto.toFixed(2)}`;
                               
                               return (
-                                <div key={pIdx} className="bg-white border border-slate-200 px-2 py-0.5 rounded shadow-xs text-[9px] flex items-center gap-1">
-                                  <span className="text-[8px] text-sky-700 font-bold uppercase">{label}:</span>
-                                  <span className="font-mono font-bold text-slate-800">{formattedMonto}</span>
+                                <div key={pIdx} className="bg-white border border-slate-200 px-2.5 py-1 rounded-lg shadow-2xs text-[9.5px] flex items-center gap-1.5">
+                                  <span className="text-[8.5px] text-sky-700 font-bold uppercase">{label}:</span>
+                                  <span className="font-mono font-bold text-slate-900">{formattedMonto}</span>
                                   {p.reference && <span className="text-[8px] text-slate-400 font-mono">Ref: {p.reference}</span>}
                                 </div>
                               );
@@ -7116,35 +7219,35 @@ export default function CajaPOS({
                           </div>
                           {/* Display vuelto (change) if any */}
                           {((devSelectedSale.vueltoUSD || 0) > 0 || (devSelectedSale.vueltoVES || 0) > 0) && (
-                            <div className="text-[8px] text-slate-500 italic mt-0.5 flex gap-2 font-mono border-t border-slate-200/60 pt-1">
+                            <div className="text-[8.5px] text-slate-500 italic mt-0.5 flex gap-2.5 font-mono border-t border-slate-200/60 pt-1">
                               <span>Vuelto entregado:</span>
-                              {(devSelectedSale.vueltoUSD || 0) > 0 && <span>${(devSelectedSale.vueltoUSD || 0).toFixed(2)} USD</span>}
-                              {(devSelectedSale.vueltoVES || 0) > 0 && <span>Bs {(devSelectedSale.vueltoVES || 0).toFixed(2)} VES</span>}
+                              {(devSelectedSale.vueltoUSD || 0) > 0 && <span className="font-bold text-slate-700">${(devSelectedSale.vueltoUSD || 0).toFixed(2)} USD</span>}
+                              {(devSelectedSale.vueltoVES || 0) > 0 && <span className="font-bold text-slate-700">Bs {(devSelectedSale.vueltoVES || 0).toFixed(2)} VES</span>}
                             </div>
                           )}
                         </div>
 
-                        <div className="flex justify-between items-center border-b border-slate-200 pb-1">
-                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block font-mono">Modificar Cantidades a Devolver</span>
+                        <div className="flex justify-between items-center border-b border-slate-200 pb-1.5">
+                          <span className="text-[10px] font-extrabold text-slate-600 uppercase tracking-wider block font-mono">Modificar Cantidades a Devolver</span>
                           <button
                             type="button"
                             onClick={handleSelectAllForDev}
                             disabled={selectedReturnInfo.isFullyReturned}
-                            className="text-[9px] text-rose-700 hover:text-white font-bold font-sans bg-rose-50 hover:bg-rose-600 border border-rose-200 hover:border-transparent disabled:opacity-40 disabled:hover:bg-rose-50 disabled:hover:text-rose-700 px-2.5 py-0.5 rounded transition-all flex items-center gap-1 shadow-xs"
+                            className="text-[9.5px] text-rose-700 hover:text-white font-bold font-sans bg-rose-50 hover:bg-rose-600 border border-rose-200 hover:border-transparent disabled:opacity-40 disabled:hover:bg-rose-50 disabled:hover:text-rose-700 px-3 py-1 rounded-lg transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
                           >
-                            <RotateCcw className="w-2.5 h-2.5" />
+                            <RotateCcw className="w-3 h-3" />
                             {selectedReturnInfo.isPartiallyReturned ? 'Devolver Faltantes' : 'Devolver Factura Completa'}
                           </button>
                         </div>
 
                         {/* Items list to return */}
-                        <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                        <div className="space-y-2.5 max-h-[260px] overflow-y-auto pr-1">
                           {devItems.map((item, idx) => {
                             const isItemFullyReturned = item.remainingQty <= 0;
                             
                             if (isItemFullyReturned) {
                               return (
-                                <div key={idx} className="bg-slate-100 border border-slate-200 p-3 rounded-lg flex items-center justify-between text-xs gap-4 opacity-75">
+                                <div key={idx} className="bg-slate-100 border border-slate-200 p-3 rounded-xl flex items-center justify-between text-xs gap-4 opacity-75">
                                   <div className="flex-grow min-w-0">
                                     <span className="font-bold text-slate-500 uppercase block truncate line-through">{item.product.description}</span>
                                     <span className="text-[10px] text-rose-700 font-mono font-bold">✓ Totalmente Devuelto ({item.prevReturnedQty} de {item.qty})</span>
@@ -7157,38 +7260,44 @@ export default function CajaPOS({
                             }
 
                             return (
-                              <div key={idx} className="bg-white border border-slate-200 p-3 rounded-lg flex items-center justify-between text-xs gap-4 shadow-sm">
-                                <div className="flex-grow min-w-0">
-                                  <span className="font-bold text-slate-800 uppercase block truncate">{item.product.description}</span>
-                                  <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 font-mono mt-0.5">
-                                    <span>Precio: ${item.priceUSD.toFixed(2)}</span>
-                                    <span>| Original: {item.qty}</span>
-                                    {item.prevReturnedQty > 0 && <span className="text-amber-800 font-bold bg-amber-100/70 px-1 rounded">Ya devueltos: {item.prevReturnedQty}</span>}
-                                    <span className="text-emerald-800 font-bold bg-emerald-100/70 px-1 rounded">Disponibles: {item.remainingQty}</span>
+                              <div key={idx} className="bg-white border border-slate-200 p-3.5 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between text-xs gap-3 sm:gap-4 shadow-sm hover:border-slate-300 transition-all">
+                                <div className="flex-grow min-w-0 pr-2">
+                                  <span className="font-bold text-slate-900 uppercase block text-[11.5px] leading-snug">{item.product.description}</span>
+                                  <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-500 font-mono mt-1.5">
+                                    <span className="bg-slate-100 border border-slate-200/80 px-1.5 py-0.5 rounded text-slate-700 font-bold">Precio: ${item.priceUSD.toFixed(2)}</span>
+                                    <span className="text-slate-500">Original: <strong className="text-slate-800">{item.qty}</strong></span>
+                                    {item.prevReturnedQty > 0 && (
+                                      <span className="text-amber-900 font-bold bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded">
+                                        Ya devueltos: {item.prevReturnedQty}
+                                      </span>
+                                    )}
+                                    <span className="text-emerald-900 font-bold bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded shadow-2xs">
+                                      Disponibles: {item.remainingQty}
+                                    </span>
                                   </div>
                                 </div>
                                 
-                                <div className="flex items-center gap-3 flex-shrink-0">
-                                  <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded px-1.5 py-1">
-                                    <span className="text-[8px] font-bold text-slate-400 uppercase font-sans">Destino:</span>
+                                <div className="flex items-center gap-3 flex-shrink-0 self-end sm:self-center">
+                                  <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 shadow-2xs">
+                                    <span className="text-[8.5px] font-bold text-slate-400 uppercase font-sans">Destino:</span>
                                     <select
                                       value={item.inventoryDest || 'disponible'}
                                       onChange={(e) => handleUpdateDevDest(idx, e.target.value as any)}
-                                      className="text-[9px] font-bold font-sans bg-transparent focus:outline-none cursor-pointer text-slate-700"
+                                      className="text-[9.5px] font-bold font-sans bg-transparent focus:outline-none cursor-pointer text-slate-800"
                                     >
                                       <option value="disponible">🟢 Stock Vendible</option>
                                       <option value="merma">🔴 Defectuoso / Merma</option>
                                     </select>
                                   </div>
 
-                                  <div className="flex items-center gap-1">
-                                    <label className="text-[9px] text-slate-400 uppercase block font-sans">Devolver:</label>
-                                    <div className="flex items-center border border-slate-300 rounded overflow-hidden">
+                                  <div className="flex items-center gap-1.5">
+                                    <label className="text-[9.5px] text-slate-500 uppercase block font-sans font-bold">Devolver:</label>
+                                    <div className="flex items-center border border-slate-300 rounded-lg overflow-hidden bg-white shadow-2xs">
                                       <button
                                         type="button"
                                         onClick={() => handleUpdateDevQty(idx, item.returnQty - (item.product.a_granel ? 0.1 : 1))}
                                         disabled={selectedReturnInfo.isFullyReturned}
-                                        className="bg-slate-100 hover:bg-slate-200 px-2.5 py-1 text-slate-600 font-bold disabled:opacity-40"
+                                        className="bg-slate-100 hover:bg-slate-200 px-3 py-1 text-slate-700 font-black disabled:opacity-40 transition-colors"
                                       >
                                         -
                                       </button>
@@ -7201,13 +7310,13 @@ export default function CajaPOS({
                                         placeholder="0"
                                         disabled={selectedReturnInfo.isFullyReturned}
                                         onChange={(e) => handleUpdateDevQty(idx, item.product.a_granel ? parseFloat(e.target.value) || 0 : parseInt(e.target.value) || 0)}
-                                        className="w-12 text-center font-bold font-mono text-xs focus:outline-none disabled:bg-slate-100 disabled:text-slate-400"
+                                        className="w-14 text-center font-black font-mono text-xs focus:outline-none disabled:bg-slate-100 disabled:text-slate-400 py-1"
                                       />
                                       <button
                                         type="button"
                                         onClick={() => handleUpdateDevQty(idx, item.returnQty + (item.product.a_granel ? 0.1 : 1))}
                                         disabled={selectedReturnInfo.isFullyReturned}
-                                        className="bg-slate-100 hover:bg-slate-200 px-2.5 py-1 text-slate-600 font-bold disabled:opacity-40"
+                                        className="bg-slate-100 hover:bg-slate-200 px-3 py-1 text-slate-700 font-black disabled:opacity-40 transition-colors"
                                       >
                                         +
                                       </button>

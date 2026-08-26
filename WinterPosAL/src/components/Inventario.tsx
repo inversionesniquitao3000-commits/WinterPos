@@ -2665,6 +2665,7 @@ export default function Inventario({
 
   // Categories management modal states
   const [newCategoryName, setNewCategoryName] = useState('');
+  const [categorySearchTerm, setCategorySearchTerm] = useState('');
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [editingCategoryName, setEditingCategoryName] = useState('');
 
@@ -7711,150 +7712,238 @@ export default function Inventario({
         </div>
       )}
 
-      {/* CATEGORIES MODAL */}
+      {/* CATEGORIES MODAL (MODERNO Y EJECUTIVO) */}
       {showCategoriesModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-md w-full overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in duration-200">
-            {/* Header */}
-            <div className="bg-gradient-to-r from-violet-650 to-violet-755 px-6 py-4 flex justify-between items-center text-white">
-              <h3 className="text-sm font-extrabold uppercase tracking-wider font-mono flex items-center gap-2">
-                <Tag className="w-4 h-4" />
-                Gestión de Categorías
-              </h3>
+        <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-5">
+          <div className="bg-white rounded-2xl shadow-2xl border border-indigo-200/80 max-w-xl w-full overflow-hidden flex flex-col max-h-[92vh] animate-in fade-in zoom-in duration-200 font-sans">
+            {/* Header Ejecutivo */}
+            <div className="bg-gradient-to-r from-slate-950 via-indigo-950 to-slate-900 px-6 py-4 flex justify-between items-center text-white border-b border-indigo-900/50">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-indigo-500/20 rounded-xl border border-indigo-400/30">
+                  <Tag className="w-5 h-5 text-indigo-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-wider font-mono flex items-center gap-2">
+                    Gestión de Categorías
+                  </h3>
+                  <p className="text-[11px] text-indigo-200 font-medium">
+                    Administre y organice las líneas de productos del catálogo
+                  </p>
+                </div>
+              </div>
               <button 
                 onClick={() => {
                   setShowCategoriesModal(false);
                   setEditingCategory(null);
                   setNewCategoryName('');
+                  setCategorySearchTerm('');
                 }} 
-                className="text-white/80 hover:text-white text-base focus:outline-none"
+                className="text-white/70 hover:text-white text-lg font-bold transition-colors cursor-pointer"
               >
                 ✕
               </button>
             </div>
 
             {/* Content */}
-            <div className="p-6 overflow-y-auto space-y-5 flex-grow">
-              {/* Form Create */}
-              <div className="space-y-1.5">
-                <label className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold font-mono block">Crear Nueva Categoría</label>
+            <div className="p-5 sm:p-6 overflow-y-auto space-y-4 flex-grow bg-slate-50/50">
+              {/* Card: Crear Nueva Categoría */}
+              <div className="bg-gradient-to-br from-indigo-50/80 via-white to-slate-50 border border-indigo-200/80 rounded-2xl p-4 shadow-2xs space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] uppercase tracking-wider text-indigo-950 font-black font-mono flex items-center gap-1.5">
+                    <Plus className="w-3.5 h-3.5 text-indigo-600 bg-indigo-100 rounded-full p-0.5" />
+                    Crear Nueva Categoría
+                  </label>
+                  <span className="text-[10px] text-indigo-600/80 font-mono font-semibold">
+                    {allCategories.length} en total
+                  </span>
+                </div>
                 <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newCategoryName}
-                    onChange={(e) => setNewCategoryName(e.target.value)}
-                    placeholder="Escriba el nombre..."
-                    className="flex-grow bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-800 focus:bg-white focus:border-violet-600 focus:outline-none"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleCreateCategory();
-                    }}
-                  />
+                  <div className="relative flex-grow">
+                    <Tag className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      placeholder="Ej. BEBIDAS, VÍVERES, LIMPIEZA..."
+                      className="w-full bg-white border border-slate-300 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-500/20 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-800 focus:outline-none transition-all placeholder:text-slate-400 font-medium uppercase"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleCreateCategory();
+                      }}
+                      autoFocus
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={handleCreateCategory}
-                    className="bg-violet-600 hover:bg-violet-700 text-white font-bold font-mono px-4 py-2 rounded-lg text-xs transition-all flex items-center justify-center shadow-sm"
+                    disabled={!newCategoryName.trim()}
+                    className="bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 disabled:opacity-50 text-white font-bold font-mono px-4 py-2 rounded-xl text-xs transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-95 cursor-pointer whitespace-nowrap"
                   >
-                    + Agregar
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Agregar</span>
                   </button>
                 </div>
               </div>
 
-              {/* Categories list */}
+              {/* Header de la lista con Buscador integrado */}
               <div className="space-y-2">
-                <label className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold font-mono block">Categorías Existentes</label>
-                <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-[40vh] overflow-y-auto bg-slate-50/50">
-                  {allCategories.length === 0 ? (
-                    <div className="p-4 text-center text-slate-400 text-xs italic">
-                      No hay categorías registradas en el sistema.
-                    </div>
-                  ) : (
-                    allCategories.map(cat => {
-                      const activeCount = products.filter(p => (p.category || '').trim().toUpperCase() === cat && p.estado === 'Activo').length;
-                      const isEditing = editingCategory === cat;
-
-                      return (
-                        <div key={cat} className="p-3 flex items-center justify-between gap-3 bg-white hover:bg-slate-50/40 transition-colors">
-                          {isEditing ? (
-                            <div className="flex gap-2 flex-grow">
-                              <input
-                                type="text"
-                                value={editingCategoryName}
-                                onChange={(e) => setEditingCategoryName(e.target.value)}
-                                className="flex-grow bg-slate-50 border border-slate-350 rounded px-2.5 py-1 text-xs text-slate-800 focus:bg-white focus:outline-none"
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') handleRenameCategory(cat);
-                                }}
-                                autoFocus
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleRenameCategory(cat)}
-                                className="text-emerald-600 hover:text-emerald-700 font-bold text-xs uppercase"
-                              >
-                                Guardar
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setEditingCategory(null)}
-                                className="text-slate-400 hover:text-slate-500 font-bold text-xs uppercase"
-                              >
-                                Cancelar
-                              </button>
-                            </div>
-                          ) : (
-                            <>
-                              <div className="flex flex-col">
-                                <span className="text-xs font-bold text-slate-800 uppercase">{cat}</span>
-                                <span className="text-[9px] font-semibold text-slate-450 font-sans mt-0.5">
-                                  {activeCount === 0 ? 'Sin productos activos' : `${activeCount} prod. activos`}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setEditingCategory(cat);
-                                    setEditingCategoryName(cat);
-                                  }}
-                                  className="text-slate-400 hover:text-slate-600 p-1.5 rounded hover:bg-slate-100 transition-all"
-                                  title="Renombrar categoría"
-                                >
-                                  <Edit className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteCategory(cat)}
-                                  disabled={activeCount > 0}
-                                  className={`p-1.5 rounded transition-all ${
-                                    activeCount > 0
-                                      ? 'text-slate-200 cursor-not-allowed'
-                                      : 'text-red-500 hover:text-red-750 hover:bg-red-50'
-                                  }`}
-                                  title={activeCount > 0 ? 'No se puede eliminar una categoría con productos activos' : 'Eliminar categoría'}
-                                >
-                                  <Minus className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      );
-                    })
-                  )}
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <label className="text-[10.5px] uppercase tracking-wider text-slate-600 font-black font-mono">
+                    Categorías Registradas
+                  </label>
+                  {/* Buscador de categorías */}
+                  <div className="relative w-48 sm:w-56">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={categorySearchTerm}
+                      onChange={(e) => setCategorySearchTerm(e.target.value)}
+                      placeholder="Filtrar categorías..."
+                      className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg pl-7 pr-6 py-1 text-[11px] text-slate-800 focus:outline-none transition-all placeholder:text-slate-400"
+                    />
+                    {categorySearchTerm && (
+                      <button
+                        type="button"
+                        onClick={() => setCategorySearchTerm('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
                 </div>
+
+                {/* Lista de Categorías */}
+                {(() => {
+                  const filteredCats = allCategories.filter(cat => 
+                    !categorySearchTerm.trim() || cat.toLowerCase().includes(categorySearchTerm.toLowerCase())
+                  );
+
+                  return (
+                    <div className="space-y-2 max-h-[38vh] overflow-y-auto pr-1">
+                      {filteredCats.length === 0 ? (
+                        <div className="bg-white border border-dashed border-slate-300 rounded-xl p-8 text-center text-slate-400 text-xs flex flex-col items-center gap-2">
+                          <Tag className="w-8 h-8 text-slate-300" />
+                          <span>
+                            {categorySearchTerm.trim() 
+                              ? `No se encontraron categorías que coincidan con "${categorySearchTerm}".`
+                              : 'No hay categorías registradas en el sistema.'}
+                          </span>
+                        </div>
+                      ) : (
+                        filteredCats.map(cat => {
+                          const activeCount = products.filter(p => (p.category || '').trim().toUpperCase() === cat && p.estado === 'Activo').length;
+                          const isEditing = editingCategory === cat;
+
+                          return (
+                            <div 
+                              key={cat} 
+                              className="bg-white border border-slate-200 hover:border-indigo-300/80 rounded-xl p-3 flex items-center justify-between gap-3 shadow-2xs hover:shadow-sm transition-all"
+                            >
+                              {isEditing ? (
+                                <div className="flex gap-2 flex-grow items-center">
+                                  <input
+                                    type="text"
+                                    value={editingCategoryName}
+                                    onChange={(e) => setEditingCategoryName(e.target.value)}
+                                    className="flex-grow bg-slate-50 border border-indigo-400 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 font-bold uppercase"
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') handleRenameCategory(cat);
+                                      if (e.key === 'Escape') setEditingCategory(null);
+                                    }}
+                                    autoFocus
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRenameCategory(cat)}
+                                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] uppercase px-3 py-1.5 rounded-lg flex items-center gap-1 transition-all shadow-2xs"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                    Guardar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingCategory(null)}
+                                    className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-[10px] uppercase px-2.5 py-1.5 rounded-lg transition-all"
+                                  >
+                                    Cancelar
+                                  </button>
+                                </div>
+                              ) : (
+                                <>
+                                  <div className="flex items-center gap-3 min-w-0 flex-grow">
+                                    <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 flex-shrink-0">
+                                      <Tag className="w-4 h-4" />
+                                    </div>
+                                    <div className="flex flex-col min-w-0">
+                                      <span className="text-xs font-bold text-slate-900 uppercase truncate">
+                                        {cat}
+                                      </span>
+                                      <div className="mt-0.5">
+                                        {activeCount > 0 ? (
+                                          <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.2 rounded text-[9.5px] font-mono font-bold inline-block">
+                                            {activeCount} {activeCount === 1 ? 'producto activo' : 'productos activos'}
+                                          </span>
+                                        ) : (
+                                          <span className="bg-slate-100 text-slate-400 border border-slate-200 px-2 py-0.2 rounded text-[9.5px] font-mono inline-block">
+                                            Sin productos activos
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-1 flex-shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingCategory(cat);
+                                        setEditingCategoryName(cat);
+                                      }}
+                                      className="p-1.5 rounded-lg bg-slate-100 hover:bg-indigo-50 text-slate-500 hover:text-indigo-600 border border-slate-200/80 hover:border-indigo-200 transition-all cursor-pointer shadow-2xs"
+                                      title="Renombrar categoría"
+                                    >
+                                      <Edit className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteCategory(cat)}
+                                      disabled={activeCount > 0}
+                                      className={`p-1.5 rounded-lg border transition-all ${
+                                        activeCount > 0
+                                          ? 'bg-slate-50 text-slate-300 border-slate-200/60 cursor-not-allowed opacity-50'
+                                          : 'bg-rose-50 hover:bg-rose-100 text-rose-600 hover:text-rose-700 border-rose-200/80 cursor-pointer shadow-2xs'
+                                      }`}
+                                      title={activeCount > 0 ? `No se puede eliminar: tiene ${activeCount} productos activos asignados` : 'Eliminar categoría'}
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 
             {/* Footer */}
-            <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex justify-end">
+            <div className="bg-slate-50 px-6 py-3.5 border-t border-slate-200 flex justify-between items-center text-xs">
+              <span className="text-[10px] text-slate-400 font-medium">
+                💡 Tip: Solo se pueden eliminar categorías sin productos activos vinculados.
+              </span>
               <button
                 type="button"
                 onClick={() => {
                   setShowCategoriesModal(false);
                   setEditingCategory(null);
                   setNewCategoryName('');
+                  setCategorySearchTerm('');
                 }}
-                className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-5 py-2 rounded-lg text-xs font-sans font-bold transition-all"
+                className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2 rounded-xl text-xs font-sans font-bold transition-all active:scale-95 shadow-sm cursor-pointer"
               >
                 Cerrar
               </button>

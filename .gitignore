@@ -25,3 +25,11 @@ dist_backend/
 dist_root/
 .dev_source_backup/
 
+# Archivos multimedia y datos dinámicos generados en tiempo de ejecución (fotos de productos, bases de datos locales)
+data/product_images/
+data/product_images/*
+backend/data/product_images/
+backend/data/product_images/*
+*.sqlite
+*.sqlite3
+*.db
