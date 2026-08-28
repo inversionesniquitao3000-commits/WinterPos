@@ -502,18 +502,33 @@ app.delete('/api/productos/:id', async (req, res) => {
 });
 
 app.get('/api/tasas', async (req, res) => {
-  const history = await getTasaHistory();
-  res.json(history);
+  try {
+    const history = await getTasaHistory();
+    res.json(history);
+  } catch (err) {
+    console.error('Error en GET /api/tasas:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/tasas', async (req, res) => {
-  const saved = await saveTasa(req.body);
-  res.json(saved);
+  try {
+    const saved = await saveTasa(req.body);
+    res.json(saved);
+  } catch (err) {
+    console.error('Error en POST /api/tasas:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.delete('/api/tasas/clear', async (req, res) => {
-  await clearTasaHistory();
-  res.json({ success: true });
+  try {
+    await clearTasaHistory();
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error en DELETE /api/tasas/clear:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/movements', async (req, res) => {

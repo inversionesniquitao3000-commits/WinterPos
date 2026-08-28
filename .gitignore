@@ -33,3 +33,4 @@ backend/data/product_images/*
 *.sqlite
 *.sqlite3
 *.db
+backend/backend/

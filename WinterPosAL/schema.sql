@@ -33,13 +33,15 @@ CREATE TABLE Usuarios (
 -- ==========================================
 -- 3. TASAS DE CAMBIO (AUDITORÍA DIARIA)
 -- ==========================================
-CREATE TABLE Tasas_Cambio (
+CREATE TABLE IF NOT EXISTS Tasas_Cambio (
     id BIGSERIAL PRIMARY KEY,
     tasa_cobro NUMERIC(12, 4) NOT NULL CHECK (tasa_cobro > 0),
     tasa_vuelto NUMERIC(12, 4) NOT NULL CHECK (tasa_vuelto > 0),
-    fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    usuario_id BIGINT NOT NULL,
-    CONSTRAINT fk_tasas_usuario FOREIGN KEY (usuario_id) REFERENCES Usuarios(id)
+    tasa_oficial NUMERIC(12, 4) DEFAULT 0,
+    diferencial_porcentaje NUMERIC(5, 2) DEFAULT 0.00,
+    fecha_actualizacion VARCHAR(50) NOT NULL DEFAULT TO_CHAR(NOW(), 'YYYY-MM-DD HH24:MI'),
+    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    usuario_id BIGINT REFERENCES Usuarios(id) ON DELETE SET NULL
 );
 
 -- ==========================================

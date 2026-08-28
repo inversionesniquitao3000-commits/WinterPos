@@ -10,7 +10,7 @@ interface TasaCambioProps {
   currentUser: User;
   isServer?: boolean;
   getApiUrl?: (path: string) => string;
-  onUpdateTasa: (newDia: number, newVuelto: number, userOverrideLabel?: string) => void;
+  onUpdateTasa: (newDia: number, newVuelto: number, userOverrideLabel?: string) => Promise<any> | void;
   onClearHistory?: () => Promise<void>;
 }
 
@@ -375,7 +375,7 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
     printWindow.document.close();
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
@@ -393,8 +393,16 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
       return;
     }
 
-    onUpdateTasa(valDia, valVuelto);
-    setSuccessMsg('Tasas de cambio actualizadas exitosamente en el sistema.');
+    try {
+      const res = await onUpdateTasa(valDia, valVuelto);
+      if (res !== false) {
+        setSuccessMsg('Tasas de cambio actualizadas exitosamente en el sistema.');
+      } else {
+        setErrorMsg('No se pudo guardar la tasa de cambio en la base de datos central. Verifique la conexión.');
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error al actualizar la tasa de cambio.');
+    }
   };
 
   const handleClear = () => {

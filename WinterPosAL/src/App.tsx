@@ -1304,17 +1304,21 @@ const cleanProductObject = (p: any): Product => ({
   const tasaDia = currentTasa ? currentTasa.tasa_cobro : 40.00;
   const tasaVuelto = currentTasa ? currentTasa.tasa_vuelto : 40.00;
 
-  const handleUpdateTasa = async (newDia: number, newVuelto: number, userOverrideLabel?: string) => {
+  const handleUpdateTasa = async (newDia: number, newVuelto: number, userOverrideLabel?: string): Promise<boolean> => {
     const newItem = {
       tasa_cobro: newDia,
       tasa_vuelto: newVuelto,
+      tasa_oficial: newDia,
+      diferencial_porcentaje: 0,
       usuarioId: currentUser?.id,
       usuario: userOverrideLabel || currentUser?.nombre || 'SISTEMA'
     };
     const saved = await postApiData('/tasas', newItem);
     if (saved) {
       setTasaHistory(prev => [...prev, saved]);
+      return true;
     }
+    return false;
   };
 
   // Engine de sincronización y validación automática de tasa BCV parametrizable

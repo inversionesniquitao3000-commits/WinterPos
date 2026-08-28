@@ -235,6 +235,14 @@ try {
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS tamano_foto_buscador_pos VARCHAR(20) DEFAULT 'mediana';
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS limite_productos_buscador_pos INT DEFAULT 5;
     ALTER TABLE IF EXISTS Tasas_Cambio ADD COLUMN IF NOT EXISTS fecha_actualizacion VARCHAR(50);
+    ALTER TABLE IF EXISTS Tasas_Cambio ADD COLUMN IF NOT EXISTS tasa_vuelto NUMERIC(12, 4) DEFAULT 0;
+    ALTER TABLE IF EXISTS Tasas_Cambio ADD COLUMN IF NOT EXISTS tasa_oficial NUMERIC(12, 4) DEFAULT 0;
+    ALTER TABLE IF EXISTS Tasas_Cambio ALTER COLUMN tasa_oficial DROP NOT NULL;
+    ALTER TABLE IF EXISTS Tasas_Cambio ALTER COLUMN tasa_oficial SET DEFAULT 0;
+    ALTER TABLE IF EXISTS Tasas_Cambio ADD COLUMN IF NOT EXISTS diferencial_porcentaje NUMERIC(5, 2) DEFAULT 0;
+    ALTER TABLE IF EXISTS Tasas_Cambio ALTER COLUMN diferencial_porcentaje DROP NOT NULL;
+    ALTER TABLE IF EXISTS Tasas_Cambio ALTER COLUMN diferencial_porcentaje SET DEFAULT 0;
+    ALTER TABLE IF EXISTS Tasas_Cambio ALTER COLUMN usuario_id DROP NOT NULL;
 
     CREATE TABLE IF NOT EXISTS Accionistas (
       id SERIAL PRIMARY KEY,
@@ -2349,22 +2357,37 @@ export async function saveTasa(t) {
           if (uRes.rowCount > 0) userId = uRes.rows[0].id;
         }
       }
-      if (isNaN(userId) || userId <= 0) userId = 1;
+      if (!isNaN(userId) && userId > 0) {
+        const uCheck = await pool.query('SELECT id FROM Usuarios WHERE id = $1 LIMIT 1', [userId]);
+        if (uCheck.rowCount === 0) userId = null;
+      } else {
+        userId = null;
+      }
       
+      const tasaCobro = parseFloat(t.tasa_cobro) || 0;
+      const tasaVuelto = parseFloat(t.tasa_vuelto) || tasaCobro;
+      const tasaOficial = parseFloat(t.tasa_oficial || t.tasa_cobro || 0);
+      const difPorc = parseFloat(t.diferencial_porcentaje || 0);
       const nowStr = getLocalISODateString();
+
       const res = await pool.query(
-        `INSERT INTO Tasas_Cambio (tasa_cobro, tasa_vuelto, fecha_actualizacion, usuario_id)
-         VALUES ($1, $2, $3, $4) RETURNING id, fecha_actualizacion`,
-        [t.tasa_cobro, t.tasa_vuelto, nowStr, userId]
+        `INSERT INTO Tasas_Cambio (tasa_cobro, tasa_vuelto, tasa_oficial, diferencial_porcentaje, fecha_actualizacion, usuario_id)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, fecha_actualizacion`,
+        [tasaCobro, tasaVuelto, tasaOficial, difPorc, nowStr, userId]
       );
 
-      const opRes = await pool.query('SELECT nombre FROM Usuarios WHERE id = $1', [userId]);
-      const opName = opRes.rowCount > 0 ? opRes.rows[0].nombre : (t.usuario || 'SISTEMA');
+      let opName = t.usuario || 'SISTEMA';
+      if (userId) {
+        const opRes = await pool.query('SELECT nombre FROM Usuarios WHERE id = $1', [userId]);
+        if (opRes.rowCount > 0 && opRes.rows[0].nombre) opName = opRes.rows[0].nombre;
+      }
 
       return { 
         id: res.rows[0].id,
-        tasa_cobro: parseFloat(t.tasa_cobro),
-        tasa_vuelto: parseFloat(t.tasa_vuelto),
+        tasa_cobro: tasaCobro,
+        tasa_vuelto: tasaVuelto,
+        tasa_oficial: tasaOficial,
+        diferencial_porcentaje: difPorc,
         fecha_actualizacion: getLocalISODateString(res.rows[0].fecha_actualizacion),
         usuario: opName
       };

@@ -178,6 +178,13 @@ export async function initDatabase() {
         -- Migración estándar para Tasas_Cambio y Cajas
         ALTER TABLE Tasas_Cambio ADD COLUMN IF NOT EXISTS fecha_actualizacion VARCHAR(50);
         ALTER TABLE Tasas_Cambio ADD COLUMN IF NOT EXISTS tasa_vuelto NUMERIC(12, 4) DEFAULT 0;
+        ALTER TABLE Tasas_Cambio ADD COLUMN IF NOT EXISTS tasa_oficial NUMERIC(12, 4) DEFAULT 0;
+        ALTER TABLE Tasas_Cambio ALTER COLUMN tasa_oficial DROP NOT NULL;
+        ALTER TABLE Tasas_Cambio ALTER COLUMN tasa_oficial SET DEFAULT 0;
+        ALTER TABLE Tasas_Cambio ADD COLUMN IF NOT EXISTS diferencial_porcentaje NUMERIC(5, 2) DEFAULT 0;
+        ALTER TABLE Tasas_Cambio ALTER COLUMN diferencial_porcentaje DROP NOT NULL;
+        ALTER TABLE Tasas_Cambio ALTER COLUMN diferencial_porcentaje SET DEFAULT 0;
+        ALTER TABLE Tasas_Cambio ALTER COLUMN usuario_id DROP NOT NULL;
         ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_apertura_usd NUMERIC(12, 2) DEFAULT 0;
         ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_apertura_ves NUMERIC(12, 2) DEFAULT 0;
         ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_cierre_real_ves NUMERIC(12, 2) DEFAULT 0;
