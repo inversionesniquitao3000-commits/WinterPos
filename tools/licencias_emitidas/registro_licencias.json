@@ -1,5 +1,16 @@
 [
   {
+    "cliente": "Inversiones Niquitao Arturo",
+    "rif": "J-0000",
+    "hwid": "WPOS-4795-9278-F59E",
+    "terminales": 5,
+    "fechaEmision": "2026-08-28",
+    "fechaExpiracion": "2027-08-28",
+    "tipo": "365 DÍAS",
+    "archivo": "Licencia_Inversiones_Niquitao_Arturo_J-0000_WPOS-4795-9278-F59E.lic",
+    "fechaRegistro": "2026-08-28T02:06:20.202Z"
+  },
+  {
     "cliente": "Inversiones Familia Angel",
     "rif": "J-411",
     "hwid": "WPOS-6515-A299-1AD6",

@@ -96,12 +96,12 @@ export const mockTasaHistory = [
 ];
 
 export const mockConfig = {
-  rif: 'J-41132631',
-  nombre_comercio: 'INVERSIONES NIQUITAO',
-  direccion: 'Caracas, Venezuela',
-  telefono: '0424-2042877',
-  correo: 'niquitao@correo.com',
+  rif: 'J-000000000',
+  nombre_comercio: 'Mi Comercio C.A.',
+  direccion: 'Venezuela',
+  telefono: '',
+  correo: '',
   moneda_base: 'USD',
-  mensaje_pie_ticket: 'Gracias por su compra!',
-  metodos_pago_activos: ["efectivo_usd", "efectivo_ves", "debito", "pago_movil", "biopago", "credito"]
+  mensaje_pie_ticket: '¡Gracias por su compra!',
+  metodos_pago_activos: ["efectivo_usd", "efectivo_ves", "tarjeta_ves", "pago_movil", "biopago", "credito"]
 };

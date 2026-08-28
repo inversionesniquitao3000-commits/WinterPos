@@ -6,13 +6,13 @@ import http from 'http';
 import net from 'net';
 import { fileURLToPath } from 'url';
 
-// 1. Control Anti-Doble Clic Rápido (Lockfile en TEMP con 3.5s de enfriamiento)
+// 1. Control Anti-Doble Clic Rápido (Lockfile en TEMP con 6s de enfriamiento)
 const lockFilePath = path.join(os.tmpdir(), 'winterpos_launch.lock');
 try {
   if (fs.existsSync(lockFilePath)) {
     const stats = fs.statSync(lockFilePath);
     const elapsed = Date.now() - stats.mtimeMs;
-    if (elapsed < 3500) {
+    if (elapsed < 6000) {
       process.exit(0); // Segunda ejecución descartada instantáneamente
     }
   }
@@ -95,6 +95,18 @@ function findBrowserExe() {
 }
 
 function launchAppWindow(targetUrl) {
+  // Anti-duplicación estricta: No abrir más de 1 ventana en un intervalo de 6 segundos
+  const windowLockPath = path.join(os.tmpdir(), 'winterpos_window.lock');
+  try {
+    if (fs.existsSync(windowLockPath)) {
+      const stats = fs.statSync(windowLockPath);
+      if (Date.now() - stats.mtimeMs < 6000) {
+        return; // Ya se ordenó abrir una ventana hace menos de 6s
+      }
+    }
+    fs.writeFileSync(windowLockPath, String(process.pid), 'utf8');
+  } catch (_) {}
+
   if (process.platform === 'win32') {
     const browserExe = findBrowserExe();
     const appDataDir = path.join(process.env.LOCALAPPDATA || os.tmpdir(), 'WinterPos', 'browser-data');

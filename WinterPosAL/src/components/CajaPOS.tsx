@@ -2289,16 +2289,27 @@ export default function CajaPOS({
       }
 
       // Build payment array
+      // Build payment array with precise USD and VES values
+      const rate = tasaDia || 1;
       const pagos: Payment[] = [];
-      if (cashUSDVal > 0) pagos.push({ metodo: 'Efectivo$', monto: cashUSDVal, montoUSD: cashUSDVal });
-      if (cashVESVal > 0) pagos.push({ metodo: 'EfectivoBs', monto: cashVESVal, montoUSD: cashVESVal / tasaDia });
-      if (cardVESVal > 0) pagos.push({ metodo: 'TarjetaBs', monto: cardVESVal, montoUSD: cardVESVal / tasaDia });
-      if (cardUSDVal > 0) pagos.push({ metodo: 'Tarjeta$', monto: cardUSDVal, montoUSD: cardUSDVal });
+      if (cashUSDVal > 0) {
+        pagos.push({ metodo: 'Efectivo$', monto: cashUSDVal, montoUSD: cashUSDVal, montoVES: cashUSDVal * rate });
+      }
+      if (cashVESVal > 0) {
+        pagos.push({ metodo: 'EfectivoBs', monto: cashVESVal / rate, montoUSD: cashVESVal / rate, montoVES: cashVESVal });
+      }
+      if (cardVESVal > 0) {
+        pagos.push({ metodo: 'TarjetaBs', monto: cardVESVal / rate, montoUSD: cardVESVal / rate, montoVES: cardVESVal });
+      }
+      if (cardUSDVal > 0) {
+        pagos.push({ metodo: 'Tarjeta$', monto: cardUSDVal, montoUSD: cardUSDVal, montoVES: cardUSDVal * rate });
+      }
       if (pagoMovilVESVal > 0) {
         pagos.push({
           metodo: 'PagoMovil',
-          monto: pagoMovilVESVal,
-          montoUSD: pagoMovilVESVal / tasaDia,
+          monto: pagoMovilVESVal / rate,
+          montoUSD: pagoMovilVESVal / rate,
+          montoVES: pagoMovilVESVal,
           reference: refPagoMovil,
           bancoEmisor: bankPagoMovil
         });
@@ -2306,16 +2317,21 @@ export default function CajaPOS({
       if (biopagoVESVal > 0) {
         pagos.push({
           metodo: 'Biopago',
-          monto: biopagoVESVal,
-          montoUSD: biopagoVESVal / tasaDia,
+          monto: biopagoVESVal / rate,
+          montoUSD: biopagoVESVal / rate,
+          montoVES: biopagoVESVal,
           reference: '',
           bancoEmisor: ''
         });
       }
-      if (binanceUSDVal > 0) pagos.push({ metodo: 'Binance', monto: binanceUSDVal, montoUSD: binanceUSDVal });
-      if (paypalUSDVal > 0) pagos.push({ metodo: 'PayPal', monto: paypalUSDVal, montoUSD: paypalUSDVal });
+      if (binanceUSDVal > 0) {
+        pagos.push({ metodo: 'Binance', monto: binanceUSDVal, montoUSD: binanceUSDVal, montoVES: binanceUSDVal * rate });
+      }
+      if (paypalUSDVal > 0) {
+        pagos.push({ metodo: 'PayPal', monto: paypalUSDVal, montoUSD: paypalUSDVal, montoVES: paypalUSDVal * rate });
+      }
       if (creditUSDVal > 0) {
-        pagos.push({ metodo: 'CreditoCliente', monto: creditUSDVal, montoUSD: creditUSDVal });
+        pagos.push({ metodo: 'CreditoCliente', monto: creditUSDVal, montoUSD: creditUSDVal, montoVES: creditUSDVal * rate });
       }
 
       let finalVueltoUSD = 0;
@@ -3820,13 +3836,13 @@ export default function CajaPOS({
             <table className="w-full border-collapse text-left">
               <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
                 <tr className="text-slate-550">
-                  <th className="px-4 py-2.5 w-24">CÓDIGO</th>
-                  <th className="px-4 py-2.5">DESCRIPCIÓN</th>
-                  <th className="px-4 py-2.5 text-center w-24">TIPO P.</th>
-                  <th className="px-4 py-2.5 text-center w-28">CANTIDAD</th>
-                  <th className="px-4 py-2.5 text-right whitespace-nowrap min-w-[110px] font-extrabold text-xs">PRECIO U.</th>
-                  <th className="px-4 py-2.5 text-right whitespace-nowrap min-w-[110px] font-extrabold text-xs">TOTAL</th>
-                  <th className="px-4 py-2.5 w-12 text-center">
+                  <th className="px-3 py-2.5 w-24 whitespace-nowrap">CÓDIGO</th>
+                  <th className="px-3 py-2.5">DESCRIPCIÓN</th>
+                  <th className="px-3 py-2.5 text-center whitespace-nowrap min-w-[100px]">TIPO P.</th>
+                  <th className="px-3 py-2.5 text-center whitespace-nowrap min-w-[110px]">CANTIDAD</th>
+                  <th className="px-3 py-2.5 text-right whitespace-nowrap min-w-[110px] font-extrabold text-xs">PRECIO U.</th>
+                  <th className="px-3 py-2.5 text-right whitespace-nowrap min-w-[110px] font-extrabold text-xs">TOTAL</th>
+                  <th className="px-2 py-2.5 w-10 text-center">
                     {saleItems.length > 0 && (
                       <button
                         type="button"
@@ -3858,8 +3874,8 @@ export default function CajaPOS({
                           isSelected ? 'bg-blue-50/70 border-l-2 border-winter-blueBtn shadow-sm' : ''
                         }`}
                       >
-                        <td className="px-4 py-3 font-bold font-mono text-slate-450">{item.product.barcode}</td>
-                        <td className="px-4 py-3 font-sans select-text">
+                        <td className="px-3 py-2.5 font-bold font-mono text-slate-450 whitespace-nowrap">{item.product.barcode}</td>
+                        <td className="px-3 py-2.5 font-sans select-text">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="font-bold text-slate-850">{item.product.description}</span>
                             {item.product.exento_impuesto === true ? (
@@ -3876,7 +3892,7 @@ export default function CajaPOS({
                             )}
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-center">
+                        <td className="px-3 py-2.5 text-center whitespace-nowrap">
                           <button
                             type="button"
                             onClick={(e) => {

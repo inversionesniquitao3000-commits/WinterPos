@@ -541,7 +541,7 @@ export default function App() {
           const res = await fetch(`http://localhost:5000/api/status`);
           if (res.ok) {
             const data = await res.json();
-            if (data.localIp && !ip) {
+            if (data.localIp) {
               ip = data.localIp;
               localStorage.setItem('pos_lan_ip', data.localIp);
             }
@@ -3288,6 +3288,8 @@ const cleanProductObject = (p: any): Product => ({
                 currentUser={currentUser}
                 getApiUrl={getApiUrl}
                 hasPermission={hasModulePermission}
+                companyConfig={companyConfig}
+                tasaDia={bcvRateUSD || tasaDia}
               />
             </ErrorBoundary>
           )}

@@ -102,9 +102,11 @@ CREATE TABLE IF NOT EXISTS Productos (
 -- ==========================================
 CREATE TABLE IF NOT EXISTS Tasas_Cambio (
     id BIGSERIAL PRIMARY KEY,
-    tasa_oficial NUMERIC(12, 4) NOT NULL,
-    tasa_cobro NUMERIC(12, 4) NOT NULL,
+    tasa_cobro NUMERIC(12, 4) NOT NULL DEFAULT 0,
+    tasa_vuelto NUMERIC(12, 4) NOT NULL DEFAULT 0,
+    tasa_oficial NUMERIC(12, 4) DEFAULT 0,
     diferencial_porcentaje NUMERIC(5, 2) DEFAULT 0.00,
+    fecha_actualizacion VARCHAR(50) NOT NULL DEFAULT TO_CHAR(NOW(), 'YYYY-MM-DD HH24:MI'),
     fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     usuario_id BIGINT REFERENCES Usuarios(id) ON DELETE SET NULL
 );
@@ -140,13 +142,16 @@ CREATE TABLE IF NOT EXISTS Cajas_Apertura_Cierre (
     id BIGSERIAL PRIMARY KEY,
     usuario_id BIGINT NOT NULL REFERENCES Usuarios(id),
     estacion_nombre VARCHAR(50) NOT NULL,
-    monto_inicial_usd NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
-    monto_inicial_ves NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    monto_apertura_usd NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    monto_apertura_ves NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
     fecha_apertura TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     fecha_cierre TIMESTAMP,
-    monto_cierre_estimado_usd NUMERIC(12, 2),
-    monto_cierre_real_usd NUMERIC(12, 2),
-    diferencia_usd NUMERIC(12, 2),
+    monto_cierre_estimado_usd NUMERIC(12, 2) DEFAULT 0.00,
+    monto_cierre_esperado_usd NUMERIC(12, 2) DEFAULT 0.00,
+    monto_cierre_esperado_ves NUMERIC(12, 2) DEFAULT 0.00,
+    monto_cierre_real_usd NUMERIC(12, 2) DEFAULT 0.00,
+    monto_cierre_real_ves NUMERIC(12, 2) DEFAULT 0.00,
+    diferencia_usd NUMERIC(12, 2) DEFAULT 0.00,
     estatus estado_caja DEFAULT 'Abierta',
     detalles_json JSONB
 );
@@ -163,8 +168,10 @@ CREATE TABLE IF NOT EXISTS Movimientos_Caja (
 );
 
 -- ==========================================
--- 8. VENTAS (CABECERA DE FACTURACIÓN)
+-- 8. VENTAS (HISTÓRICO TRANSACCIONAL)
 -- ==========================================
+CREATE SEQUENCE IF NOT EXISTS seq_factura START WITH 1;
+
 CREATE TABLE IF NOT EXISTS Ventas (
     id BIGSERIAL PRIMARY KEY,
     caja_id BIGINT REFERENCES Cajas_Apertura_Cierre(id) ON DELETE SET NULL,
@@ -177,7 +184,10 @@ CREATE TABLE IF NOT EXISTS Ventas (
     descuento_usd NUMERIC(12, 2) DEFAULT 0.00,
     total_usd NUMERIC(12, 2) NOT NULL,
     total_ves NUMERIC(12, 2) NOT NULL,
-    tasa_cambio NUMERIC(12, 4) NOT NULL,
+    tasa_cambio NUMERIC(12, 4) DEFAULT 1.00,
+    vuelto_usd NUMERIC(12, 2) DEFAULT 0.00,
+    vuelto_ves NUMERIC(12, 2) DEFAULT 0.00,
+    con_ticket BOOLEAN DEFAULT TRUE,
     fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     estacion_nombre VARCHAR(50) DEFAULT 'LOCAL',
     nro_control_fiscal VARCHAR(50),

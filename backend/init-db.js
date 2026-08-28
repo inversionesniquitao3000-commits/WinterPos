@@ -174,7 +174,16 @@ export async function initDatabase() {
         ALTER TABLE Productos ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(50);
         ALTER TABLE Productos ADD COLUMN IF NOT EXISTS estado VARCHAR(10) DEFAULT 'Activo';
         ALTER TABLE Productos ALTER COLUMN imagen_url TYPE TEXT;
-      `).catch(err => console.warn('[Migration Documentos_Empresa / Productos]', err.message));
+
+        -- Migración estándar para Tasas_Cambio y Cajas
+        ALTER TABLE Tasas_Cambio ADD COLUMN IF NOT EXISTS fecha_actualizacion VARCHAR(50);
+        ALTER TABLE Tasas_Cambio ADD COLUMN IF NOT EXISTS tasa_vuelto NUMERIC(12, 4) DEFAULT 0;
+        ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_apertura_usd NUMERIC(12, 2) DEFAULT 0;
+        ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_apertura_ves NUMERIC(12, 2) DEFAULT 0;
+        ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_cierre_real_ves NUMERIC(12, 2) DEFAULT 0;
+        ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_cierre_esperado_ves NUMERIC(12, 2) DEFAULT 0;
+        ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS con_ticket BOOLEAN DEFAULT TRUE;
+      `).catch(err => console.warn('[Migration Documentos_Empresa / Productos / Tasas / Cajas]', err.message));
     }
     return true;
 

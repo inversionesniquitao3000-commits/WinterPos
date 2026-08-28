@@ -81,6 +81,9 @@ Name: "{app}\backend\data"; Permissions: users-full
 Name: "{app}\backend\data\product_images"; Permissions: users-full
 
 [Run]
+; Cerrar instancias previas huérfanas en actualizaciones
+Filename: "taskkill"; Parameters: "/F /IM node.exe"; Flags: runhidden; Check: WizardIsTaskSelected('killnode')
+
 ; Otorgar permisos totales de escritura en la carpeta de instalación (licenciamiento y datos)
 Filename: "icacls"; Parameters: """{app}"" /grant Users:(OI)(CI)F /T"; Flags: runhidden; StatusMsg: "Configurando permisos de escritura para licencia y datos..."
 

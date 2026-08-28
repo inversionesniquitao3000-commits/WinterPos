@@ -550,5 +550,65 @@ export interface CotizacionProveedor {
   };
 }
 
+export interface ExpedienteDocumentoEmpleado {
+  id: string;
+  tipo: 'CEDULA' | 'RIF' | 'CONTRATO' | 'IVSS' | 'INPSASEL' | 'SALUD' | 'CURRICULUM' | 'OTRO';
+  titulo: string;
+  nombre_archivo: string;
+  ruta_archivo: string;
+  fecha_subida: string;
+  fecha_vencimiento?: string;
+  estatus?: 'Vigente' | 'Por Vencer' | 'Vencido';
+}
 
+export interface Empleado {
+  id: string | number;
+  nombre: string;
+  cedula: string;
+  rif?: string;
+  telefono?: string;
+  correo?: string;
+  direccion?: string;
+  cargo: string;
+  departamento?: string;
+  fecha_ingreso: string;
+  tipo_contrato: 'INDETERMINADO' | 'DETERMINADO' | 'PRUEBA' | 'SERVICIOS';
+  sueldo_base_usd: number;
+  bono_alimentacion_usd?: number;
+  modalidad_pago: 'QUINCENAL' | 'SEMANAL' | 'MENSUAL';
+  banco_pago?: string;
+  cuenta_bancaria?: string;
+  pago_movil_telefono?: string;
+  estatus: 'Activo' | 'Vacaciones' | 'Reposo' | 'Liquidado';
+  foto_url?: string;
+  documentos_expediente?: ExpedienteDocumentoEmpleado[];
+  created_at?: string;
+}
 
+export interface PlantillaDocumentoLaboral {
+  id: string;
+  tipo: 'CONSTANCIA' | 'CONTRATO' | 'VACACIONES' | 'FINIQUITO';
+  nombre: string;
+  descripcion: string;
+  contenido: string;
+  variables_disponibles: string[];
+}
+
+export interface ReciboPagoNomina {
+  id: string;
+  empleado_id: string | number;
+  empleado_nombre: string;
+  empleado_cedula: string;
+  empleado_cargo: string;
+  periodo_desde: string;
+  periodo_hasta: string;
+  fecha_pago: string;
+  tasa_bcv: number;
+  dias_laborados: number;
+  asignaciones: Array<{ concepto: string; monto_usd: number; monto_ves: number }>;
+  deducciones: Array<{ concepto: string; monto_usd: number; monto_ves: number }>;
+  total_asignaciones_usd: number;
+  total_deducciones_usd: number;
+  neto_pagar_usd: number;
+  neto_pagar_ves: number;
+}

@@ -1,18 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { CompanyDocument, User } from '../types';
+import { CompanyDocument, User, CompanyConfig } from '../types';
 import { useDialog } from '../hooks/useDialog';
 import { 
   FileText, Upload, Trash2, Eye, Download, Search, AlertTriangle, 
   CheckCircle2, ShieldCheck, Building2, Calendar, FileCode, Plus, X,
   Clock, RefreshCw, Sparkles, CloudUpload, Edit3, Save,
   LayoutGrid, List, Image as ImageIcon, CheckSquare, Award, MessageSquare,
-  History, Printer, PackageCheck
+  History, Printer, PackageCheck, Users
 } from 'lucide-react';
+import GestionPersonalRRHH from './GestionPersonalRRHH';
 
 interface RepositorioDocumentalProps {
   currentUser: User;
   getApiUrl: (path: string) => string;
   hasPermission?: (modulo: string, accion: 'ver' | 'crear' | 'editar' | 'eliminar') => boolean;
+  companyConfig?: CompanyConfig;
+  tasaDia?: number;
 }
 
 const REQUISITOS_LEY_VENEZUELA = [
@@ -133,9 +136,14 @@ function autoDetectDates(fileName: string, rawText: string) {
 export const RepositorioDocumental: React.FC<RepositorioDocumentalProps> = ({
   currentUser,
   getApiUrl,
-  hasPermission
+  hasPermission,
+  companyConfig,
+  tasaDia = 0
 }) => {
   const { showAlert, showConfirm } = useDialog();
+
+  // Submódulo activo: 'empresa' (Bóveda Legal) o 'personal' (Gestión de Personal & RRHH)
+  const [activeSubTab, setActiveSubTab] = useState<'empresa' | 'personal'>('empresa');
 
   const [documentos, setDocumentos] = useState<CompanyDocument[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -508,109 +516,158 @@ export const RepositorioDocumental: React.FC<RepositorioDocumentalProps> = ({
   });
 
   return (
-    <div className="p-6 space-y-6 bg-slate-50 min-h-screen font-sans antialiased">
-      {/* Encabezado */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-        <div>
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-blue-600 text-white rounded-xl shadow-md">
-              <ShieldCheck className="w-7 h-7" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-black text-slate-800 tracking-tight">Bóveda Documental Legal y Fiscal</h1>
-              <p className="text-sm font-medium text-slate-500 mt-0.5">
-                Cumplimiento Tributario SENIAT, Licencias Municipales, Parafiscales e Inspecciones en Venezuela.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setShowDossierModal(true)}
-            className="flex items-center gap-1.5 px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-xs shadow-sm transition-all"
-            title="Generar Expediente Digital para Inspecciones"
-          >
-            <PackageCheck className="w-4 h-4 text-emerald-400" />
-            <span>Expediente Dossier</span>
-          </button>
-
-          <button
-            onClick={handleSendWhatsAppNotification}
-            disabled={sendingWsp}
-            className="flex items-center gap-1.5 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-sm transition-all"
-            title="Enviar Alerta de Vencimientos por WhatsApp"
-          >
-            <MessageSquare className="w-4 h-4" />
-            <span>{sendingWsp ? 'Enviando...' : 'Alertas WhatsApp'}</span>
-          </button>
-
-          <button
-            onClick={fetchDocumentos}
-            className="p-2.5 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
-            title="Recargar lista"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-          
-          {canCreate && (
-            <button
-              onClick={() => setIsUploadOpen(true)}
-              className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition-all transform active:scale-95 text-xs"
-            >
-              <Upload className="w-4 h-4" />
-              <span>Subir Documento</span>
-            </button>
-          )}
-        </div>
+    <div className="space-y-4 text-slate-800 font-mono text-xs animate-fade-in p-6 bg-slate-50 min-h-screen">
+      
+      {/* HEADER SECTION */}
+      <div>
+        <h1 className="text-xl font-extrabold text-winter-header tracking-wider flex items-center gap-2">
+          <ShieldCheck className="w-5 h-5 text-winter-header" />
+          BÓVEDA DOCUMENTAL LEGAL Y EXPEDIENTES LABORALES
+        </h1>
+        <p className="text-xs text-slate-500 mt-1 font-sans">
+          Cumplimiento Tributario SENIAT, Licencias Municipales, Parafiscales e Inspecciones y Gestión de Personal (LOTTT).
+        </p>
       </div>
 
-      {/* WIDGET DE SEMÁFORO DE CUMPLIMIENTO LEGAL VENEZOLANO */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-blue-950 text-white p-6 rounded-2xl shadow-md space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-white/10 rounded-2xl backdrop-blur-md border border-white/10">
-              <Award className="w-8 h-8 text-amber-400" />
-            </div>
-            <div>
-              <span className="text-xs font-black uppercase tracking-wider text-blue-300">Semáforo de Cumplimiento Legal</span>
-              <h2 className="text-xl font-black tracking-tight">Salud Legal de la Empresa en Venezuela</h2>
-            </div>
-          </div>
+      {/* TOP TABS NAVIGATION - Aligned Left (Config Module Style) */}
+      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-1">
+        <button
+          onClick={() => setActiveSubTab('empresa')}
+          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all flex items-center gap-1.5 cursor-pointer ${
+            activeSubTab === 'empresa'
+              ? 'bg-white border-slate-200 text-slate-900 shadow-2xs font-extrabold'
+              : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
+          }`}
+        >
+          <Building2 className="w-3.5 h-3.5" />
+          Bóveda Legal & Fiscal (Empresa)
+        </button>
 
-          <div className="flex items-center gap-4">
-            <div className="text-right">
-              <span className="text-xs text-slate-300 font-bold block">Estatus Global:</span>
-              <span className={`text-2xl font-black ${
-                porcentajeCumplimiento >= 80 ? 'text-emerald-400' : porcentajeCumplimiento >= 50 ? 'text-amber-400' : 'text-red-400'
-              }`}>
-                {porcentajeCumplimiento}% En Regla
-              </span>
-            </div>
-
-            <button
-              onClick={() => setShowChecklistModal(true)}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-black rounded-xl shadow-lg transition-all flex items-center gap-1.5"
-            >
-              <CheckSquare className="w-4 h-4" />
-              <span>Ver Checklist Ley</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="w-full bg-slate-700/60 rounded-full h-3.5 p-0.5 overflow-hidden">
-          <div 
-            className={`h-full rounded-full transition-all duration-500 ${
-              porcentajeCumplimiento >= 80 
-                ? 'bg-gradient-to-r from-emerald-500 to-teal-400' 
-                : porcentajeCumplimiento >= 50 
-                ? 'bg-gradient-to-r from-amber-500 to-yellow-400' 
-                : 'bg-gradient-to-r from-red-600 to-rose-500'
-            }`}
-            style={{ width: `${porcentajeCumplimiento}%` }}
-          />
-        </div>
+        <button
+          onClick={() => setActiveSubTab('personal')}
+          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all flex items-center gap-1.5 cursor-pointer ${
+            activeSubTab === 'personal'
+              ? 'bg-white border-slate-200 text-slate-900 shadow-2xs font-extrabold'
+              : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
+          }`}
+        >
+          <Users className="w-3.5 h-3.5" />
+          Gestión de Personal & Expedientes Laborales
+        </button>
       </div>
+
+      {activeSubTab === 'personal' ? (
+        <GestionPersonalRRHH
+          currentUser={currentUser}
+          companyConfig={companyConfig}
+          tasaDia={tasaDia}
+        />
+      ) : (
+        <>
+          {/* Action Bar Bóveda Empresa */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-2xl shadow-xs border border-slate-200 font-sans">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl border border-blue-100 shadow-xs">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-sm font-black text-slate-800 tracking-tight uppercase">Bóveda Documental Legal y Fiscal</h2>
+                <p className="text-xs font-medium text-slate-500">
+                  Control tributario SENIAT, licencias municipales, parafiscales e inspecciones.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setShowDossierModal(true)}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-xs shadow-xs transition-all active:scale-95"
+                title="Generar Expediente Digital para Inspecciones"
+              >
+                <PackageCheck className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Expediente Dossier</span>
+              </button>
+
+              <button
+                onClick={handleSendWhatsAppNotification}
+                disabled={sendingWsp}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-xs transition-all active:scale-95 disabled:opacity-50"
+                title="Enviar Alerta de Vencimientos por WhatsApp"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                <span>{sendingWsp ? 'Enviando...' : 'Alertas WhatsApp'}</span>
+              </button>
+
+              <button
+                onClick={fetchDocumentos}
+                className="p-2 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors active:scale-95"
+                title="Recargar lista"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              </button>
+              
+              {canCreate && (
+                <button
+                  onClick={() => setIsUploadOpen(true)}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition-all active:scale-95 text-xs"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Subir Documento</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* WIDGET DE SEMÁFORO DE CUMPLIMIENTO LEGAL VENEZOLANO */}
+          <div className="bg-slate-900 border border-slate-800/90 text-white p-5 rounded-2xl shadow-sm space-y-4 font-sans">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-slate-800/90 rounded-xl border border-slate-700/60 shadow-inner">
+                  <Award className="w-6 h-6 text-amber-400" />
+                </div>
+                <div>
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-sky-400">Semáforo de Cumplimiento Legal</span>
+                  <h2 className="text-base font-black tracking-tight text-white">Salud Legal de la Empresa en Venezuela</h2>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+                <div className="flex items-center gap-2 bg-slate-800/80 border border-slate-700/70 px-3.5 py-1.5 rounded-xl">
+                  <span className="text-xs text-slate-400 font-semibold">Estatus Global:</span>
+                  <span className={`text-sm font-black tracking-wide ${
+                    porcentajeCumplimiento >= 80 
+                      ? 'text-emerald-400' 
+                      : porcentajeCumplimiento >= 50 
+                      ? 'text-amber-400' 
+                      : 'text-rose-400'
+                  }`}>
+                    {porcentajeCumplimiento}% En Regla
+                  </span>
+                </div>
+
+                <button
+                  onClick={() => setShowChecklistModal(true)}
+                  className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 active:scale-95"
+                >
+                  <CheckSquare className="w-3.5 h-3.5" />
+                  <span>Ver Checklist Ley</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="w-full bg-slate-800 rounded-full h-3 p-0.5 overflow-hidden border border-slate-700/40">
+              <div 
+                className={`h-full rounded-full transition-all duration-500 shadow-sm ${
+                  porcentajeCumplimiento >= 80 
+                    ? 'bg-gradient-to-r from-emerald-500 to-teal-400' 
+                    : porcentajeCumplimiento >= 50 
+                    ? 'bg-gradient-to-r from-amber-500 to-yellow-400' 
+                    : 'bg-gradient-to-r from-rose-500 to-red-600'
+                }`}
+                style={{ width: `${porcentajeCumplimiento}%` }}
+              />
+            </div>
+          </div>
 
       {/* Banner de Alertas de Vencimiento */}
       {(docsVencidos.length > 0 || docsPorVencer.length > 0) && (
@@ -1564,6 +1621,9 @@ export const RepositorioDocumental: React.FC<RepositorioDocumentalProps> = ({
             </div>
           </div>
         </div>
+      )}
+      {/* FIN CONDICIONAL SUBTAB EMPRESA */}
+        </>
       )}
     </div>
   );

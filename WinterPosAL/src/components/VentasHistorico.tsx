@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Sale, CierreCaja, User } from '../types';
-import { History, Printer, ShieldAlert, ShoppingCart, Eye, Edit, Trash2, Search, ChevronUp, ChevronDown, ChevronsUpDown, CheckCircle2, FileDown, MessageCircle, FileText } from 'lucide-react';
+import { History, Printer, ShieldAlert, ShoppingCart, Eye, Edit, Trash2, Search, ChevronUp, ChevronDown, ChevronsUpDown, CheckCircle2, FileDown, MessageCircle, FileText, BarChart3 } from 'lucide-react';
 import { formatNumberToWordsUSD, getLocalDateStr, formatBs } from '../utils';
 import { useDialog } from '../hooks/useDialog';
+import CentroReportesModal from './CentroReportesModal';
 
 interface VentasHistoricoProps {
   sales: Sale[];
@@ -40,6 +41,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
   const [cierreInvoicesModal, setCierreInvoicesModal] = useState<CierreCaja | null>(null);
   const [cierreInvoiceSearch, setCierreInvoiceSearch] = useState('');
   const [hideZeroLines, setHideZeroLines] = useState(true);
+  const [showCentroReportesModal, setShowCentroReportesModal] = useState(false);
 
   const isAdmin = currentUser?.rol?.toLowerCase() === 'administrador';
 
@@ -87,6 +89,11 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
           setSelectedCierre(null);
           return;
         }
+        if (showCentroReportesModal) {
+          e.preventDefault(); e.stopPropagation();
+          setShowCentroReportesModal(false);
+          return;
+        }
         if (selectedSale) {
           e.preventDefault(); e.stopPropagation();
           setSelectedSale(null);
@@ -104,7 +111,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
       window.removeEventListener('click', handleCloseContextMenu);
       window.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [contextMenu, editingCierre, cierreInvoicesModal, selectedCierre, selectedSale, capturingCierre]);
+  }, [contextMenu, editingCierre, cierreInvoicesModal, selectedCierre, selectedSale, capturingCierre, showCentroReportesModal]);
 
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
 
@@ -1024,7 +1031,13 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
               ` : invoices.map(s => {
                 const isDev = s.factura_nro?.startsWith('DEV-');
                 const sign = isDev ? '-' : '';
-                const pagosStr = (s.pagos || []).map(p => `${p.metodo}: $${p.monto.toFixed(2)}`).join(', ') || 'N/A';
+                const pagosStr = (s.pagos || []).map(p => {
+                  const isBs = ['efectivobs', 'tarjetabs', 'pagomovil', 'biopago'].includes(String(p.metodo || '').toLowerCase());
+                  if (isBs && p.montoVES) {
+                    return `${p.metodo}: Bs ${p.montoVES.toFixed(2)} ($${p.monto.toFixed(2)})`;
+                  }
+                  return `${p.metodo}: $${p.monto.toFixed(2)}`;
+                }).join(', ') || 'N/A';
 
                 return `
                   <tr style="${isDev ? 'background-color: #fff1f2;' : ''}">
@@ -1733,21 +1746,14 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         {activeSubTab === 'ventas' && (
           <div className="flex items-center gap-2">
             <button
-              onClick={handleDownloadLibroVentasFiscalPDF}
-              className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs px-3 py-1.5 rounded font-bold font-sans flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
-              title="Generar e imprimir el Libro de Ventas Fiscal Oficial del SENIAT (Providencia 0071)"
+              type="button"
+              onClick={() => setShowCentroReportesModal(true)}
+              className="bg-gradient-to-r from-indigo-700 via-indigo-800 to-indigo-950 hover:from-indigo-800 hover:to-slate-950 text-white border border-indigo-500/40 text-xs px-3.5 py-1.5 rounded-lg font-bold font-sans flex items-center gap-2 transition-all shadow-md cursor-pointer active:scale-95 group"
+              title="Centro Unificado de Reportes Fiscales SENIAT, IGTF, Cuadre de Caja y Rentabilidad"
             >
-              <FileText className="w-3.5 h-3.5 text-emerald-700" />
-              <span>📑 Libro de Ventas SENIAT</span>
-            </button>
-
-            <button
-              onClick={handleDownloadTransactionsReport}
-              className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 text-xs px-3 py-1.5 rounded font-bold font-sans flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
-              title="Exportar reporte de ventas filtradas en PDF"
-            >
-              <Printer className="w-3.5 h-3.5 text-slate-600" />
-              <span>PDF General</span>
+              <BarChart3 className="w-4 h-4 text-amber-300 group-hover:rotate-12 transition-transform" />
+              <span className="tracking-wide">📊 Centro de Reportes</span>
+              <ChevronDown className="w-3.5 h-3.5 text-indigo-300" />
             </button>
           </div>
         )}
@@ -4514,6 +4520,18 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
           })()}
         </div>
       )}
+
+      {/* CENTRO UNIFICADO DE REPORTES FISCALES Y DE GESTIÓN */}
+      <CentroReportesModal
+        isOpen={showCentroReportesModal}
+        onClose={() => setShowCentroReportesModal(false)}
+        sales={sales}
+        cierres={cierres}
+        companyConfig={companyConfig}
+        initialStartDate={startDate}
+        initialEndDate={endDate}
+        tasaDia={tasaDia}
+      />
 
     </div>
   );

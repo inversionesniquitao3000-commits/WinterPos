@@ -157,6 +157,12 @@ try {
     CREATE INDEX IF NOT EXISTS idx_cajas_estatus_usuario ON Cajas_Apertura_Cierre(estatus, usuario_id);
     CREATE INDEX IF NOT EXISTS idx_cajas_estatus_terminal ON Cajas_Apertura_Cierre(estatus, estacion_nombre);
 
+    ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_apertura_usd NUMERIC(12, 2) DEFAULT 0;
+    ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_apertura_ves NUMERIC(12, 2) DEFAULT 0;
+    ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_cierre_esperado_usd NUMERIC(12, 2) DEFAULT 0;
+    ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_cierre_esperado_ves NUMERIC(12, 2) DEFAULT 0;
+    ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_cierre_real_usd NUMERIC(12, 2) DEFAULT 0;
+    ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_cierre_real_ves NUMERIC(12, 2) DEFAULT 0;
     ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS venta_total_usd NUMERIC DEFAULT 0;
     ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS utilidad_usd NUMERIC DEFAULT 0;
     ALTER TABLE IF EXISTS Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS detalles_json TEXT;
@@ -179,7 +185,10 @@ try {
     ALTER TABLE IF EXISTS Abonos DROP CONSTRAINT IF EXISTS abonos_metodo_pago_check;
     ALTER TABLE IF EXISTS Abonos ADD COLUMN IF NOT EXISTS caja_id INT REFERENCES Cajas_Apertura_Cierre(id) ON DELETE SET NULL;
     ALTER TABLE IF EXISTS Usuarios ADD COLUMN IF NOT EXISTS clave VARCHAR(100) DEFAULT 'admin*';
-    ALTER TABLE IF EXISTS Usuarios ADD COLUMN IF NOT EXISTS permisos TEXT;
+    ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS tasa_cambio NUMERIC(12, 4) DEFAULT 1.00;
+    ALTER TABLE IF EXISTS Ventas ALTER COLUMN tasa_cambio DROP NOT NULL;
+    ALTER TABLE IF EXISTS Ventas ALTER COLUMN tasa_cambio SET DEFAULT 1.00;
+    ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS con_ticket BOOLEAN DEFAULT TRUE;
     ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS estacion_nombre VARCHAR(50) DEFAULT 'CAJA_PRINCIPAL';
     ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS vuelto_usd NUMERIC DEFAULT 0;
     ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS vuelto_ves NUMERIC DEFAULT 0;
@@ -225,6 +234,7 @@ try {
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS mostrar_fotos_en_buscador_pos BOOLEAN DEFAULT TRUE;
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS tamano_foto_buscador_pos VARCHAR(20) DEFAULT 'mediana';
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS limite_productos_buscador_pos INT DEFAULT 5;
+    ALTER TABLE IF EXISTS Tasas_Cambio ADD COLUMN IF NOT EXISTS fecha_actualizacion VARCHAR(50);
 
     CREATE TABLE IF NOT EXISTS Accionistas (
       id SERIAL PRIMARY KEY,
@@ -373,7 +383,9 @@ try {
       END IF;
       IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'tasas_cambio') THEN
         PERFORM setval(pg_get_serial_sequence('Tasas_Cambio', 'id'), COALESCE((SELECT MAX(id) FROM Tasas_Cambio), 1));
-        DELETE FROM Tasas_Cambio WHERE fecha_actualizacion IN ('2026-07-10 08:15', '2026-07-10 14:00', '2026-07-15 08:05');
+        IF EXISTS (SELECT FROM information_schema.columns WHERE table_name = 'tasas_cambio' AND column_name = 'fecha_actualizacion') THEN
+          DELETE FROM Tasas_Cambio WHERE fecha_actualizacion IN ('2026-07-10 08:15', '2026-07-10 14:00', '2026-07-15 08:05');
+        END IF;
       END IF;
       IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'cajas_apertura_cierre') THEN
         UPDATE Cajas_Apertura_Cierre SET fecha_cierre = COALESCE(fecha_cierre, fecha_apertura, CURRENT_TIMESTAMP) WHERE fecha_cierre IS NULL;
@@ -393,10 +405,20 @@ try {
 
   // Sync master_pass from config.json → PG (one-time migration if DB column is NULL)
   try {
-    const mpRow = await client.query('SELECT id, master_pass FROM Configuracion_Empresa ORDER BY id DESC LIMIT 1');
+    const mpRow = await client.query('SELECT id, master_pass, nombre_comercio FROM Configuracion_Empresa ORDER BY id DESC LIMIT 1');
     if (mpRow.rowCount === 0) {
-      await client.query("INSERT INTO Configuracion_Empresa (nombre_comercio, master_pass) VALUES ('INVERSIONES NIQUITAO 3000 C.A.', '1234')");
-      console.log('🔑 Fila de Configuracion_Empresa inicializada con Master Pass por defecto (1234).');
+      let initName = 'Mi Comercio C.A.';
+      let initRif = 'J-000000000';
+      try {
+        const licPath = path.join(path.resolve('.'), 'license.lic');
+        if (fs.existsSync(licPath)) {
+          const licData = JSON.parse(fs.readFileSync(licPath, 'utf8'));
+          if (licData?.payload?.cliente) initName = licData.payload.cliente;
+          if (licData?.payload?.rif) initRif = licData.payload.rif;
+        }
+      } catch (_) {}
+      await client.query("INSERT INTO Configuracion_Empresa (nombre_comercio, rif, master_pass) VALUES ($1, $2, '1234')", [initName, initRif]);
+      console.log(`🔑 Fila de Configuracion_Empresa inicializada para '${initName}' con Master Pass por defecto (1234).`);
     } else if (!mpRow.rows[0].master_pass) {
       const jsonPath = path.join(path.resolve('./data'), 'config.json');
       let jsonPass = '1234';
@@ -2645,13 +2667,18 @@ export async function getSales(limit = null, sinceId = null, excludeTerminal = n
         descuento: parseFloat(row.descuento_usd || 0),
         totalUSD: parseFloat(row.total_usd || 0),
         totalVES: parseFloat(row.total_ves || 0),
-        pagos: (row.payments_json || []).map(p => ({
-          metodo: p.metodo,
-          monto: parseFloat(p.monto || 0),
-          montoVES: parseFloat(p.montoVES || 0),
-          banco: p.banco || '',
-          referencia: p.referencia || ''
-        })),
+        pagos: (row.payments_json || []).map(p => {
+          const mUSD = parseFloat(p.monto || p.monto_entregado_usd || 0);
+          const mVES = parseFloat(p.montoVES || p.monto_entregado_ves || 0);
+          return {
+            metodo: p.metodo,
+            monto: mUSD,
+            montoUSD: mUSD,
+            montoVES: mVES,
+            banco: p.banco || '',
+            referencia: p.referencia || ''
+          };
+        }),
         vueltoUSD: parseFloat(row.vueltoUSD || 0),
         vueltoVES: parseFloat(row.vueltoVES || 0),
         usuario: row.usuario,
@@ -2765,16 +2792,21 @@ export async function saveSale(s) {
       const exentoVal = s.exento_usd || s.montoExento || 0;
       const igtfVal = s.igtf_usd || s.igtf || 0;
 
+      const tasaVal = parseFloat(s.tasa_cambio || s.tasa || (s.totalVES && s.totalUSD ? s.totalVES / s.totalUSD : 1)) || 1.00;
+      const conTicketVal = s.con_ticket !== false;
+
       const saleRes = await clientTarget.query(
         `INSERT INTO Ventas (
           factura_nro, cliente_id, usuario_id, caja_id, subtotal_usd, descuento_usd, total_usd, total_ves, 
+          tasa_cambio, con_ticket,
           estacion_nombre, vuelto_usd, vuelto_ves, tipo_documento, nro_fiscal, serial_fiscal, nro_z, 
           estatus_fiscal, base_imponible_usd, iva_usd, exento_usd, igtf_usd
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22) 
          RETURNING id, fecha`,
         [
           factura_nro, clientId, userId, cajaId, s.subtotal, s.descuento, s.totalUSD, s.totalVES, 
+          tasaVal, conTicketVal,
           s.terminal || 'CAJA_PRINCIPAL', s.vueltoUSD || 0, s.vueltoVES || 0,
           tipoDoc, nroFiscal, serialFiscal, nroZ, estatusFiscal, baseImp, ivaVal, exentoVal, igtfVal
         ]
@@ -2843,11 +2875,31 @@ export async function saveSale(s) {
           }
         }
         
+        const saleRate = parseFloat(s.tasa_cambio || s.tasa || (s.totalVES && s.totalUSD ? s.totalVES / s.totalUSD : 1)) || 1.00;
+        let payUSD = parseFloat(p.montoUSD || 0);
+        let payVES = parseFloat(p.montoVES || 0);
+
+        if (!payUSD && !payVES) {
+          const rawMonto = parseFloat(p.monto || 0);
+          const isBs = ['efectivobs', 'tarjetabs', 'pagomovil', 'biopago'].includes(String(p.metodo || '').toLowerCase());
+          if (isBs) {
+            payVES = rawMonto;
+            payUSD = rawMonto / saleRate;
+          } else {
+            payUSD = rawMonto;
+            payVES = rawMonto * saleRate;
+          }
+        } else if (!payUSD && payVES) {
+          payUSD = payVES / saleRate;
+        } else if (payUSD && !payVES) {
+          payVES = payUSD * saleRate;
+        }
+
         try {
           await clientTarget.query(
             `INSERT INTO Pagos_Venta (venta_id, metodo_pago, monto_entregado_usd, monto_entregado_ves, monto_vuelto_usd, monto_vuelto_ves, banco_emisor, numero_referencia)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-            [saleId, p.metodo, p.monto, p.montoVES || 0, s.vueltoUSD || 0, s.vueltoVES || 0, p.banco || '', p.referencia || '']
+            [saleId, p.metodo, payUSD, payVES, s.vueltoUSD || 0, s.vueltoVES || 0, p.banco || '', p.referencia || '']
           );
         } catch (payErr) {
           if (payErr.message && payErr.message.includes('pagos_venta_metodo_pago_check')) {
@@ -3025,30 +3077,23 @@ export async function abrirCaja(usd, ves, usuarioId, terminal, usuarioNombre) {
       let userId = parseInt(usuarioId);
       if (isNaN(userId) || userId <= 0) {
         if (usuarioNombre) {
-          const uRes = await pool.query('SELECT id FROM Usuarios WHERE nombre = $1 OR usuario = $2 LIMIT 1', [usuarioNombre, usuarioNombre]);
+          const uRes = await pool.query('SELECT id FROM Usuarios WHERE LOWER(nombre) = LOWER($1) OR LOWER(usuario) = LOWER($1) LIMIT 1', [usuarioNombre]);
           if (uRes.rowCount > 0) userId = uRes.rows[0].id;
         }
       }
-      if (isNaN(userId) || userId <= 0) userId = 1;
+      if (isNaN(userId) || userId <= 0) {
+        const anyUser = await pool.query('SELECT id FROM Usuarios ORDER BY id ASC LIMIT 1');
+        userId = anyUser.rowCount > 0 ? anyUser.rows[0].id : 1;
+      }
 
       const termName = terminal || 'CAJA_PRINCIPAL';
       const nowStr = getLocalISODateString();
 
-      const sysConfig = await getCompanyConfig();
-      const compartirApertura = sysConfig.compartir_apertura_caja !== false;
-
-      // Auto-close any previous stale open session for THIS user
-      if (compartirApertura) {
-        await pool.query(
-          "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = $2 WHERE usuario_id = $1 AND estatus = 'Abierta'",
-          [userId, nowStr]
-        );
-      } else {
-        await pool.query(
-          "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = $3 WHERE estacion_nombre = $1 AND usuario_id = $2 AND estatus = 'Abierta'",
-          [termName, userId, nowStr]
-        );
-      }
+      // Cerrar cualquier apertura anterior huérfana
+      await pool.query(
+        "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = $2 WHERE (usuario_id = $1 OR estacion_nombre = $3) AND estatus = 'Abierta'",
+        [userId, nowStr, termName]
+      ).catch(() => {});
 
       const res = await pool.query(
         `INSERT INTO Cajas_Apertura_Cierre (usuario_id, estacion_nombre, monto_apertura_usd, monto_apertura_ves, estatus, fecha_apertura)
@@ -3281,19 +3326,18 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
       if (!isNaN(userId) && userId > 0) {
         if (compartirApertura) {
           activeRes = await pool.query(
-            "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY id DESC LIMIT 1",
+            "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND (usuario_id = $1 OR usuario_id = 1) ORDER BY id DESC LIMIT 1",
             [userId]
           );
         } else {
           activeRes = await pool.query(
-            "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 AND usuario_id = $2 ORDER BY id DESC LIMIT 1",
+            "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND (estacion_nombre = $1 OR usuario_id = $2 OR usuario_id = 1) ORDER BY id DESC LIMIT 1",
             [myTerminal, userId]
           );
         }
       } else {
         activeRes = await pool.query(
-          "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",
-          [myTerminal]
+          "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1"
         );
       }
       if (activeRes.rowCount === 0) {
@@ -3876,7 +3920,15 @@ export async function getMasterPass() {
         return String(row.master_pass);
       }
       // If no config row at all, insert initial row
-      await pool.query("INSERT INTO Configuracion_Empresa (nombre_comercio, master_pass) VALUES ('INVERSIONES NIQUITAO 3000 C.A.', '1234')");
+      let initName = 'Mi Comercio C.A.';
+      try {
+        const licPath = path.join(path.resolve('.'), 'license.lic');
+        if (fs.existsSync(licPath)) {
+          const licData = JSON.parse(fs.readFileSync(licPath, 'utf8'));
+          if (licData?.payload?.cliente) initName = licData.payload.cliente;
+        }
+      } catch (_) {}
+      await pool.query("INSERT INTO Configuracion_Empresa (nombre_comercio, master_pass) VALUES ($1, '1234')", [initName]);
       return '1234';
     } catch (err) {
       console.error('Error al obtener master_pass (Postgres):', err.message);
@@ -3898,7 +3950,15 @@ export async function saveMasterPass(newPass) {
         console.log(`✅ Master Pass actualizado en PostgreSQL.`);
         return true;
       }
-      await pool.query("INSERT INTO Configuracion_Empresa (nombre_comercio, master_pass) VALUES ('INVERSIONES NIQUITAO 3000 C.A.', $1)", [passStr]);
+      let initName = 'Mi Comercio C.A.';
+      try {
+        const licPath = path.join(path.resolve('.'), 'license.lic');
+        if (fs.existsSync(licPath)) {
+          const licData = JSON.parse(fs.readFileSync(licPath, 'utf8'));
+          if (licData?.payload?.cliente) initName = licData.payload.cliente;
+        }
+      } catch (_) {}
+      await pool.query("INSERT INTO Configuracion_Empresa (nombre_comercio, master_pass) VALUES ($1, $2)", [initName, passStr]);
       console.log(`✅ Master Pass creado en PostgreSQL.`);
       return true;
     } catch (err) {

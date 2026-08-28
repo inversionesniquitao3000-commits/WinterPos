@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
-import { Upload, Sparkles, CheckCircle2, AlertTriangle, Settings, RefreshCw, Wand2, ArrowRight, Eye, Trash2, Tag, Layers, Calculator, FileSpreadsheet, Search } from 'lucide-react';
+import { useState, useRef, useEffect, useMemo } from 'react';
+import { Upload, Sparkles, CheckCircle2, AlertTriangle, Settings, RefreshCw, Wand2, ArrowRight, Eye, Trash2, Tag, Layers, Calculator, FileSpreadsheet, Search, Package, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 // Dynamic loader for XLSX (SheetJS)
 const loadXlsx = (): Promise<any> => {
   return new Promise((resolve, reject) => {
@@ -54,6 +54,9 @@ export interface ParsedImportProduct {
   precio_detalle_usd: number;
   precio_mayor_usd: number;
   cantidad_mayorista: number;
+  precio_bulto_usd: number;
+  cant_bulto: number;
+  ganancia_bulto?: number;
   exento_impuesto: boolean;
   porcentaje_impuesto?: number;
   a_granel: boolean;
@@ -104,17 +107,29 @@ export default function AsistenteImportacionPDF({
   // Rules Configuration
   const [stockMinMode, setStockMinMode] = useState<'reporte' | 'fijo'>('fijo');
   const [customStockMinVal, setCustomStockMinVal] = useState<number>(5);
+  
+  // Mayorista Rule
   const [applyMayorDiscount, setApplyMayorDiscount] = useState(true);
   const [mayorDiscountPct, setMayorDiscountPct] = useState<number>(10);
+  const [defaultCantidadMayorista, setDefaultCantidadMayorista] = useState<number>(6);
+
+  // Bulto Rule
+  const [applyBultoDiscount, setApplyBultoDiscount] = useState(true);
+  const [bultoDiscountPct, setBultoDiscountPct] = useState<number>(15);
+  const [defaultCantBulto, setDefaultCantBulto] = useState<number>(12);
+
+  // Category & Tax Rule
   const [defaultCategory, setDefaultCategory] = useState('GENERAL');
   const [categoryMode, setCategoryMode] = useState<'auto' | 'fijo'>('auto');
   const [defaultExento, setDefaultExento] = useState(false);
   const [taxRuleMode, setTaxRuleMode] = useState<'auto_venezuela' | 'todos_gravables' | 'todos_exentos'>('auto_venezuela');
 
-  // Preview filtering states
+  // Preview filtering & pagination states
   const [previewSearchTerm, setPreviewSearchTerm] = useState('');
   const [previewCategoryFilter, setPreviewCategoryFilter] = useState('ALL');
   const [previewTaxFilter, setPreviewTaxFilter] = useState<'all' | 'exempt' | 'taxable'>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
   // Column Headers & Mapping state
   const [_rawLines, setRawLines] = useState<string[]>([]);
@@ -131,6 +146,9 @@ export default function AsistenteImportacionPDF({
     precio_costo_usd: number;
     precio_detalle_usd: number;
     precio_mayor_usd: number;
+    cantidad_mayorista: number;
+    precio_bulto_usd: number;
+    cant_bulto: number;
     unit: number;
   }>({
     barcode: -1,
@@ -141,6 +159,9 @@ export default function AsistenteImportacionPDF({
     precio_costo_usd: -1,
     precio_detalle_usd: -1,
     precio_mayor_usd: -1,
+    cantidad_mayorista: -1,
+    precio_bulto_usd: -1,
+    cant_bulto: -1,
     unit: -1
   });
 
@@ -190,10 +211,8 @@ export default function AsistenteImportacionPDF({
     const matchesKeyword = (kw: string) => {
       const kwNorm = normalizeText(kw);
       if (kwNorm.includes(' ')) {
-        // Multi-word phrase like "PAPEL HIGIENICO" or "CREMA DE LECHE"
         return d.includes(kwNorm);
       }
-      // Single word: exact match or prefix match for words >= 4 letters
       return wordsInDesc.some(w => w === kwNorm || (kwNorm.length >= 4 && w.startsWith(kwNorm)));
     };
 
@@ -296,7 +315,6 @@ export default function AsistenteImportacionPDF({
 
     for (const rule of categoryRules) {
       if (rule.keywords.some(kw => matchesKeyword(kw))) {
-        // If system already has a matching category in systemCategories, prefer system's existing category!
         const existingMatch = systemCategories.find(sc => {
           const scUpper = normalizeText(sc);
           const ruleCatUpper = normalizeText(rule.category);
@@ -312,12 +330,11 @@ export default function AsistenteImportacionPDF({
     return fallbackCategory.toUpperCase();
   };
 
-  // Clasificador Inteligente de Impuesto IVA (Norma Venezolana: Canasta Básica / Farmacia = Exento 0%, Resto = IVA 16%)
+  // Clasificador Inteligente de Impuesto IVA (Norma Venezolana)
   const inferTaxStatusFromProduct = (barcode: string, desc: string, mode: 'auto_venezuela' | 'todos_gravables' | 'todos_exentos'): { isExempt: boolean; taxPct: number } => {
     if (mode === 'todos_exentos') return { isExempt: true, taxPct: 0 };
     if (mode === 'todos_gravables') return { isExempt: false, taxPct: 16 };
 
-    // Verificación por prefijo de Código de Barras (GTIN nacional Venezuela 759...)
     const cleanCode = (barcode || '').trim();
     if (cleanCode.startsWith('7591001') || cleanCode.startsWith('7591003') || cleanCode.startsWith('7591004')) {
       return { isExempt: true, taxPct: 0 };
@@ -334,23 +351,17 @@ export default function AsistenteImportacionPDF({
       return wordsInDesc.some(w => w === kwNorm || (kwNorm.length >= 4 && w.startsWith(kwNorm)));
     };
 
-    // Palabras clave de víveres esenciales, alimentos de la canasta básica, medicamentos y artículos de farmacia (Norma Venezolana SENIAT Art 18)
     const exemptKeywords = [
-      // Alimentación básica (Canasta Alimentaria)
       'HARINA', 'HARINA PAN', 'ARROZ', 'PASTA', 'SPAGHETTI', 'MACARRON', 'AZUCAR', 'SUGAR',
       'LECHE', 'SAL', 'CARAOTA', 'FRIJOL', 'LENTEJA', 'GARBANZO', 'GRANO', 'AVENA', 'FORORO',
       'CAFE', 'PAN', 'HUEVO', 'QUESO', 'CARNE', 'POLLO', 'PESCADO', 'BISTEC', 'MILANESA',
       'PECHUGA', 'MUSLO', 'CERDO', 'PERNIL', 'COSTILLA', 'LOMITO', 'SOLOMO', 'MOLIDA', 'CHULETA',
       'CAMARON', 'SARDINA', 'ATUN EN AGUA', 'ACEITE', 'ACEITE DE SOYA', 'SOYA', 'ACEITE DE MAIZ', 'ACEITE VEGETAL', 'ACEITE GIRASOL',
       'MANTEQUILLA', 'MARGARINA',
-
-      // Farmacia y Medicamentos (100% Exentos de IVA según Seniat)
       'ACETAMINOFEN', 'IBUPROFENO', 'PARACETAMOL', 'ANALGESICO', 'VITAMINA', 'JARABE', 'ANTIBIOTICO', 'AMOXICILINA',
       'DESLORATADINA', 'LORATADINA', 'ALCOHOL MEDICINAL', 'AGUA OXIGENADA', 'OXIGENADA', 'GASA', 'VENDA', 'ALGODON MEDICINAL',
       'ALGODON', 'CURA', 'CURITA', 'MEDICAMENTO', 'MEDICINA', 'FARMACIA', 'PASTILLA', 'CAPSULA', 'TABLETA', 'GOTAS',
       'SOLUCION', 'SOLUCION FISIOLOGICA', 'SUERO ORAL', 'TERMOMETRO', 'DESINFECTANTE MEDICO',
-
-      // Educativo escolar básico
       'CUADERNO ESCOLAR', 'LIBRO'
     ];
 
@@ -370,11 +381,10 @@ export default function AsistenteImportacionPDF({
 
     setRawLines(lines);
 
-    // Heuristic: Find header row
     let headerIdx = -1;
     let headers: string[] = [];
 
-    const headerKeywords = ['CLAVE', 'CODIGO', 'DESCRIPCION', 'ARTICULO', 'DEPARTAMENTO', 'EXISTENCIA', 'STOCK', 'COSTO', 'PRECIO', 'PVP', 'MINIMO'];
+    const headerKeywords = ['CLAVE', 'CODIGO', 'DESCRIPCION', 'ARTICULO', 'DEPARTAMENTO', 'EXISTENCIA', 'STOCK', 'COSTO', 'PRECIO', 'PVP', 'MINIMO', 'BULTO'];
 
     for (let i = 0; i < Math.min(lines.length, 25); i++) {
       const upper = lines[i].toUpperCase();
@@ -388,21 +398,17 @@ export default function AsistenteImportacionPDF({
     let rows: string[][] = [];
 
     if (headerIdx !== -1) {
-      // Split header line by multiple spaces, tabs or delimiters
       const headerLine = lines[headerIdx];
       headers = headerLine.split(/\t|\s{2,}|\|/).map(h => h.trim()).filter(Boolean);
       
-      // If splitting by spaces didn't produce multiple columns, try single space/comma
       if (headers.length < 3) {
         headers = headerLine.split(/;|,|\t/).map(h => h.trim()).filter(Boolean);
       }
 
-      // Process data lines after headerIdx
       for (let i = headerIdx + 1; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
         
-        // Skip obvious page footers / total lines
         const upper = line.toUpperCase();
         if (upper.startsWith('PAGINA') || upper.startsWith('TOTAL') || upper.startsWith('REPORTE DE') || upper.includes('IMPRESO EL')) {
           continue;
@@ -418,7 +424,6 @@ export default function AsistenteImportacionPDF({
         }
       }
     } else {
-      // Fallback: Create arbitrary columns based on line splitting
       headers = ['Columna 1', 'Columna 2', 'Columna 3', 'Columna 4', 'Columna 5', 'Columna 6', 'Columna 7', 'Columna 8'];
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
@@ -433,7 +438,6 @@ export default function AsistenteImportacionPDF({
     setDetectedColumns(headers);
     setTableRowsData(rows);
 
-    // Auto-map column indices
     const newMapping = {
       barcode: -1,
       description: -1,
@@ -443,6 +447,9 @@ export default function AsistenteImportacionPDF({
       precio_costo_usd: -1,
       precio_detalle_usd: -1,
       precio_mayor_usd: -1,
+      cantidad_mayorista: -1,
+      precio_bulto_usd: -1,
+      cant_bulto: -1,
       unit: -1
     };
 
@@ -452,7 +459,7 @@ export default function AsistenteImportacionPDF({
         newMapping.barcode = idx;
       } else if (newMapping.description === -1 && (name.includes('DESCRIPCION') || name.includes('ARTICULO') || name.includes('PRODUCTO') || name.includes('NOMBRE'))) {
         newMapping.description = idx;
-      } else if (newMapping.category === -1 && (name.includes('DEPARTAMENTO') || name.includes('CATEGORIA') || name.includes('DEPTO') || name.includes('GRUPO') || name.includes('LINEA'))) {
+      } else if (newMapping.category === -1 && (name.includes('DEPARTAMENTO') || name.includes('CATEGORIA') || name.includes('DEPTO') || name.includes('GRUPO') || name.includes('LINEA') || name.includes('RUBRO'))) {
         newMapping.category = idx;
       } else if (newMapping.stock_actual === -1 && (name.includes('EXISTENCIA') || name.includes('STOCK') || name.includes('CANTIDAD') || name.includes('CANT') || name.includes('EXIS'))) {
         newMapping.stock_actual = idx;
@@ -460,16 +467,19 @@ export default function AsistenteImportacionPDF({
         newMapping.stock_minimo = idx;
       } else if (newMapping.precio_costo_usd === -1 && (name.includes('COSTO') || name.includes('P.COSTO') || name.includes('COST'))) {
         newMapping.precio_costo_usd = idx;
+      } else if (newMapping.precio_bulto_usd === -1 && (name.includes('BULTO') || name.includes('P.BULTO') || name.includes('CAJA') || name.includes('P.CAJA') || name.includes('FARDO') || name.includes('PRECIO 3') || name.includes('PRECIO BULTO'))) {
+        newMapping.precio_bulto_usd = idx;
+      } else if (newMapping.cant_bulto === -1 && (name.includes('CANT BULTO') || name.includes('EMPAQUE') || name.includes('UND X CAJA') || name.includes('UNID BULTO') || name.includes('CANT CAJA') || name.includes('UNID X BULTO') || name.includes('PXC'))) {
+        newMapping.cant_bulto = idx;
       } else if (newMapping.precio_detalle_usd === -1 && (name.includes('PRECIO 1') || name.includes('PRECIO DETALLE') || name.includes('PRECIO VENTA') || name.includes('PVP') || name.includes('VENTA') || name.includes('PRECIO'))) {
         newMapping.precio_detalle_usd = idx;
-      } else if (newMapping.precio_mayor_usd === -1 && (name.includes('PRECIO 2') || name.includes('PRECIO MAYOR') || name.includes('MAYOR'))) {
+      } else if (newMapping.precio_mayor_usd === -1 && (name.includes('PRECIO 2') || name.includes('PRECIO MAYOR') || name.includes('MAYOR') || name.includes('MAYORISTA'))) {
         newMapping.precio_mayor_usd = idx;
       } else if (newMapping.unit === -1 && (name.includes('U. M.') || name.includes('UM') || name.includes('UNIDAD') || name.includes('MEDIDA'))) {
         newMapping.unit = idx;
       }
     });
 
-    // Smart fallbacks if header auto-detection didn't pick up everything
     if (newMapping.barcode === -1 && headers.length > 0) newMapping.barcode = 0;
     if (newMapping.description === -1 && headers.length > 1) newMapping.description = 1;
     if (newMapping.category === -1 && headers.length > 2) newMapping.category = 2;
@@ -478,7 +488,6 @@ export default function AsistenteImportacionPDF({
     setParsingStep('mapping');
   };
 
-  // Extract text from PDF file page by page
   const handleReadPdfFile = async (pdfFile: File) => {
     setIsProcessing(true);
     setStatusMsg('Leyendo documento PDF...');
@@ -497,7 +506,6 @@ export default function AsistenteImportacionPDF({
         const page = await pdf.getPage(pageNum);
         const textContent = await page.getTextContent();
         
-        // Group items by line Y coordinate
         interface TextItem {
           str: string;
           x: number;
@@ -510,7 +518,6 @@ export default function AsistenteImportacionPDF({
           y: Math.round(item.transform[5])
         })).filter((i: TextItem) => i.str.trim().length > 0);
 
-        // Group by Y position with tolerance of 3 units
         const linesMap: { y: number; items: TextItem[] }[] = [];
         
         items.forEach(item => {
@@ -522,14 +529,11 @@ export default function AsistenteImportacionPDF({
           }
         });
 
-        // Sort lines top-to-bottom (highest Y first in PDF coordinate space)
         linesMap.sort((a, b) => b.y - a.y);
 
-        // For each line, sort items left-to-right (lowest X first)
         linesMap.forEach(line => {
           line.items.sort((a, b) => a.x - b.x);
           
-          // Join items using tab if gap > 12, or space if gap <= 12
           let lineStr = '';
           for (let k = 0; k < line.items.length; k++) {
             const current = line.items[k];
@@ -537,7 +541,7 @@ export default function AsistenteImportacionPDF({
               lineStr += current.str;
             } else {
               const prev = line.items[k - 1];
-              const gap = current.x - (prev.x + prev.str.length * 5); // approximate width
+              const gap = current.x - (prev.x + prev.str.length * 5);
               if (gap > 12) {
                 lineStr += '\t' + current.str;
               } else {
@@ -560,7 +564,6 @@ export default function AsistenteImportacionPDF({
     }
   };
 
-  // Extract data from Excel files (.xlsx, .xls, .ods)
   const handleReadExcelFile = async (excelFile: File) => {
     setIsProcessing(true);
     setStatusMsg('Leyendo libro de Excel...');
@@ -573,7 +576,6 @@ export default function AsistenteImportacionPDF({
       const firstSheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[firstSheetName];
       
-      // Convert worksheet to 2D matrix of strings
       const rawMatrix: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
       
       const allLines: string[] = rawMatrix
@@ -589,7 +591,6 @@ export default function AsistenteImportacionPDF({
     }
   };
 
-  // Handle plain text paste or CSV upload
   const handleReadTextOrCsv = (textData: string) => {
     const lines = textData.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
     processRawLinesToTable(lines);
@@ -604,7 +605,6 @@ export default function AsistenteImportacionPDF({
     } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.ods')) {
       handleReadExcelFile(selectedFile);
     } else {
-      // Read as plain text (CSV / TXT)
       const reader = new FileReader();
       reader.onload = (e) => {
         const text = e.target?.result as string;
@@ -629,64 +629,63 @@ export default function AsistenteImportacionPDF({
       const rawBarcode = getVal(colMapping.barcode).trim();
       const rawDesc = getVal(colMapping.description).trim();
 
-      // Skip row if barcode or description is empty
       if (!rawBarcode && !rawDesc) return;
 
       const barcode = rawBarcode || `GEN-${Date.now()}-${rowIdx}`;
       const description = (rawDesc || 'PRODUCTO SIN NOMBRE').toUpperCase();
 
-      // 1. Detección Inteligente por Código de Barras Único (Catálogo del Sistema)
       const catalogMatch = barcode ? existingProducts.find(ep => ep.barcode && ep.barcode.trim().toUpperCase() === barcode.trim().toUpperCase()) : undefined;
 
-      // Category (Prioridad por Código de Barras Único registrado > Mapeo directo > Inferencia IA por Descripción)
       let category = '';
       let isInferredCategory = false;
       let isCatalogMatch = false;
 
       const rawCatColVal = colMapping.category >= 0 ? getVal(colMapping.category).trim().toUpperCase() : '';
-
-      if (catalogMatch && catalogMatch.category && catalogMatch.category.trim()) {
-        // Prioridad Absoluta: Si el producto ya está en el catálogo del sistema por su Código de Barras Único, asigna su Categoría registrada
-        category = catalogMatch.category.trim().toUpperCase();
-        isCatalogMatch = true;
-        isInferredCategory = false;
-      } else if (colMapping.category === -2) {
-        category = defaultCategory.toUpperCase();
-        isInferredCategory = false;
-      } else if (
-        colMapping.category === -1 || 
-        categoryMode === 'auto' || 
-        !rawCatColVal || 
+      const isColEmptyOrPlaceholder = !rawCatColVal || 
         rawCatColVal === 'SIN CATEGORIA' || 
         rawCatColVal === 'DEPARTAMENTO' || 
         rawCatColVal === 'S/C' || 
         rawCatColVal === 'NINGUNA' || 
-        rawCatColVal === 'GENERAL'
-      ) {
-        category = inferCategoryFromDescription(description, existingCategories, defaultCategory);
-        isInferredCategory = true;
-      } else {
+        rawCatColVal === 'N/A' ||
+        rawCatColVal === 'GENERAL';
+
+      if (catalogMatch && catalogMatch.category && catalogMatch.category.trim()) {
+        category = catalogMatch.category.trim().toUpperCase();
+        isCatalogMatch = true;
+        isInferredCategory = false;
+      } else if (colMapping.category >= 0 && !isColEmptyOrPlaceholder) {
         category = rawCatColVal;
         isInferredCategory = false;
+      } else if (colMapping.category === -2) {
+        category = defaultCategory.toUpperCase();
+        isInferredCategory = false;
+      } else {
+        if (categoryMode === 'auto') {
+          category = inferCategoryFromDescription(description, existingCategories, defaultCategory);
+          isInferredCategory = true;
+        } else {
+          category = defaultCategory.toUpperCase();
+          isInferredCategory = false;
+        }
       }
 
-      // Existencia / Stock Actual
       const stock_actual = parseNumber(getVal(colMapping.stock_actual));
 
-      // Stock Mínimo
       let stock_minimo = customStockMinVal;
       if (stockMinMode === 'reporte' && colMapping.stock_minimo !== -1) {
         const parsedMin = parseNumber(getVal(colMapping.stock_minimo));
         if (parsedMin > 0) stock_minimo = parsedMin;
       }
 
-      // Costo
       const precio_costo_usd = parseNumber(getVal(colMapping.precio_costo_usd));
-
-      // Precio Detalle (Precio Venta)
       const precio_detalle_usd = parseNumber(getVal(colMapping.precio_detalle_usd));
 
-      // Precio Mayorista
+      let cantidad_mayorista = defaultCantidadMayorista;
+      if (colMapping.cantidad_mayorista !== -1) {
+        const parsedCantMayor = parseNumber(getVal(colMapping.cantidad_mayorista));
+        if (parsedCantMayor > 0) cantidad_mayorista = parsedCantMayor;
+      }
+
       let precio_mayor_usd = 0;
       if (applyMayorDiscount && precio_detalle_usd > 0) {
         const discountFactor = (100 - mayorDiscountPct) / 100;
@@ -698,7 +697,28 @@ export default function AsistenteImportacionPDF({
         precio_mayor_usd = precio_detalle_usd;
       }
 
-      // Unit / A Granel
+      let cant_bulto = defaultCantBulto;
+      if (colMapping.cant_bulto !== -1) {
+        const parsedCantBulto = parseNumber(getVal(colMapping.cant_bulto));
+        if (parsedCantBulto > 0) cant_bulto = parsedCantBulto;
+      }
+
+      let precio_bulto_usd = 0;
+      if (applyBultoDiscount && precio_detalle_usd > 0) {
+        const bultoDiscountFactor = (100 - bultoDiscountPct) / 100;
+        precio_bulto_usd = Math.max(0, parseFloat((precio_detalle_usd * bultoDiscountFactor).toFixed(2)));
+      } else if (colMapping.precio_bulto_usd !== -1) {
+        precio_bulto_usd = parseNumber(getVal(colMapping.precio_bulto_usd));
+      }
+      if (precio_bulto_usd === 0 && precio_mayor_usd > 0) {
+        precio_bulto_usd = precio_mayor_usd;
+      }
+
+      let ganancia_bulto = 0;
+      if (precio_costo_usd > 0 && precio_bulto_usd > precio_costo_usd) {
+        ganancia_bulto = parseFloat((((precio_bulto_usd - precio_costo_usd) / precio_costo_usd) * 100).toFixed(2));
+      }
+
       const unitStr = getVal(colMapping.unit).toUpperCase();
       const a_granel = unitStr.includes('KG') || unitStr.includes('GR') || unitStr.includes('LTS') || unitStr.includes('KILO');
 
@@ -719,7 +739,6 @@ export default function AsistenteImportacionPDF({
 
       if (catalogMatch && taxRuleMode === 'auto_venezuela') {
         if (taxStatus.isExempt) {
-          // Garantizar Exento 0% IVA a productos esenciales (víveres, aceites, medicinas) según la norma venezolana
           exento_impuesto = true;
           porcentaje_impuesto = 0;
         } else if (catalogMatch.exento_impuesto !== undefined) {
@@ -737,7 +756,10 @@ export default function AsistenteImportacionPDF({
         precio_costo_usd,
         precio_detalle_usd,
         precio_mayor_usd,
-        cantidad_mayorista: 6,
+        cantidad_mayorista,
+        precio_bulto_usd,
+        cant_bulto,
+        ganancia_bulto,
         exento_impuesto,
         porcentaje_impuesto,
         a_granel,
@@ -750,6 +772,7 @@ export default function AsistenteImportacionPDF({
     });
 
     setParsedProducts(products);
+    setCurrentPage(1);
     setParsingStep('preview');
   };
 
@@ -762,13 +785,16 @@ export default function AsistenteImportacionPDF({
       const updated = [...prev];
       const item = { ...updated[index], [field]: val };
 
-      // Re-evaluate discount if detail price changes
-      if (field === 'precio_detalle_usd' && applyMayorDiscount) {
+      if (field === 'precio_detalle_usd') {
         const detailNum = parseFloat(val) || 0;
-        item.precio_mayor_usd = Math.max(0, parseFloat((detailNum * ((100 - mayorDiscountPct) / 100)).toFixed(2)));
+        if (applyMayorDiscount) {
+          item.precio_mayor_usd = Math.max(0, parseFloat((detailNum * ((100 - mayorDiscountPct) / 100)).toFixed(2)));
+        }
+        if (applyBultoDiscount) {
+          item.precio_bulto_usd = Math.max(0, parseFloat((detailNum * ((100 - bultoDiscountPct) / 100)).toFixed(2)));
+        }
       }
 
-      // Re-evaluate tax percentage if exento_impuesto changes
       if (field === 'exento_impuesto') {
         const isExempt = Boolean(val);
         item.porcentaje_impuesto = isExempt ? 0 : 16;
@@ -779,11 +805,49 @@ export default function AsistenteImportacionPDF({
     });
   };
 
+  // High-performance filtered memo for preview
+  const filteredPreviewList = useMemo(() => {
+    return parsedProducts.map((p, originalIdx) => ({ p, originalIdx })).filter(({ p }) => {
+      if (previewSearchTerm) {
+        const term = previewSearchTerm.toLowerCase().trim();
+        const matchesCode = p.barcode.toLowerCase().includes(term);
+        const matchesDesc = p.description.toLowerCase().includes(term);
+        if (!matchesCode && !matchesDesc) return false;
+      }
+      if (previewCategoryFilter && previewCategoryFilter !== 'ALL') {
+        if (p.category.toUpperCase() !== previewCategoryFilter.toUpperCase()) return false;
+      }
+      if (previewTaxFilter === 'exempt' && !p.exento_impuesto) return false;
+      if (previewTaxFilter === 'taxable' && p.exento_impuesto) return false;
+
+      return true;
+    });
+  }, [parsedProducts, previewSearchTerm, previewCategoryFilter, previewTaxFilter]);
+
+  // Derived Pagination
+  const totalPages = Math.max(1, Math.ceil(filteredPreviewList.length / pageSize));
+  const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIdx = (validCurrentPage - 1) * pageSize;
+  const endIdx = Math.min(startIdx + pageSize, filteredPreviewList.length);
+  const paginatedItems = filteredPreviewList.slice(startIdx, endIdx);
+
+  // Available unique categories for filtering
+  const uniqueCategories = useMemo(() => {
+    return Array.from(new Set(parsedProducts.map(p => p.category))).filter(Boolean).sort();
+  }, [parsedProducts]);
+
   return (
-    <div className="bg-slate-50 border border-indigo-200 rounded-xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh] w-full text-slate-800">
+    <div className="bg-slate-50 border border-indigo-200 rounded-xl overflow-hidden shadow-2xl flex flex-col max-h-[88vh] w-full text-slate-800">
       
+      {/* DATALIST FOR CATEGORIES AUTOCOMPLETE */}
+      <datalist id="asistente-existing-categories">
+        {existingCategories.map((cat, idx) => (
+          <option key={idx} value={cat} />
+        ))}
+      </datalist>
+
       {/* HEADER */}
-      <div className="bg-gradient-to-r from-indigo-700 via-indigo-800 to-indigo-900 text-white px-6 py-4 flex justify-between items-center shadow-md">
+      <div className="bg-gradient-to-r from-indigo-700 via-indigo-800 to-indigo-900 text-white px-6 py-4 flex justify-between items-center shadow-md shrink-0">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-indigo-500/30 rounded-lg backdrop-blur-sm border border-indigo-400/30">
             <Sparkles className="w-5 h-5 text-amber-300 animate-pulse" />
@@ -807,11 +871,11 @@ export default function AsistenteImportacionPDF({
       </div>
 
       {/* STEPPER NAV BAR */}
-      <div className="bg-indigo-950/90 text-indigo-200 px-6 py-2 flex items-center justify-between border-b border-indigo-800/50 text-xs font-sans font-bold">
+      <div className="bg-indigo-950/90 text-indigo-200 px-6 py-2.5 flex items-center justify-between border-b border-indigo-800/50 text-xs font-sans font-bold shrink-0">
         <div className="flex items-center gap-6">
           <span className={`flex items-center gap-1.5 ${parsingStep === 'upload' ? 'text-amber-300 font-black' : 'text-slate-400'}`}>
             <span className="w-5 h-5 rounded-full bg-indigo-800 flex items-center justify-center text-[10px]">1</span>
-            Subir Reporte PDF
+            Subir Reporte PDF / Excel
           </span>
           <ArrowRight className="w-3.5 h-3.5 text-slate-600" />
           <span className={`flex items-center gap-1.5 ${parsingStep === 'mapping' ? 'text-amber-300 font-black' : 'text-slate-400'}`}>
@@ -916,7 +980,7 @@ export default function AsistenteImportacionPDF({
                   {file ? `Archivo Seleccionado: ${file.name}` : 'Arrastra o selecciona tu archivo de Excel (.xlsx, .xls) o PDF aquí'}
                 </h4>
                 <p className="text-xs text-slate-500 font-sans max-w-md leading-relaxed mb-4">
-                  El asistente leerá automáticamente los productos, códigos, departamentos, precios de costo, precio venta y stock del reporte.
+                  El asistente leerá automáticamente los productos, códigos, departamentos, precios de costo, precio venta, mayorista, bulto y stock del reporte.
                 </p>
 
                 <div className="bg-indigo-600 text-white px-5 py-2.5 rounded-lg text-xs font-sans font-bold shadow-md group-hover:bg-indigo-700 transition-all flex items-center gap-2 uppercase tracking-wider">
@@ -972,20 +1036,20 @@ export default function AsistenteImportacionPDF({
               <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm space-y-1">
                 <strong className="text-indigo-900 font-bold uppercase block flex items-center gap-1.5">
                   <Calculator className="w-4 h-4 text-indigo-600" />
-                  Descuento Mayorista (-10%)
+                  Precios Mayor y Bulto
                 </strong>
                 <p className="text-slate-500 text-[11px] leading-relaxed">
-                  Toma el Precio Venta (Detalle) del reporte y calcula automáticamente el precio mayorista con 10% menos.
+                  Calcula de forma automática los precios de Mayorista y Bulto aplicando porcentajes configurables sobre Detalle.
                 </p>
               </div>
 
               <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-sm space-y-1">
                 <strong className="text-indigo-900 font-bold uppercase block flex items-center gap-1.5">
                   <Layers className="w-4 h-4 text-indigo-600" />
-                  Flexibilidad de Stock Mínimo
+                  Flexibilidad de Stock
                 </strong>
                 <p className="text-slate-500 text-[11px] leading-relaxed">
-                  Puedes conservar el stock mínimo individual del reporte o asignar 5 unidades por defecto a todos.
+                  Puedes conservar el stock mínimo individual del reporte o asignar unidades fijas por defecto.
                 </p>
               </div>
             </div>
@@ -1006,11 +1070,11 @@ export default function AsistenteImportacionPDF({
                 Configuración de Reglas de Importación
               </h4>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs font-sans">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-sans">
                 
                 {/* Rule: Stock Mínimo */}
                 <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3">
-                  <span className="font-bold text-slate-800 uppercase block font-sans">
+                  <span className="font-bold text-slate-800 uppercase block font-sans flex items-center gap-1.5">
                     📦 Regla para Stock Mínimo:
                   </span>
                   
@@ -1022,14 +1086,14 @@ export default function AsistenteImportacionPDF({
                       onChange={() => setStockMinMode('fijo')}
                       className="text-indigo-600 focus:ring-indigo-500"
                     />
-                    <span>Asignar stock mínimo fijo a todos los productos:</span>
+                    <span className="text-[11px]">Asignar stock mínimo fijo:</span>
                     <input
                       type="number"
                       min="0"
                       value={customStockMinVal}
                       onChange={(e) => setCustomStockMinVal(parseInt(e.target.value) || 0)}
                       disabled={stockMinMode !== 'fijo'}
-                      className="w-16 bg-white border border-slate-300 rounded px-2 py-1 text-center font-bold text-indigo-900 focus:outline-none"
+                      className="w-14 bg-white border border-slate-300 rounded px-1.5 py-0.5 text-center font-bold text-indigo-900 focus:outline-none"
                     />
                   </label>
 
@@ -1041,13 +1105,13 @@ export default function AsistenteImportacionPDF({
                       onChange={() => setStockMinMode('reporte')}
                       className="text-indigo-600 focus:ring-indigo-500"
                     />
-                    <span>Usar el valor individual del reporte (columna MINIMO)</span>
+                    <span className="text-[11px]">Usar valor individual del reporte</span>
                   </label>
                 </div>
 
                 {/* Rule: Precio Mayorista */}
                 <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3">
-                  <span className="font-bold text-slate-800 uppercase block font-sans">
+                  <span className="font-bold text-slate-800 uppercase block font-sans flex items-center gap-1.5">
                     💲 Regla para Precio Mayorista:
                   </span>
 
@@ -1059,9 +1123,9 @@ export default function AsistenteImportacionPDF({
                       className="text-indigo-600 focus:ring-indigo-500 mt-0.5 rounded"
                     />
                     <div>
-                      <span>Calcular Precio Mayorista aplicando descuento automático sobre el Precio Detalle del reporte:</span>
-                      <div className="flex items-center gap-2 mt-1.5">
-                        <span className="text-[11px] text-slate-500">% Descuento Mayorista:</span>
+                      <span className="text-[11px] leading-tight block">Calcular Precio Mayorista aplicando descuento sobre Precio Detalle:</span>
+                      <div className="flex items-center gap-2 mt-2">
+                        <span className="text-[11px] text-slate-500">% Descuento:</span>
                         <input
                           type="number"
                           min="0"
@@ -1069,16 +1133,73 @@ export default function AsistenteImportacionPDF({
                           value={mayorDiscountPct}
                           onChange={(e) => setMayorDiscountPct(parseFloat(e.target.value) || 0)}
                           disabled={!applyMayorDiscount}
-                          className="w-16 bg-white border border-slate-300 rounded px-2 py-1 text-center font-bold text-emerald-700 focus:outline-none"
+                          className="w-14 bg-white border border-slate-300 rounded px-1.5 py-0.5 text-center font-bold text-emerald-700 focus:outline-none"
                         />
-                        <span className="text-[10px] text-emerald-600 font-bold">(Detalle - 10%)</span>
+                        <span className="text-[10px] text-emerald-600 font-bold">(-{mayorDiscountPct}%)</span>
+                      </div>
+
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <span className="text-[11px] text-slate-500">Mínimo Mayorista:</span>
+                        <input
+                          type="number"
+                          min="1"
+                          value={defaultCantidadMayorista}
+                          onChange={(e) => setDefaultCantidadMayorista(parseInt(e.target.value) || 1)}
+                          className="w-14 bg-white border border-slate-300 rounded px-1.5 py-0.5 text-center font-bold text-slate-700 focus:outline-none"
+                        />
+                        <span className="text-[10px] text-slate-500">unidades</span>
+                      </div>
+                    </div>
+                  </label>
+                </div>
+
+                {/* Rule: Precio por Bulto */}
+                <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3">
+                  <span className="font-bold text-slate-800 uppercase block font-sans flex items-center gap-1.5">
+                    <Package className="w-3.5 h-3.5 text-indigo-600" />
+                    Regla para Precio por Bulto:
+                  </span>
+
+                  <label className="flex items-start gap-2 cursor-pointer font-medium text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={applyBultoDiscount}
+                      onChange={(e) => setApplyBultoDiscount(e.target.checked)}
+                      className="text-indigo-600 focus:ring-indigo-500 mt-0.5 rounded"
+                    />
+                    <div>
+                      <span className="text-[11px] leading-tight block">Calcular Precio por Bulto aplicando descuento sobre Precio Detalle:</span>
+                      <div className="flex items-center gap-2 mt-2">
+                        <span className="text-[11px] text-slate-500">% Descuento:</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="90"
+                          value={bultoDiscountPct}
+                          onChange={(e) => setBultoDiscountPct(parseFloat(e.target.value) || 0)}
+                          disabled={!applyBultoDiscount}
+                          className="w-14 bg-white border border-slate-300 rounded px-1.5 py-0.5 text-center font-bold text-indigo-700 focus:outline-none"
+                        />
+                        <span className="text-[10px] text-indigo-600 font-bold">(-{bultoDiscountPct}%)</span>
+                      </div>
+
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <span className="text-[11px] text-slate-500">Empaque / Bulto:</span>
+                        <input
+                          type="number"
+                          min="1"
+                          value={defaultCantBulto}
+                          onChange={(e) => setDefaultCantBulto(parseInt(e.target.value) || 1)}
+                          className="w-14 bg-white border border-slate-300 rounded px-1.5 py-0.5 text-center font-bold text-slate-700 focus:outline-none"
+                        />
+                        <span className="text-[10px] text-slate-500">unid. por caja</span>
                       </div>
                     </div>
                   </label>
                 </div>
 
                 {/* Rule: Categoría y Exento */}
-                <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3 md:col-span-2">
+                <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3 md:col-span-3">
                   <span className="font-bold text-slate-800 uppercase block font-sans">
                     🏷️ Modo de Categorización (cuando no venga en el reporte o seleccione Auto-clasificar):
                   </span>
@@ -1095,7 +1216,7 @@ export default function AsistenteImportacionPDF({
                       <div>
                         <span className="block font-black text-indigo-900">✨ Auto-clasificar Inteligente (Recomendado)</span>
                         <span className="text-[11px] text-slate-600 font-normal block leading-tight mt-0.5">
-                          El asistente analiza la descripción del producto (harina, aceite, refresco, champú, jamón, etc.) y le asigna la categoría correspondiente.
+                          El asistente analiza la descripción del producto (harina, aceite, refresco, champú, jamón, etc.) y le asigna la categoría correspondiente cuando no venga definida en el archivo.
                         </span>
                       </div>
                     </label>
@@ -1113,11 +1234,12 @@ export default function AsistenteImportacionPDF({
                         <div className="flex items-center gap-2 mt-1">
                           <input
                             type="text"
+                            list="asistente-existing-categories"
                             value={defaultCategory}
                             onChange={(e) => setDefaultCategory(e.target.value)}
                             disabled={categoryMode !== 'fijo'}
                             placeholder="GENERAL"
-                            className="bg-white border border-slate-300 rounded px-2.5 py-1 text-xs font-bold uppercase text-slate-800 focus:outline-none w-36"
+                            className="bg-white border border-slate-300 rounded px-2.5 py-1 text-xs font-bold uppercase text-slate-800 focus:outline-none w-48"
                           />
                         </div>
                       </div>
@@ -1138,7 +1260,7 @@ export default function AsistenteImportacionPDF({
                 </div>
 
                 {/* Rule: Clasificación de Impuesto / IVA (Venezuela) */}
-                <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3 md:col-span-2">
+                <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3 md:col-span-3">
                   <span className="font-bold text-slate-800 uppercase block font-sans">
                     🏛️ Clasificación de Impuesto / IVA (Normativa Venezolana):
                   </span>
@@ -1205,7 +1327,7 @@ export default function AsistenteImportacionPDF({
                   <Wand2 className="w-4 h-4 text-indigo-600" />
                   Mapeo de Columnas Detectadas ({detectedColumns.length} columnas en reporte)
                 </h4>
-                <span className="text-[10px] text-slate-400 font-sans">Verifica que los datos coincidan correctamente</span>
+                <span className="text-[10px] text-slate-400 font-sans">Verifica que las columnas correspondan con los datos de tu reporte</span>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-xs font-sans">
@@ -1252,7 +1374,7 @@ export default function AsistenteImportacionPDF({
                 <div className="space-y-1 bg-indigo-50/60 p-2.5 rounded-lg border border-indigo-200">
                   <label className="font-extrabold text-indigo-950 uppercase block text-[10.5px] flex items-center justify-between">
                     <span>3. Categoría / Depto.</span>
-                    <span className="text-[9.5px] text-indigo-600 font-bold">✨ IA Inteligente</span>
+                    <span className="text-[9.5px] text-indigo-600 font-bold">📂 Reporte / IA</span>
                   </label>
                   <select
                     value={colMapping.category}
@@ -1346,10 +1468,67 @@ export default function AsistenteImportacionPDF({
                   </select>
                 </div>
 
+                {/* Precio Mayorista (PRECIO 2 / MAYOR) */}
+                <div className="space-y-1 bg-amber-50/60 p-2.5 rounded-lg border border-amber-200">
+                  <label className="font-extrabold text-amber-950 uppercase block text-[10.5px]">
+                    8. Precio Mayorista (PRECIO 2 / MAYOR)
+                  </label>
+                  <select
+                    value={colMapping.precio_mayor_usd}
+                    onChange={(e) => setColMapping(prev => ({ ...prev, precio_mayor_usd: parseInt(e.target.value) }))}
+                    className="w-full bg-white border border-slate-300 rounded-md p-1.5 text-amber-800 font-bold focus:border-amber-600 focus:outline-none"
+                  >
+                    <option value={-1}>{applyMayorDiscount ? `⚡ Calcular Automático (Detalle - ${mayorDiscountPct}%)` : '-- Ninguno ($0.00) --'}</option>
+                    {detectedColumns.map((col, idx) => (
+                      <option key={idx} value={idx}>
+                        Columna {idx + 1}: {col}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Precio por Bulto (PRECIO BULTO / CAJA) */}
+                <div className="space-y-1 bg-indigo-50/60 p-2.5 rounded-lg border border-indigo-200">
+                  <label className="font-extrabold text-indigo-950 uppercase block text-[10.5px]">
+                    9. Precio Bulto (PRECIO 3 / CAJA)
+                  </label>
+                  <select
+                    value={colMapping.precio_bulto_usd}
+                    onChange={(e) => setColMapping(prev => ({ ...prev, precio_bulto_usd: parseInt(e.target.value) }))}
+                    className="w-full bg-white border border-indigo-300 rounded-md p-1.5 text-indigo-800 font-bold focus:border-indigo-600 focus:outline-none"
+                  >
+                    <option value={-1}>{applyBultoDiscount ? `⚡ Calcular Automático (Detalle - ${bultoDiscountPct}%)` : '-- Ninguno ($0.00) --'}</option>
+                    {detectedColumns.map((col, idx) => (
+                      <option key={idx} value={idx}>
+                        Columna {idx + 1}: {col}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Cantidad por Bulto (Empaque) */}
+                <div className="space-y-1 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                  <label className="font-bold text-slate-700 uppercase block text-[10.5px]">
+                    10. Cant. Bulto (UNID. CAJA / EMPAQUE)
+                  </label>
+                  <select
+                    value={colMapping.cant_bulto}
+                    onChange={(e) => setColMapping(prev => ({ ...prev, cant_bulto: parseInt(e.target.value) }))}
+                    className="w-full bg-white border border-slate-300 rounded-md p-1.5 text-slate-800 focus:border-indigo-600 focus:outline-none"
+                  >
+                    <option value={-1}>-- Fijo por Defecto ({defaultCantBulto} un.) --</option>
+                    {detectedColumns.map((col, idx) => (
+                      <option key={idx} value={idx}>
+                        Columna {idx + 1}: {col}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 {/* U.M. */}
                 <div className="space-y-1 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
                   <label className="font-bold text-slate-700 uppercase block text-[10.5px]">
-                    8. Unidad de Medida (U. M.)
+                    11. Unidad de Medida (U. M.)
                   </label>
                   <select
                     value={colMapping.unit}
@@ -1406,7 +1585,7 @@ export default function AsistenteImportacionPDF({
                 onClick={() => setParsingStep('upload')}
                 className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-5 py-2.5 rounded-lg text-xs font-sans font-bold transition-all"
               >
-                ← Volver a Cargar PDF
+                ← Volver a Cargar Reporte
               </button>
 
               <button
@@ -1425,320 +1604,429 @@ export default function AsistenteImportacionPDF({
         {/* ------------------------------------------------------------- */}
         {/* STEP 3: PREVIEW & CONFIRM IMPORT                              */}
         {/* ------------------------------------------------------------- */}
-        {/* ------------------------------------------------------------- */}
-        {/* STEP 3: PREVIEW & CONFIRM IMPORT                              */}
-        {/* ------------------------------------------------------------- */}
-        {parsingStep === 'preview' && (() => {
-          const filteredPreviewProducts = parsedProducts.map((p, originalIdx) => ({ p, originalIdx })).filter(({ p }) => {
-            if (previewSearchTerm) {
-              const term = previewSearchTerm.toLowerCase().trim();
-              const matchesCode = p.barcode.toLowerCase().includes(term);
-              const matchesDesc = p.description.toLowerCase().includes(term);
-              if (!matchesCode && !matchesDesc) return false;
-            }
-            if (previewCategoryFilter && previewCategoryFilter !== 'ALL') {
-              if (p.category.toUpperCase() !== previewCategoryFilter.toUpperCase()) return false;
-            }
-            if (previewTaxFilter === 'exempt' && !p.exento_impuesto) return false;
-            if (previewTaxFilter === 'taxable' && p.exento_impuesto) return false;
+        {parsingStep === 'preview' && (
+          <div className="space-y-4">
+            
+            {/* Summary metrics header */}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs font-sans">
+              <div className="bg-indigo-50 border border-indigo-150 p-3 rounded-xl">
+                <span className="text-[10px] text-indigo-700 font-extrabold uppercase block">Productos Procesados</span>
+                <strong className="text-lg text-indigo-950 font-black">{parsedProducts.length} ítems</strong>
+              </div>
 
-            return true;
-          });
+              <div className="bg-emerald-50 border border-emerald-150 p-3 rounded-xl">
+                <span className="text-[10px] text-emerald-700 font-extrabold uppercase block">Existencia Total</span>
+                <strong className="text-lg text-emerald-950 font-black font-mono">
+                  {parsedProducts.reduce((acc, p) => acc + p.stock_actual, 0).toLocaleString()} un.
+                </strong>
+              </div>
 
-          return (
-            <div className="space-y-4">
+              <div className="bg-sky-50 border border-sky-150 p-3 rounded-xl">
+                <span className="text-[10px] text-sky-700 font-extrabold uppercase block">Regla Stock Mínimo</span>
+                <strong className="text-xs text-sky-950 font-bold block mt-1">
+                  {stockMinMode === 'fijo' ? `Fijo: ${customStockMinVal} un.` : 'Del Reporte'}
+                </strong>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-150 p-3 rounded-xl">
+                <span className="text-[10px] text-amber-800 font-extrabold uppercase block">Regla Precio Mayor</span>
+                <strong className="text-xs text-amber-950 font-bold block mt-1">
+                  {applyMayorDiscount ? `Detalle - ${mayorDiscountPct}%` : 'Del Reporte'}
+                </strong>
+              </div>
+
+              <div className="bg-purple-50 border border-purple-150 p-3 rounded-xl col-span-2 md:col-span-1">
+                <span className="text-[10px] text-purple-800 font-extrabold uppercase block">Regla Precio Bulto</span>
+                <strong className="text-xs text-purple-950 font-bold block mt-1">
+                  {applyBultoDiscount ? `Detalle - ${bultoDiscountPct}%` : 'Del Reporte'}
+                </strong>
+              </div>
+            </div>
+
+            {/* SEARCH AND FILTERS BAR */}
+            <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row gap-3 items-center justify-between font-sans text-xs">
               
-              {/* Summary metrics header */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs font-sans">
-                <div className="bg-indigo-50 border border-indigo-150 p-3 rounded-xl">
-                  <span className="text-[10px] text-indigo-700 font-extrabold uppercase block">Productos Procesados</span>
-                  <strong className="text-lg text-indigo-950 font-black">{parsedProducts.length} ítems</strong>
-                </div>
-
-                <div className="bg-emerald-50 border border-emerald-150 p-3 rounded-xl">
-                  <span className="text-[10px] text-emerald-700 font-extrabold uppercase block">Existencia Total Sumada</span>
-                  <strong className="text-lg text-emerald-950 font-black font-mono">
-                    {parsedProducts.reduce((acc, p) => acc + p.stock_actual, 0).toLocaleString()} un.
-                  </strong>
-                </div>
-
-                <div className="bg-sky-50 border border-sky-150 p-3 rounded-xl">
-                  <span className="text-[10px] text-sky-700 font-extrabold uppercase block">Regla Stock Mínimo</span>
-                  <strong className="text-xs text-sky-950 font-bold block mt-1">
-                    {stockMinMode === 'fijo' ? `Fijo: ${customStockMinVal} un. a todos` : 'Individual del Reporte'}
-                  </strong>
-                </div>
-
-                <div className="bg-amber-50 border border-amber-150 p-3 rounded-xl">
-                  <span className="text-[10px] text-amber-800 font-extrabold uppercase block">Regla Precio Mayor</span>
-                  <strong className="text-xs text-amber-950 font-bold block mt-1">
-                    {applyMayorDiscount ? `Precio Detalle - ${mayorDiscountPct}%` : 'Valor del Reporte'}
-                  </strong>
-                </div>
+              {/* SEARCH FIELD */}
+              <div className="relative flex-1 w-full">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  value={previewSearchTerm}
+                  onChange={(e) => {
+                    setPreviewSearchTerm(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  placeholder="🔍 Buscar por código de barras o descripción..."
+                  className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-800 font-sans focus:bg-white focus:border-indigo-600 focus:outline-none"
+                />
               </div>
 
-              {/* SEARCH AND FILTERS BAR */}
-              <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row gap-3 items-center justify-between font-sans text-xs">
-                
-                {/* SEARCH FIELD */}
-                <div className="relative flex-1 w-full">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                  <input
-                    type="text"
-                    value={previewSearchTerm}
-                    onChange={(e) => setPreviewSearchTerm(e.target.value)}
-                    placeholder="🔍 Buscar por código de barras o descripción..."
-                    className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-800 font-sans focus:bg-white focus:border-indigo-600 focus:outline-none"
-                  />
-                </div>
-
-                {/* CATEGORY FILTER */}
-                <div className="flex items-center gap-2 w-full md:w-auto">
-                  <span className="text-[11px] font-bold text-slate-500 uppercase shrink-0">Categoría:</span>
-                  <select
-                    value={previewCategoryFilter}
-                    onChange={(e) => setPreviewCategoryFilter(e.target.value)}
-                    className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs font-bold text-slate-700 uppercase focus:bg-white focus:border-indigo-600 focus:outline-none w-full md:w-48"
-                  >
-                    <option value="ALL">Todas ({parsedProducts.length})</option>
-                    {Array.from(new Set(parsedProducts.map(p => p.category))).sort().map((cat, i) => (
-                      <option key={i} value={cat}>{cat}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* TAX FILTER */}
-                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-250 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setPreviewTaxFilter('all')}
-                    className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${
-                      previewTaxFilter === 'all' ? 'bg-white text-slate-800 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-                    }`}
-                  >
-                    Todos
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPreviewTaxFilter('exempt')}
-                    className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${
-                      previewTaxFilter === 'exempt' ? 'bg-emerald-600 text-white shadow-xs' : 'text-emerald-700 hover:bg-emerald-50'
-                    }`}
-                  >
-                    Exentos (0%)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPreviewTaxFilter('taxable')}
-                    className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${
-                      previewTaxFilter === 'taxable' ? 'bg-sky-600 text-white shadow-xs' : 'text-sky-700 hover:bg-sky-50'
-                    }`}
-                  >
-                    IVA 16%
-                  </button>
-                </div>
-
+              {/* CATEGORY FILTER */}
+              <div className="flex items-center gap-2 w-full md:w-auto">
+                <span className="text-[11px] font-bold text-slate-500 uppercase shrink-0">Categoría:</span>
+                <select
+                  value={previewCategoryFilter}
+                  onChange={(e) => {
+                    setPreviewCategoryFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs font-bold text-slate-700 uppercase focus:bg-white focus:border-indigo-600 focus:outline-none w-full md:w-56"
+                >
+                  <option value="ALL">Todas ({parsedProducts.length})</option>
+                  {uniqueCategories.map((cat, i) => (
+                    <option key={i} value={cat}>{cat}</option>
+                  ))}
+                </select>
               </div>
 
-              {/* PREVIEW TABLE */}
-              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm bg-white">
-                <div className="max-h-80 overflow-auto">
-                  <table className="w-full text-left border-collapse text-[11px] font-sans min-w-[1100px]">
-                    <thead className="sticky top-0 bg-slate-100 text-slate-700 font-extrabold uppercase border-b border-slate-200 shadow-sm z-10">
-                      <tr>
-                        <th className="p-2.5 font-mono min-w-[130px]">Código / Clave</th>
-                        <th className="p-2.5 min-w-[300px]">Descripción del Producto</th>
-                        <th className="p-2.5 min-w-[160px]">Categoría</th>
-                        <th className="p-2.5 text-center min-w-[110px]">Impuesto (IVA)</th>
-                        <th className="p-2.5 text-right font-mono min-w-[90px]">Existencia</th>
-                        <th className="p-2.5 text-right font-mono min-w-[85px]">Min. Stock</th>
-                        <th className="p-2.5 text-right font-mono min-w-[90px]">Costo USD</th>
-                        <th className="p-2.5 text-right font-mono text-emerald-700 min-w-[95px]">P. Detalle ($)</th>
-                        <th className="p-2.5 text-right font-mono text-amber-700 min-w-[95px]">P. Mayor (-10%)</th>
-                        <th className="p-2.5 text-center min-w-[90px]">A Granel</th>
-                        <th className="p-2.5 text-center min-w-[60px]">Acción</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredPreviewProducts.length === 0 ? (
-                        <tr>
-                          <td colSpan={11} className="p-8 text-center text-slate-400 font-sans italic">
-                            No se encontraron productos que coincidan con la búsqueda o filtro aplicado.
-                          </td>
-                        </tr>
-                      ) : (
-                        filteredPreviewProducts.map(({ p, originalIdx }) => (
-                          <tr key={originalIdx} className={`border-b border-slate-100 hover:bg-indigo-50/40 transition-colors ${p.hasWarning ? 'bg-amber-50/40' : ''}`}>
-                            
-                            {/* Barcode */}
-                            <td className="p-2 font-mono font-bold text-slate-700 min-w-[130px]">
-                              <input
-                                type="text"
-                                value={p.barcode}
-                                onChange={(e) => handleUpdatePreviewItem(originalIdx, 'barcode', e.target.value)}
-                                title={p.barcode}
-                                className="bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-indigo-400 rounded px-1.5 py-1 w-full font-mono text-xs"
-                              />
-                            </td>
-
-                            {/* Description */}
-                            <td className="p-2 font-bold text-slate-800 uppercase min-w-[300px]">
-                              <input
-                                type="text"
-                                value={p.description}
-                                onChange={(e) => handleUpdatePreviewItem(originalIdx, 'description', e.target.value)}
-                                title={p.description}
-                                className="bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-indigo-400 rounded px-1.5 py-1 w-full uppercase text-xs font-sans font-bold"
-                              />
-                            </td>
-
-                            {/* Category */}
-                            <td className="p-2 min-w-[160px]">
-                              <div className="flex flex-col">
-                                <input
-                                  type="text"
-                                  value={p.category}
-                                  onChange={(e) => handleUpdatePreviewItem(originalIdx, 'category', e.target.value.toUpperCase())}
-                                  className="bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-indigo-400 rounded px-1 py-0.5 w-full uppercase text-indigo-950 font-extrabold text-xs"
-                                />
-                                {p.isCatalogMatch ? (
-                                  <span className="text-[9px] text-amber-800 font-bold flex items-center gap-0.5 px-1 bg-amber-50 border border-amber-300 rounded w-fit mt-0.5 select-none" title="Categoría identificada desde el catálogo registrado por su código de barras único">
-                                    ⭐ Catálogo Registrado
-                                  </span>
-                                ) : p.isInferredCategory ? (
-                                  <span className="text-[9px] text-indigo-600 font-bold flex items-center gap-0.5 px-1 bg-indigo-50 border border-indigo-200 rounded w-fit mt-0.5 select-none">
-                                    ✨ IA Auto-Detectada
-                                  </span>
-                                ) : null}
-                              </div>
-                            </td>
-
-                            {/* Impuesto / IVA Column */}
-                            <td className="p-2 text-center">
-                              <button
-                                type="button"
-                                onClick={() => handleUpdatePreviewItem(originalIdx, 'exento_impuesto', !p.exento_impuesto)}
-                                className={`px-2 py-0.5 rounded text-[9.5px] font-extrabold uppercase transition-all shadow-2xs cursor-pointer ${
-                                  p.exento_impuesto
-                                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200'
-                                    : 'bg-sky-100 text-sky-800 border border-sky-300 hover:bg-sky-200'
-                                }`}
-                              >
-                                {p.exento_impuesto ? 'EXENTO (0%)' : 'IVA 16%'}
-                              </button>
-                            </td>
-
-                            {/* Stock actual */}
-                            <td className="p-2 text-right">
-                              <input
-                                type="number"
-                                step="any"
-                                value={p.stock_actual}
-                                onChange={(e) => handleUpdatePreviewItem(originalIdx, 'stock_actual', parseFloat(e.target.value) || 0)}
-                                className="bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-indigo-400 rounded px-1 py-0.5 w-20 text-right font-mono font-bold text-slate-800"
-                              />
-                            </td>
-
-                            {/* Stock minimo */}
-                            <td className="p-2 text-right">
-                              <input
-                                type="number"
-                                value={p.stock_minimo}
-                                onChange={(e) => handleUpdatePreviewItem(originalIdx, 'stock_minimo', parseInt(e.target.value) || 0)}
-                                className="bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-indigo-400 rounded px-1 py-0.5 w-16 text-right font-mono text-slate-500"
-                              />
-                            </td>
-
-                            {/* Costo */}
-                            <td className="p-2 text-right">
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={p.precio_costo_usd}
-                                onChange={(e) => handleUpdatePreviewItem(originalIdx, 'precio_costo_usd', parseFloat(e.target.value) || 0)}
-                                className="bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-indigo-400 rounded px-1 py-0.5 w-20 text-right font-mono text-slate-600"
-                              />
-                            </td>
-
-                            {/* Detail Price */}
-                            <td className="p-2 text-right">
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={p.precio_detalle_usd}
-                                onChange={(e) => handleUpdatePreviewItem(originalIdx, 'precio_detalle_usd', parseFloat(e.target.value) || 0)}
-                                className="bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-emerald-500 rounded px-1 py-0.5 w-20 text-right font-mono font-bold text-emerald-700"
-                              />
-                            </td>
-
-                            {/* Mayor Price */}
-                            <td className="p-2 text-right">
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={p.precio_mayor_usd}
-                                onChange={(e) => handleUpdatePreviewItem(originalIdx, 'precio_mayor_usd', parseFloat(e.target.value) || 0)}
-                                className="bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-amber-500 rounded px-1 py-0.5 w-20 text-right font-mono font-bold text-amber-700"
-                              />
-                            </td>
-
-                            {/* A Granel */}
-                            <td className="p-2 text-center">
-                              <button
-                                type="button"
-                                onClick={() => handleUpdatePreviewItem(originalIdx, 'a_granel', !p.a_granel)}
-                                className={`px-2 py-0.5 rounded text-[9.5px] font-bold uppercase transition-all ${
-                                  p.a_granel ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-slate-100 text-slate-500'
-                                }`}
-                              >
-                                {p.a_granel ? 'SI (Granel)' : 'NO'}
-                              </button>
-                            </td>
-
-                            {/* Delete */}
-                            <td className="p-2 text-center">
-                              <button
-                                type="button"
-                                onClick={() => handleRemovePreviewItem(originalIdx)}
-                                className="text-slate-400 hover:text-red-600 transition-colors p-1"
-                                title="Eliminar fila"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </td>
-
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* FOOTER ACTIONS */}
-              <div className="flex justify-between items-center pt-2">
+              {/* TAX FILTER */}
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-250 shrink-0">
                 <button
                   type="button"
-                  onClick={() => setParsingStep('mapping')}
-                  className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-5 py-2.5 rounded-lg text-xs font-sans font-bold transition-all"
+                  onClick={() => {
+                    setPreviewTaxFilter('all');
+                    setCurrentPage(1);
+                  }}
+                  className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${
+                    previewTaxFilter === 'all' ? 'bg-white text-slate-800 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                  }`}
                 >
-                  ← Volver a Mapeo de Columnas
+                  Todos
                 </button>
-
                 <button
                   type="button"
-                  disabled={parsedProducts.length === 0}
-                  onClick={() => onProcessImport(parsedProducts)}
-                  className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-sans font-bold text-xs py-3 px-8 rounded-xl shadow-lg uppercase tracking-wider transition-all active:scale-95 flex items-center gap-2"
+                  onClick={() => {
+                    setPreviewTaxFilter('exempt');
+                    setCurrentPage(1);
+                  }}
+                  className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${
+                    previewTaxFilter === 'exempt' ? 'bg-emerald-600 text-white shadow-xs' : 'text-emerald-700 hover:bg-emerald-50'
+                  }`}
                 >
-                  <CheckCircle2 className="w-5 h-5" />
-                  Procesar Importación ({parsedProducts.length} Productos)
+                  Exentos (0%)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPreviewTaxFilter('taxable');
+                    setCurrentPage(1);
+                  }}
+                  className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all ${
+                    previewTaxFilter === 'taxable' ? 'bg-sky-600 text-white shadow-xs' : 'text-sky-700 hover:bg-sky-50'
+                  }`}
+                >
+                  IVA 16%
                 </button>
               </div>
 
             </div>
-          );
-        })()}
+
+            {/* PREVIEW TABLE WRAPPER */}
+            <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm bg-white">
+              <div className="max-h-[420px] overflow-auto">
+                <table className="w-full text-left border-collapse text-[11px] font-sans min-w-[1380px]">
+                  <thead className="sticky top-0 bg-slate-100 text-slate-700 font-extrabold uppercase border-b border-slate-200 shadow-sm z-10">
+                    <tr>
+                      <th className="p-2.5 font-mono min-w-[130px]">Código / Clave</th>
+                      <th className="p-2.5 min-w-[280px]">Descripción del Producto</th>
+                      <th className="p-2.5 min-w-[170px]">Categoría</th>
+                      <th className="p-2.5 text-center min-w-[100px]">Impuesto (IVA)</th>
+                      <th className="p-2.5 text-right font-mono min-w-[85px]">Existencia</th>
+                      <th className="p-2.5 text-right font-mono min-w-[80px]">Min. Stock</th>
+                      <th className="p-2.5 text-right font-mono min-w-[85px]">Costo USD</th>
+                      <th className="p-2.5 text-right font-mono text-emerald-700 min-w-[95px]">P. Detalle ($)</th>
+                      <th className="p-2.5 text-right font-mono text-amber-700 min-w-[95px]">P. Mayor ($)</th>
+                      <th className="p-2.5 text-right font-mono text-purple-700 min-w-[95px]">P. Bulto ($)</th>
+                      <th className="p-2.5 text-center font-mono min-w-[85px]">Cant. Bulto</th>
+                      <th className="p-2.5 text-center min-w-[80px]">A Granel</th>
+                      <th className="p-2.5 text-center min-w-[55px]">Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginatedItems.length === 0 ? (
+                      <tr>
+                        <td colSpan={13} className="p-8 text-center text-slate-400 font-sans italic">
+                          No se encontraron productos que coincidan con la búsqueda o filtro aplicado.
+                        </td>
+                      </tr>
+                    ) : (
+                      paginatedItems.map(({ p, originalIdx }) => (
+                        <tr key={originalIdx} className={`border-b border-slate-100 hover:bg-indigo-50/40 transition-colors ${p.hasWarning ? 'bg-amber-50/40' : ''}`}>
+                          
+                          {/* Barcode */}
+                          <td className="p-2 font-mono font-bold text-slate-700 min-w-[130px]">
+                            <input
+                              type="text"
+                              value={p.barcode}
+                              onChange={(e) => handleUpdatePreviewItem(originalIdx, 'barcode', e.target.value)}
+                              title={p.barcode}
+                              className="bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-indigo-400 rounded px-1.5 py-1 w-full font-mono text-xs"
+                            />
+                          </td>
+
+                          {/* Description */}
+                          <td className="p-2 font-bold text-slate-800 uppercase min-w-[280px]">
+                            <input
+                              type="text"
+                              value={p.description}
+                              onChange={(e) => handleUpdatePreviewItem(originalIdx, 'description', e.target.value)}
+                              title={p.description}
+                              className="bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-indigo-400 rounded px-1.5 py-1 w-full uppercase text-xs font-sans font-bold"
+                            />
+                          </td>
+
+                          {/* Category */}
+                          <td className="p-2 min-w-[170px]">
+                            <div className="flex flex-col">
+                              <input
+                                type="text"
+                                list="asistente-existing-categories"
+                                value={p.category}
+                                onChange={(e) => handleUpdatePreviewItem(originalIdx, 'category', e.target.value.toUpperCase())}
+                                className="bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-indigo-400 rounded px-1 py-0.5 w-full uppercase text-indigo-950 font-extrabold text-xs"
+                              />
+                              {p.isCatalogMatch ? (
+                                <span className="text-[9px] text-amber-800 font-bold flex items-center gap-0.5 px-1 bg-amber-50 border border-amber-300 rounded w-fit mt-0.5 select-none" title="Categoría identificada desde el catálogo registrado por su código de barras único">
+                                  ⭐ Catálogo Registrado
+                                </span>
+                              ) : p.isInferredCategory ? (
+                                <span className="text-[9px] text-indigo-600 font-bold flex items-center gap-0.5 px-1 bg-indigo-50 border border-indigo-200 rounded w-fit mt-0.5 select-none">
+                                  ✨ IA Auto-Detectada
+                                </span>
+                              ) : null}
+                            </div>
+                          </td>
+
+                          {/* Impuesto / IVA Column */}
+                          <td className="p-2 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdatePreviewItem(originalIdx, 'exento_impuesto', !p.exento_impuesto)}
+                              className={`px-2 py-0.5 rounded text-[9.5px] font-extrabold uppercase transition-all shadow-2xs cursor-pointer ${
+                                p.exento_impuesto
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200'
+                                  : 'bg-sky-100 text-sky-800 border border-sky-300 hover:bg-sky-200'
+                              }`}
+                            >
+                              {p.exento_impuesto ? 'EXENTO (0%)' : 'IVA 16%'}
+                            </button>
+                          </td>
+
+                          {/* Stock actual */}
+                          <td className="p-2 text-right">
+                            <input
+                              type="number"
+                              step="any"
+                              value={p.stock_actual}
+                              onChange={(e) => handleUpdatePreviewItem(originalIdx, 'stock_actual', parseFloat(e.target.value) || 0)}
+                              className="bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-indigo-400 rounded px-1 py-0.5 w-18 text-right font-mono font-bold text-slate-800"
+                            />
+                          </td>
+
+                          {/* Stock minimo */}
+                          <td className="p-2 text-right">
+                            <input
+                              type="number"
+                              value={p.stock_minimo}
+                              onChange={(e) => handleUpdatePreviewItem(originalIdx, 'stock_minimo', parseInt(e.target.value) || 0)}
+                              className="bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-indigo-400 rounded px-1 py-0.5 w-14 text-right font-mono text-slate-500"
+                            />
+                          </td>
+
+                          {/* Costo */}
+                          <td className="p-2 text-right">
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={p.precio_costo_usd}
+                              onChange={(e) => handleUpdatePreviewItem(originalIdx, 'precio_costo_usd', parseFloat(e.target.value) || 0)}
+                              className="bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-indigo-400 rounded px-1 py-0.5 w-18 text-right font-mono text-slate-600"
+                            />
+                          </td>
+
+                          {/* Detail Price */}
+                          <td className="p-2 text-right">
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={p.precio_detalle_usd}
+                              onChange={(e) => handleUpdatePreviewItem(originalIdx, 'precio_detalle_usd', parseFloat(e.target.value) || 0)}
+                              className="bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-emerald-500 rounded px-1 py-0.5 w-20 text-right font-mono font-bold text-emerald-700"
+                            />
+                          </td>
+
+                          {/* Mayor Price */}
+                          <td className="p-2 text-right">
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={p.precio_mayor_usd}
+                              onChange={(e) => handleUpdatePreviewItem(originalIdx, 'precio_mayor_usd', parseFloat(e.target.value) || 0)}
+                              className="bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-amber-500 rounded px-1 py-0.5 w-20 text-right font-mono font-bold text-amber-700"
+                            />
+                          </td>
+
+                          {/* Bulto Price */}
+                          <td className="p-2 text-right">
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={p.precio_bulto_usd}
+                              onChange={(e) => handleUpdatePreviewItem(originalIdx, 'precio_bulto_usd', parseFloat(e.target.value) || 0)}
+                              className="bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-purple-500 rounded px-1 py-0.5 w-20 text-right font-mono font-bold text-purple-700"
+                            />
+                          </td>
+
+                          {/* Cant Bulto */}
+                          <td className="p-2 text-center">
+                            <input
+                              type="number"
+                              min="1"
+                              value={p.cant_bulto}
+                              onChange={(e) => handleUpdatePreviewItem(originalIdx, 'cant_bulto', parseInt(e.target.value) || 1)}
+                              className="bg-transparent hover:bg-white focus:bg-white border border-transparent focus:border-indigo-400 rounded px-1 py-0.5 w-14 text-center font-mono text-slate-700"
+                              title="Unidades por Bulto / Caja"
+                            />
+                          </td>
+
+                          {/* A Granel */}
+                          <td className="p-2 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdatePreviewItem(originalIdx, 'a_granel', !p.a_granel)}
+                              className={`px-2 py-0.5 rounded text-[9.5px] font-bold uppercase transition-all ${
+                                p.a_granel ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-slate-100 text-slate-500'
+                              }`}
+                            >
+                              {p.a_granel ? 'SI' : 'NO'}
+                            </button>
+                          </td>
+
+                          {/* Delete */}
+                          <td className="p-2 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleRemovePreviewItem(originalIdx)}
+                              className="text-slate-400 hover:text-red-600 transition-colors p-1"
+                              title="Eliminar fila"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* PAGINATION TOOLBAR */}
+              <div className="bg-slate-50 px-4 py-2.5 border-t border-slate-200 flex flex-col md:flex-row items-center justify-between gap-3 text-xs font-sans">
+                
+                {/* Visible counts and Page size selector */}
+                <div className="flex items-center gap-3 text-slate-600">
+                  <span>
+                    Mostrando <strong>{filteredPreviewList.length > 0 ? startIdx + 1 : 0}</strong> a <strong>{endIdx}</strong> de <strong>{filteredPreviewList.length}</strong> productos
+                    {filteredPreviewList.length !== parsedProducts.length && ` (filtrados de ${parsedProducts.length} totales)`}
+                  </span>
+
+                  <div className="flex items-center gap-1.5 ml-2 border-l border-slate-300 pl-3">
+                    <span className="text-[11px] text-slate-500">Por página:</span>
+                    <select
+                      value={pageSize}
+                      onChange={(e) => {
+                        setPageSize(parseInt(e.target.value) || 50);
+                        setCurrentPage(1);
+                      }}
+                      className="bg-white border border-slate-300 rounded px-2 py-1 font-bold text-slate-700 focus:outline-none focus:border-indigo-600"
+                    >
+                      <option value={25}>25</option>
+                      <option value={50}>50</option>
+                      <option value={100}>100</option>
+                      <option value={200}>200</option>
+                      <option value={500}>500</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Page navigation buttons */}
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={validCurrentPage <= 1}
+                    onClick={() => setCurrentPage(1)}
+                    className="p-1.5 rounded bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                    title="Primera página"
+                  >
+                    <ChevronsLeft className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={validCurrentPage <= 1}
+                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    className="px-2.5 py-1 rounded bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-1 font-bold text-[11px]"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    Anterior
+                  </button>
+
+                  <div className="px-3 py-1 bg-white border border-indigo-200 text-indigo-950 font-bold rounded text-xs flex items-center gap-1">
+                    <span>Página</span>
+                    <span className="text-indigo-600 font-extrabold">{validCurrentPage}</span>
+                    <span>de</span>
+                    <span className="text-slate-600">{totalPages}</span>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={validCurrentPage >= totalPages}
+                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                    className="px-2.5 py-1 rounded bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-1 font-bold text-[11px]"
+                  >
+                    Siguiente
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={validCurrentPage >= totalPages}
+                    onClick={() => setCurrentPage(totalPages)}
+                    className="p-1.5 rounded bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                    title="Última página"
+                  >
+                    <ChevronsRight className="w-4 h-4" />
+                  </button>
+                </div>
+
+              </div>
+
+            </div>
+
+            {/* FOOTER ACTIONS */}
+            <div className="flex justify-between items-center pt-2">
+              <button
+                type="button"
+                onClick={() => setParsingStep('mapping')}
+                className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-5 py-2.5 rounded-lg text-xs font-sans font-bold transition-all"
+              >
+                ← Volver a Mapeo de Columnas
+              </button>
+
+              <button
+                type="button"
+                disabled={parsedProducts.length === 0}
+                onClick={() => onProcessImport(parsedProducts)}
+                className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-sans font-bold text-xs py-3 px-8 rounded-xl shadow-lg uppercase tracking-wider transition-all active:scale-95 flex items-center gap-2"
+              >
+                <CheckCircle2 className="w-5 h-5" />
+                Procesar Importación ({parsedProducts.length} Productos)
+              </button>
+            </div>
+
+          </div>
+        )}
 
       </div>
     </div>

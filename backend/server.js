@@ -138,6 +138,10 @@ dotenv.config();
 
 // Global crash guards for asynchronous library errors (e.g. WhatsApp LocalAuth EBUSY)
 process.on('uncaughtException', (err) => {
+  if (err?.code === 'EADDRINUSE' || err?.message?.includes('EADDRINUSE')) {
+    console.log(`ℹ️ [WinterPos] El puerto 5000 ya está activo y atendiendo peticiones del sistema en segundo plano.`);
+    return;
+  }
   console.warn('⚠️ [Server] Excepción no capturada controlada:', err?.message || err);
 });
 
@@ -754,78 +758,169 @@ import https from 'https';
 // Cache for BCV rates
 let bcvCache = {
   success: true,
-  usd: '36.5432',
-  eur: '39.7821',
-  fechaValor: 'Pendiente de actualización'
+  usd: '0.00',
+  eur: '0.00',
+  fechaValor: 'Sincronizando...',
+  fechaActualizacion: new Date().toISOString()
 };
 
-async function fetchBcvRates() {
-  return new Promise((resolve) => {
-    const agent = new https.Agent({
-      rejectUnauthorized: false
-    });
-    
-    const req = https.get('https://www.bcv.org.ve/', { agent, timeout: 4000 }, (res) => {
-      let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        try {
-          // Parse USD and EUR from BCV home page elements
-          const dolarRegex = /id="dolar"[^]*?<strong[^>]*?>\s*([\d,.]+)\s*<\/strong>/i;
-          const euroRegex = /id="euro"[^]*?<strong[^>]*?>\s*([\d,.]+)\s*<\/strong>/i;
-          const fechaRegex = /class="date-display-single"[^]*?>\s*([^<]+?)\s*<\/span>/i;
-
-          const dolarMatch = data.match(dolarRegex);
-          const euroMatch = data.match(euroRegex);
-          const fechaMatch = data.match(fechaRegex);
-
-          if (dolarMatch && euroMatch) {
-            const usd = dolarMatch[1].replace(',', '.').trim();
-            const eur = euroMatch[1].replace(',', '.').trim();
-            
-            let fechaValor = 'Desconocida';
-            if (fechaMatch) {
-              fechaValor = fechaMatch[1].trim();
-            } else {
-              const secondaryFechaRegex = /Fecha Valor:[^]*?<strong>\s*([^<]+?)\s*<\/strong>/i;
-              const secondaryMatch = data.match(secondaryFechaRegex);
-              if (secondaryMatch) {
-                fechaValor = secondaryMatch[1].trim();
-              }
-            }
-
-            bcvCache = {
-              success: true,
-              usd,
-              eur,
-              fechaValor
-            };
+function fetchHttpsJson(urlStr, timeoutMs = 4000) {
+  return new Promise((resolve, reject) => {
+    try {
+      const u = new URL(urlStr);
+      const req = https.get(
+        {
+          hostname: u.hostname,
+          path: u.pathname + u.search,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*'
+          },
+          rejectUnauthorized: false,
+          timeout: timeoutMs
+        },
+        (res) => {
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            return reject(new Error(`HTTP ${res.statusCode}`));
           }
-        } catch (parseErr) {
-          console.error('Error al parsear HTML del BCV:', parseErr.message);
+          let body = '';
+          res.on('data', chunk => { body += chunk; });
+          res.on('end', () => {
+            try {
+              resolve(JSON.parse(body));
+            } catch (e) {
+              reject(e);
+            }
+          });
         }
-        resolve(bcvCache);
+      );
+      req.on('error', reject);
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error('Timeout'));
       });
-    });
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+async function fetchBcvRates() {
+  // PROVEEDOR 1: ve.dolarapi.com (API oficial, ultra rápida y con alta disponibilidad)
+  try {
+    const [usdData, eurData] = await Promise.all([
+      fetchHttpsJson('https://ve.dolarapi.com/v1/dolares/oficial', 3500),
+      fetchHttpsJson('https://ve.dolarapi.com/v1/euros/oficial', 3500).catch(() => null)
+    ]);
+
+    if (usdData && (usdData.promedio || usdData.precio || usdData.monto)) {
+      const usdVal = parseFloat(usdData.promedio || usdData.precio || usdData.monto);
+      let eurVal = eurData && (eurData.promedio || eurData.precio || eurData.monto) 
+        ? parseFloat(eurData.promedio || eurData.precio || eurData.monto) 
+        : (usdVal * 1.08);
+
+      if (usdVal > 0) {
+        bcvCache = {
+          success: true,
+          usd: usdVal.toFixed(4),
+          eur: eurVal.toFixed(4),
+          fechaValor: usdData.fechaActualizacion ? new Date(usdData.fechaActualizacion).toLocaleString('es-VE') : 'Al día',
+          fechaActualizacion: new Date().toISOString(),
+          fuente: 'BCV Oficial (DolarApi)'
+        };
+        return bcvCache;
+      }
+    }
+  } catch (err1) {
+    // Continuar a proveedor 2
+  }
+
+  // PROVEEDOR 2: pydolarvenezuela-api.vercel.app
+  try {
+    const pyData = await fetchHttpsJson('https://pydolarvenezuela-api.vercel.app/api/v1/dollar?page=bcv', 4000);
+    if (pyData && pyData.monitors && pyData.monitors.usd) {
+      const usdVal = parseFloat(pyData.monitors.usd.price || pyData.monitors.usd.precio || 0);
+      const eurVal = pyData.monitors.eur ? parseFloat(pyData.monitors.eur.price || 0) : (usdVal * 1.08);
+      if (usdVal > 0) {
+        bcvCache = {
+          success: true,
+          usd: usdVal.toFixed(4),
+          eur: eurVal.toFixed(4),
+          fechaValor: pyData.monitors.usd.last_update || 'Al día',
+          fechaActualizacion: new Date().toISOString(),
+          fuente: 'BCV Oficial (PyDolar)'
+        };
+        return bcvCache;
+      }
+    }
+  } catch (err2) {
+    // Continuar a proveedor 3 (Scraping directo)
+  }
+
+  // PROVEEDOR 3: Scraping directo a bcv.org.ve con headers de navegador
+  return new Promise((resolve) => {
+    const agent = new https.Agent({ rejectUnauthorized: false });
+    const req = https.get(
+      'https://www.bcv.org.ve/',
+      {
+        agent,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        },
+        timeout: 5000
+      },
+      (res) => {
+        let data = '';
+        res.on('data', chunk => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const dolarRegex = /id="dolar"[^]*?<strong[^>]*?>\s*([\d,.]+)\s*<\/strong>/i;
+            const euroRegex = /id="euro"[^]*?<strong[^>]*?>\s*([\d,.]+)\s*<\/strong>/i;
+            const fechaRegex = /class="date-display-single"[^]*?>\s*([^<]+?)\s*<\/span>/i;
+
+            const dolarMatch = data.match(dolarRegex);
+            const euroMatch = data.match(euroRegex);
+            const fechaMatch = data.match(fechaRegex);
+
+            if (dolarMatch) {
+              const usd = dolarMatch[1].replace(',', '.').trim();
+              const eur = euroMatch ? euroMatch[1].replace(',', '.').trim() : (parseFloat(usd) * 1.08).toFixed(4);
+              const fechaValor = fechaMatch ? fechaMatch[1].trim() : 'Al día';
+
+              bcvCache = {
+                success: true,
+                usd,
+                eur,
+                fechaValor,
+                fechaActualizacion: new Date().toISOString(),
+                fuente: 'BCV Oficial Directo'
+              };
+            }
+          } catch (parseErr) {
+            console.error('Error al parsear HTML del BCV:', parseErr.message);
+          }
+          resolve(bcvCache);
+        });
+      }
+    );
 
     req.on('error', (err) => {
-      console.error('Error al consultar tasas del BCV (sin internet o caída de servidor):', err.message);
       resolve(bcvCache);
     });
 
     req.on('timeout', () => {
       req.destroy();
-      console.warn('Timeout al consultar tasas del BCV (límite de 4s excedido).');
       resolve(bcvCache);
     });
   });
 }
 
-// Background query on startup and every 10 minutes
+// Background query on startup and every 5 minutes
 fetchBcvRates().catch(() => {});
 setInterval(() => {
   fetchBcvRates().catch(() => {});
-}, 10 * 60 * 1000);
+}, 5 * 60 * 1000);
 
 app.get('/api/bcv', async (req, res) => {
   const rates = await fetchBcvRates();
@@ -2343,7 +2438,7 @@ function freePortIfOccupied(port) {
 
 // Start Server with Auto-Port Freeing
 freePortIfOccupied(PORT).then(() => {
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Servidor API de WinterPosAL corriendo en http://localhost:${PORT}`);
     console.log(`Expuesto en red LAN para recibir conexiones de otras terminales.`);
     
@@ -2365,5 +2460,13 @@ freePortIfOccupied(PORT).then(() => {
     setTimeout(() => {
       initWhatsAppClient();
     }, 1000);
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.log(`ℹ️ [WinterPos] El puerto ${PORT} ya está activo y atendiendo el sistema.`);
+    } else {
+      console.error('Error en el servidor HTTP:', err.message);
+    }
   });
 });

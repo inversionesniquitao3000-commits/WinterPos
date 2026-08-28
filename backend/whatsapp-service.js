@@ -634,17 +634,10 @@ async function ensureWWebJSInjected(c) {
     const isReady = await c.pupPage.evaluate(() => {
       return typeof window.WWebJS !== 'undefined' && typeof window.WWebJS.getChat === 'function';
     });
-    if (!isReady) {
-      console.log('[WhatsApp] Reinyectando funciones WWebJS en la página de Chrome...');
-      const { createRequire } = await import('module');
-      const require = createRequire(import.meta.url);
-      const { LoadUtils } = require('whatsapp-web.js/src/util/Injected/Utils.js');
-      await c.pupPage.evaluate(LoadUtils);
-      await new Promise(r => setTimeout(r, 500));
+    if (!isReady && typeof c.inject === 'function') {
+      await c.inject().catch(() => {});
     }
-  } catch (err) {
-    console.warn('[WhatsApp] Advertencia al inyectar WWebJS:', err?.message || err);
-  }
+  } catch (_) {}
 }
 
 // Send Report Endpoint handler

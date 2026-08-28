@@ -98,11 +98,11 @@ export const mockTasaHistory: TasaHistoryItem[] = [
 ];
 
 export const mockConfig: CompanyConfig = {
-  rif: 'J-411332631',
-  nombre_comercio: 'INVERSIONES NIQUITAO JB AL 3000 -PRUEBA',
-  direccion: 'Caracas, Venezuela',
-  telefono: '0412-5515172',
-  correo: 'inversiones.niquitao3000@gmail.com',
+  rif: 'J-000000000',
+  nombre_comercio: 'Mi Comercio C.A.',
+  direccion: 'Venezuela',
+  telefono: '',
+  correo: '',
   moneda_base: 'USD',
   mensaje_pie_ticket: '¡Gracias por su compra! Conserve su ticket.',
   metodos_pago_activos: ['efectivo_usd', 'efectivo_ves', 'tarjeta_ves', 'pago_movil', 'biopago', 'credito'],
