@@ -822,21 +822,34 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
 
     const htmlContent = `
       <!DOCTYPE html>
-      <html>
+      <html lang="es">
         <head>
+          <meta charset="utf-8">
           <title>Reporte de Cierre de Caja - ${c.usuario} (${c.terminal || 'LOCAL'})</title>
           <style>
             @page {
-              size: A4 portrait;
-              margin: 12mm 15mm 15mm 15mm;
+              size: portrait;
+              margin: 0mm;
             }
-            body {
-              font-family: 'Segoe UI', Arial, sans-serif;
+            * {
+              box-sizing: border-box;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            html, body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
               color: #1e293b;
               margin: 0;
               padding: 0;
+              background: #fff;
               font-size: 11px;
               line-height: 1.4;
+            }
+            .print-page-wrapper {
+              padding: 14mm 16mm;
+              width: 100%;
+              box-sizing: border-box;
+              margin: 0 auto;
             }
             .header-banner {
               border-bottom: 2.5px solid #0f172a;
@@ -845,6 +858,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
               display: flex;
               justify-content: space-between;
               align-items: flex-end;
+              width: 100%;
             }
             .title-main {
               font-size: 18px;
@@ -969,98 +983,100 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
           </style>
         </head>
         <body>
-          <div class="header-banner">
-            <div>
-              <h1 class="title-main">Reporte Detallado de Cierre de Caja</h1>
-              <p class="subtitle">Desglose oficial de auditoría de turno y facturas emitidas</p>
+          <div class="print-page-wrapper">
+            <div class="header-banner">
+              <div>
+                <h1 class="title-main">Reporte Detallado de Cierre de Caja</h1>
+                <p class="subtitle">Desglose oficial de auditoría de turno y facturas emitidas</p>
+              </div>
+              <div class="meta-box">
+                <div><strong>Terminal:</strong> ${c.terminal || 'CAJA_01'}</div>
+                <div><strong>Impreso el:</strong> ${new Date().toLocaleString('es-VE')}</div>
+              </div>
             </div>
-            <div class="meta-box">
-              <div><strong>Terminal:</strong> ${c.terminal || 'CAJA_01'}</div>
-              <div><strong>Impreso el:</strong> ${new Date().toLocaleString('es-VE')}</div>
-            </div>
-          </div>
 
-          <div class="cierre-details">
-            <div class="detail-item"><label>Cajero / Operador: </label><span>${c.usuario?.toUpperCase()}</span></div>
-            <div class="detail-item"><label>Estado de Caja: </label><span>${c.status || 'Conciliada'}</span></div>
-            <div class="detail-item"><label>Apertura USD / VES: </label><span>$${(c.aperturaUsd || 0).toFixed(2)} / Bs ${(c.aperturaVes || 0).toFixed(2)}</span></div>
-            <div class="detail-item"><label>Fecha Apertura: </label><span>${fechaAperturaStr}</span></div>
-            <div class="detail-item"><label>Fecha Cierre: </label><span>${fechaCierreStr}</span></div>
-            <div class="detail-item"><label>Físico Reportado: </label><span>$${(c.realUsd || 0).toFixed(2)} USD / Bs ${(c.realVes || 0).toFixed(2)}</span></div>
-            <div class="detail-item"><label>Efectivo Esperado: </label><span>$${dineroExpected.toFixed(2)} USD</span></div>
-            <div class="detail-item"><label>Diferencia Cuadre: </label><span class="${diffUsd >= 0 ? 'text-green' : 'text-red'}">$${diffUsd.toFixed(2)} USD</span></div>
-            <div class="detail-item"><label>Utilidad Neta del Cierre: </label><span class="text-emerald">$${utilidad.toFixed(2)} USD</span></div>
-          </div>
-
-          <div class="kpi-grid">
-            <div class="kpi-card">
-              <span class="kpi-label">Facturas Emitidas</span>
-              <div class="kpi-val">${invoices.length}</div>
+            <div class="cierre-details">
+              <div class="detail-item"><label>Cajero / Operador: </label><span>${c.usuario?.toUpperCase()}</span></div>
+              <div class="detail-item"><label>Estado de Caja: </label><span>${c.status || 'Conciliada'}</span></div>
+              <div class="detail-item"><label>Apertura USD / VES: </label><span>$${(c.aperturaUsd || 0).toFixed(2)} / Bs ${(c.aperturaVes || 0).toFixed(2)}</span></div>
+              <div class="detail-item"><label>Fecha Apertura: </label><span>${fechaAperturaStr}</span></div>
+              <div class="detail-item"><label>Fecha Cierre: </label><span>${fechaCierreStr}</span></div>
+              <div class="detail-item"><label>Físico Reportado: </label><span>$${(c.realUsd || 0).toFixed(2)} USD / Bs ${(c.realVes || 0).toFixed(2)}</span></div>
+              <div class="detail-item"><label>Efectivo Esperado: </label><span>$${dineroExpected.toFixed(2)} USD</span></div>
+              <div class="detail-item"><label>Diferencia Cuadre: </label><span class="${diffUsd >= 0 ? 'text-green' : 'text-red'}">$${diffUsd.toFixed(2)} USD</span></div>
+              <div class="detail-item"><label>Utilidad Neta del Cierre: </label><span class="text-emerald">$${utilidad.toFixed(2)} USD</span></div>
             </div>
-            <div class="kpi-card">
-              <span class="kpi-label">Ventas Netas ($)</span>
-              <div class="kpi-val" style="color: #047857;">$${netoUSD.toFixed(2)}</div>
-            </div>
-            <div class="kpi-card">
-              <span class="kpi-label">Ventas Netas (Bs)</span>
-              <div class="kpi-val" style="color: #4338ca;">Bs ${netoVES.toFixed(2)}</div>
-            </div>
-            <div class="kpi-card">
-              <span class="kpi-label">Utilidad Turno</span>
-              <div class="kpi-val" style="color: #059669;">$${utilidad.toFixed(2)}</div>
-            </div>
-          </div>
 
-          <div class="section-title">Facturas y Transacciones del Turno (${invoices.length})</div>
-
-          <table class="report-table">
-            <thead>
-              <tr>
-                <th style="width: 14%;">Fecha / Hora</th>
-                <th style="width: 14%;">Factura Nº</th>
-                <th style="width: 22%;">Cliente</th>
-                <th style="width: 14%;">Operador</th>
-                <th class="text-center" style="width: 12%;">Total USD</th>
-                <th class="text-center" style="width: 12%;">Total VES</th>
-                <th style="width: 12%;">Forma Pago</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${invoices.length === 0 ? `
-                <tr><td colspan="7" class="text-center" style="color: #94a3b8; padding: 15px;">No se registraron ventas en este turno de caja.</td></tr>
-              ` : invoices.map(s => {
-                const isDev = s.factura_nro?.startsWith('DEV-');
-                const sign = isDev ? '-' : '';
-                const pagosStr = (s.pagos || []).map(p => {
-                  const isBs = ['efectivobs', 'tarjetabs', 'pagomovil', 'biopago'].includes(String(p.metodo || '').toLowerCase());
-                  if (isBs && p.montoVES) {
-                    return `${p.metodo}: Bs ${p.montoVES.toFixed(2)} ($${p.monto.toFixed(2)})`;
-                  }
-                  return `${p.metodo}: $${p.monto.toFixed(2)}`;
-                }).join(', ') || 'N/A';
-
-                return `
-                  <tr style="${isDev ? 'background-color: #fff1f2;' : ''}">
-                    <td>${s.fecha}</td>
-                    <td class="font-bold ${isDev ? 'text-dev' : ''}">${s.factura_nro}</td>
-                    <td>${s.client?.nombre || 'Público General'}<br/><span style="font-size: 8.5px; color: #64748b;">${s.client?.cedula_rif || ''}</span></td>
-                    <td style="text-transform: uppercase;">${s.usuario || c.usuario}</td>
-                    <td class="text-center font-bold ${isDev ? 'text-dev' : ''}">${sign}$${Math.abs(s.totalUSD || 0).toFixed(2)}</td>
-                    <td class="text-center font-bold ${isDev ? 'text-dev' : ''}">${sign}Bs ${Math.abs(s.totalVES || 0).toFixed(2)}</td>
-                    <td style="font-size: 8.5px;">${pagosStr}</td>
-                  </tr>
-                `;
-              }).join('')}
-            </tbody>
-          </table>
-
-          <div class="signatures">
-            <div class="sig-line">
-              Firma Cajero / Operador<br/>
-              ${c.usuario?.toUpperCase()}
+            <div class="kpi-grid">
+              <div class="kpi-card">
+                <span class="kpi-label">Facturas Emitidas</span>
+                <div class="kpi-val">${invoices.length}</div>
+              </div>
+              <div class="kpi-card">
+                <span class="kpi-label">Ventas Netas ($)</span>
+                <div class="kpi-val" style="color: #047857;">$${netoUSD.toFixed(2)}</div>
+              </div>
+              <div class="kpi-card">
+                <span class="kpi-label">Ventas Netas (Bs)</span>
+                <div class="kpi-val" style="color: #4338ca;">Bs ${netoVES.toFixed(2)}</div>
+              </div>
+              <div class="kpi-card">
+                <span class="kpi-label">Utilidad Turno</span>
+                <div class="kpi-val" style="color: #059669;">$${utilidad.toFixed(2)}</div>
+              </div>
             </div>
-            <div class="sig-line">
-              Firma Supervisión / Administración
+
+            <div class="section-title">Facturas y Transacciones del Turno (${invoices.length})</div>
+
+            <table class="report-table">
+              <thead>
+                <tr>
+                  <th style="width: 14%;">Fecha / Hora</th>
+                  <th style="width: 14%;">Factura Nº</th>
+                  <th style="width: 22%;">Cliente</th>
+                  <th style="width: 14%;">Operador</th>
+                  <th class="text-center" style="width: 12%;">Total USD</th>
+                  <th class="text-center" style="width: 12%;">Total VES</th>
+                  <th style="width: 12%;">Forma Pago</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${invoices.length === 0 ? `
+                  <tr><td colspan="7" class="text-center" style="color: #94a3b8; padding: 15px;">No se registraron ventas en este turno de caja.</td></tr>
+                ` : invoices.map(s => {
+                  const isDev = s.factura_nro?.startsWith('DEV-');
+                  const sign = isDev ? '-' : '';
+                  const pagosStr = (s.pagos || []).map(p => {
+                    const isBs = ['efectivobs', 'tarjetabs', 'pagomovil', 'biopago'].includes(String(p.metodo || '').toLowerCase());
+                    if (isBs && p.montoVES) {
+                      return `${p.metodo}: Bs ${p.montoVES.toFixed(2)} ($${p.monto.toFixed(2)})`;
+                    }
+                    return `${p.metodo}: $${p.monto.toFixed(2)}`;
+                  }).join(', ') || 'N/A';
+
+                  return `
+                    <tr style="${isDev ? 'background-color: #fff1f2;' : ''}">
+                      <td>${s.fecha}</td>
+                      <td class="font-bold ${isDev ? 'text-dev' : ''}">${s.factura_nro}</td>
+                      <td>${s.client?.nombre || 'Público General'}<br/><span style="font-size: 8.5px; color: #64748b;">${s.client?.cedula_rif || ''}</span></td>
+                      <td style="text-transform: uppercase;">${s.usuario || c.usuario}</td>
+                      <td class="text-center font-bold ${isDev ? 'text-dev' : ''}">${sign}$${Math.abs(s.totalUSD || 0).toFixed(2)}</td>
+                      <td class="text-center font-bold ${isDev ? 'text-dev' : ''}">${sign}Bs ${Math.abs(s.totalVES || 0).toFixed(2)}</td>
+                      <td style="font-size: 8.5px;">${pagosStr}</td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+
+            <div class="signatures">
+              <div class="sig-line">
+                Firma Cajero / Operador<br/>
+                ${c.usuario?.toUpperCase()}
+              </div>
+              <div class="sig-line">
+                Firma Supervisión / Administración
+              </div>
             </div>
           </div>
 
@@ -1136,67 +1152,91 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
     }
 
     printWindow.document.write(`
-      <html>
+      <html lang="es">
         <head>
+          <meta charset="utf-8">
           <title>Reporte PDF - ${title}</title>
           <style>
+            @page {
+              size: letter portrait;
+              margin: 10mm 12mm 12mm 12mm;
+            }
+            * {
+              box-sizing: border-box;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
             body {
-              font-family: Arial, sans-serif;
-              color: #333;
-              margin: 30px;
-              font-size: 11px;
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+              color: #0f172a;
+              margin: 0;
+              padding: 0;
+              font-size: 10px;
+              line-height: 1.4;
+              background: #fff;
             }
             .header {
-              border-bottom: 2px solid #333;
+              border-bottom: 2.5px solid #0f172a;
               padding-bottom: 8px;
-              margin-bottom: 15px;
+              margin-bottom: 12px;
               display: flex;
               justify-content: space-between;
-              align-items: flex-end;
+              align-items: flex-start;
+              width: 100%;
             }
             .header-left h1 {
               margin: 0 0 3px 0;
-              font-size: 18px;
+              font-size: 16px;
+              font-weight: 900;
               color: #0f172a;
-              letter-spacing: 0.5px;
+              letter-spacing: 0.3px;
+              text-transform: uppercase;
             }
             .header-left p {
-              margin: 0;
-              color: #64748b;
+              margin: 2px 0 0 0;
+              color: #475569;
               font-size: 10px;
             }
             .header-right {
               text-align: right;
-              font-size: 9px;
-              color: #64748b;
+              font-size: 9.5px;
+              color: #475569;
               line-height: 1.4;
             }
             h2 {
               font-size: 12px;
+              font-weight: 800;
               text-transform: uppercase;
-              color: #1e293b;
+              color: #0f172a;
               margin-top: 0;
               margin-bottom: 12px;
-              border-bottom: 1px solid #cbd5e1;
-              padding-bottom: 4px;
-              letter-spacing: 0.5px;
+              background: #f1f5f9;
+              border: 1px solid #cbd5e1;
+              border-radius: 6px;
+              padding: 8px 12px;
+              letter-spacing: 0.3px;
             }
             .report-table {
               width: 100%;
               border-collapse: collapse;
-              margin-bottom: 15px;
+              margin-bottom: 12px;
+              font-size: 9.5px;
             }
             .report-table th, .report-table td {
-              border: 1px solid #94a3b8;
-              padding: 6px 8px;
+              border: 1px solid #cbd5e1;
+              padding: 5px 8px;
               text-align: left;
             }
             .report-table th {
-              background-color: #f1f5f9;
-              font-weight: bold;
+              background-color: #0f172a !important;
+              color: #ffffff !important;
+              font-weight: 800;
               text-transform: uppercase;
-              font-size: 9px;
-              color: #334155;
+              font-size: 8.5px;
+              letter-spacing: 0.3px;
+            }
+            .report-table tr:nth-child(even) td {
+              background-color: #f8fafc;
             }
             .text-right {
               text-align: right !important;
@@ -1204,59 +1244,68 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
             .font-bold {
               font-weight: bold;
             }
-            .text-green {
-              color: #16a34a !important;
+            .text-green, .text-emerald {
+              color: #059669 !important;
+              font-weight: bold;
             }
             .text-red {
               color: #dc2626 !important;
-            }
-            .text-emerald {
-              color: #059669 !important;
+              font-weight: bold;
             }
             .report-summary {
-              margin-top: 20px;
-              padding: 12px;
-              background-color: #f8fafc;
-              border: 1px solid #e2e8f0;
-              border-radius: 4px;
-              width: fit-content;
-              min-width: 250px;
+              margin-top: 14px;
+              padding: 12px 16px;
+              background-color: #f8fafc !important;
+              border: 1.5px solid #cbd5e1;
+              border-radius: 8px;
+              width: 100%;
+              page-break-inside: avoid;
             }
             .report-summary p {
               margin: 0 0 5px 0;
-              font-size: 11px;
+              font-size: 10px;
             }
-            .report-summary p:last-child {
-              margin-bottom: 0;
+            .print-page-wrapper {
+              padding: 14mm 16mm;
+              width: 100%;
+              box-sizing: border-box;
+              margin: 0 auto;
             }
             @media print {
-              body { margin: 15px; }
-              .no-print { display: none; }
+              html, body {
+                margin: 0 !important;
+                padding: 0 !important;
+              }
+              .no-print {
+                display: none !important;
+              }
             }
           </style>
         </head>
         <body>
-          <div class="header">
-            <div class="header-left">
-              <h1>INVERSIONES NIQUITAO 3000 C.A.</h1>
-              <p>RIF: J-41132631 | Telf: 0424-2042877</p>
-              <p style="margin-top: 5px; font-weight: bold;">${periodText}</p>
+          <div class="print-page-wrapper">
+            <div class="header">
+              <div class="header-left">
+                <h1>INVERSIONES NIQUITAO 3000 C.A.</h1>
+                <p>RIF: J-41132631 | Telf: 0424-2042877</p>
+                <p style="margin-top: 5px; font-weight: bold;">${periodText}</p>
+              </div>
+              <div class="header-right">
+                <p><strong>Fecha Reporte:</strong> ${dateStr}</p>
+                <p><strong>Módulo:</strong> Historial de Cierres</p>
+              </div>
             </div>
-            <div class="header-right">
-              <p><strong>Fecha Reporte:</strong> ${dateStr}</p>
-              <p><strong>Módulo:</strong> Historial de Cierres</p>
-            </div>
+            
+            <h2>${title}</h2>
+            ${tableHtml}
           </div>
-          
-          <h2>${title}</h2>
-          ${tableHtml}
           
           <script>
             window.onload = function() {
               window.print();
               setTimeout(function() {
                 window.close();
-              }, 300);
+              }, 400);
             };
           </script>
         </body>
@@ -1376,46 +1425,139 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
     }
 
     printWindow.document.write(`
-      <html>
+      <html lang="es">
         <head>
+          <meta charset="utf-8">
           <title>${title}</title>
           <style>
-            @page { size: landscape; margin: 12mm; }
-            body { font-family: 'Segoe UI', Arial, sans-serif; margin: 15px; color: #1e293b; }
-            .header { display: flex; justify-content: space-between; border-bottom: 2px solid #0f172a; padding-bottom: 10px; margin-bottom: 15px; }
-            .header-left h1 { margin: 0; font-size: 16px; color: #0f172a; text-transform: uppercase; }
-            .header-left p { margin: 2px 0 0 0; font-size: 10.5px; color: #475569; }
-            .header-right { text-align: right; font-size: 10px; color: #475569; }
-            .header-right p { margin: 2px 0 0 0; }
-            h2 { font-size: 13px; color: #0f172a; text-transform: uppercase; margin: 0 0 10px 0; background: #e2e8f0; padding: 6px 10px; border-radius: 4px; text-align: center; }
-            .report-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10px; }
-            .report-table th { background-color: #0f172a; color: #ffffff; border: 1px solid #0f172a; padding: 6px 6px; font-weight: bold; text-transform: uppercase; font-size: 8.5px; }
-            .report-table td { border: 1px solid #cbd5e1; padding: 5px 6px; font-size: 9.5px; }
+            @page {
+              size: landscape;
+              margin: 0mm;
+            }
+            * {
+              box-sizing: border-box;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            html, body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+              margin: 0;
+              padding: 0;
+              color: #0f172a;
+              font-size: 10px;
+              line-height: 1.4;
+              background: #fff;
+            }
+            .print-page-wrapper {
+              padding: 10mm 14mm;
+              width: 100%;
+              box-sizing: border-box;
+              margin: 0 auto;
+            }
+            .header {
+              display: flex;
+              justify-content: space-between;
+              border-bottom: 2.5px solid #0f172a;
+              padding-bottom: 8px;
+              margin-bottom: 12px;
+              width: 100%;
+            }
+            .header-left h1 {
+              margin: 0;
+              font-size: 16px;
+              font-weight: 900;
+              color: #0f172a;
+              text-transform: uppercase;
+              letter-spacing: 0.3px;
+            }
+            .header-left p {
+              margin: 2px 0 0 0;
+              font-size: 10px;
+              color: #475569;
+            }
+            .header-right {
+              text-align: right;
+              font-size: 9.5px;
+              color: #475569;
+              line-height: 1.4;
+            }
+            .header-right p {
+              margin: 2px 0 0 0;
+            }
+            h2 {
+              font-size: 12px;
+              font-weight: 800;
+              color: #0f172a;
+              text-transform: uppercase;
+              margin: 0 0 12px 0;
+              background: #f1f5f9;
+              border: 1px solid #cbd5e1;
+              border-radius: 6px;
+              padding: 8px 12px;
+              letter-spacing: 0.3px;
+            }
+            .report-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 12px;
+              font-size: 9.5px;
+            }
+            .report-table th {
+              background-color: #0f172a !important;
+              color: #ffffff !important;
+              border: 1px solid #0f172a;
+              padding: 6px 8px;
+              font-weight: 800;
+              text-transform: uppercase;
+              font-size: 8.5px;
+              letter-spacing: 0.3px;
+            }
+            .report-table td {
+              border: 1px solid #cbd5e1;
+              padding: 5px 8px;
+              font-size: 9.5px;
+            }
+            .report-table tr:nth-child(even) td {
+              background-color: #f8fafc;
+            }
             .text-center { text-align: center !important; }
             .text-right { text-align: right !important; }
             .font-bold { font-weight: bold; }
-            .text-emerald { color: #059669 !important; }
-            .report-summary { padding: 12px 16px; background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; }
-            .report-summary p { margin: 0 0 4px 0; font-size: 10.5px; }
-            @media print { body { margin: 5px; } .no-print { display: none; } }
+            .text-emerald { color: #059669 !important; font-weight: bold; }
+            .report-summary {
+              padding: 12px 16px;
+              background-color: #f8fafc !important;
+              border: 1.5px solid #cbd5e1;
+              border-radius: 8px;
+              margin-top: 14px;
+              width: 100%;
+              page-break-inside: avoid;
+            }
+            .report-summary p { margin: 0 0 4px 0; font-size: 10px; }
+            @media print {
+              html, body { margin: 0 !important; padding: 0 !important; }
+              .no-print { display: none !important; }
+            }
           </style>
         </head>
         <body>
-          <div class="header">
-            <div class="header-left">
-              <h1>${companyConfig?.nombre_comercio || 'INVERSIONES NIQUITAO 3000 C.A.'}</h1>
-              <p>RIF: ${companyConfig?.rif || 'J-41132631'} | Dirección: ${companyConfig?.direccion || 'Centro, Caracas'}</p>
-              <p style="margin-top: 4px; font-weight: bold; color: #0f172a;">${periodText}</p>
+          <div class="print-page-wrapper">
+            <div class="header">
+              <div class="header-left">
+                <h1>${companyConfig?.nombre_comercio || 'INVERSIONES NIQUITAO 3000 C.A.'}</h1>
+                <p>RIF: ${companyConfig?.rif || 'J-41132631'} | Dirección: ${companyConfig?.direccion || 'Centro, Caracas'}</p>
+                <p style="margin-top: 4px; font-weight: bold; color: #0f172a;">${periodText}</p>
+              </div>
+              <div class="header-right">
+                <p><strong>Fecha Emisión:</strong> ${dateStr}</p>
+                <p><strong>Régimen:</strong> Contribuyente Ordinario IVA</p>
+                <p><strong>Sistema:</strong> WinterPOS Cloud Fiscal</p>
+              </div>
             </div>
-            <div class="header-right">
-              <p><strong>Fecha Emisión:</strong> ${dateStr}</p>
-              <p><strong>Régimen:</strong> Contribuyente Ordinario IVA</p>
-              <p><strong>Sistema:</strong> WinterPOS Cloud Fiscal</p>
-            </div>
+            
+            <h2>${title}</h2>
+            ${tableHtml}
           </div>
-          
-          <h2>${title}</h2>
-          ${tableHtml}
           
           <script>
             window.onload = function() {
@@ -1493,69 +1635,102 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
     }
 
     printWindow.document.write(`
-      <html>
+      <html lang="es">
         <head>
+          <meta charset="utf-8">
           <title>Reporte PDF - ${title}</title>
           <style>
-            body {
-              font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-              color: #1e293b;
-              margin: 20px;
-              font-size: 11px;
+            @page {
+              size: portrait;
+              margin: 0mm;
+            }
+            * {
+              box-sizing: border-box;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            html, body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+              color: #0f172a;
+              margin: 0;
+              padding: 0;
+              background: #fff;
+              font-size: 10.5px;
+              line-height: 1.4;
+            }
+            .print-page-wrapper {
+              padding: 14mm 16mm;
+              width: 100%;
+              box-sizing: border-box;
+              margin: 0 auto;
             }
             .header {
-              border-bottom: 2px solid #0f172a;
+              border-bottom: 2.5px solid #0f172a;
               padding-bottom: 8px;
-              margin-bottom: 15px;
+              margin-bottom: 12px;
               display: flex;
               justify-content: space-between;
-              align-items: flex-end;
+              align-items: flex-start;
+              width: 100%;
             }
             .header-left h1 {
               margin: 0 0 3px 0;
-              font-size: 18px;
+              font-size: 16px;
+              font-weight: 900;
               color: #0f172a;
-              letter-spacing: 0.5px;
+              letter-spacing: 0.3px;
+              text-transform: uppercase;
             }
             .header-left p {
-              margin: 0;
-              color: #64748b;
+              margin: 2px 0 0 0;
+              color: #475569;
               font-size: 10px;
             }
             .header-right {
               text-align: right;
-              font-size: 9px;
-              color: #64748b;
+              font-size: 9.5px;
+              color: #475569;
               line-height: 1.4;
+            }
+            .header-right p {
+              margin: 2px 0 0 0;
             }
             h2 {
               font-size: 12px;
+              font-weight: 800;
               text-transform: uppercase;
-              color: #1e293b;
+              color: #0f172a;
               margin-top: 0;
               margin-bottom: 12px;
-              border-bottom: 1px solid #cbd5e1;
-              padding-bottom: 4px;
-              letter-spacing: 0.5px;
+              background: #f1f5f9;
+              border: 1px solid #cbd5e1;
+              border-radius: 6px;
+              padding: 8px 12px;
+              letter-spacing: 0.3px;
             }
             .report-table {
               width: 100%;
               border-collapse: collapse;
-              margin-bottom: 15px;
+              margin-bottom: 12px;
+              font-size: 9.5px;
             }
             .report-table th {
-              background-color: #0f172a;
-              color: #ffffff;
+              background-color: #0f172a !important;
+              color: #ffffff !important;
               border: 1px solid #0f172a;
-              padding: 7px 8px;
-              font-weight: bold;
+              padding: 6px 8px;
+              font-weight: 800;
               text-transform: uppercase;
-              font-size: 9px;
+              font-size: 8.5px;
+              letter-spacing: 0.3px;
             }
             .report-table td {
               border: 1px solid #cbd5e1;
-              padding: 6px 8px;
-              font-size: 10.5px;
+              padding: 5.5px 8px;
+              font-size: 9.5px;
+            }
+            .report-table tr:nth-child(even) td {
+              background-color: #f8fafc;
             }
             .text-center {
               text-align: center !important;
@@ -1566,59 +1741,62 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
             .font-bold {
               font-weight: bold;
             }
-            .text-green {
-              color: #16a34a !important;
+            .text-green, .text-emerald {
+              color: #059669 !important;
+              font-weight: bold;
             }
             .text-red {
               color: #dc2626 !important;
-            }
-            .text-emerald {
-              color: #059669 !important;
+              font-weight: bold;
             }
             .report-summary {
-              margin-top: 20px;
+              margin-top: 14px;
               padding: 12px 16px;
-              background-color: #f8fafc;
-              border: 1px solid #cbd5e1;
+              background-color: #f8fafc !important;
+              border: 1.5px solid #cbd5e1;
               border-radius: 8px;
-              width: fit-content;
-              min-width: 280px;
+              width: 100%;
+              page-break-inside: avoid;
             }
             .report-summary p {
               margin: 0 0 5px 0;
-              font-size: 11px;
-            }
-            .report-summary p:last-child {
-              margin-bottom: 0;
+              font-size: 10px;
             }
             @media print {
-              body { margin: 10px; }
-              .no-print { display: none; }
+              html, body {
+                margin: 0 !important;
+                padding: 0 !important;
+              }
+              .no-print {
+                display: none !important;
+              }
             }
           </style>
         </head>
         <body>
-          <div class="header">
-            <div class="header-left">
-              <h1>INVERSIONES NIQUITAO 3000 C.A.</h1>
-              <p>RIF: J-41132631 | Telf: 0424-2042877</p>
-              <p style="margin-top: 5px; font-weight: bold;">${periodText}</p>
+          <div class="print-page-wrapper">
+            <div class="header">
+              <div class="header-left">
+                <h1>INVERSIONES NIQUITAO 3000 C.A.</h1>
+                <p>RIF: J-41132631 | Telf: 0424-2042877</p>
+                <p style="margin-top: 5px; font-weight: bold;">${periodText}</p>
+              </div>
+              <div class="header-right">
+                <p><strong>Fecha Reporte:</strong> ${dateStr}</p>
+                <p><strong>Módulo:</strong> Historial de Transacciones</p>
+              </div>
             </div>
-            <div class="header-right">
-              <p><strong>Fecha Reporte:</strong> ${dateStr}</p>
-              <p><strong>Módulo:</strong> Historial de Transacciones</p>
-            </div>
+            
+            <h2>${title}</h2>
+            ${tableHtml}
           </div>
-          
-          <h2>${title}</h2>
-          ${tableHtml}
           
           <script>
             window.onload = function() {
               window.print();
               setTimeout(function() {
                 window.close();
-              }, 300);
+              }, 400);
             };
           </script>
         </body>

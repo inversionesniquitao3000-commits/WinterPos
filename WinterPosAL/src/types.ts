@@ -191,7 +191,6 @@ export interface CompanyDocument {
   created_at?: string;
 }
 
-
 export interface Sale {
   id?: number;
   factura_nro: string;
@@ -587,11 +586,12 @@ export interface Empleado {
 
 export interface PlantillaDocumentoLaboral {
   id: string;
-  tipo: 'CONSTANCIA' | 'CONTRATO' | 'VACACIONES' | 'FINIQUITO';
+  tipo: 'CONSTANCIA' | 'CONTRATO' | 'VACACIONES' | 'FINIQUITO' | 'RECIBO_NOMINA' | 'RECIBO';
   nombre: string;
   descripcion: string;
   contenido: string;
   variables_disponibles: string[];
+  tamano_papel?: 'letter' | 'legal' | 'folio' | 'a4';
 }
 
 export interface ReciboPagoNomina {

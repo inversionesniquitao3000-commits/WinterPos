@@ -6643,13 +6643,13 @@ export default function Inventario({
 
                       <div>
                         <label className="text-[10.5px] font-bold text-slate-700 block mb-0.5">Impuesto IVA</label>
-                        <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs select-none shadow-2xs h-[30px]">
-                          <label className="flex items-center gap-1 cursor-pointer font-bold text-slate-700 text-xs">
+                        <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg px-1.5 py-1 text-xs select-none shadow-2xs h-[30px]">
+                          <label className="flex items-center gap-0.5 cursor-pointer font-bold text-slate-700 text-xs shrink-0">
                             <input
                               type="checkbox"
                               checked={newTaxActive}
                               onChange={(e) => setNewTaxActive(e.target.checked)}
-                              className="rounded border-slate-300 text-winter-inventarioStart focus:ring-winter-inventarioStart w-3.5 h-3.5"
+                              className="rounded border-slate-300 text-winter-inventarioStart focus:ring-winter-inventarioStart w-3.5 h-3.5 cursor-pointer"
                             />
                             <span>Sí</span>
                           </label>
@@ -6659,9 +6659,9 @@ export default function Inventario({
                             disabled={!newTaxActive}
                             value={newTaxName}
                             onChange={(e) => setNewTaxName(e.target.value.toUpperCase())}
-                            className="w-10 bg-slate-50 border border-slate-200 rounded px-1 py-0.5 text-[10px] font-bold text-slate-800 uppercase disabled:opacity-40"
+                            className="w-8 text-center bg-slate-50 border border-slate-200 rounded px-0.5 py-0.5 text-[10px] font-bold text-slate-800 uppercase disabled:opacity-40"
                           />
-                          <span className="font-bold text-slate-400 text-[10px]">%</span>
+                          <span className="font-bold text-slate-400 text-[10px] shrink-0">%</span>
                           <input
                             type="number"
                             min="0"
@@ -6669,7 +6669,7 @@ export default function Inventario({
                             disabled={!newTaxActive}
                             value={newTaxPct}
                             onChange={(e) => setNewTaxPct(e.target.value)}
-                            className="w-9 text-center bg-slate-50 border border-slate-200 rounded px-0.5 py-0.5 font-bold font-mono text-[10px] text-slate-900 disabled:opacity-40"
+                            className="w-12 text-center bg-slate-50 border border-slate-200 rounded px-1 py-0.5 font-bold font-mono text-[11px] text-slate-900 disabled:opacity-40 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                           />
                         </div>
                       </div>
@@ -7126,13 +7126,13 @@ export default function Inventario({
 
                       <div>
                         <label className="text-[10.5px] font-bold text-slate-700 block mb-0.5">Impuesto IVA</label>
-                        <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs select-none shadow-2xs h-[30px]">
-                          <label className="flex items-center gap-1 cursor-pointer font-bold text-slate-700 text-xs">
+                        <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg px-1.5 py-1 text-xs select-none shadow-2xs h-[30px]">
+                          <label className="flex items-center gap-0.5 cursor-pointer font-bold text-slate-700 text-xs shrink-0">
                             <input
                               type="checkbox"
                               checked={editTaxActive}
                               onChange={(e) => setEditTaxActive(e.target.checked)}
-                              className="rounded border-slate-300 text-winter-inventarioStart focus:ring-winter-inventarioStart w-3.5 h-3.5"
+                              className="rounded border-slate-300 text-winter-inventarioStart focus:ring-winter-inventarioStart w-3.5 h-3.5 cursor-pointer"
                             />
                             <span>Sí</span>
                           </label>
@@ -7142,9 +7142,9 @@ export default function Inventario({
                             disabled={!editTaxActive}
                             value={editTaxName}
                             onChange={(e) => setEditTaxName(e.target.value.toUpperCase())}
-                            className="w-10 bg-slate-50 border border-slate-200 rounded px-1 py-0.5 text-[10px] font-bold text-slate-800 uppercase disabled:opacity-40"
+                            className="w-8 text-center bg-slate-50 border border-slate-200 rounded px-0.5 py-0.5 text-[10px] font-bold text-slate-800 uppercase disabled:opacity-40"
                           />
-                          <span className="font-bold text-slate-400 text-[10px]">%</span>
+                          <span className="font-bold text-slate-400 text-[10px] shrink-0">%</span>
                           <input
                             type="number"
                             min="0"
@@ -7152,7 +7152,7 @@ export default function Inventario({
                             disabled={!editTaxActive}
                             value={editTaxPct}
                             onChange={(e) => setEditTaxPct(e.target.value)}
-                            className="w-9 text-center bg-slate-50 border border-slate-200 rounded px-0.5 py-0.5 font-bold font-mono text-[10px] text-slate-900 disabled:opacity-40"
+                            className="w-12 text-center bg-slate-50 border border-slate-200 rounded px-1 py-0.5 font-bold font-mono text-[11px] text-slate-900 disabled:opacity-40 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                           />
                         </div>
                       </div>

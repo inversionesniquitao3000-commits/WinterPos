@@ -116,75 +116,205 @@ export default function CentroReportesModal({
   // -------------------------------------------------------------
   // HELPER: IMPRESIÓN HTML EN PDF CON MEMBRETE
   // -------------------------------------------------------------
-  const printReportHtml = (title: string, tableHtml: string, summaryHtml?: string) => {
+  const printReportHtml = (
+    title: string, 
+    tableHtml: string, 
+    summaryHtml?: string, 
+    orientation: 'portrait' | 'landscape' = 'portrait'
+  ) => {
     const printWindow = window.open("", "_blank");
     if (!printWindow) {
       alert('Por favor habilite las ventanas emergentes (popups) para ver el reporte.');
       return;
     }
 
-    const dateStr = new Date().toLocaleString();
+    const dateStr = new Date().toLocaleString('es-VE');
 
     printWindow.document.write(`
       <!DOCTYPE html>
-      <html>
+      <html lang="es">
         <head>
+          <meta charset="utf-8">
           <title>${title} - ${companyName}</title>
           <style>
-            @page { size: landscape; margin: 10mm; }
-            body { font-family: 'Segoe UI', Arial, sans-serif; margin: 15px; color: #0f172a; background: #fff; font-size: 10px; }
-            .header { display: flex; justify-content: space-between; border-bottom: 2.5px solid #0f172a; padding-bottom: 8px; margin-bottom: 12px; }
-            .header-left h1 { margin: 0; font-size: 15px; font-weight: 800; color: #0f172a; text-transform: uppercase; }
-            .header-left p { margin: 2px 0 0 0; font-size: 10px; color: #475569; }
-            .header-right { text-align: right; font-size: 9.5px; color: #475569; }
-            .header-right p { margin: 1px 0 0 0; }
-            .report-title-box { background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 12px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
-            .report-title-box h2 { margin: 0; font-size: 13px; font-weight: 800; color: #0f172a; text-transform: uppercase; }
-            .report-title-box span { font-size: 10.5px; font-weight: bold; color: #4338ca; }
-            .report-table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 9.5px; }
-            .report-table th { background-color: #0f172a; color: #ffffff; border: 1px solid #0f172a; padding: 6px 5px; font-weight: bold; text-transform: uppercase; font-size: 8.5px; letter-spacing: 0.3px; }
-            .report-table td { border: 1px solid #cbd5e1; padding: 4.5px 5px; font-size: 9px; }
+            @page {
+              size: ${orientation === 'landscape' ? 'landscape' : 'portrait'};
+              margin: 0mm;
+            }
+            * {
+              box-sizing: border-box;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            html, body {
+              margin: 0;
+              padding: 0;
+              background: #ffffff;
+              color: #0f172a;
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+              font-size: 10px;
+              line-height: 1.4;
+            }
+            .print-page-wrapper {
+              padding: ${orientation === 'landscape' ? '10mm 14mm' : '14mm 16mm'};
+              width: 100%;
+              box-sizing: border-box;
+              margin: 0 auto;
+            }
+            .header-container {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              border-bottom: 2.5px solid #0f172a;
+              padding-bottom: 10px;
+              margin-bottom: 14px;
+              width: 100%;
+            }
+            .header-left h1 {
+              margin: 0;
+              font-size: 16px;
+              font-weight: 900;
+              color: #0f172a;
+              text-transform: uppercase;
+              letter-spacing: 0.3px;
+            }
+            .header-left p {
+              margin: 3px 0 0 0;
+              font-size: 10.5px;
+              color: #475569;
+            }
+            .header-right {
+              text-align: right;
+              font-size: 10px;
+              color: #475569;
+            }
+            .header-right p {
+              margin: 2px 0 0 0;
+            }
+            .report-title-box {
+              background: #f1f5f9 !important;
+              border: 1.5px solid #cbd5e1;
+              border-radius: 8px;
+              padding: 9px 14px;
+              margin-bottom: 14px;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+            }
+            .report-title-box h2 {
+              margin: 0;
+              font-size: 13.5px;
+              font-weight: 900;
+              color: #0f172a;
+              text-transform: uppercase;
+              letter-spacing: 0.4px;
+            }
+            .report-title-box span {
+              font-size: 11px;
+              font-weight: 800;
+              color: #1e40af;
+            }
+            .report-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 6px;
+              margin-bottom: 16px;
+              font-size: 10px;
+            }
+            .report-table th {
+              background-color: #0f172a !important;
+              color: #ffffff !important;
+              border: 1px solid #0f172a;
+              padding: 7px 8px;
+              font-weight: 800;
+              text-transform: uppercase;
+              font-size: 9px;
+              letter-spacing: 0.3px;
+            }
+            .report-table td {
+              border: 1px solid #cbd5e1;
+              padding: 6px 8px;
+              font-size: 9.5px;
+            }
+            .report-table tr:nth-child(even) td {
+              background-color: #f8fafc;
+            }
             .text-center { text-align: center !important; }
             .text-right { text-align: right !important; }
             .font-bold { font-weight: bold; }
-            .text-emerald { color: #059669 !important; }
-            .text-indigo { color: #4338ca !important; }
-            .text-amber { color: #d97706 !important; }
-            .text-red { color: #dc2626 !important; }
-            .report-summary-grid { display: flex; gap: 15px; margin-top: 15px; }
-            .summary-card { flex: 1; padding: 10px 14px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; }
-            .summary-card h4 { margin: 0 0 6px 0; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; font-size: 10.5px; font-weight: 800; text-transform: uppercase; color: #0f172a; }
-            .summary-card p { margin: 0 0 3px 0; font-size: 9.5px; }
-            @media print { body { margin: 0; } .no-print { display: none; } }
+            .text-emerald { color: #059669 !important; font-weight: bold; }
+            .text-indigo { color: #4338ca !important; font-weight: bold; }
+            .text-amber { color: #d97706 !important; font-weight: bold; }
+            .text-red { color: #dc2626 !important; font-weight: bold; }
+            .report-summary-grid {
+              display: flex;
+              flex-wrap: wrap;
+              gap: 14px;
+              margin-top: 16px;
+              page-break-inside: avoid;
+            }
+            .summary-card {
+              flex: 1;
+              min-width: 250px;
+              padding: 12px 16px;
+              background: #f8fafc !important;
+              border: 1.5px solid #cbd5e1;
+              border-radius: 8px;
+            }
+            .summary-card h4 {
+              margin: 0 0 6px 0;
+              border-bottom: 1.5px solid #cbd5e1;
+              padding-bottom: 5px;
+              font-size: 11px;
+              font-weight: 900;
+              text-transform: uppercase;
+              color: #0f172a;
+            }
+            .summary-card p {
+              margin: 0 0 4px 0;
+              font-size: 10px;
+              color: #1e293b;
+            }
+            @media print {
+              html, body {
+                margin: 0 !important;
+                padding: 0 !important;
+              }
+              .no-print {
+                display: none !important;
+              }
+            }
           </style>
         </head>
         <body>
-          <div class="header">
-            <div class="header-left">
-              <h1>${companyName}</h1>
-              <p><strong>RIF:</strong> ${companyRif} | <strong>Dirección:</strong> ${companyAddress}</p>
-              <p><strong>Sistema:</strong> WinterPOS Cloud Fiscal | Tasa Referencial: Bs ${tasaDia ? tasaDia.toFixed(2) : 'N/A'}</p>
+          <div class="print-page-wrapper">
+            <div class="header-container">
+              <div class="header-left">
+                <h1>${companyName}</h1>
+                <p><strong>RIF:</strong> ${companyRif} &nbsp;|&nbsp; <strong>Dirección:</strong> ${companyAddress}</p>
+                <p><strong>Sistema:</strong> WinterPOS Cloud Fiscal &nbsp;|&nbsp; <strong>Tasa Referencial:</strong> Bs ${tasaDia ? tasaDia.toFixed(2) : 'N/A'}</p>
+              </div>
+              <div class="header-right">
+                <p><strong>Fecha Impresión:</strong> ${dateStr}</p>
+                <p><strong>Régimen:</strong> Contribuyente Ordinario IVA</p>
+                <p><strong>Estado:</strong> ${periodText}</p>
+              </div>
             </div>
-            <div class="header-right">
-              <p><strong>Fecha Impresión:</strong> ${dateStr}</p>
-              <p><strong>Régimen:</strong> Contribuyente Ordinario IVA</p>
-              <p><strong>Estado:</strong> ${periodText}</p>
+            
+            <div class="report-title-box">
+              <h2>${title}</h2>
+              <span>${periodText}</span>
             </div>
-          </div>
-          
-          <div class="report-title-box">
-            <h2>${title}</h2>
-            <span>${periodText}</span>
-          </div>
 
-          ${tableHtml}
+            ${tableHtml}
 
-          ${summaryHtml || ''}
+            ${summaryHtml || ''}
+          </div>
 
           <script>
             window.onload = function() {
               window.print();
-              setTimeout(function() { window.close(); }, 400);
+              setTimeout(function() { window.close(); }, 500);
             };
           </script>
         </body>
@@ -329,7 +459,7 @@ export default function CentroReportesModal({
       </div>
     `;
 
-    printReportHtml('LIBRO DE VENTAS FISCAL OFICIAL (SENIAT)', tableHtml, summaryHtml);
+    printReportHtml('LIBRO DE VENTAS FISCAL OFICIAL (SENIAT)', tableHtml, summaryHtml, 'landscape');
   };
 
   // -------------------------------------------------------------
