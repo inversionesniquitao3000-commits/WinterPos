@@ -2,6 +2,17 @@
   {
     "cliente": "Inversiones Niquitao JB AL 3000",
     "rif": "J-411332631",
+    "hwid": "WPOS-DF3E-33D6-7EA0",
+    "terminales": "ILIMITADO",
+    "fechaEmision": "2026-08-29",
+    "fechaExpiracion": "2026-09-28",
+    "tipo": "30 DÍAS",
+    "archivo": "Licencia_Inversiones_Niquitao_JB_AL_3000_J-411332631_WPOS-DF3E-33D6-7EA0.lic",
+    "fechaRegistro": "2026-08-29T17:10:51.431Z"
+  },
+  {
+    "cliente": "Inversiones Niquitao JB AL 3000",
+    "rif": "J-411332631",
     "hwid": "WPOS-64AF-CAB0-DB34",
     "terminales": "ILIMITADO",
     "fechaEmision": "2026-08-28",
