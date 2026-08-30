@@ -12,7 +12,18 @@ export default defineConfig({
   ],
   build: {
     sourcemap: false,
-    chunkSizeWarningLimit: 1500
+    chunkSizeWarningLimit: 1200,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-icons': ['lucide-react'],
+          'vendor-excel': ['xlsx'],
+          'vendor-pdf': ['jspdf', 'jspdf-autotable', 'pdfjs-dist'],
+          'vendor-canvas': ['html2canvas', 'html-to-image']
+        }
+      }
+    }
   },
   server: {
     host: true, // Expone en la red LAN para acceso desde otros dispositivos

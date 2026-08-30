@@ -41,7 +41,19 @@ const formatStockVal = (val: any, aGranel?: boolean) => {
   const num = parseFloat(val);
   if (isNaN(num)) return '0';
   if (!aGranel) return Math.round(num).toString();
-  return num.toFixed(3);
+
+  const isNegative = num < 0;
+  const abs = Math.abs(num);
+  const kg = Math.floor(abs);
+  const gr = Math.round((abs - kg) * 1000);
+
+  const parts: string[] = [];
+  if (kg > 0) parts.push(`${kg} Kg`);
+  if (gr > 0) parts.push(`${gr} Gr`);
+  if (parts.length === 0) parts.push('0 Kg');
+
+  const formatted = parts.join(' ');
+  return isNegative ? `-${formatted}` : formatted;
 };
 
 export default function Inventario({
@@ -1214,6 +1226,7 @@ export default function Inventario({
   const [customStockValue, setCustomStockValue] = useState<string>('5');
   const [filterMinStock, setFilterMinStock] = useState<'todos' | 'bajo_minimo'>('todos');
   const [filterTax, setFilterTax] = useState<'todos' | 'exentos' | 'gravables'>('todos');
+  const [filterGranel, setFilterGranel] = useState<'todos' | 'a_granel' | 'unidad'>('todos');
 
 
 
@@ -2322,6 +2335,9 @@ export default function Inventario({
       type: string;
       totalItems: number;
       totalQty: number;
+      totalUds: number;
+      totalKg: number;
+      hasBulk: boolean;
       movements: InventoryMovement[];
     }> = {};
 
@@ -2338,16 +2354,29 @@ export default function Inventario({
           type: m.type,
           totalItems: 0,
           totalQty: 0,
+          totalUds: 0,
+          totalKg: 0,
+          hasBulk: false,
           movements: []
         };
       }
+      const relatedProd = safeProducts.find(p => p.barcode === m.productCode || p.description === m.productDescription);
+      const isBulk = relatedProd?.a_granel === true || (m as any).a_granel === true;
+      const numQty = typeof m.qty === 'number' ? m.qty : (parseFloat(m.qty as any) || 0);
+
       groups[groupKey].totalItems += 1;
-      groups[groupKey].totalQty += m.qty;
+      groups[groupKey].totalQty += numQty;
+      if (isBulk) {
+        groups[groupKey].totalKg += numQty;
+        groups[groupKey].hasBulk = true;
+      } else {
+        groups[groupKey].totalUds += numQty;
+      }
       groups[groupKey].movements.push(m);
     });
 
     return Object.values(groups);
-  }, [filteredMovements]);
+  }, [filteredMovements, safeProducts]);
 
   const existingCategories = useMemo(() => {
     const cats = new Set<string>();
@@ -3336,10 +3365,15 @@ export default function Inventario({
         filterTax === 'todos' ? true :
         filterTax === 'exentos' ? isExempt :
         filterTax === 'gravables' ? !isExempt : true;
+
+      const matchesGranel = 
+        filterGranel === 'todos' ? true :
+        filterGranel === 'a_granel' ? p.a_granel === true :
+        filterGranel === 'unidad' ? !p.a_granel : true;
         
-      return matchesSearch && matchesCategory && matchesStock && matchesMinStock && matchesTax;
+      return matchesSearch && matchesCategory && matchesStock && matchesMinStock && matchesTax && matchesGranel;
     });
-  }, [safeProducts, searchTerm, selectedCategories, filterStock, customStockValue, filterMinStock, filterTax]);
+  }, [safeProducts, searchTerm, selectedCategories, filterStock, customStockValue, filterMinStock, filterTax, filterGranel]);
 
   const sortedProducts = useMemo(() => {
     if (sortRules.length === 0) return filteredProducts;
@@ -3694,6 +3728,9 @@ export default function Inventario({
       const taxFilterLabel = 
         filterTax === 'todos' ? 'TODOS' :
         filterTax === 'exentos' ? 'SOLO EXENTOS (E)' : 'SOLO GRAVABLES (G)';
+      const granelFilterLabel = 
+        filterGranel === 'todos' ? 'TODOS' :
+        filterGranel === 'a_granel' ? 'SOLO A GRANEL' : 'SOLO UNIDADES';
 
       // 1. Crear documento PDF en orientación Horizontal (Landscape) para máxima legibilidad de todas las columnas
       const doc = new jsPDF({
@@ -3737,7 +3774,7 @@ export default function Inventario({
       // Filtros Aplicados
       doc.setFontSize(7.5);
       doc.setTextColor(100, 116, 139);
-      doc.text(`FILTROS: Categoría: [${categoryFilterLabel}]  |  Stock: [${stockFilterLabel}]  |  Alerta: [${minStockFilterLabel}]  |  IVA: [${taxFilterLabel}]`, margin, 66);
+      doc.text(`FILTROS: Categoría: [${categoryFilterLabel}]  |  Stock: [${stockFilterLabel}]  |  Alerta: [${minStockFilterLabel}]  |  IVA: [${taxFilterLabel}]  |  Tipo: [${granelFilterLabel}]`, margin, 66);
 
       // Resumen KPI (Cuadro informativo superior)
       const kpiY = 74;
@@ -4178,7 +4215,7 @@ export default function Inventario({
                         {safeProducts.length}
                       </span>
                       <span className="text-[10px] text-slate-400 font-sans font-normal">
-                        ({totalUds} uds + {totalKg.toFixed(3)} kg)
+                        ({totalUds} uds + {formatStockVal(totalKg, true)})
                       </span>
                     </div>
                   </>
@@ -4189,7 +4226,7 @@ export default function Inventario({
                       {safeProducts.length}
                     </span>
                     <span className="text-[10px] text-slate-400 font-sans font-normal">
-                      ({totalUds} uds + {totalKg.toFixed(3)} kg)
+                      ({totalUds} uds + {formatStockVal(totalKg, true)})
                     </span>
                   </div>
                 )}
@@ -4226,7 +4263,7 @@ export default function Inventario({
                           {filteredProducts.length}
                         </span>
                         <span className="text-[10px] text-sky-600 font-sans font-normal">
-                          ({filtUds} uds + {filtKg.toFixed(3)} kg)
+                          ({filtUds} uds + {formatStockVal(filtKg, true)})
                         </span>
                       </div>
                     </>
@@ -4239,7 +4276,7 @@ export default function Inventario({
                         {filteredProducts.length}
                       </span>
                       <span className="text-[10px] text-sky-600 font-sans font-normal">
-                        ({filtUds} uds + {filtKg.toFixed(3)} kg)
+                        ({filtUds} uds + {formatStockVal(filtKg, true)})
                       </span>
                     </div>
                   )}
@@ -4415,7 +4452,7 @@ export default function Inventario({
           </div>
 
           {/* FILTER CONTROLS */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 bg-slate-50/50 border border-slate-200/60 rounded-xl py-1.5 px-3 shadow-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5 bg-slate-50/50 border border-slate-200/60 rounded-xl py-1.5 px-3 shadow-sm">
             {/* Multi-Category Selector */}
             <div className="relative flex flex-col gap-0.5" ref={categoryMenuRef}>
               <label className="text-[10px] font-bold text-slate-500 font-sans uppercase">Categorías (Multi-Selección)</label>
@@ -4528,6 +4565,20 @@ export default function Inventario({
                 <option value="todos">TODOS (TODOS LOS PRODUCTOS)</option>
                 <option value="exentos">🟢 SOLO EXENTOS (E) - 0% IVA</option>
                 <option value="gravables">🔵 SOLO GRAVABLES (G) - CON IVA 16%</option>
+              </select>
+            </div>
+
+            {/* Tipo de Venta Filter (A Granel vs Unidad) */}
+            <div className="flex flex-col gap-0.5">
+              <label className="text-[10px] font-bold text-slate-500 font-sans uppercase">Tipo de Venta (Granel / Unidad)</label>
+              <select
+                value={filterGranel}
+                onChange={(e) => setFilterGranel(e.target.value as any)}
+                className="bg-white border border-slate-300 rounded-lg py-1 px-2 text-xs text-slate-800 font-sans font-bold focus:border-winter-inventarioStart focus:outline-none shadow-sm"
+              >
+                <option value="todos">TODOS (GRANEL Y UNIDAD)</option>
+                <option value="a_granel">⚖️ SOLO A GRANEL (KG / PESO)</option>
+                <option value="unidad">📦 SOLO UNIDADES (DETAL / BULTO)</option>
               </select>
             </div>
           </div>
@@ -4919,7 +4970,7 @@ export default function Inventario({
                         <span className="font-extrabold uppercase truncate block text-slate-900">{selectedProduct.description}</span>
                         <span className="font-mono text-slate-500 font-bold block text-[9.5px]">{selectedProduct.barcode}</span>
                         <span className={`font-mono font-black block mt-0.5 ${selectedProduct.stock_actual <= selectedProduct.stock_minimo ? 'text-red-700 animate-pulse' : 'text-slate-700'}`}>
-                          Stock: {formatStockVal(selectedProduct.stock_actual, selectedProduct.a_granel)} {selectedProduct.a_granel ? 'kg' : 'uds'}
+                          Stock: {formatStockVal(selectedProduct.stock_actual, selectedProduct.a_granel)}{!selectedProduct.a_granel ? ' uds' : ''}
                         </span>
                       </div>
                     </div>
@@ -5430,31 +5481,54 @@ export default function Inventario({
                       if (m.type === 'Merma') typeColor = 'text-red-700 bg-red-50 border-red-200 font-bold';
                       if (m.type === 'Devolucion' || m.type === 'Devolución') typeColor = 'text-yellow-700 bg-yellow-50 border-yellow-250 font-bold';
 
-                      const relatedProd = products.find(p => p.barcode === m.productCode || p.description === m.productDescription);
+                      const relatedProd = safeProducts.find(p => p.barcode === m.productCode || p.description === m.productDescription);
                       const isBulk = relatedProd?.a_granel === true || (m as any).a_granel === true;
 
-                      const formatKardexVal = (numVal: number, showSign: boolean = false) => {
-                        const val = typeof numVal === 'number' ? numVal : (parseFloat(numVal) || 0);
-                        const formatted = isBulk ? val.toFixed(3) : (Math.round(val * 1000) / 1000 % 1 === 0 ? Math.round(val).toString() : val.toFixed(3));
-                        if (showSign && val > 0) return `+${formatted}`;
-                        return formatted;
+                      const formatKardexVal = (numVal: number, showSign: boolean = false, isBulkProd: boolean = isBulk) => {
+                        const val = typeof numVal === 'number' ? numVal : (parseFloat(numVal as any) || 0);
+                        if (isBulkProd) {
+                          const isNeg = val < 0;
+                          const abs = Math.abs(val);
+                          const kg = Math.floor(abs);
+                          const gr = Math.round((abs - kg) * 1000);
+                          const parts: string[] = [];
+                          if (kg > 0) parts.push(`${kg} Kg`);
+                          if (gr > 0) parts.push(`${gr} Gr`);
+                          if (parts.length === 0) parts.push('0 Kg');
+                          const formatted = parts.join(' ');
+                          if (isNeg) return `-${formatted}`;
+                          if (showSign && val > 0) return `+${formatted}`;
+                          return formatted;
+                        }
+                        const rounded = Math.round(val * 1000) / 1000 % 1 === 0 ? Math.round(val).toString() : val.toFixed(3);
+                        if (showSign && val > 0) return `+${rounded}`;
+                        return rounded;
                       };
 
                       return (
                         <tr key={m.id} className="hover:bg-slate-55/50">
                           <td className="px-4 py-2.5 font-mono text-slate-450">{m.date}</td>
                           <td className="px-4 py-2.5 font-mono font-bold text-slate-500">{m.productCode}</td>
-                          <td className="px-4 py-2.5 font-sans">{m.productDescription}</td>
+                          <td className="px-4 py-2.5 font-sans">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-slate-800">{m.productDescription}</span>
+                              {isBulk && (
+                                <span className="bg-orange-100 text-orange-800 text-[9px] px-1.5 py-0.5 rounded font-bold font-sans flex-shrink-0">
+                                  ⚖️ A Granel
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-4 py-2.5 text-center">
                             <span className={`px-2 py-0.5 rounded border text-[9px] ${typeColor}`}>
                               {m.type}
                             </span>
                           </td>
                           <td className={`px-4 py-2.5 text-center font-black font-mono ${m.type === 'Salida' || m.type === 'Merma' ? 'text-red-600' : (m.qty > 0 ? 'text-green-600' : 'text-red-600')}`}>
-                            {m.type === 'Salida' || m.type === 'Merma' ? `-${Math.abs(m.qty)}` : formatKardexVal(m.qty, true)}
+                            {m.type === 'Salida' || m.type === 'Merma' ? `-${formatKardexVal(Math.abs(m.qty), false, isBulk)}` : formatKardexVal(m.qty, true, isBulk)}
                           </td>
-                          <td className="px-4 py-2.5 text-center font-mono text-slate-450">{formatKardexVal(m.stock_anterior)}</td>
-                          <td className="px-4 py-2.5 text-center font-mono text-slate-600">{formatKardexVal(m.stock_posterior)}</td>
+                          <td className="px-4 py-2.5 text-center font-mono text-slate-500">{formatKardexVal(m.stock_anterior, false, isBulk)}</td>
+                          <td className="px-4 py-2.5 text-center font-mono font-bold text-slate-700">{formatKardexVal(m.stock_posterior, false, isBulk)}</td>
                           <td className="px-4 py-2.5 text-slate-655 italic font-sans">{m.motivo}</td>
                           <td className="px-4 py-2.5 font-sans">{m.usuario}</td>
                           <td className="px-4 py-2.5 text-center">
@@ -5500,6 +5574,32 @@ export default function Inventario({
                       if (g.type === 'Merma') typeColor = 'text-red-700 bg-red-50 border-red-200 font-bold';
                       if (g.type === 'Devolucion' || g.type === 'Devolución') typeColor = 'text-yellow-700 bg-yellow-50 border-yellow-250 font-bold';
 
+                      const renderGroupSummaryQty = (gItem: typeof g) => {
+                        const parts: string[] = [];
+                        if (Math.abs(gItem.totalUds) > 0.0001) {
+                          const isNeg = gItem.totalUds < 0;
+                          const abs = Math.abs(gItem.totalUds);
+                          const rounded = Math.round(abs * 1000) / 1000 % 1 === 0 ? Math.round(abs).toString() : abs.toFixed(3);
+                          parts.push(`${isNeg ? '-' : '+'}${rounded} uds`);
+                        }
+                        if (Math.abs(gItem.totalKg) > 0.0001) {
+                          const isNeg = gItem.totalKg < 0;
+                          const abs = Math.abs(gItem.totalKg);
+                          const kg = Math.floor(abs);
+                          const gr = Math.round((abs - kg) * 1000);
+                          const bulkParts: string[] = [];
+                          if (kg > 0) bulkParts.push(`${kg} Kg`);
+                          if (gr > 0) bulkParts.push(`${gr} Gr`);
+                          if (bulkParts.length === 0) bulkParts.push('0 Kg');
+                          const formatted = bulkParts.join(' ');
+                          parts.push(isNeg ? `-${formatted}` : `+${formatted}`);
+                        }
+                        if (parts.length === 0) {
+                          return '0';
+                        }
+                        return parts.join(' + ');
+                      };
+
                       return (
                         <tr key={g.key} className="hover:bg-slate-55/50">
                           <td className="px-4 py-2.5 font-mono text-slate-450">{g.date}</td>
@@ -5511,7 +5611,7 @@ export default function Inventario({
                           <td className="px-4 py-2.5 text-slate-655 italic font-sans font-bold">{g.motivo}</td>
                           <td className="px-4 py-2.5 text-center font-mono font-bold text-slate-600">{g.totalItems}</td>
                           <td className={`px-4 py-2.5 text-center font-black font-mono ${g.type === 'Salida' || g.type === 'Merma' ? 'text-red-600' : (g.totalQty > 0 ? 'text-green-600' : 'text-red-600')}`}>
-                            {g.type === 'Salida' || g.type === 'Merma' ? `-${Math.abs(g.totalQty)}` : (g.totalQty > 0 ? `+${g.totalQty}` : g.totalQty)}
+                            {renderGroupSummaryQty(g)}
                           </td>
                           <td className="px-4 py-2.5 font-sans">{g.usuario}</td>
                           <td className="px-4 py-2.5 text-center">
@@ -5573,25 +5673,48 @@ export default function Inventario({
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-sans text-slate-700">
                   {selectedGroupedMovements.map(m => {
-                    const relatedProd = products.find(p => p.barcode === m.productCode || p.description === m.productDescription);
+                    const relatedProd = safeProducts.find(p => p.barcode === m.productCode || p.description === m.productDescription);
                     const isBulk = relatedProd?.a_granel === true || (m as any).a_granel === true;
 
-                    const formatKardexVal = (numVal: number, showSign: boolean = false) => {
-                      const val = typeof numVal === 'number' ? numVal : (parseFloat(numVal) || 0);
-                      const formatted = isBulk ? val.toFixed(3) : (Math.round(val * 1000) / 1000 % 1 === 0 ? Math.round(val).toString() : val.toFixed(3));
-                      if (showSign && val > 0) return `+${formatted}`;
-                      return formatted;
+                    const formatKardexVal = (numVal: number, showSign: boolean = false, isBulkProd: boolean = isBulk) => {
+                      const val = typeof numVal === 'number' ? numVal : (parseFloat(numVal as any) || 0);
+                      if (isBulkProd) {
+                        const isNeg = val < 0;
+                        const abs = Math.abs(val);
+                        const kg = Math.floor(abs);
+                        const gr = Math.round((abs - kg) * 1000);
+                        const parts: string[] = [];
+                        if (kg > 0) parts.push(`${kg} Kg`);
+                        if (gr > 0) parts.push(`${gr} Gr`);
+                        if (parts.length === 0) parts.push('0 Kg');
+                        const formatted = parts.join(' ');
+                        if (isNeg) return `-${formatted}`;
+                        if (showSign && val > 0) return `+${formatted}`;
+                        return formatted;
+                      }
+                      const rounded = Math.round(val * 1000) / 1000 % 1 === 0 ? Math.round(val).toString() : val.toFixed(3);
+                      if (showSign && val > 0) return `+${rounded}`;
+                      return rounded;
                     };
 
                     return (
                       <tr key={m.id} className="hover:bg-slate-55/30">
                         <td className="px-4 py-2 font-mono font-bold text-slate-500">{m.productCode}</td>
-                        <td className="px-4 py-2">{m.productDescription}</td>
-                        <td className={`px-4 py-2 text-center font-bold font-mono ${m.qty > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {formatKardexVal(m.qty, true)}
+                        <td className="px-4 py-2">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-slate-800">{m.productDescription}</span>
+                            {isBulk && (
+                              <span className="bg-orange-100 text-orange-800 text-[9px] px-1.5 py-0.5 rounded font-bold font-sans flex-shrink-0">
+                                ⚖️ A Granel
+                              </span>
+                            )}
+                          </div>
                         </td>
-                        <td className="px-4 py-2 text-center font-mono text-slate-400">{formatKardexVal(m.stock_anterior)}</td>
-                        <td className="px-4 py-2 text-center font-mono text-slate-600">{formatKardexVal(m.stock_posterior)}</td>
+                        <td className={`px-4 py-2 text-center font-bold font-mono ${m.qty > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {formatKardexVal(m.qty, true, isBulk)}
+                        </td>
+                        <td className="px-4 py-2 text-center font-mono text-slate-500">{formatKardexVal(m.stock_anterior, false, isBulk)}</td>
+                        <td className="px-4 py-2 text-center font-mono font-bold text-slate-700">{formatKardexVal(m.stock_posterior, false, isBulk)}</td>
                       </tr>
                     );
                   })}
@@ -5612,6 +5735,108 @@ export default function Inventario({
           </div>
         </div>
       )}
+
+      {/* DETALLE DE MOVIMIENTO INDIVIDUAL POPUP */}
+      {selectedMovementDetail && (() => {
+        const m = selectedMovementDetail;
+        const relatedProd = safeProducts.find(p => p.barcode === m.productCode || p.description === m.productDescription);
+        const isBulk = relatedProd?.a_granel === true || (m as any).a_granel === true;
+
+        const formatKardexVal = (numVal: number, showSign: boolean = false) => {
+          const val = typeof numVal === 'number' ? numVal : (parseFloat(numVal as any) || 0);
+          if (isBulk) {
+            const isNeg = val < 0;
+            const abs = Math.abs(val);
+            const kg = Math.floor(abs);
+            const gr = Math.round((abs - kg) * 1000);
+            const parts: string[] = [];
+            if (kg > 0) parts.push(`${kg} Kg`);
+            if (gr > 0) parts.push(`${gr} Gr`);
+            if (parts.length === 0) parts.push('0 Kg');
+            const formatted = parts.join(' ');
+            if (isNeg) return `-${formatted}`;
+            if (showSign && val > 0) return `+${formatted}`;
+            return formatted;
+          }
+          const rounded = Math.round(val * 1000) / 1000 % 1 === 0 ? Math.round(val).toString() : val.toFixed(3);
+          if (showSign && val > 0) return `+${rounded}`;
+          return rounded;
+        };
+
+        return (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-2xl border border-slate-200 max-w-lg w-full overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200 font-sans">
+              <div className="bg-gradient-to-r from-sky-600 to-sky-700 px-5 py-3 flex justify-between items-center text-white">
+                <h3 className="text-xs font-extrabold uppercase tracking-wider font-mono flex items-center gap-2">
+                  <History className="w-3.5 h-3.5" />
+                  Detalle de Movimiento de Kardex
+                </h3>
+                <button 
+                  onClick={() => setSelectedMovementDetail(null)} 
+                  className="text-white/80 hover:text-white text-base focus:outline-none"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="p-5 space-y-3.5 text-xs text-slate-700">
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-extrabold text-slate-900 uppercase text-sm">{m.productDescription}</span>
+                    {isBulk && (
+                      <span className="bg-orange-100 text-orange-800 text-[9px] px-1.5 py-0.5 rounded font-bold">
+                        ⚖️ A Granel
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] font-mono text-slate-500">CÓDIGO: {m.productCode}</div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                    <div className="text-[10px] text-slate-400 font-bold uppercase">Fecha y Hora</div>
+                    <div className="font-mono font-bold text-slate-800 mt-0.5">{m.date}</div>
+                  </div>
+                  <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                    <div className="text-[10px] text-slate-400 font-bold uppercase">Tipo / Operador</div>
+                    <div className="font-bold text-slate-800 mt-0.5">{m.type} • {m.usuario}</div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="bg-slate-50 p-2 rounded-lg border border-slate-200">
+                    <div className="text-[9px] text-slate-400 font-bold uppercase">Stock Anterior</div>
+                    <div className="font-mono font-bold text-slate-700 mt-1">{formatKardexVal(m.stock_anterior)}</div>
+                  </div>
+                  <div className={`p-2 rounded-lg border ${m.qty > 0 ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+                    <div className="text-[9px] font-bold uppercase">Cantidad Mov.</div>
+                    <div className="font-mono font-black mt-1 text-sm">{formatKardexVal(m.qty, true)}</div>
+                  </div>
+                  <div className="bg-slate-50 p-2 rounded-lg border border-slate-200">
+                    <div className="text-[9px] text-slate-400 font-bold uppercase">Stock Posterior</div>
+                    <div className="font-mono font-bold text-slate-900 mt-1">{formatKardexVal(m.stock_posterior)}</div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">Justificación / Motivo</div>
+                  <div className="text-slate-800 mt-1 italic font-medium">{m.motivo || 'Sin observaciones registradas'}</div>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 px-5 py-3 border-t border-slate-200 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setSelectedMovementDetail(null)}
+                  className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded-lg text-[11px] font-sans font-bold transition-all"
+                >
+                  Cerrar
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* HISTORIAL PRECIOS PANEL */}
       {activeSubTab === 'precios' && (() => {
@@ -8751,7 +8976,7 @@ export default function Inventario({
                               </td>
 
                               <td className="px-2 py-2 text-right font-mono font-black text-slate-700">
-                                {formatStockVal(p.stock_actual, p.a_granel)} {p.a_granel ? 'kg' : 'uds'}
+                                {formatStockVal(p.stock_actual, p.a_granel)}{!p.a_granel ? ' uds' : ''}
                               </td>
 
                               <td className="px-2 py-2 text-right">
@@ -12645,7 +12870,7 @@ export default function Inventario({
               <span className="text-[9px] text-blue-300 font-mono font-bold block truncate">{contextMenu.product.barcode}</span>
               <span className="text-[11px] font-black text-white block uppercase truncate leading-tight">{contextMenu.product.description}</span>
               <span className="text-[9px] text-emerald-400 font-mono block mt-0.5">
-                Stock: {formatStockVal(contextMenu.product.stock_actual, contextMenu.product.a_granel)} {contextMenu.product.a_granel ? 'kg' : 'uds'}
+                Stock: {formatStockVal(contextMenu.product.stock_actual, contextMenu.product.a_granel)}{!contextMenu.product.a_granel ? ' uds' : ''}
               </span>
             </div>
           </div>

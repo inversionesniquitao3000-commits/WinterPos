@@ -40,6 +40,7 @@ Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+Name: "autostartbackend"; Description: "🚀 Iniciar Servidor WinterPOS en segundo plano al encender Windows (Recomendado para apertura instantánea y acceso en Red LAN)"; GroupDescription: "Rendimiento e Inicio Rápido:"; Flags: checkedonce
 Name: "killnode"; Description: "🔄 Cerrar procesos Node.js en ejecución (Recomendado para aplicar actualizaciones limpias sin archivos bloqueados)"; GroupDescription: "Mantenimiento y Actualización:"; Flags: checkedonce
 Name: "installpg"; Description: "🐘 Instalar Motor de Base de Datos PostgreSQL 15 (Recomendado para Servidor Central)"; GroupDescription: "Componentes del Servidor:"
 Name: "installnode"; Description: "💚 Instalar Entorno de Ejecución Node.js v20 (Recomendado si la PC no posee Node.js previamente)"; GroupDescription: "Componentes del Servidor:"
@@ -61,6 +62,10 @@ Source: "wizard_card.bmp"; Flags: dontcopy
 ; Launchers and root scripts
 Source: "..\Iniciar_WinterPos.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\Iniciar_WinterPos.vbs"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\Iniciar_Servicio_Fondo.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\Iniciar_Servicio_Fondo.vbs"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\Reiniciar_Servidor_WinterPos.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\Detener_Servidor_WinterPos.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\package.json"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist_root\desktop-main.js"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\desktop-main.js"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
@@ -78,11 +83,21 @@ Source: "..\WinterPosAL\dist\*"; DestDir: "{app}\WinterPosAL\dist"; Flags: ignor
 Name: "{group}\WinterPosAL"; Filename: "wscript.exe"; Parameters: """{app}\{#MyAppExeName}"""; WorkingDir: "{app}"; IconFilename: "{app}\app_icon.ico"; IconIndex: 0
 Name: "{autodesktop}\WinterPosAL"; Filename: "wscript.exe"; Parameters: """{app}\{#MyAppExeName}"""; WorkingDir: "{app}"; Tasks: desktopicon; IconFilename: "{app}\app_icon.ico"; IconIndex: 0
 
+; Inicio automatico con Windows (Startup)
+Name: "{autostartup}\WinterPos Server"; Filename: "wscript.exe"; Parameters: """{app}\Iniciar_Servicio_Fondo.vbs"""; WorkingDir: "{app}"; Tasks: autostartbackend; IconFilename: "{app}\app_icon.ico"; IconIndex: 0
+
+; Utilidades de mantenimiento en Menu Inicio
+Name: "{group}\Utilidades\Reiniciar Servidor WinterPOS"; Filename: "{app}\Reiniciar_Servidor_WinterPos.bat"; IconFilename: "{app}\app_icon.ico"; IconIndex: 0
+Name: "{group}\Utilidades\Detener Servidor WinterPOS"; Filename: "{app}\Detener_Servidor_WinterPos.bat"; IconFilename: "{app}\app_icon.ico"; IconIndex: 0
+
 ; Modo Depuración / Debugger (Si se selecciona la casilla Debugger)
 Name: "{autodesktop}\WinterPosAL (Debug CMD)"; Filename: "{app}\Iniciar_WinterPos.bat"; Tasks: desktopicon; IconFilename: "{app}\app_icon.ico"; IconIndex: 0; Check: IsDebugModeSelected
 
 ; Acceso directo de diagnóstico permanente en Menú Inicio
 Name: "{group}\WinterPosAL - Modo Depuración (Logs CMD)"; Filename: "{app}\Iniciar_WinterPos.bat"; IconFilename: "{app}\app_icon.ico"; IconIndex: 0
+
+[UninstallRun]
+Filename: "taskkill"; Parameters: "/F /IM node.exe"; Flags: runhidden
 [Dirs]
 Name: "{app}"; Permissions: users-full
 Name: "{app}\data"; Permissions: users-full

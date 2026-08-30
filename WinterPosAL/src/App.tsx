@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { 
   mockUsers, 
   mockConfig 
@@ -19,20 +19,22 @@ export function getLocalISODateString(d = new Date()) {
 
 import LoginTerminal from './components/LoginTerminal';
 import CajaPOS from './components/CajaPOS';
-import Inventario from './components/Inventario';
-import Clientes from './components/Clientes';
-import Proveedores from './components/Proveedores';
-import TasaCambio from './components/TasaCambio';
-import ConfiguracionEmpresa from './components/ConfiguracionEmpresa';
-import VentasHistorico from './components/VentasHistorico';
-import LicenciaModal from './components/LicenciaModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import { MasterPassModal } from './components/MasterPassModal';
-import { InversionesModulo } from './components/InversionesModulo';
-import { RepositorioDocumental } from './components/RepositorioDocumental';
-import MobileApp from './mobile/MobileApp';
-import ManualAccesoMovilModal from './components/ManualAccesoMovilModal';
 import { ThemeSelectorModal, ThemeMode, ThemePalette } from './components/ThemeSelectorModal';
+
+// High-Performance Lazy Loaded Secondary Modules (Sub-second initial boot)
+const Inventario = lazy(() => import('./components/Inventario'));
+const Clientes = lazy(() => import('./components/Clientes'));
+const Proveedores = lazy(() => import('./components/Proveedores'));
+const TasaCambio = lazy(() => import('./components/TasaCambio'));
+const ConfiguracionEmpresa = lazy(() => import('./components/ConfiguracionEmpresa'));
+const VentasHistorico = lazy(() => import('./components/VentasHistorico'));
+const InversionesModulo = lazy(() => import('./components/InversionesModulo').then(m => ({ default: m.InversionesModulo })));
+const RepositorioDocumental = lazy(() => import('./components/RepositorioDocumental').then(m => ({ default: m.RepositorioDocumental })));
+const LicenciaModal = lazy(() => import('./components/LicenciaModal'));
+const ManualAccesoMovilModal = lazy(() => import('./components/ManualAccesoMovilModal'));
+const MobileApp = lazy(() => import('./mobile/MobileApp'));
 import { 
   ShoppingBag, Package, Users, Truck,
   TrendingUp, Settings, LogOut, Globe, Cpu, History, Printer, CheckCircle2, ShieldCheck, Briefcase,
@@ -610,31 +612,60 @@ export default function App() {
     return () => clearInterval(interval);
   }, [terminalName, lanIP, dbMode]);
 
-  // Load business config, users, and official BCV rate immediately when app starts
+  // High-performance bootstrap: Load business config, users, roles, license and BCV in 1 single fast roundtrip
   useEffect(() => {
-    const loadConfig = async () => {
+    const loadBootstrapData = async () => {
       try {
-        const configRes = await fetch(getApiUrl('/config'));
-        if (configRes.ok) {
+        const bootRes = await fetch(getApiUrl(`/bootstrap?terminal=${encodeURIComponent(terminalName)}`), {
+          headers: { 'X-Terminal-ID': terminalName }
+        });
+        if (bootRes.ok) {
+          const bootData = await bootRes.json();
+          if (bootData && bootData.success) {
+            if (bootData.companyConfig) {
+              setCompanyConfig(bootData.companyConfig);
+              localStorage.setItem('pos_biz_info', JSON.stringify(bootData.companyConfig));
+            }
+            if (Array.isArray(bootData.users) && bootData.users.length > 0) {
+              setUsers(bootData.users);
+            }
+            if (bootData.bcv && bootData.bcv.usd) {
+              const parsed = parseFloat(bootData.bcv.usd.toString().replace(',', '.'));
+              if (!isNaN(parsed) && parsed > 0) {
+                setBcvRateUSD(parsed);
+                localStorage.setItem('pos_bcv_usd', parsed.toString());
+              }
+            }
+            if (bootData.license) {
+              setLicenseStatus(bootData.license);
+            }
+            if (bootData.localIp) {
+              setLanIP(bootData.localIp);
+              localStorage.setItem('pos_lan_ip', bootData.localIp);
+            }
+            return;
+          }
+        }
+      } catch (_) {}
+
+      // Fallback a endpoints individuales en caso de servidores antiguos
+      try {
+        const [configRes, usersRes, bcvRes] = await Promise.all([
+          fetch(getApiUrl('/config')).catch(() => null),
+          fetch(getApiUrl('/users')).catch(() => null),
+          fetch(getApiUrl('/bcv')).catch(() => null)
+        ]);
+
+        if (configRes && configRes.ok) {
           const configData = await configRes.json();
           setCompanyConfig(configData);
           localStorage.setItem('pos_biz_info', JSON.stringify(configData));
         }
-      } catch (err) {
-        console.warn('⚠️ No se pudo obtener la configuración del negocio al iniciar.');
-      }
-      try {
-        const usersRes = await fetch(getApiUrl('/users'));
-        if (usersRes.ok) {
+        if (usersRes && usersRes.ok) {
           const usersData = await usersRes.json();
           setUsers(usersData);
         }
-      } catch (err) {
-        console.warn('⚠️ No se pudo obtener la lista de usuarios al iniciar.');
-      }
-      try {
-        const bcvRes = await fetch(getApiUrl('/bcv'));
-        if (bcvRes.ok) {
+        if (bcvRes && bcvRes.ok) {
           const bcvData = await bcvRes.json();
           if (bcvData && bcvData.usd) {
             const parsed = parseFloat(bcvData.usd.toString().replace(',', '.'));
@@ -645,11 +676,11 @@ export default function App() {
           }
         }
       } catch (err) {
-        console.warn('⚠️ No se pudo obtener la tasa oficial del BCV al iniciar.');
+        console.warn('⚠️ No se pudo completar la carga inicial de datos.');
       }
     };
-    loadConfig();
-  }, [lanIP, dbMode]);
+    loadBootstrapData();
+  }, [lanIP, dbMode, terminalName]);
 
   // Update browser favicon dynamically when company logo_url changes
   useEffect(() => {
@@ -2652,19 +2683,25 @@ const cleanProductObject = (p: any): Product => ({
 
   // Render Mobile Executive App directly if on mobile device or ?mode=mobile (solo si tiene permiso movil)
   if (isMobileMode && hasModulePermission('movil', 'ver')) {
-    return <MobileApp onSwitchToDesktop={() => setIsMobileMode(false)} />;
+    return (
+      <Suspense fallback={<div className="flex items-center justify-center min-h-screen bg-slate-950 text-white"><div className="w-8 h-8 border-4 border-sky-500 border-t-transparent rounded-full animate-spin"></div></div>}>
+        <MobileApp onSwitchToDesktop={() => setIsMobileMode(false)} />
+      </Suspense>
+    );
   }
 
   const isLicenseBlocking = licenseStatus && !licenseStatus.isValid;
 
   if (isLicenseBlocking || showLicenseModalManually) {
     return (
-      <LicenciaModal 
-        licenseStatus={licenseStatus} 
-        onLicenseActivated={fetchLicenseStatus} 
-        getApiUrl={getApiUrl} 
-        onClose={isLicenseBlocking ? undefined : () => setShowLicenseModalManually(false)}
-      />
+      <Suspense fallback={<div className="flex items-center justify-center min-h-screen bg-slate-950 text-white"><div className="w-8 h-8 border-4 border-sky-500 border-t-transparent rounded-full animate-spin"></div></div>}>
+        <LicenciaModal 
+          licenseStatus={licenseStatus} 
+          onLicenseActivated={fetchLicenseStatus} 
+          getApiUrl={getApiUrl} 
+          onClose={isLicenseBlocking ? undefined : () => setShowLicenseModalManually(false)}
+        />
+      </Suspense>
     );
   }
 
@@ -3068,235 +3105,240 @@ const cleanProductObject = (p: any): Product => ({
             />
           )}
 
-          {activeTab === 'inventario' && (
-            <ErrorBoundary moduleName="Inventario">
-              <Inventario
-                products={products}
-                movements={movements}
-                priceHistory={priceHistory}
+          <Suspense fallback={
+            <div className="flex flex-col items-center justify-center min-h-[420px] gap-3 select-none">
+              <div className="w-9 h-9 border-4 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
+              <span className="text-xs font-mono font-bold text-slate-400">Cargando módulo...</span>
+            </div>
+          }>
+            {activeTab === 'inventario' && (
+              <ErrorBoundary moduleName="Inventario">
+                <Inventario
+                  products={products}
+                  movements={movements}
+                  priceHistory={priceHistory}
+                  currentUser={currentUser}
+                  tasaDia={tasaDia}
+                  bcvRateUSD={bcvRateUSD}
+                  companyConfig={companyConfig}
+                  onAddProduct={handleAddProduct}
+                  onAddProductsBulk={handleAddProductsBulk}
+                  onUpdateProductStock={handleUpdateProductStock}
+                  onUpdateProductPrices={handleUpdateProductPrices}
+                  onUpdateProductPricesBulk={handleUpdateProductPricesBulk}
+                  onDeleteProduct={handleDeleteProduct}
+                  onUpdateProduct={handleUpdateProduct}
+                  onUpdateProductStockBulk={handleUpdateProductStockBulk}
+                />
+              </ErrorBoundary>
+            )}
+
+            {activeTab === 'ventas' && (
+              <VentasHistorico
+                sales={sales}
+                cierres={cierres}
+                onReprintTicket={handleReprint}
                 currentUser={currentUser}
+                onUpdateCierre={async (cierreId: number, updatedData: any) => {
+                  try {
+                    const res = await fetch(getApiUrl(`/cajas/cierres/${cierreId}`), {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(updatedData)
+                    });
+                    if (res.ok) {
+                      const saved = await res.json();
+                      setCierres(prev => prev.map(c => c.id === cierreId ? saved : c));
+                      return true;
+                    }
+                  } catch (e) {
+                    console.error('Error actualizando cierre:', e);
+                  }
+                  return false;
+                }}
+                onDeleteCierre={async (cierreId: number): Promise<boolean> => {
+                  try {
+                    const res = await fetch(getApiUrl(`/cajas/cierres/${cierreId}`), {
+                      method: 'DELETE'
+                    });
+                    if (res.ok) {
+                      setCierres(prev => prev.filter(c => c.id !== cierreId));
+                      return true;
+                    }
+                  } catch (e) {
+                    console.error('Error eliminando cierre:', e);
+                  }
+                  return false;
+                }}
+                getApiUrl={getApiUrl}
                 tasaDia={tasaDia}
-                bcvRateUSD={bcvRateUSD}
-                companyConfig={companyConfig}
-                onAddProduct={handleAddProduct}
-                onAddProductsBulk={handleAddProductsBulk}
-                onUpdateProductStock={handleUpdateProductStock}
-                onUpdateProductPrices={handleUpdateProductPrices}
-                onUpdateProductPricesBulk={handleUpdateProductPricesBulk}
-                onDeleteProduct={handleDeleteProduct}
-                onUpdateProduct={handleUpdateProduct}
-                onUpdateProductStockBulk={handleUpdateProductStockBulk}
               />
-            </ErrorBoundary>
-          )}
+            )}
 
-          {activeTab === 'ventas' && (
-            <VentasHistorico
-              sales={sales}
-              cierres={cierres}
-              onReprintTicket={handleReprint}
-              currentUser={currentUser}
-              onUpdateCierre={async (cierreId: number, updatedData: any) => {
-                try {
-                  const res = await fetch(getApiUrl(`/cajas/cierres/${cierreId}`), {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(updatedData)
-                  });
-                  if (res.ok) {
-                    const saved = await res.json();
-                    setCierres(prev => prev.map(c => c.id === cierreId ? saved : c));
-                    return true;
-                  }
-                } catch (e) {
-                  console.error('Error actualizando cierre:', e);
-                }
-                return false;
-              }}
-              onDeleteCierre={async (cierreId: number): Promise<boolean> => {
-                try {
-                  const res = await fetch(getApiUrl(`/cajas/cierres/${cierreId}`), {
-                    method: 'DELETE'
-                  });
-                  if (res.ok) {
-                    setCierres(prev => prev.filter(c => c.id !== cierreId));
-                    return true;
-                  }
-                } catch (e) {
-                  console.error('Error eliminando cierre:', e);
-                }
-                return false;
-              }}
-              getApiUrl={getApiUrl}
-              tasaDia={tasaDia}
-            />
+            {activeTab === 'clientes' && (
+              <ErrorBoundary moduleName="Clientes">
+                <Clientes
+                  clients={clients}
+                  currentUser={currentUser}
+                  cajaAbierta={cajaAbierta}
+                  companyConfig={companyConfig}
+                  getApiUrl={getApiUrl}
+                  onAddClient={handleAddClient}
+                  onAddClientsBulk={handleAddClientsBulk}
+                  onRegisterAbono={handleRegisterAbono}
+                  onUpdateClient={handleUpdateClient}
+                  onDeleteClient={handleDeleteClient}
+                  sales={sales}
+                  abonos={abonos}
+                  tasaDia={tasaDia}
+                />
+              </ErrorBoundary>
+            )}
 
-          )}
-
-          {activeTab === 'clientes' && (
-            <ErrorBoundary moduleName="Clientes">
-              <Clientes
-                clients={clients}
+            {activeTab === 'proveedores' && (
+              <Proveedores
+                proveedores={proveedores}
+                compras={compras}
+                pagosProveedores={pagosProveedores}
+                cotizacionesProveedores={cotizacionesProveedores}
+                products={products}
                 currentUser={currentUser}
                 cajaAbierta={cajaAbierta}
+                tasaDia={tasaDia}
                 companyConfig={companyConfig}
                 getApiUrl={getApiUrl}
-                onAddClient={handleAddClient}
-                onAddClientsBulk={handleAddClientsBulk}
-                onRegisterAbono={handleRegisterAbono}
-                onUpdateClient={handleUpdateClient}
-                onDeleteClient={handleDeleteClient}
-                sales={sales}
-                abonos={abonos}
-                tasaDia={tasaDia}
+                onAddProveedor={handleAddProveedor}
+                onUpdateProveedor={handleUpdateProveedor}
+                onDeleteProveedor={handleDeleteProveedor}
+                onAddCompra={handleAddCompra}
+                onAddPagoProveedor={handleAddPagoProveedor}
+                onAddCotizacion={handleAddCotizacion}
+                onDeleteCotizacion={handleDeleteCotizacion}
+                onRefreshData={handleRefreshProveedoresData}
               />
-            </ErrorBoundary>
-          )}
+            )}
 
-          {activeTab === 'proveedores' && (
-            <Proveedores
-              proveedores={proveedores}
-              compras={compras}
-              pagosProveedores={pagosProveedores}
-              cotizacionesProveedores={cotizacionesProveedores}
-              products={products}
-              currentUser={currentUser}
-              cajaAbierta={cajaAbierta}
-              tasaDia={tasaDia}
-              companyConfig={companyConfig}
-              getApiUrl={getApiUrl}
-              onAddProveedor={handleAddProveedor}
-              onUpdateProveedor={handleUpdateProveedor}
-              onDeleteProveedor={handleDeleteProveedor}
-              onAddCompra={handleAddCompra}
-              onAddPagoProveedor={handleAddPagoProveedor}
-              onAddCotizacion={handleAddCotizacion}
-              onDeleteCotizacion={handleDeleteCotizacion}
-              onRefreshData={handleRefreshProveedoresData}
-            />
-          )}
+            {activeTab === 'tasa' && (
+              <TasaCambio
+                tasaDia={tasaDia}
+                tasaVuelto={tasaVuelto}
+                tasaHistory={tasaHistory}
+                currentUser={currentUser}
+                isServer={terminalName === 'CAJA_01' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'}
+                getApiUrl={getApiUrl}
+                onUpdateTasa={handleUpdateTasa}
+                onClearHistory={handleClearTasaHistory}
+              />
+            )}
 
-          {activeTab === 'tasa' && (
-            <TasaCambio
-              tasaDia={tasaDia}
-              tasaVuelto={tasaVuelto}
-              tasaHistory={tasaHistory}
-              currentUser={currentUser}
-              isServer={terminalName === 'CAJA_01' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'}
-              getApiUrl={getApiUrl}
-              onUpdateTasa={handleUpdateTasa}
-              onClearHistory={handleClearTasaHistory}
-            />
-          )}
-
-
-          {activeTab === 'config' && (
-            <ConfiguracionEmpresa
-              config={companyConfig}
-              onSaveConfig={setCompanyConfig}
-              currentUser={currentUser}
-              getApiUrl={getApiUrl}
-              onReloadUsers={async () => {
-                try {
-                  const res = await fetch(getApiUrl('/users'));
-                  if (res.ok) {
-                    const data = await res.json();
-                    setUsers(data);
+            {activeTab === 'config' && (
+              <ConfiguracionEmpresa
+                config={companyConfig}
+                onSaveConfig={setCompanyConfig}
+                currentUser={currentUser}
+                getApiUrl={getApiUrl}
+                onReloadUsers={async () => {
+                  try {
+                    const res = await fetch(getApiUrl('/users'));
+                    if (res.ok) {
+                      const data = await res.json();
+                      setUsers(data);
+                    }
+                  } catch (e) {
+                    console.error('Error reloading users:', e);
                   }
-                } catch (e) {
-                  console.error('Error reloading users:', e);
-                }
-              }}
-              onWipeData={(mode) => {
-                if (mode === 'sales' || mode === 'all') {
-                  setSales([]);
-                  setCierres([]);
-                  setMovements([]);
-                  setPriceHistory([]);
-                  setAbonos([]);
-                  setShiftSales([]);
-                  setShiftAbonosUsd(0);
-                  setShiftEntradasUsd(0);
-                  setShiftEntradasVes(0);
-                  setShiftSalidasUsd(0);
-                  setShiftSalidasVes(0);
-                  setShiftDevolucionesUsd(0);
-                  setShiftDevolucionesVes(0);
-                  setCajaAbierta(false);
-                }
-                if (mode === 'inventory' || mode === 'all') {
-                  setProducts([]);
-                  setMovements([]);
-                  setPriceHistory([]);
-                }
-                if (mode === 'stock') {
-                  setProducts(prev => prev.map(p => ({ ...p, stock_actual: 0 })));
-                  setMovements([]);
-                }
-                if (mode === 'clients' || mode === 'all') {
-                  setClients(prev => prev.filter(c => c.cedula_rif === 'V-00000000'));
-                }
-                if (mode === 'client_balances') {
-                  setAbonos([]);
-                  setClients(prev => prev.map(c => ({
-                    ...c,
-                    saldo_pendiente: 0,
-                    credito_disponible: c.limite_credito
-                  })));
-                }
-                if (mode === 'all') {
-                  setTasaHistory([]);
-                  setUsers(prev => prev.filter(u => u.usuario.toLowerCase() === 'admin'));
-                  setCompanyConfig({
-                    rif: '',
-                    nombre_comercio: '',
-                    direccion: '',
-                    telefono: '',
-                    correo: '',
-                    moneda_base: 'USD',
-                    mensaje_pie_ticket: '',
-                    metodos_pago_activos: []
-                  });
-                  localStorage.removeItem('pos_tasa_history');
-                  localStorage.removeItem('pos_biz_info');
-                  localStorage.removeItem('pos_users');
-                  localStorage.removeItem('pos_roles');
-                  localStorage.removeItem('pos_products');
-                  localStorage.removeItem('pos_sales_log');
-                  localStorage.removeItem('pos_clients');
-                }
-              }}
-            />
-          )}
-
-          {/* TAB: INVERSIONES & ACCIONISTAS - Solo Administrador */}
-          {activeTab === 'inversiones' && (
-            <ErrorBoundary moduleName="Control de Inversiones y Accionistas">
-              <InversionesModulo
-                isOpen={true}
-                onClose={() => setActiveTab('caja')}
-                currentUser={currentUser}
-                inline={true}
-                subTab={inversionesSubTab}
-                onSubTabChange={setInversionesSubTab}
-                tasaDia={tasaDia}
-                companyConfig={companyConfig}
+                }}
+                onWipeData={(mode) => {
+                  if (mode === 'sales' || mode === 'all') {
+                    setSales([]);
+                    setCierres([]);
+                    setMovements([]);
+                    setPriceHistory([]);
+                    setAbonos([]);
+                    setShiftSales([]);
+                    setShiftAbonosUsd(0);
+                    setShiftEntradasUsd(0);
+                    setShiftEntradasVes(0);
+                    setShiftSalidasUsd(0);
+                    setShiftSalidasVes(0);
+                    setShiftDevolucionesUsd(0);
+                    setShiftDevolucionesVes(0);
+                    setCajaAbierta(false);
+                  }
+                  if (mode === 'inventory' || mode === 'all') {
+                    setProducts([]);
+                    setMovements([]);
+                    setPriceHistory([]);
+                  }
+                  if (mode === 'stock') {
+                    setProducts(prev => prev.map(p => ({ ...p, stock_actual: 0 })));
+                    setMovements([]);
+                  }
+                  if (mode === 'clients' || mode === 'all') {
+                    setClients(prev => prev.filter(c => c.cedula_rif === 'V-00000000'));
+                  }
+                  if (mode === 'client_balances') {
+                    setAbonos([]);
+                    setClients(prev => prev.map(c => ({
+                      ...c,
+                      saldo_pendiente: 0,
+                      credito_disponible: c.limite_credito
+                    })));
+                  }
+                  if (mode === 'all') {
+                    setTasaHistory([]);
+                    setUsers(prev => prev.filter(u => u.usuario.toLowerCase() === 'admin'));
+                    setCompanyConfig({
+                      rif: '',
+                      nombre_comercio: '',
+                      direccion: '',
+                      telefono: '',
+                      correo: '',
+                      moneda_base: 'USD',
+                      mensaje_pie_ticket: '',
+                      metodos_pago_activos: []
+                    });
+                    localStorage.removeItem('pos_tasa_history');
+                    localStorage.removeItem('pos_biz_info');
+                    localStorage.removeItem('pos_users');
+                    localStorage.removeItem('pos_roles');
+                    localStorage.removeItem('pos_products');
+                    localStorage.removeItem('pos_sales_log');
+                    localStorage.removeItem('pos_clients');
+                  }
+                }}
               />
-            </ErrorBoundary>
-          )}
+            )}
 
-          {/* TAB: REPOSITORIO DE DOCUMENTOS LEGALES Y FISCALES */}
-          {activeTab === 'documentos' && currentUser && (
-            <ErrorBoundary moduleName="Bóveda Documental Legal y Fiscal">
-              <RepositorioDocumental
-                currentUser={currentUser}
-                getApiUrl={getApiUrl}
-                hasPermission={hasModulePermission}
-                companyConfig={companyConfig}
-                tasaDia={bcvRateUSD || tasaDia}
-              />
-            </ErrorBoundary>
-          )}
+            {/* TAB: INVERSIONES & ACCIONISTAS - Solo Administrador */}
+            {activeTab === 'inversiones' && (
+              <ErrorBoundary moduleName="Control de Inversiones y Accionistas">
+                <InversionesModulo
+                  isOpen={true}
+                  onClose={() => setActiveTab('caja')}
+                  currentUser={currentUser}
+                  inline={true}
+                  subTab={inversionesSubTab}
+                  onSubTabChange={setInversionesSubTab}
+                  tasaDia={tasaDia}
+                  companyConfig={companyConfig}
+                />
+              </ErrorBoundary>
+            )}
+
+            {/* TAB: REPOSITORIO DE DOCUMENTOS LEGALES Y FISCALES */}
+            {activeTab === 'documentos' && currentUser && (
+              <ErrorBoundary moduleName="Bóveda Documental Legal y Fiscal">
+                <RepositorioDocumental
+                  currentUser={currentUser}
+                  getApiUrl={getApiUrl}
+                  hasPermission={hasModulePermission}
+                  companyConfig={companyConfig}
+                  tasaDia={bcvRateUSD || tasaDia}
+                />
+              </ErrorBoundary>
+            )}
+          </Suspense>
         </div>
       </main>
 
@@ -3596,11 +3638,15 @@ const cleanProductObject = (p: any): Product => ({
       />
 
       {/* MODAL GUÍA DE ACCESO MÓVIL Y CÓDIGO QR */}
-      <ManualAccesoMovilModal
-        isOpen={showManualAccesoModal}
-        onClose={() => setShowManualAccesoModal(false)}
-        lanIp={lanIP}
-      />
+      {showManualAccesoModal && (
+        <Suspense fallback={null}>
+          <ManualAccesoMovilModal
+            isOpen={showManualAccesoModal}
+            onClose={() => setShowManualAccesoModal(false)}
+            lanIp={lanIP}
+          />
+        </Suspense>
+      )}
 
       {/* DOCK FLOTANTE GLOBAL PARA REANUDAR PRODUCTO PAUSADO DESDE CUALQUIER MÓDULO (F1 - F10) */}
       {pausedProductDraft && currentUser && (

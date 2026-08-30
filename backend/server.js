@@ -965,6 +965,36 @@ app.get('/api/bcv', async (req, res) => {
   res.json(rates);
 });
 
+// HIGH-PERFORMANCE UNIFIED BOOTSTRAP ENDPOINT (1 Single Fast Roundtrip on App Startup)
+app.get('/api/bootstrap', async (req, res) => {
+  try {
+    const terminal = req.headers['x-terminal-id'] || req.query.terminal || 'LOCAL';
+    registerTerminalActivity(terminal);
+
+    const [companyConfig, users, roles, bcv, license] = await Promise.all([
+      getCompanyConfig().catch(() => null),
+      getUsers().catch(() => []),
+      getRoles().catch(() => []),
+      fetchBcvRates().catch(() => bcvCache),
+      Promise.resolve().then(() => verifyLicense()).catch(() => null)
+    ]);
+
+    res.json({
+      success: true,
+      companyConfig,
+      users,
+      roles,
+      bcv,
+      license,
+      localIp: getLocalIpAddress(),
+      serverTime: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error('Error en /api/bootstrap:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Recent Sales Deduplication Cache (Anti-Double-Charge Idempotency Shield)
 const recentSalesDeduplication = new Map();
 
@@ -2480,24 +2510,10 @@ freePortIfOccupied(PORT).then(() => {
     console.log(`🚀 Servidor API de WinterPosAL corriendo en http://localhost:${PORT}`);
     console.log(`Expuesto en red LAN para recibir conexiones de otras terminales.`);
     
-    // Launch Native App Window (Edge App Mode / Browser) on startup
-    setTimeout(() => {
-      import('child_process').then(({ exec }) => {
-        const targetUrl = `http://localhost:${PORT}?mode=desktop`;
-        if (process.platform === 'win32') {
-          exec(`start "" chrome --app=${targetUrl} --window-size=1080,700`, (err) => {
-            if (err) exec(`start ${targetUrl}`);
-          });
-        } else {
-          exec(`start ${targetUrl}`);
-        }
-      }).catch(() => {});
-    }, 1500);
-
-    // Initialize WhatsApp connection at startup if enabled
+    // Initialize WhatsApp connection in background after startup (non-blocking for UI)
     setTimeout(() => {
       initWhatsAppClient();
-    }, 1000);
+    }, 6000);
   });
 
   server.on('error', (err) => {

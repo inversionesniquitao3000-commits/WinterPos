@@ -493,3 +493,23 @@ export async function deleteApiData(path: string): Promise<any> {
   return await res.json().catch(() => ({ success: true }));
 }
 
+export const formatStockVal = (val: any, aGranel?: boolean): string => {
+  const num = parseFloat(val);
+  if (isNaN(num)) return '0';
+  if (!aGranel) return Math.round(num).toString();
+
+  const isNegative = num < 0;
+  const abs = Math.abs(num);
+  const kg = Math.floor(abs);
+  const gr = Math.round((abs - kg) * 1000);
+
+  const parts: string[] = [];
+  if (kg > 0) parts.push(`${kg} Kg`);
+  if (gr > 0) parts.push(`${gr} Gr`);
+  if (parts.length === 0) parts.push('0 Kg');
+
+  const formatted = parts.join(' ');
+  return isNegative ? `-${formatted}` : formatted;
+};
+
+

@@ -132,8 +132,8 @@ function launchAppWindow(targetUrl) {
     const flags = [
       `--app=${targetUrl}`,
       `--user-data-dir="${appDataDir}"`,
-      '--window-size=840,520',
-      '--window-position=240,120',
+      '--window-size=1060,650',
+      '--window-position=160,60',
       '--disable-features=PasswordLeakDetection,PasswordCheck',
       '--disable-save-password-bubble',
       '--password-store=basic',
@@ -160,7 +160,14 @@ async function start() {
   let serverProcess = null;
 
   if (!isAlreadyRunning) {
-    serverProcess = spawn(process.execPath, ['setup-launcher.js'], {
+    // Ensure .env exists before starting server
+    const envPath = path.join(backendDir, '.env');
+    if (!fs.existsSync(envPath)) {
+      const defaultEnv = `PORT=5000\nDB_USER=postgres\nDB_PASSWORD=postgres\nDB_HOST=localhost\nDB_PORT=5432\nDB_DATABASE=Winter\n`;
+      try { fs.writeFileSync(envPath, defaultEnv, 'utf8'); } catch (_) {}
+    }
+
+    serverProcess = spawn(process.execPath, ['server.js'], {
       cwd: backendDir,
       stdio: isDebug ? 'inherit' : 'ignore',
       windowsHide: !isDebug
