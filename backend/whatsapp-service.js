@@ -629,11 +629,36 @@ function startMockFlow() {
 
 // Helper to ensure WWebJS is injected and ready in pupPage
 async function ensureWWebJSInjected(c) {
-  if (!c || !c.pupPage) return;
+  if (!c) return;
   try {
-    const isReady = await c.pupPage.evaluate(() => {
-      return typeof window.WWebJS !== 'undefined' && typeof window.WWebJS.getChat === 'function';
-    });
+    if (c.pupBrowser) {
+      try {
+        const pages = await c.pupBrowser.pages();
+        if (pages && pages.length > 0) {
+          const waPage = pages.find(p => p && !p.isClosed() && (p.url().includes('whatsapp.com') || p.url().includes('about:blank'))) || pages[0];
+          if (waPage && !waPage.isClosed()) {
+            c.pupPage = waPage;
+          }
+        }
+      } catch (_) {}
+    }
+    if (!c.pupPage || c.pupPage.isClosed()) return;
+
+    let isReady = false;
+    try {
+      isReady = await c.pupPage.evaluate(() => {
+        return typeof window.WWebJS !== 'undefined' && typeof window.WWebJS.getChat === 'function';
+      });
+    } catch (evalErr) {
+      // Detached frame or execution context destroyed
+      if (c.pupBrowser) {
+        const pages = await c.pupBrowser.pages();
+        if (pages.length > 0 && !pages[0].isClosed()) {
+          c.pupPage = pages[0];
+        }
+      }
+    }
+
     if (!isReady && typeof c.inject === 'function') {
       await c.inject().catch(() => {});
     }
@@ -719,85 +744,64 @@ export async function sendCierreReport(imageBase64, textSummary) {
     return { success: true, simulated: true };
   }
 
-  try {
-    const { default: pkg } = await import('whatsapp-web.js');
-    const { MessageMedia } = pkg;
+  const { default: pkg } = await import('whatsapp-web.js');
+  const { MessageMedia } = pkg;
 
-    await ensureWWebJSInjected(client);
-
+  // Intento de envío con reintento automático y recuperación de marco
+  let lastError = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      if (imageBase64 && typeof imageBase64 === 'string' && imageBase64.length > 50) {
+      await ensureWWebJSInjected(client);
+
+      const hasValidImage = imageBase64 && typeof imageBase64 === 'string' && imageBase64.length > 100 && !imageBase64.includes('AAAABJRU5ErkJggg==');
+      if (hasValidImage) {
         const base64Data = imageBase64.split(';base64,').pop().trim();
         const isPdf = imageBase64.startsWith('data:application/pdf');
         const mediaType = isPdf ? 'application/pdf' : 'image/png';
         const fileName = isPdf ? `reporte_${Date.now()}.pdf` : `reporte_${Date.now()}.png`;
 
-        console.log(`[WhatsApp] Enviando documento adjunto (${mediaType}, ${base64Data.length} chars) a ${target}`);
+        console.log(`[WhatsApp] Enviando documento adjunto (${mediaType}, intento ${attempt}) a ${target}`);
         const media = new MessageMedia(mediaType, base64Data, fileName);
         
         try {
           await client.sendMessage(target, media, { caption: textSummary });
         } catch (captionErr) {
-          console.warn('[WhatsApp] Falló envío con caption combinado, enviando media y texto secuencialmente:', captionErr.message || captionErr);
+          console.warn('[WhatsApp] Falló envío con caption combinado, enviando secuencial:', captionErr.message || captionErr);
           await client.sendMessage(target, media);
           if (textSummary) {
             await client.sendMessage(target, textSummary);
           }
         }
       } else {
+        console.log(`[WhatsApp] Enviando mensaje de texto (intento ${attempt}) a ${target}`);
         await client.sendMessage(target, textSummary);
       }
-    } catch (sendErr) {
-      const sendErrMsg = String(sendErr?.message || sendErr);
-      if (sendErrMsg.includes('getChat') || sendErrMsg.includes('WWebJS') || sendErrMsg.includes('undefined')) {
-        console.warn('[WhatsApp] Reinyectando scripts tras fallo getChat y reintentando envío...');
-        await ensureWWebJSInjected(client);
-        await new Promise(r => setTimeout(r, 800));
-        if (imageBase64 && typeof imageBase64 === 'string' && imageBase64.length > 50) {
-          const base64Data = imageBase64.split(';base64,').pop().trim();
-          const isPdf = imageBase64.startsWith('data:application/pdf');
-          const mediaType = isPdf ? 'application/pdf' : 'image/png';
-          const fileName = isPdf ? `reporte_${Date.now()}.pdf` : `reporte_${Date.now()}.png`;
-          const media = new MessageMedia(mediaType, base64Data, fileName);
-          await client.sendMessage(target, media, { caption: textSummary });
-        } else {
-          await client.sendMessage(target, textSummary);
-        }
-      } else {
-        throw sendErr;
-      }
-    }
 
-    console.log('[WhatsApp] Mensaje y documento adjunto enviados con éxito a WhatsApp.');
-    return { success: true };
-  } catch (err) {
-    console.error('[WhatsApp] Error al enviar mensaje:', err.message);
-    const errText = String(err?.message || err);
-    if (errText.includes('detached Frame') || errText.includes('Execution context was destroyed') || errText.includes('Session closed')) {
-      console.warn('[WhatsApp] Detectado marco desprendido/sesión cerrada en Puppeteer. Intentando recarga y reenvío...');
-      try {
-        if (client && client.pupPage && typeof client.pupPage.reload === 'function') {
-          await client.pupPage.reload({ waitUntil: 'domcontentloaded' });
-          await new Promise(r => setTimeout(r, 2000));
-          await ensureWWebJSInjected(client);
-          if (imageBase64 && typeof imageBase64 === 'string' && imageBase64.length > 50) {
-            const { default: pkg } = await import('whatsapp-web.js');
-            const { MessageMedia } = pkg;
-            const base64Data = imageBase64.replace(/^data:image\/[a-z]+;base64,/, "");
-            const media = new MessageMedia('image/png', base64Data, `reporte_${Date.now()}.png`);
-            await client.sendMessage(target, media, { caption: textSummary });
-          } else {
-            await client.sendMessage(target, textSummary);
-          }
-          console.log('[WhatsApp] Mensaje reenviado exitosamente tras recarga de marco.');
-          return { success: true };
+      console.log('[WhatsApp] Mensaje enviado con éxito a WhatsApp.');
+      return { success: true };
+    } catch (err) {
+      lastError = err;
+      const errText = String(err?.message || err);
+      console.warn(`[WhatsApp] Intento ${attempt} falló: ${errText}`);
+      
+      if (attempt < 3) {
+        if (client && client.pupBrowser) {
+          try {
+            const pages = await client.pupBrowser.pages();
+            if (pages.length > 0) {
+              client.pupPage = pages.find(p => !p.isClosed() && p.url().includes('whatsapp.com')) || pages[0];
+            }
+          } catch (_) {}
         }
-      } catch (retryErr) {
-        console.error('[WhatsApp] Falló el reintento tras recarga:', retryErr.message);
+        if (typeof client.inject === 'function') {
+          await client.inject().catch(() => {});
+        }
+        await new Promise(r => setTimeout(r, 1200));
       }
     }
-    throw err;
   }
+
+  throw lastError || new Error('Falla al enviar mensaje por WhatsApp tras múltiples intentos.');
 }
 
 // Send Direct WhatsApp Message to a specific Phone Number or Group JID

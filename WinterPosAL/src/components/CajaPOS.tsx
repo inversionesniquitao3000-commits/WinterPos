@@ -2318,7 +2318,6 @@ export default function CajaPOS({
         }
       }
 
-      // Build payment array
       // Build payment array with precise USD and VES values
       const rate = tasaDia || 1;
       const pagos: Payment[] = [];
@@ -2326,10 +2325,10 @@ export default function CajaPOS({
         pagos.push({ metodo: 'Efectivo$', monto: cashUSDVal, montoUSD: cashUSDVal, montoVES: cashUSDVal * rate });
       }
       if (cashVESVal > 0) {
-        pagos.push({ metodo: 'EfectivoBs', monto: cashVESVal / rate, montoUSD: cashVESVal / rate, montoVES: cashVESVal });
+        pagos.push({ metodo: 'EfectivoBs', monto: cashVESVal, montoUSD: cashVESVal / rate, montoVES: cashVESVal });
       }
       if (cardVESVal > 0) {
-        pagos.push({ metodo: 'TarjetaBs', monto: cardVESVal / rate, montoUSD: cardVESVal / rate, montoVES: cardVESVal });
+        pagos.push({ metodo: 'TarjetaBs', monto: cardVESVal, montoUSD: cardVESVal / rate, montoVES: cardVESVal });
       }
       if (cardUSDVal > 0) {
         pagos.push({ metodo: 'Tarjeta$', monto: cardUSDVal, montoUSD: cardUSDVal, montoVES: cardUSDVal * rate });
@@ -2337,7 +2336,7 @@ export default function CajaPOS({
       if (pagoMovilVESVal > 0) {
         pagos.push({
           metodo: 'PagoMovil',
-          monto: pagoMovilVESVal / rate,
+          monto: pagoMovilVESVal,
           montoUSD: pagoMovilVESVal / rate,
           montoVES: pagoMovilVESVal,
           reference: refPagoMovil,
@@ -2347,7 +2346,7 @@ export default function CajaPOS({
       if (biopagoVESVal > 0) {
         pagos.push({
           metodo: 'Biopago',
-          monto: biopagoVESVal / rate,
+          monto: biopagoVESVal,
           montoUSD: biopagoVESVal / rate,
           montoVES: biopagoVESVal,
           reference: '',
@@ -2619,138 +2618,139 @@ export default function CajaPOS({
 
   const handleSaveCierre = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanUsdStr = (cierreRealUsd || '').toString().trim().replace(/[^\d.]/g, '');
-    const cleanVesStr = (cierreRealVes || '').toString().trim().replace(/[^\d.,]/g, '').replace(/\./g, '').replace(/,/g, '.');
-    const cleanEurStr = (cierreRealEur || '').toString().trim().replace(/[^\d.]/g, '');
-
-    const realUsd = parseFloat(cleanUsdStr) || 0;
-    const realVes = parseFloat(cleanVesStr) || 0;
-    const realEur = parseFloat(cleanEurStr) || 0;
-
-    let targetShiftSales = shiftSales;
-    let targetShiftAbonos = abonos || [];
-    let targetAperturaUsd = _montoAperturaUsd;
-    let targetAperturaVes = _montoAperturaVes;
-    let targetEntradaUsd = shiftEntradasUsd;
-    let targetEntradaVes = shiftEntradasVes;
-    let targetSalidaUsd = shiftSalidasUsd;
-    let targetSalidaVes = shiftSalidasVes;
-    let targetDevolucionUsd = shiftDevolucionesUsd;
-    let targetDevolucionVes = shiftDevolucionesVes;
-
-    let serverPuntoVes = 0;
-    let serverBiopagoVes = 0;
-    let serverPagoMovilVes = 0;
-    let serverTransferenciaVes = 0;
-
-    const uKey = currentUser?.id || currentUser?.usuario || 'default';
-    let fetchedFechaApertura = localStorage.getItem(`pos_apertura_fecha_${uKey}`) || localStorage.getItem(`pos_apertura_fecha_${currentUser?.usuario}`) || localStorage.getItem('pos_apertura_fecha') || '';
-    // Fetch fresh unified caja estado from server before generating final cierre card
     try {
-      const termName = localStorage.getItem('pos_terminal_name') || 'CAJA_01';
-      const res = await fetch(getApiUrl(`/cajas/estado?terminal=${encodeURIComponent(termName)}&usuarioId=${currentUser.id}&usuarioNombre=${encodeURIComponent(currentUser.nombre)}`));
-      if (res.ok) {
-        const cajaData = await res.json();
-        if (cajaData && cajaData.abierta) {
-          if (cajaData.fechaApertura) fetchedFechaApertura = cajaData.fechaApertura;
-          if (Array.isArray(cajaData.shiftSales)) targetShiftSales = cajaData.shiftSales;
-          if (Array.isArray(cajaData.shiftAbonosList)) targetShiftAbonos = cajaData.shiftAbonosList;
-          if (typeof cajaData.aperturaUsd === 'number') targetAperturaUsd = cajaData.aperturaUsd;
-          if (typeof cajaData.aperturaVes === 'number') targetAperturaVes = cajaData.aperturaVes;
-          if (typeof cajaData.shiftEntradasUsd === 'number') targetEntradaUsd = cajaData.shiftEntradasUsd;
-          if (typeof cajaData.shiftEntradasVes === 'number') targetEntradaVes = cajaData.shiftEntradasVes;
-          if (typeof cajaData.shiftSalidasUsd === 'number') targetSalidaUsd = cajaData.shiftSalidasUsd;
-          if (typeof cajaData.shiftSalidasVes === 'number') targetSalidaVes = cajaData.shiftSalidasVes;
-          if (typeof cajaData.shiftDevolucionesUsd === 'number') targetDevolucionUsd = cajaData.shiftDevolucionesUsd;
-          if (typeof cajaData.shiftDevolucionesVes === 'number') targetDevolucionVes = cajaData.shiftDevolucionesVes;
-          if (typeof cajaData.shiftPuntoVesMovs === 'number') serverPuntoVes = cajaData.shiftPuntoVesMovs;
-          if (typeof cajaData.shiftBiopagoVesMovs === 'number') serverBiopagoVes = cajaData.shiftBiopagoVesMovs;
-          if (typeof cajaData.shiftPagoMovilVesMovs === 'number') serverPagoMovilVes = cajaData.shiftPagoMovilVesMovs;
-          if (typeof cajaData.shiftTransferenciaVesMovs === 'number') serverTransferenciaVes = cajaData.shiftTransferenciaVesMovs;
+      const cleanUsdStr = (cierreRealUsd || '').toString().trim().replace(/[^\d.]/g, '');
+      const cleanVesStr = (cierreRealVes || '').toString().trim().replace(/[^\d.,]/g, '').replace(/\./g, '').replace(/,/g, '.');
+      const cleanEurStr = (cierreRealEur || '').toString().trim().replace(/[^\d.]/g, '');
+
+      const realUsd = parseFloat(cleanUsdStr) || 0;
+      const realVes = parseFloat(cleanVesStr) || 0;
+      const realEur = parseFloat(cleanEurStr) || 0;
+
+      let targetShiftSales = Array.isArray(shiftSales) ? shiftSales : [];
+      let targetShiftAbonos = Array.isArray(abonos) ? abonos : [];
+      let targetAperturaUsd = _montoAperturaUsd;
+      let targetAperturaVes = _montoAperturaVes;
+      let targetEntradaUsd = shiftEntradasUsd;
+      let targetEntradaVes = shiftEntradasVes;
+      let targetSalidaUsd = shiftSalidasUsd;
+      let targetSalidaVes = shiftSalidasVes;
+      let targetDevolucionUsd = shiftDevolucionesUsd;
+      let targetDevolucionVes = shiftDevolucionesVes;
+
+      let serverPuntoVes = 0;
+      let serverBiopagoVes = 0;
+      let serverPagoMovilVes = 0;
+      let serverTransferenciaVes = 0;
+
+      const uKey = currentUser?.id || currentUser?.usuario || 'default';
+      let fetchedFechaApertura = localStorage.getItem(`pos_apertura_fecha_${uKey}`) || localStorage.getItem(`pos_apertura_fecha_${currentUser?.usuario}`) || localStorage.getItem('pos_apertura_fecha') || '';
+      // Fetch fresh unified caja estado from server before generating final cierre card
+      try {
+        const termName = localStorage.getItem('pos_terminal_name') || 'CAJA_01';
+        const res = await fetch(getApiUrl(`/cajas/estado?terminal=${encodeURIComponent(termName)}&usuarioId=${currentUser?.id || ''}&usuarioNombre=${encodeURIComponent(currentUser?.nombre || '')}`));
+        if (res.ok) {
+          const cajaData = await res.json();
+          if (cajaData && cajaData.abierta) {
+            if (cajaData.fechaApertura) fetchedFechaApertura = cajaData.fechaApertura;
+            if (Array.isArray(cajaData.shiftSales)) targetShiftSales = cajaData.shiftSales;
+            if (Array.isArray(cajaData.shiftAbonosList)) targetShiftAbonos = cajaData.shiftAbonosList;
+            if (typeof cajaData.aperturaUsd === 'number') targetAperturaUsd = cajaData.aperturaUsd;
+            if (typeof cajaData.aperturaVes === 'number') targetAperturaVes = cajaData.aperturaVes;
+            if (typeof cajaData.shiftEntradasUsd === 'number') targetEntradaUsd = cajaData.shiftEntradasUsd;
+            if (typeof cajaData.shiftEntradasVes === 'number') targetEntradaVes = cajaData.shiftEntradasVes;
+            if (typeof cajaData.shiftSalidasUsd === 'number') targetSalidaUsd = cajaData.shiftSalidasUsd;
+            if (typeof cajaData.shiftSalidasVes === 'number') targetSalidaVes = cajaData.shiftSalidasVes;
+            if (typeof cajaData.shiftDevolucionesUsd === 'number') targetDevolucionUsd = cajaData.shiftDevolucionesUsd;
+            if (typeof cajaData.shiftDevolucionesVes === 'number') targetDevolucionVes = cajaData.shiftDevolucionesVes;
+            if (typeof cajaData.shiftPuntoVesMovs === 'number') serverPuntoVes = cajaData.shiftPuntoVesMovs;
+            if (typeof cajaData.shiftBiopagoVesMovs === 'number') serverBiopagoVes = cajaData.shiftBiopagoVesMovs;
+            if (typeof cajaData.shiftPagoMovilVesMovs === 'number') serverPagoMovilVes = cajaData.shiftPagoMovilVesMovs;
+            if (typeof cajaData.shiftTransferenciaVesMovs === 'number') serverTransferenciaVes = cajaData.shiftTransferenciaVesMovs;
+          }
         }
+      } catch (err) {
+        console.warn('⚠️ No se pudo refrescar el estado de caja desde el servidor antes del cierre, utilizando cache local:', err);
       }
-    } catch (err) {
-      console.warn('⚠️ No se pudo refrescar el estado de caja desde el servidor antes del cierre, utilizando cache local:', err);
-    }
 
-    let shiftDivisaOps: any[] = [];
-    try {
-      const resOps = await fetch(getApiUrl('/cajas/divisas-operaciones'));
-      if (resOps.ok) {
-        const opsData = await resOps.json();
-        if (Array.isArray(opsData)) {
-          const aperturaMs = fetchedFechaApertura ? new Date(fetchedFechaApertura).getTime() : 0;
-          const termName = localStorage.getItem('pos_terminal_name') || 'CAJA_01';
-          
-          shiftDivisaOps = opsData.filter((op: any) => {
-            const opTime = op.timestamp || (op.fecha ? new Date(op.fecha).getTime() : 0);
-            // Exclude operations prior to current session opening
-            if (aperturaMs > 0 && opTime > 0 && opTime < (aperturaMs - 60000)) {
-              return false;
-            }
-            if (op.terminal && op.terminal !== termName) {
-              return false;
-            }
-            if (op.usuario_id && currentUser?.id && Number(op.usuario_id) !== Number(currentUser.id)) {
-              return false;
-            }
-            return true;
-          });
+      let shiftDivisaOps: any[] = [];
+      try {
+        const resOps = await fetch(getApiUrl('/cajas/divisas-operaciones'));
+        if (resOps.ok) {
+          const opsData = await resOps.json();
+          if (Array.isArray(opsData)) {
+            const aperturaMs = fetchedFechaApertura ? new Date(fetchedFechaApertura).getTime() : 0;
+            const termName = localStorage.getItem('pos_terminal_name') || 'CAJA_01';
+            
+            shiftDivisaOps = opsData.filter((op: any) => {
+              const opTime = op.timestamp || (op.fecha ? new Date(op.fecha).getTime() : 0);
+              // Exclude operations prior to current session opening
+              if (aperturaMs > 0 && opTime > 0 && opTime < (aperturaMs - 60000)) {
+                return false;
+              }
+              if (op.terminal && op.terminal !== termName) {
+                return false;
+              }
+              if (op.usuario_id && currentUser?.id && Number(op.usuario_id) !== Number(currentUser.id)) {
+                return false;
+              }
+              return true;
+            });
+          }
         }
+      } catch (e) {
+        console.warn('⚠️ Error al consultar divisas-operaciones para el cierre:', e);
       }
-    } catch (e) {
-      console.warn('⚠️ Error al consultar divisas-operaciones para el cierre:', e);
-    }
 
-    const avanceBiopagoVes = Math.max(serverBiopagoVes, shiftDivisaOps.reduce((acc, op) => {
-      const isVentaEfectivo = op.tipo_operacion === 'VENTA_EFECTIVO' || String(op.descripcion || '').includes('[VENTA EFECTIVO]');
-      const isBiopago = op.metodo_cobro === 'BIOPAGO' || op.metodo_pago === 'BIOPAGO' || String(op.descripcion || '').includes('BIOPAGO');
-      if (isVentaEfectivo && isBiopago) {
-        return acc + (op.monto_digital_cobrado_ves || op.monto_ves || op.ves || 0);
-      }
-      return acc;
-    }, 0));
+      const avanceBiopagoVes = Math.max(serverBiopagoVes, shiftDivisaOps.reduce((acc, op) => {
+        const isVentaEfectivo = op.tipo_operacion === 'VENTA_EFECTIVO' || String(op.descripcion || '').includes('[VENTA EFECTIVO]');
+        const isBiopago = op.metodo_cobro === 'BIOPAGO' || op.metodo_pago === 'BIOPAGO' || String(op.descripcion || '').includes('BIOPAGO');
+        if (isVentaEfectivo && isBiopago) {
+          return acc + (op.monto_digital_cobrado_ves || op.monto_ves || op.ves || 0);
+        }
+        return acc;
+      }, 0));
 
-    const avancePuntoVes = Math.max(serverPuntoVes, shiftDivisaOps.reduce((acc, op) => {
-      const isVentaEfectivo = op.tipo_operacion === 'VENTA_EFECTIVO' || String(op.descripcion || '').includes('[VENTA EFECTIVO]');
-      const isPunto = op.metodo_cobro === 'PUNTO' || op.metodo_pago === 'PUNTO' || String(op.descripcion || '').includes('PUNTO');
-      if (isVentaEfectivo && isPunto) {
-        return acc + (op.monto_digital_cobrado_ves || op.monto_ves || op.ves || 0);
-      }
-      return acc;
-    }, 0));
+      const avancePuntoVes = Math.max(serverPuntoVes, shiftDivisaOps.reduce((acc, op) => {
+        const isVentaEfectivo = op.tipo_operacion === 'VENTA_EFECTIVO' || String(op.descripcion || '').includes('[VENTA EFECTIVO]');
+        const isPunto = op.metodo_cobro === 'PUNTO' || op.metodo_pago === 'PUNTO' || String(op.descripcion || '').includes('PUNTO');
+        if (isVentaEfectivo && isPunto) {
+          return acc + (op.monto_digital_cobrado_ves || op.monto_ves || op.ves || 0);
+        }
+        return acc;
+      }, 0));
 
-    const avancePagoMovilVes = Math.max(serverPagoMovilVes, shiftDivisaOps.reduce((acc, op) => {
-      const isVentaEfectivo = op.tipo_operacion === 'VENTA_EFECTIVO' || String(op.descripcion || '').includes('[VENTA EFECTIVO]');
-      const isPagoMovil = op.metodo_cobro === 'PAGO_MOVIL' || op.metodo_pago === 'PAGO_MOVIL' || String(op.descripcion || '').includes('PAGO MÓVIL') || String(op.descripcion || '').includes('PAGO_MOVIL');
-      if (isVentaEfectivo && isPagoMovil) {
-        return acc + (op.monto_digital_cobrado_ves || op.monto_ves || op.ves || 0);
-      }
-      return acc;
-    }, 0));
+      const avancePagoMovilVes = Math.max(serverPagoMovilVes, shiftDivisaOps.reduce((acc, op) => {
+        const isVentaEfectivo = op.tipo_operacion === 'VENTA_EFECTIVO' || String(op.descripcion || '').includes('[VENTA EFECTIVO]');
+        const isPagoMovil = op.metodo_cobro === 'PAGO_MOVIL' || op.metodo_pago === 'PAGO_MOVIL' || String(op.descripcion || '').includes('PAGO MÓVIL') || String(op.descripcion || '').includes('PAGO_MOVIL');
+        if (isVentaEfectivo && isPagoMovil) {
+          return acc + (op.monto_digital_cobrado_ves || op.monto_ves || op.ves || 0);
+        }
+        return acc;
+      }, 0));
 
-    const avanceTransferenciaVes = Math.max(serverTransferenciaVes, shiftDivisaOps.reduce((acc, op) => {
-      const isVentaEfectivo = op.tipo_operacion === 'VENTA_EFECTIVO' || String(op.descripcion || '').includes('[VENTA EFECTIVO]');
-      const isTransferencia = op.metodo_cobro === 'TRANSFERENCIA' || op.metodo_pago === 'TRANSFERENCIA' || String(op.descripcion || '').includes('TRANSFERENCIA');
-      if (isVentaEfectivo && isTransferencia) {
-        return acc + (op.monto_digital_cobrado_ves || op.monto_ves || op.ves || 0);
-      }
-      return acc;
-    }, 0));
+      const avanceTransferenciaVes = Math.max(serverTransferenciaVes, shiftDivisaOps.reduce((acc, op) => {
+        const isVentaEfectivo = op.tipo_operacion === 'VENTA_EFECTIVO' || String(op.descripcion || '').includes('[VENTA EFECTIVO]');
+        const isTransferencia = op.metodo_cobro === 'TRANSFERENCIA' || op.metodo_pago === 'TRANSFERENCIA' || String(op.descripcion || '').includes('TRANSFERENCIA');
+        if (isVentaEfectivo && isTransferencia) {
+          return acc + (op.monto_digital_cobrado_ves || op.monto_ves || op.ves || 0);
+        }
+        return acc;
+      }, 0));
 
-    const avanceComisionTotalVes = shiftDivisaOps.reduce((acc, op) => {
-      if (op.tipo_operacion === 'VENTA_EFECTIVO') {
-        return acc + (op.comision_monto_ves || 0);
-      }
-      return acc;
-    }, 0);
+      const avanceComisionTotalVes = shiftDivisaOps.reduce((acc, op) => {
+        if (op.tipo_operacion === 'VENTA_EFECTIVO') {
+          return acc + (op.comision_monto_ves || 0);
+        }
+        return acc;
+      }, 0);
 
-    const avanceComisionTotalUsd = shiftDivisaOps.reduce((acc, op) => {
-      if (op.tipo_operacion === 'VENTA_EFECTIVO') {
-        return acc + (op.comision_monto_usd || 0);
-      }
-      return acc;
-    }, 0);
+      const avanceComisionTotalUsd = shiftDivisaOps.reduce((acc, op) => {
+        if (op.tipo_operacion === 'VENTA_EFECTIVO') {
+          return acc + (op.comision_monto_usd || 0);
+        }
+        return acc;
+      }, 0);
 
     const cambioDivisasUsd = shiftDivisaOps.reduce((acc, op) => {
       if (op.tipo_operacion === 'COMPRA_DIVISA' && (op.currency === 'USD' || !op.currency)) {
@@ -2775,18 +2775,57 @@ export default function CajaPOS({
 
     const cambioDivisasCount = shiftDivisaOps.filter(op => op.tipo_operacion === 'COMPRA_DIVISA').length;
 
+    // Helper payment conversion functions
+    const getPayUsd = (p: Payment) => {
+      if (!p) return 0;
+      if (typeof p.montoUSD === 'number' && !isNaN(p.montoUSD) && p.montoUSD > 0) return p.montoUSD;
+      if (p.metodo === 'Efectivo$' || p.metodo === 'Tarjeta$' || p.metodo === 'Binance' || p.metodo === 'PayPal' || p.metodo === 'CreditoCliente') {
+        return typeof p.monto === 'number' && !isNaN(p.monto) ? p.monto : 0;
+      }
+      const ves = typeof p.montoVES === 'number' && !isNaN(p.montoVES) && p.montoVES > 0
+        ? p.montoVES
+        : (typeof (p as any).montoBs === 'number' && !isNaN((p as any).montoBs) && (p as any).montoBs > 0
+          ? (p as any).montoBs
+          : (typeof (p as any).monto_entregado_ves === 'number' && !isNaN((p as any).monto_entregado_ves) && (p as any).monto_entregado_ves > 0
+            ? (p as any).monto_entregado_ves
+            : (typeof p.monto === 'number' && !isNaN(p.monto) ? p.monto : 0)));
+      return (tasaDia && tasaDia > 0) ? (ves / tasaDia) : (p.monto || 0);
+    };
+
+    const getPayVes = (p: Payment) => {
+      if (!p) return 0;
+      if (typeof p.montoVES === 'number' && !isNaN(p.montoVES) && p.montoVES > 0) return p.montoVES;
+      if (typeof (p as any).montoBs === 'number' && !isNaN((p as any).montoBs) && (p as any).montoBs > 0) return (p as any).montoBs;
+      if (typeof (p as any).monto_entregado_ves === 'number' && !isNaN((p as any).monto_entregado_ves) && (p as any).monto_entregado_ves > 0) return (p as any).monto_entregado_ves;
+      
+      const isBs = ['efectivobs', 'tarjetabs', 'pagomovil', 'biopago'].includes(String(p.metodo || '').toLowerCase());
+      if (isBs) {
+        if (typeof p.monto === 'number' && !isNaN(p.monto)) {
+          if (p.montoUSD && Math.abs(p.monto - p.montoUSD) < 0.001) {
+            return p.monto * (tasaDia || 1);
+          }
+          return p.monto > 50 ? p.monto : p.monto * (tasaDia || 1);
+        }
+      }
+      
+      if (typeof p.montoUSD === 'number' && !isNaN(p.montoUSD) && p.montoUSD > 0) {
+        return p.montoUSD * (tasaDia || 1);
+      }
+      return (typeof p.monto === 'number' && !isNaN(p.monto) ? p.monto : 0) * (tasaDia || 1);
+    };
+
     // Detailed metrics calculation
     const aperturaUsd = targetAperturaUsd;
     const aperturaVes = targetAperturaVes;
     const ventasEfectivoUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      if (sale.factura_nro?.startsWith('DEV-')) return acc;
       const cashPay = (sale.pagos || []).find(p => p.metodo === 'Efectivo$');
-      return acc + (cashPay ? cashPay.monto : 0);
+      return acc + (cashPay ? getPayUsd(cashPay) : 0);
     }, 0);
     const ventasEfectivoVes = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      if (sale.factura_nro?.startsWith('DEV-')) return acc;
       const cashPay = (sale.pagos || []).find(p => p.metodo === 'EfectivoBs');
-      return acc + (cashPay ? cashPay.monto : 0);
+      return acc + (cashPay ? getPayVes(cashPay) : 0);
     }, 0);
     // Detailed abonos metrics calculation for active shift
     const abonosEfectivoUsd = targetShiftAbonos.reduce((acc, a) => {
@@ -2826,12 +2865,17 @@ export default function CajaPOS({
     }, 0);
     const abonosPuntoVes = targetShiftAbonos.reduce((acc, a) => {
       const m = String(a.metodo_pago || '');
-      if (m === 'TarjetaBs' || m === 'Tarjeta$') return acc + (a.monto_ves || (a.monto || 0) * tasaDia);
+      if (m === 'TarjetaBs' || m === 'Punto') return acc + (a.monto_ves || (a.monto || 0) * tasaDia);
       return acc;
     }, 0);
     const abonosPuntoUsd = targetShiftAbonos.reduce((acc, a) => {
       const m = String(a.metodo_pago || '');
-      if (m === 'TarjetaBs' || m === 'Tarjeta$') return acc + (a.monto || 0);
+      if (m === 'TarjetaBs' || m === 'Punto') return acc + (a.monto || 0);
+      return acc;
+    }, 0);
+    const abonosTarjetaUsd = targetShiftAbonos.reduce((acc, a) => {
+      const m = String(a.metodo_pago || '');
+      if (m === 'Tarjeta$') return acc + (a.monto || 0);
       return acc;
     }, 0);
     const abonosZelleUsd = targetShiftAbonos.reduce((acc, a) => {
@@ -2849,7 +2893,7 @@ export default function CajaPOS({
       if (m === 'PayPal') return acc + (a.monto || 0);
       return acc;
     }, 0);
-    const abonoClientesUsd = abonosEfectivoUsd + abonosEfectivoBsUsd + abonosBiopagoUsd + abonosPagoMovilUsd + abonosPuntoUsd + abonosZelleUsd + abonosBinanceUsd + abonosPayPalUsd;
+    const abonoClientesUsd = abonosEfectivoUsd + abonosEfectivoBsUsd + abonosBiopagoUsd + abonosPagoMovilUsd + abonosPuntoUsd + abonosTarjetaUsd + abonosZelleUsd + abonosBinanceUsd + abonosPayPalUsd;
 
     const entradaEfectivoUsd = targetEntradaUsd;
     const entradaEfectivoVes = targetEntradaVes;
@@ -2892,57 +2936,47 @@ export default function CajaPOS({
     const expectedVes = Math.max(0, parseFloat(rawExpectedVes.toFixed(2)));
     
     const ventasTotalesUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      if (sale.factura_nro?.startsWith('DEV-')) return acc;
       return acc + (sale.totalUSD || 0);
     }, 0);
     const descuentosUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      if (sale.factura_nro?.startsWith('DEV-')) return acc;
       return acc + (sale.descuento || 0);
     }, 0);
     const ventaBrutaUsd = ventasTotalesUsd + descuentosUsd;
-    
-    const getPayUsd = (p: Payment) => {
-      const val = typeof p?.montoUSD === 'number' && !isNaN(p.montoUSD) ? p.montoUSD : (typeof p?.monto === 'number' && !isNaN(p.monto) ? p.monto : 0);
-      return isNaN(val) ? 0 : val;
-    };
-
-    const getPayVes = (p: Payment) => {
-      const val = typeof p?.monto === 'number' && !isNaN(p.monto) ? p.monto : 0;
-      return isNaN(val) ? 0 : val;
-    };
 
     const pagosEfectivoUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      if (sale.factura_nro?.startsWith('DEV-')) return acc;
       return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Efectivo$' ? a + getPayUsd(p) : a, 0);
     }, 0);
 
     const pagosEfectivoBsUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      if (sale.factura_nro?.startsWith('DEV-')) return acc;
       return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'EfectivoBs' ? a + getPayUsd(p) : a, 0);
     }, 0);
 
     const pagosEfectivoBsVes = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      if (sale.factura_nro?.startsWith('DEV-')) return acc;
       return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'EfectivoBs' ? a + getPayVes(p) : a, 0);
     }, 0) + abonosEfectivoBsVes;
 
     const pagosBiopagoUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      if (sale.factura_nro?.startsWith('DEV-')) return acc;
       return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Biopago' ? a + getPayUsd(p) : a, 0);
     }, 0);
 
     const pagosBiopagoVes = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      if (sale.factura_nro?.startsWith('DEV-')) return acc;
       return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Biopago' ? a + getPayVes(p) : a, 0);
     }, 0) + abonosBiopagoVes + avanceBiopagoVes;
 
     const pagosPagoMovilUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      if (sale.factura_nro?.startsWith('DEV-')) return acc;
       return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'PagoMovil' ? a + getPayUsd(p) : a, 0);
     }, 0);
 
     const pagosPagoMovilVes = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      if (sale.factura_nro?.startsWith('DEV-')) return acc;
       return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'PagoMovil' ? a + getPayVes(p) : a, 0);
     }, 0) + abonosPagoMovilVes + avancePagoMovilVes;
 
@@ -2950,24 +2984,28 @@ export default function CajaPOS({
     const pagosTransferenciaVes = avanceTransferenciaVes;
 
     const pagosPuntoUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro.startsWith('DEV-')) return acc;
-      return acc + (sale.pagos || []).reduce((a, p) => (p.metodo === 'Tarjeta$' || p.metodo === 'TarjetaBs') ? a + getPayUsd(p) : a, 0);
+      if (sale.factura_nro?.startsWith('DEV-')) return acc;
+      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'TarjetaBs' ? a + getPayUsd(p) : a, 0);
     }, 0);
 
     const pagosPuntoVes = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro.startsWith('DEV-')) return acc;
-      return acc + (sale.pagos || []).reduce((a, p) => (p.metodo === 'Tarjeta$' || p.metodo === 'TarjetaBs') ? a + getPayVes(p) : a, 0);
+      if (sale.factura_nro?.startsWith('DEV-')) return acc;
+      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'TarjetaBs' ? a + getPayVes(p) : a, 0);
     }, 0) + abonosPuntoVes + avancePuntoVes;
     
-    const pagosTarjetaUsd = pagosEfectivoBsUsd; 
+    const pagosTarjetaUsd = targetShiftSales.reduce((acc, sale) => {
+      if (sale.factura_nro?.startsWith('DEV-')) return acc;
+      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Tarjeta$' ? a + getPayUsd(p) : a, 0);
+    }, 0) + abonosTarjetaUsd;
+    
     const pagosCreditoUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      if (sale.factura_nro?.startsWith('DEV-')) return acc;
       return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'CreditoCliente' ? a + getPayUsd(p) : a, 0);
     }, 0);
     const pagosPuntosUsd = pagosBiopagoUsd; 
     
     const totalDevolucionesUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro.startsWith('DEV-')) {
+      if (sale.factura_nro?.startsWith('DEV-')) {
         const val = typeof sale.totalUSD === 'number' && !isNaN(sale.totalUSD) ? Math.abs(sale.totalUSD) : 0;
         return acc + val;
       }
@@ -2975,7 +3013,7 @@ export default function CajaPOS({
     }, 0);
 
     const devolucionVentasUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro.startsWith('DEV-')) {
+      if (sale.factura_nro?.startsWith('DEV-')) {
         const isUsdDev = (sale.pagos || []).some(p => {
           const m = String(p.metodo || '');
           return m === 'Efectivo$' || m.endsWith('$') || m === 'Binance' || m === 'PayPal' || m === 'Zelle';
@@ -2997,7 +3035,7 @@ export default function CajaPOS({
     }, 0);
 
     const devolucionVentasVes = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro.startsWith('DEV-')) {
+      if (sale.factura_nro?.startsWith('DEV-')) {
         const isVesDev = (sale.pagos || []).some(p => {
           const m = String(p.metodo || '');
           return m === 'EfectivoBs' || m.endsWith('Bs') || m === 'PagoMovil' || m === 'Biopago';
@@ -3114,12 +3152,12 @@ export default function CajaPOS({
     const utilidadUsd = subtotalNetoUsd - costoTotalUsd;
 
     const pagosBinanceUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      if (sale.factura_nro?.startsWith('DEV-')) return acc;
       return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Binance' ? a + getPayUsd(p) : a, 0);
     }, 0);
 
     const pagosPayPalUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro.startsWith('DEV-')) return acc;
+      if (sale.factura_nro?.startsWith('DEV-')) return acc;
       return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'PayPal' ? a + getPayUsd(p) : a, 0);
     }, 0);
 
@@ -3196,6 +3234,10 @@ export default function CajaPOS({
     };
 
     setCierreResult(localCierreResult);
+    } catch (err: any) {
+      console.error('Error al generar arqueo y cierre:', err);
+      showAlert(`Error al procesar el cierre: ${err?.message || err}`, 'Error de Cierre', 'error');
+    }
   };
 
   const handleConfirmCierre = async () => {
@@ -6540,8 +6582,15 @@ export default function CajaPOS({
 
                           {(cierreResult.pagosPuntoVes > 0 || !hideZeroLines) && (
                             <div className="flex justify-between items-center py-0.5">
-                              <span className="font-sans font-semibold text-slate-600">Punto / Tarjeta :</span>
+                              <span className="font-sans font-semibold text-slate-600">Punto / Tarjetas (Bs) :</span>
                               <span className="font-black text-indigo-700 text-sm sm:text-base">Bs {(cierreResult.pagosPuntoVes && !isNaN(cierreResult.pagosPuntoVes) ? cierreResult.pagosPuntoVes : 0).toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {((cierreResult.pagosTarjetaUsd || 0) > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5">
+                              <span className="font-sans font-semibold text-slate-600">Tarjeta ($ USD) :</span>
+                              <span className="font-black text-sky-700 text-sm sm:text-base">$ {(cierreResult.pagosTarjetaUsd && !isNaN(cierreResult.pagosTarjetaUsd) ? cierreResult.pagosTarjetaUsd : 0).toFixed(2)}</span>
                             </div>
                           )}
 
