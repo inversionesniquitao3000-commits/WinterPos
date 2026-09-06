@@ -11,7 +11,10 @@ export interface Product {
   precio_bulto_usd?: number;
   cantidad_mayorista: number;
   cant_bulto?: number;
+  ganancia_detalle?: number;
+  ganancia_mayor?: number;
   ganancia_bulto?: number;
+  fijar_margen?: boolean;
   exento_impuesto: boolean;
   imagen_url: string;
   estado: 'Activo' | 'Inactivo';

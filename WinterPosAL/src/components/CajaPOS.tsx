@@ -233,6 +233,15 @@ export default function CajaPOS({
     const wholesaleQty = parseInt(editWholesaleQty) || 6;
     const taxPctNum = editTaxActive ? (parseFloat(editTaxPct) || 16) : 0;
 
+    let gananciaDetalle = editingProduct.ganancia_detalle || 0;
+    let gananciaMayor = editingProduct.ganancia_mayor || 0;
+    if (cost > 0 && detail > cost) {
+      gananciaDetalle = parseFloat((((detail - cost) / cost) * 100).toFixed(2));
+    }
+    if (cost > 0 && mayor > cost) {
+      gananciaMayor = parseFloat((((mayor - cost) / cost) * 100).toFixed(2));
+    }
+
     const updated: Product = {
       ...editingProduct,
       barcode: editBarcode.trim() || editClave.trim(),
@@ -247,7 +256,10 @@ export default function CajaPOS({
       precio_mayor_usd: mayor,
       precio_bulto_usd: bulto,
       cant_bulto: cantBulto,
+      ganancia_detalle: gananciaDetalle,
+      ganancia_mayor: gananciaMayor,
       ganancia_bulto: gananciaBulto,
+      fijar_margen: editingProduct.fijar_margen,
       stock_minimo: minStock,
       cantidad_mayorista: wholesaleQty,
       imagen_url: editImageUrl.trim()

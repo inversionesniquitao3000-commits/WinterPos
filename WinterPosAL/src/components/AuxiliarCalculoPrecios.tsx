@@ -9,6 +9,12 @@ interface AuxiliarCalculoPreciosProps {
   initialDetail?: string;
   initialMayor?: string;
   initialBulto?: string;
+  originalProductPrices?: {
+    cost?: number;
+    detail?: number;
+    mayor?: number;
+    bulto?: number;
+  };
   cantBulto?: number;
   taxActive?: boolean;
   taxPct?: number;
@@ -24,6 +30,7 @@ export default function AuxiliarCalculoPrecios({
   initialDetail = '',
   initialMayor = '',
   initialBulto = '',
+  originalProductPrices,
   cantBulto = 1,
   taxActive = false,
   taxPct = 16,
@@ -177,11 +184,11 @@ export default function AuxiliarCalculoPrecios({
     } catch (_) {}
   }, [effectiveStorageKey]);
 
-  // Initial previous prices for comparison guide
-  const prevCost = parseFloat(initialCost) || 0;
-  const prevDetail = parseFloat(initialDetail) || 0;
-  const prevMayor = parseFloat(initialMayor) || 0;
-  const prevBulto = parseFloat(initialBulto) || 0;
+  // Initial previous prices for comparison guide (prioritize originalProductPrices from database)
+  const prevCost = originalProductPrices?.cost !== undefined ? originalProductPrices.cost : (parseFloat(initialCost) || 0);
+  const prevDetail = originalProductPrices?.detail !== undefined ? originalProductPrices.detail : (parseFloat(initialDetail) || 0);
+  const prevMayor = originalProductPrices?.mayor !== undefined ? originalProductPrices.mayor : (parseFloat(initialMayor) || 0);
+  const prevBulto = originalProductPrices?.bulto !== undefined ? originalProductPrices.bulto : (parseFloat(initialBulto) || 0);
   const hasInitialPrices = prevCost > 0 || prevDetail > 0 || prevMayor > 0 || prevBulto > 0;
 
   // Helper to enforce max 2 decimal places strictly for manual inputs
@@ -259,15 +266,21 @@ export default function AuxiliarCalculoPrecios({
     isBultoAdjusted = true;
   }
 
-  const calculatedDetailUSD = rawDetailUSD;
-  const calculatedMayorUSD = rawMayorUSD;
-  const calculatedBultoUSD = rawBultoUSD;
-
-  // IVA Calculations
+  // Base and IVA Calculations with consistent cent precision
   const taxMultiplier = taxActive && taxPct > 0 ? (1 + taxPct / 100) : 1;
-  const detailWithIva = calculatedDetailUSD * taxMultiplier;
-  const mayorWithIva = calculatedMayorUSD * taxMultiplier;
-  const bultoWithIva = calculatedBultoUSD * taxMultiplier;
+
+  // Round calculated base price to 2 decimal places strictly
+  const roundedDetailBase = Math.round(rawDetailUSD * 100) / 100;
+  const roundedMayorBase = Math.round(rawMayorUSD * 100) / 100;
+  const roundedBultoBase = Math.round(rawBultoUSD * 100) / 100;
+
+  const calculatedDetailUSD = roundedDetailBase;
+  const calculatedMayorUSD = roundedMayorBase;
+  const calculatedBultoUSD = roundedBultoBase;
+
+  const detailWithIva = Math.round((roundedDetailBase * taxMultiplier) * 100) / 100;
+  const mayorWithIva = Math.round((roundedMayorBase * taxMultiplier) * 100) / 100;
+  const bultoWithIva = Math.round((roundedBultoBase * taxMultiplier) * 100) / 100;
 
   // Precios finales a transferir a la ficha técnica:
   // Si el producto es gravable (IVA activo), se transfiere el PVP con IVA incluido para que la Caja cobre el total correcto.
@@ -275,6 +288,21 @@ export default function AuxiliarCalculoPrecios({
   const finalDetailToApply = taxActive && taxPct > 0 ? detailWithIva : calculatedDetailUSD;
   const finalMayorToApply = taxActive && taxPct > 0 ? mayorWithIva : calculatedMayorUSD;
   const finalBultoToApply = taxActive && taxPct > 0 ? bultoWithIva : calculatedBultoUSD;
+
+  // Real-time synchronization callback to parent form when auxiliary values change
+  useEffect(() => {
+    if (isEnabled && unitCostUSD >= 0 && (pctDetail > 0 || pctMayor > 0 || pctBulto > 0)) {
+      onApplyPrices?.({
+        cost: unitCostUSD.toFixed(2),
+        detail: finalDetailToApply.toFixed(2),
+        mayor: finalMayorToApply.toFixed(2),
+        bulto: finalBultoToApply.toFixed(2),
+        marginDetail: marginDetail,
+        marginMayor: marginMayor,
+        marginBulto: marginBulto
+      } as any);
+    }
+  }, [isEnabled, unitCostUSD, finalDetailToApply, finalMayorToApply, finalBultoToApply, marginDetail, marginMayor, marginBulto]);
 
   const [appliedToast, setAppliedToast] = useState(false);
 
@@ -284,8 +312,11 @@ export default function AuxiliarCalculoPrecios({
         cost: unitCostUSD.toFixed(2),
         detail: finalDetailToApply.toFixed(2),
         mayor: finalMayorToApply.toFixed(2),
-        bulto: finalBultoToApply.toFixed(2)
-      });
+        bulto: finalBultoToApply.toFixed(2),
+        marginDetail: marginDetail,
+        marginMayor: marginMayor,
+        marginBulto: marginBulto
+      } as any);
       setAppliedToast(true);
       setTimeout(() => setAppliedToast(false), 2500);
     }

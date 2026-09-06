@@ -209,7 +209,10 @@ try {
     ALTER TABLE IF EXISTS Movimientos_Caja ADD COLUMN IF NOT EXISTS comision_usd NUMERIC DEFAULT 0;
     ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS precio_bulto_usd NUMERIC(12, 2) DEFAULT 0;
     ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS cant_bulto INT DEFAULT 0;
+    ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS ganancia_detalle NUMERIC(8, 2) DEFAULT 0;
+    ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS ganancia_mayor NUMERIC(8, 2) DEFAULT 0;
     ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS ganancia_bulto NUMERIC(8, 2) DEFAULT 0;
+    ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS fijar_margen BOOLEAN DEFAULT FALSE;
     ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS porcentaje_impuesto NUMERIC(5, 2) DEFAULT 0;
     ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS a_granel BOOLEAN DEFAULT FALSE;
     ALTER TABLE IF EXISTS Productos ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(50);
@@ -935,7 +938,10 @@ export async function getProducts() {
         precio_bulto_usd: parseFloat(r.precio_bulto_usd || 0),
         cantidad_mayorista: parseInt(r.cantidad_mayorista || 12, 10),
         cant_bulto: parseInt(r.cant_bulto || 0, 10),
+        ganancia_detalle: parseFloat(r.ganancia_detalle || 0),
+        ganancia_mayor: parseFloat(r.ganancia_mayor || 0),
         ganancia_bulto: parseFloat(r.ganancia_bulto || 0),
+        fijar_margen: !!r.fijar_margen,
         exento_impuesto: !!r.exento_impuesto,
         imagen_url: r.imagen_url || '',
         estado: r.estado || 'Activo',
@@ -958,9 +964,9 @@ export async function saveProduct(p) {
   if (usePostgres) {
     try {
       const res = await pool.query(
-        `INSERT INTO Productos (codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, precio_costo_usd, precio_detalle_usd, precio_mayor_usd, precio_bulto_usd, cantidad_mayorista, cant_bulto, ganancia_bulto, exento_impuesto, imagen_url, estado, a_granel, fecha_vencimiento, porcentaje_impuesto)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING id`,
-        [p.barcode, p.description, p.category, stockActual, stockMinimo, p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.precio_bulto_usd || 0, p.cantidad_mayorista || 12, p.cant_bulto || 0, p.ganancia_bulto || 0, p.exento_impuesto, p.imagen_url, p.estado, p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
+        `INSERT INTO Productos (codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, precio_costo_usd, precio_detalle_usd, precio_mayor_usd, precio_bulto_usd, cantidad_mayorista, cant_bulto, ganancia_detalle, ganancia_mayor, ganancia_bulto, fijar_margen, exento_impuesto, imagen_url, estado, a_granel, fecha_vencimiento, porcentaje_impuesto)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21) RETURNING id`,
+        [p.barcode, p.description, p.category, stockActual, stockMinimo, p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.precio_bulto_usd || 0, p.cantidad_mayorista || 12, p.cant_bulto || 0, parseFloat(p.ganancia_detalle) || 0, parseFloat(p.ganancia_mayor) || 0, parseFloat(p.ganancia_bulto) || 0, !!p.fijar_margen, p.exento_impuesto, p.imagen_url, p.estado, p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
       );
       return { ...p, id: res.rows[0].id, stock_actual: stockActual, stock_minimo: stockMinimo };
     } catch (err) {
@@ -987,9 +993,9 @@ export async function updateProduct(p) {
     try {
       const res = await pool.query(
         `UPDATE Productos 
-         SET codigo_barras_clave = $1, descripcion = $2, categoria = $3, stock_minimo = $4, precio_costo_usd = $5, precio_detalle_usd = $6, precio_mayor_usd = $7, precio_bulto_usd = $8, cantidad_mayorista = $9, cant_bulto = $10, ganancia_bulto = $11, exento_impuesto = $12, imagen_url = $13, estado = $14, a_granel = $15, fecha_vencimiento = $16, porcentaje_impuesto = $17, stock_actual = $18
-         WHERE id = $19 RETURNING *`,
-        [barcode, description, category, stockMinimo, parseFloat(p.precio_costo_usd) || 0, parseFloat(p.precio_detalle_usd) || 0, parseFloat(p.precio_mayor_usd) || 0, parseFloat(p.precio_bulto_usd) || 0, parseInt(p.cantidad_mayorista) || 12, parseInt(p.cant_bulto) || 0, parseFloat(p.ganancia_bulto) || 0, !!p.exento_impuesto, p.imagen_url || '', p.estado || 'Activo', isGranel, p.fecha_vencimiento || null, parseFloat(p.porcentaje_impuesto || 0), stockActual, prodId]
+         SET codigo_barras_clave = $1, descripcion = $2, categoria = $3, stock_minimo = $4, precio_costo_usd = $5, precio_detalle_usd = $6, precio_mayor_usd = $7, precio_bulto_usd = $8, cantidad_mayorista = $9, cant_bulto = $10, ganancia_detalle = $11, ganancia_mayor = $12, ganancia_bulto = $13, fijar_margen = $14, exento_impuesto = $15, imagen_url = $16, estado = $17, a_granel = $18, fecha_vencimiento = $19, porcentaje_impuesto = $20, stock_actual = $21
+         WHERE id = $22 RETURNING *`,
+        [barcode, description, category, stockMinimo, parseFloat(p.precio_costo_usd) || 0, parseFloat(p.precio_detalle_usd) || 0, parseFloat(p.precio_mayor_usd) || 0, parseFloat(p.precio_bulto_usd) || 0, parseInt(p.cantidad_mayorista) || 12, parseInt(p.cant_bulto) || 0, parseFloat(p.ganancia_detalle) || 0, parseFloat(p.ganancia_mayor) || 0, parseFloat(p.ganancia_bulto) || 0, !!p.fijar_margen, !!p.exento_impuesto, p.imagen_url || '', p.estado || 'Activo', isGranel, p.fecha_vencimiento || null, parseFloat(p.porcentaje_impuesto || 0), stockActual, prodId]
       );
       if (res.rowCount > 0) {
         const r = res.rows[0];
@@ -1007,7 +1013,10 @@ export async function updateProduct(p) {
           precio_bulto_usd: parseFloat(r.precio_bulto_usd || 0),
           cantidad_mayorista: parseInt(r.cantidad_mayorista) || 12,
           cant_bulto: parseInt(r.cant_bulto || 0),
+          ganancia_detalle: parseFloat(r.ganancia_detalle || 0),
+          ganancia_mayor: parseFloat(r.ganancia_mayor || 0),
           ganancia_bulto: parseFloat(r.ganancia_bulto || 0),
+          fijar_margen: !!r.fijar_margen,
           exento_impuesto: !!r.exento_impuesto,
           porcentaje_impuesto: parseFloat(r.porcentaje_impuesto || 0),
           a_granel: !!r.a_granel,
@@ -1104,17 +1113,41 @@ export async function updateProductStockBulk(updates) {
 export async function updateProductPrices(prodId, prices) {
   if (usePostgres) {
     try {
+      const gananciaDetalle = prices.ganancia_detalle !== undefined ? parseFloat(prices.ganancia_detalle) || 0 : null;
+      const gananciaMayor = prices.ganancia_mayor !== undefined ? parseFloat(prices.ganancia_mayor) || 0 : null;
+      const gananciaBulto = prices.ganancia_bulto !== undefined ? parseFloat(prices.ganancia_bulto) || 0 : null;
+      const fijarMargen = prices.fijar_margen !== undefined ? !!prices.fijar_margen : null;
+
+      let setClauses = ['precio_costo_usd = $1', 'precio_detalle_usd = $2', 'precio_mayor_usd = $3'];
+      let params = [prices.cost, prices.detail, prices.mayor];
+      let pIdx = 4;
+
       if (prices.bulto !== undefined) {
-        await pool.query(
-          'UPDATE Productos SET precio_costo_usd = $1, precio_detalle_usd = $2, precio_mayor_usd = $3, precio_bulto_usd = $4 WHERE id = $5',
-          [prices.cost, prices.detail, prices.mayor, parseFloat(prices.bulto) || 0, prodId]
-        );
-      } else {
-        await pool.query(
-          'UPDATE Productos SET precio_costo_usd = $1, precio_detalle_usd = $2, precio_mayor_usd = $3 WHERE id = $4',
-          [prices.cost, prices.detail, prices.mayor, prodId]
-        );
+        setClauses.push(`precio_bulto_usd = $${pIdx++}`);
+        params.push(parseFloat(prices.bulto) || 0);
       }
+      if (gananciaDetalle !== null) {
+        setClauses.push(`ganancia_detalle = $${pIdx++}`);
+        params.push(gananciaDetalle);
+      }
+      if (gananciaMayor !== null) {
+        setClauses.push(`ganancia_mayor = $${pIdx++}`);
+        params.push(gananciaMayor);
+      }
+      if (gananciaBulto !== null) {
+        setClauses.push(`ganancia_bulto = $${pIdx++}`);
+        params.push(gananciaBulto);
+      }
+      if (fijarMargen !== null) {
+        setClauses.push(`fijar_margen = $${pIdx++}`);
+        params.push(fijarMargen);
+      }
+
+      params.push(prodId);
+      await pool.query(
+        `UPDATE Productos SET ${setClauses.join(', ')} WHERE id = $${pIdx}`,
+        params
+      );
       return true;
     } catch (err) {
       console.error('Error en updateProductPrices (Postgres):', err.message);
@@ -1129,6 +1162,10 @@ export async function updateProductPrices(prodId, prices) {
     if (prices.bulto !== undefined) {
       products[idx].precio_bulto_usd = parseFloat(prices.bulto) || 0;
     }
+    if (prices.ganancia_detalle !== undefined) products[idx].ganancia_detalle = parseFloat(prices.ganancia_detalle) || 0;
+    if (prices.ganancia_mayor !== undefined) products[idx].ganancia_mayor = parseFloat(prices.ganancia_mayor) || 0;
+    if (prices.ganancia_bulto !== undefined) products[idx].ganancia_bulto = parseFloat(prices.ganancia_bulto) || 0;
+    if (prices.fijar_margen !== undefined) products[idx].fijar_margen = !!prices.fijar_margen;
     writeJsonFile('products.json', products);
     return true;
   }
@@ -2194,11 +2231,11 @@ export async function restoreDatabase(data) {
         for (const p of data.products) {
           await pool.query(
             `INSERT INTO Productos (id, codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, 
-             precio_costo_usd, precio_detalle_usd, precio_mayor_usd, precio_bulto_usd, cantidad_mayorista, cant_bulto, ganancia_bulto, exento_impuesto, imagen_url, 
+             precio_costo_usd, precio_detalle_usd, precio_mayor_usd, precio_bulto_usd, cantidad_mayorista, cant_bulto, ganancia_detalle, ganancia_mayor, ganancia_bulto, fijar_margen, exento_impuesto, imagen_url, 
              estado, a_granel, fecha_vencimiento, porcentaje_impuesto) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
             [p.id, p.barcode || p.codigo_barras_clave, p.description || p.descripcion, p.category || p.categoria, p.stock_actual, p.stock_minimo,
-             p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.precio_bulto_usd || 0, p.cantidad_mayorista || 12, p.cant_bulto || 0, p.ganancia_bulto || 0, p.exento_impuesto, p.imagen_url || '',
+             p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.precio_bulto_usd || 0, p.cantidad_mayorista || 12, p.cant_bulto || 0, parseFloat(p.ganancia_detalle) || 0, parseFloat(p.ganancia_mayor) || 0, parseFloat(p.ganancia_bulto) || 0, !!p.fijar_margen, p.exento_impuesto, p.imagen_url || '',
              p.estado || 'Activo', p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
           );
         }
@@ -3884,8 +3921,8 @@ export async function saveProductsBulk(products) {
         const stockMinimo = isGranel ? (p.stock_minimo || 0) : Math.round(p.stock_minimo || 0);
 
         const res = await pool.query(
-          `INSERT INTO Productos (codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, precio_costo_usd, precio_detalle_usd, precio_mayor_usd, precio_bulto_usd, cantidad_mayorista, cant_bulto, ganancia_bulto, exento_impuesto, imagen_url, estado, a_granel, fecha_vencimiento, porcentaje_impuesto)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+          `INSERT INTO Productos (codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, precio_costo_usd, precio_detalle_usd, precio_mayor_usd, precio_bulto_usd, cantidad_mayorista, cant_bulto, ganancia_detalle, ganancia_mayor, ganancia_bulto, fijar_margen, exento_impuesto, imagen_url, estado, a_granel, fecha_vencimiento, porcentaje_impuesto)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
            ON CONFLICT (codigo_barras_clave) 
            DO UPDATE SET 
              descripcion = EXCLUDED.descripcion,
@@ -3898,14 +3935,17 @@ export async function saveProductsBulk(products) {
              precio_bulto_usd = EXCLUDED.precio_bulto_usd,
              cantidad_mayorista = EXCLUDED.cantidad_mayorista,
              cant_bulto = EXCLUDED.cant_bulto,
+             ganancia_detalle = EXCLUDED.ganancia_detalle,
+             ganancia_mayor = EXCLUDED.ganancia_mayor,
              ganancia_bulto = EXCLUDED.ganancia_bulto,
+             fijar_margen = EXCLUDED.fijar_margen,
              exento_impuesto = EXCLUDED.exento_impuesto,
              estado = EXCLUDED.estado,
              a_granel = EXCLUDED.a_granel,
              fecha_vencimiento = EXCLUDED.fecha_vencimiento,
              porcentaje_impuesto = EXCLUDED.porcentaje_impuesto
            RETURNING id`,
-          [p.barcode, p.description, p.category || '', stockActual, stockMinimo, p.precio_costo_usd || 0, p.precio_detalle_usd || 0, p.precio_mayor_usd || 0, p.precio_bulto_usd || 0, p.cantidad_mayorista || 12, p.cant_bulto || 0, p.ganancia_bulto || 0, p.exento_impuesto || false, p.imagen_url || '', p.estado || 'Activo', p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
+          [p.barcode, p.description, p.category || '', stockActual, stockMinimo, p.precio_costo_usd || 0, p.precio_detalle_usd || 0, p.precio_mayor_usd || 0, p.precio_bulto_usd || 0, p.cantidad_mayorista || 12, p.cant_bulto || 0, parseFloat(p.ganancia_detalle) || 0, parseFloat(p.ganancia_mayor) || 0, parseFloat(p.ganancia_bulto) || 0, !!p.fijar_margen, p.exento_impuesto || false, p.imagen_url || '', p.estado || 'Activo', p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
         );
         savedList.push({ ...p, id: res.rows[0].id, stock_actual: stockActual, stock_minimo: stockMinimo });
       }

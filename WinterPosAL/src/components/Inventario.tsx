@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Product, InventoryMovement, PriceAdjustmentHistory, User, CompanyConfig } from '../types';
-import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator, PauseCircle, Play, Trash2, Wand2, Sparkles, ShieldAlert, RotateCcw, BarChart3, TrendingUp, Award, DollarSign, X, Image as ImageIcon, Link as LinkIcon, UploadCloud, Check, Loader2, Building2, QrCode, Truck, AlertOctagon, AlertTriangle, Clock, Copy, ClipboardCheck } from 'lucide-react';
+import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator, PauseCircle, Play, Trash2, Wand2, Sparkles, ShieldAlert, RotateCcw, BarChart3, TrendingUp, Award, DollarSign, X, Image as ImageIcon, Link as LinkIcon, UploadCloud, Check, Loader2, Building2, QrCode, Truck, AlertOctagon, AlertTriangle, Clock, Copy, ClipboardCheck, Eye, Maximize2, ExternalLink } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr, getApiBaseUrl, formatImageUrl } from '../utils';
 import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
@@ -145,6 +145,49 @@ export default function Inventario({
   });
 
   const [regeneratingSingleItemId, setRegeneratingSingleItemId] = useState<number | null>(null);
+
+  // Product Image Large Viewer & Multi-Proposal Selector Modal
+  const [imageViewerModal, setImageViewerModal] = useState<{
+    isOpen: boolean;
+    target: 'edit' | 'new';
+    description: string;
+    category: string;
+    barcode: string;
+    currentUrl: string;
+    previewUrl: string;
+    searchQuery: string;
+    candidates: Array<{ url: string; title?: string; source?: string; isAi?: boolean; isCurrent?: boolean }>;
+    isLoadingCandidates: boolean;
+    isSavingCandidate: boolean;
+    isGeneratingAi: boolean;
+  }>({
+    isOpen: false,
+    target: 'edit',
+    description: '',
+    category: '',
+    barcode: '',
+    currentUrl: '',
+    previewUrl: '',
+    searchQuery: '',
+    candidates: [],
+    isLoadingCandidates: false,
+    isSavingCandidate: false,
+    isGeneratingAi: false,
+  });
+
+  // Dedicated Escape listener for imageViewerModal (Desktop & Web)
+  useEffect(() => {
+    if (!imageViewerModal.isOpen) return;
+    const handleModalEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        setImageViewerModal(prev => ({ ...prev, isOpen: false }));
+      }
+    };
+    window.addEventListener('keydown', handleModalEsc, true);
+    return () => window.removeEventListener('keydown', handleModalEsc, true);
+  }, [imageViewerModal.isOpen]);
 
   const availableCategories = useMemo(() => {
     const set = new Set<string>();
@@ -604,6 +647,222 @@ export default function Inventario({
     showToast(`✅ ¡Éxito! Se aplicaron ${updatedCount} fotos al catálogo (${bulkAiLogs.length - updatedCount} descartadas).`);
   };
 
+  // Open image large viewer & proposal selector modal
+  const handleOpenImageViewerModal = async (target: 'edit' | 'new') => {
+    const desc = target === 'edit' ? editDesc : newDesc;
+    const cat = target === 'edit' ? editCat : newCat;
+    const code = target === 'edit' ? editBarcode : newBarcode;
+    const curr = target === 'edit' ? editImageUrl : newImageUrl;
+
+    const initialCandidates: Array<{ url: string; title?: string; source?: string; isAi?: boolean; isCurrent?: boolean }> = [];
+    if (curr) {
+      initialCandidates.push({
+        url: curr,
+        title: 'Imagen Actual',
+        source: curr.includes('/api/ai/') ? 'IA / Servidor' : 'Foto Actual',
+        isCurrent: true
+      });
+    }
+
+    setImageViewerModal({
+      isOpen: true,
+      target,
+      description: desc,
+      category: cat,
+      barcode: code,
+      currentUrl: curr,
+      previewUrl: curr || '',
+      searchQuery: desc,
+      candidates: initialCandidates,
+      isLoadingCandidates: true,
+      isSavingCandidate: false,
+      isGeneratingAi: false,
+    });
+
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/ai/search-candidates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: desc,
+          category: cat,
+          barcode: code
+        })
+      });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.candidates)) {
+        const seen = new Set(initialCandidates.map(c => c.url));
+        const merged = [...initialCandidates];
+        data.candidates.forEach((cand: any) => {
+          if (cand.url && !seen.has(cand.url)) {
+            seen.add(cand.url);
+            merged.push(cand);
+          }
+        });
+        setImageViewerModal(prev => ({
+          ...prev,
+          candidates: merged,
+          previewUrl: prev.previewUrl || (merged[0] ? merged[0].url : ''),
+          isLoadingCandidates: false
+        }));
+      } else {
+        setImageViewerModal(prev => ({ ...prev, isLoadingCandidates: false }));
+      }
+    } catch (_) {
+      setImageViewerModal(prev => ({ ...prev, isLoadingCandidates: false }));
+    }
+  };
+
+  const handleSearchImageViewerCandidates = async (queryText: string) => {
+    if (!queryText.trim()) return;
+    setImageViewerModal(prev => ({ ...prev, isLoadingCandidates: true, searchQuery: queryText }));
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/ai/search-candidates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: queryText,
+          category: imageViewerModal.category,
+          barcode: imageViewerModal.barcode
+        })
+      });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.candidates)) {
+        const seen = new Set<string>();
+        const merged: Array<{ url: string; title?: string; source?: string; isAi?: boolean; isCurrent?: boolean }> = [];
+        if (imageViewerModal.currentUrl) {
+          seen.add(imageViewerModal.currentUrl);
+          merged.push({
+            url: imageViewerModal.currentUrl,
+            title: 'Imagen Actual',
+            source: 'Foto Actual',
+            isCurrent: true
+          });
+        }
+        data.candidates.forEach((cand: any) => {
+          if (cand.url && !seen.has(cand.url)) {
+            seen.add(cand.url);
+            merged.push(cand);
+          }
+        });
+        setImageViewerModal(prev => ({
+          ...prev,
+          candidates: merged,
+          isLoadingCandidates: false
+        }));
+      } else {
+        setImageViewerModal(prev => ({ ...prev, isLoadingCandidates: false }));
+      }
+    } catch (_) {
+      setImageViewerModal(prev => ({ ...prev, isLoadingCandidates: false }));
+    }
+  };
+
+  const handleSelectProposalImage = async (candUrl: string) => {
+    if (!candUrl) return;
+    if (candUrl === imageViewerModal.currentUrl) {
+      showToast('Esta ya es la imagen actual del producto.');
+      return;
+    }
+
+    setImageViewerModal(prev => ({ ...prev, isSavingCandidate: true, previewUrl: candUrl }));
+
+    try {
+      let finalUrl = candUrl;
+      // If it's a remote web URL, download and save locally for offline-ready POS
+      if (candUrl.startsWith('http://') || candUrl.startsWith('https://')) {
+        const res = await fetch(`${getApiBaseUrl()}/ai/save-candidate-image`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            remoteUrl: candUrl,
+            description: imageViewerModal.description || 'producto'
+          })
+        });
+        const data = await res.json();
+        if (data.success && data.imageUrl) {
+          finalUrl = data.imageUrl;
+        }
+      }
+
+      if (imageViewerModal.target === 'edit') {
+        setEditImageUrl(finalUrl);
+      } else {
+        setNewImageUrl(finalUrl);
+      }
+
+      setImageViewerModal(prev => ({
+        ...prev,
+        currentUrl: finalUrl,
+        previewUrl: finalUrl,
+        isSavingCandidate: false,
+        candidates: prev.candidates.map(c => ({
+          ...c,
+          isCurrent: c.url === candUrl || c.url === finalUrl
+        }))
+      }));
+
+      showToast('✨ Imagen asignada exitosamente al producto.');
+    } catch (err: any) {
+      setImageViewerModal(prev => ({ ...prev, isSavingCandidate: false }));
+      showAlert(`Error al guardar la imagen: ${err.message}`, 'Error', 'warning');
+    }
+  };
+
+  const handleGenerateAiInsideModal = async () => {
+    const desc = imageViewerModal.description.trim() || imageViewerModal.searchQuery.trim();
+    if (!desc) {
+      showAlert('Escriba una descripción primero para generar la imagen con IA.', 'Descripción Requerida', 'warning');
+      return;
+    }
+
+    setImageViewerModal(prev => ({ ...prev, isGeneratingAi: true }));
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/ai/generate-product-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description: desc,
+          category: imageViewerModal.category,
+          barcode: imageViewerModal.barcode,
+          saveLocal: true
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.imageUrl) {
+        const newCand = {
+          url: data.imageUrl,
+          title: `Generada con IA (${desc})`,
+          source: 'IA Estudio',
+          isAi: true,
+          isCurrent: true
+        };
+
+        if (imageViewerModal.target === 'edit') {
+          setEditImageUrl(data.imageUrl);
+        } else {
+          setNewImageUrl(data.imageUrl);
+        }
+
+        setImageViewerModal(prev => ({
+          ...prev,
+          currentUrl: data.imageUrl,
+          previewUrl: data.imageUrl,
+          candidates: [newCand, ...prev.candidates.map(c => ({ ...c, isCurrent: false }))],
+          isGeneratingAi: false
+        }));
+
+        showToast('✨ Nueva fotografía generada con IA y asignada al producto.');
+      } else {
+        setImageViewerModal(prev => ({ ...prev, isGeneratingAi: false }));
+        showAlert('No se pudo generar la imagen con IA para este producto.', 'Error IA', 'warning');
+      }
+    } catch (err: any) {
+      setImageViewerModal(prev => ({ ...prev, isGeneratingAi: false }));
+      showAlert(`Error: ${err.message}`, 'Error IA', 'warning');
+    }
+  };
+
   // Estados para Carga por Factura
   const [showInvoiceLoadModal, setShowInvoiceLoadModal] = useState(false);
   const [invoiceNumber, setInvoiceNumber] = useState('');
@@ -732,6 +991,9 @@ export default function Inventario({
   const [auditDefaultBultoMargin, setAuditDefaultBultoMargin] = useState('8');
   const [auditDefaultCost, setAuditDefaultCost] = useState('1.00');
   const [auditAuxProduct, setAuditAuxProduct] = useState<Product | null>(null);
+  const [auditSearch, setAuditSearch] = useState('');
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditPageSize, setAuditPageSize] = useState(50);
   const [editedAuditProducts, setEditedAuditProducts] = useState<{
     [id: number]: {
       barcode?: string;
@@ -1457,6 +1719,12 @@ export default function Inventario({
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
 
+      if (imageViewerModal?.isOpen) {
+        e.preventDefault(); e.stopPropagation();
+        setImageViewerModal(prev => ({ ...prev, isOpen: false }));
+        return;
+      }
+
       if (contextMenu !== null) {
         e.preventDefault(); e.stopPropagation();
         setContextMenu(null);
@@ -1647,6 +1915,7 @@ export default function Inventario({
     window.addEventListener('keydown', handleEsc, true);
     return () => window.removeEventListener('keydown', handleEsc, true);
   }, [
+    imageViewerModal,
     contextMenu,
     bulkAiContextMenu,
     candidatePicker,
@@ -2683,6 +2952,11 @@ export default function Inventario({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (imageViewerModal?.isOpen) {
+          e.preventDefault(); e.stopPropagation();
+          setImageViewerModal(prev => ({ ...prev, isOpen: false }));
+          return;
+        }
         if (showBulkModal) {
           e.preventDefault(); e.stopPropagation();
           setShowBulkModal(false);
@@ -2721,7 +2995,7 @@ export default function Inventario({
     };
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [showBulkModal, showCategoriesModal, showImageManagerModal, showBulkAiModal, showInvoiceLoadModal, selectedProduct]);
+  }, [imageViewerModal, showBulkModal, showCategoriesModal, showImageManagerModal, showBulkAiModal, showInvoiceLoadModal, selectedProduct]);
 
   const allCategories = useMemo(() => {
     const catSet = new Set<string>();
@@ -3031,6 +3305,12 @@ export default function Inventario({
   const [newAGranel, setNewAGranel] = useState(false);
   const [newVencimiento, setNewVencimiento] = useState('');
 
+  // New product margins (%)
+  const [newGananciaDetalle, setNewGananciaDetalle] = useState('30');
+  const [newGananciaMayor, setNewGananciaMayor] = useState('15');
+  const [newGananciaBulto, setNewGananciaBulto] = useState('8');
+  const [newFijarMargen, setNewFijarMargen] = useState(false);
+
   // Edit product modal state
   const [editClave, setEditClave] = useState('');
   const [editBarcode, setEditBarcode] = useState('');
@@ -3048,6 +3328,143 @@ export default function Inventario({
   const [editTaxPct, setEditTaxPct] = useState('16');
   const [editAGranel, setEditAGranel] = useState(false);
   const [editVencimiento, setEditVencimiento] = useState('');
+
+  // Edit product margins (%)
+  const [editGananciaDetalle, setEditGananciaDetalle] = useState('30');
+  const [editGananciaMayor, setEditGananciaMayor] = useState('15');
+  const [editGananciaBulto, setEditGananciaBulto] = useState('8');
+  const [editFijarMargen, setEditFijarMargen] = useState(false);
+
+  // Helper calculation functions for margins & prices (incorporating tax/IVA for retail PVP consistency)
+  const getTaxMultiplier = (isEdit: boolean) => {
+    const isActive = isEdit ? editTaxActive : newTaxActive;
+    const pct = parseFloat(isEdit ? editTaxPct : newTaxPct) || 16;
+    return isActive && pct > 0 ? (1 + pct / 100) : 1;
+  };
+
+  // Standardized calculation for PVP final with IVA included (2-decimal precision on Base, then applied IVA)
+  const calcPvpFromCostAndMargin = (cost: number, marginPct: number, isEdit: boolean, overrideTaxM?: number) => {
+    if (cost <= 0 || isNaN(marginPct) || marginPct < 0) return '0.00';
+    const base = Math.round(cost * (1 + marginPct / 100) * 100) / 100;
+    const taxM = overrideTaxM !== undefined ? overrideTaxM : getTaxMultiplier(isEdit);
+    return (Math.round(base * taxM * 100) / 100).toFixed(2);
+  };
+
+  const handleNewCostChange = (val: string) => {
+    setNewCost(val);
+    const costNum = parseFloat(val) || 0;
+    if (costNum > 0 && newFijarMargen) {
+      const gDet = parseFloat(newGananciaDetalle);
+      if (!isNaN(gDet) && gDet >= 0) setNewDetail(calcPvpFromCostAndMargin(costNum, gDet, false));
+      const gMay = parseFloat(newGananciaMayor);
+      if (!isNaN(gMay) && gMay >= 0) setNewMayor(calcPvpFromCostAndMargin(costNum, gMay, false));
+      const gBul = parseFloat(newGananciaBulto);
+      if (!isNaN(gBul) && gBul >= 0) setNewBulto(calcPvpFromCostAndMargin(costNum, gBul, false));
+    }
+  };
+
+  const handleNewMarginChange = (type: 'detalle' | 'mayor' | 'bulto', val: string) => {
+    const costNum = parseFloat(newCost) || 0;
+    const marginNum = parseFloat(val);
+    if (type === 'detalle') {
+      setNewGananciaDetalle(val);
+      if (costNum > 0 && !isNaN(marginNum) && marginNum >= 0) {
+        setNewDetail(calcPvpFromCostAndMargin(costNum, marginNum, false));
+      }
+    } else if (type === 'mayor') {
+      setNewGananciaMayor(val);
+      if (costNum > 0 && !isNaN(marginNum) && marginNum >= 0) {
+        setNewMayor(calcPvpFromCostAndMargin(costNum, marginNum, false));
+      }
+    } else if (type === 'bulto') {
+      setNewGananciaBulto(val);
+      if (costNum > 0 && !isNaN(marginNum) && marginNum >= 0) {
+        setNewBulto(calcPvpFromCostAndMargin(costNum, marginNum, false));
+      }
+    }
+  };
+
+  const handleNewPriceChange = (type: 'detalle' | 'mayor' | 'bulto', val: string) => {
+    const costNum = parseFloat(newCost) || 0;
+    const priceNum = parseFloat(val) || 0;
+    const taxM = getTaxMultiplier(false);
+    const basePrice = taxM > 0 ? (priceNum / taxM) : priceNum;
+
+    if (type === 'detalle') {
+      setNewDetail(val);
+      if (costNum > 0 && basePrice > costNum) {
+        setNewGananciaDetalle((((basePrice - costNum) / costNum) * 100).toFixed(2));
+      }
+    } else if (type === 'mayor') {
+      setNewMayor(val);
+      if (costNum > 0 && basePrice > costNum) {
+        setNewGananciaMayor((((basePrice - costNum) / costNum) * 100).toFixed(2));
+      }
+    } else if (type === 'bulto') {
+      setNewBulto(val);
+      if (costNum > 0 && basePrice > costNum) {
+        setNewGananciaBulto((((basePrice - costNum) / costNum) * 100).toFixed(2));
+      }
+    }
+  };
+
+  const handleEditCostChange = (val: string) => {
+    setEditCost(val);
+    const costNum = parseFloat(val) || 0;
+    if (costNum > 0 && editFijarMargen) {
+      const gDet = parseFloat(editGananciaDetalle);
+      if (!isNaN(gDet) && gDet >= 0) setEditDetail(calcPvpFromCostAndMargin(costNum, gDet, true));
+      const gMay = parseFloat(editGananciaMayor);
+      if (!isNaN(gMay) && gMay >= 0) setEditMayor(calcPvpFromCostAndMargin(costNum, gMay, true));
+      const gBul = parseFloat(editGananciaBulto);
+      if (!isNaN(gBul) && gBul >= 0) setEditBulto(calcPvpFromCostAndMargin(costNum, gBul, true));
+    }
+  };
+
+  const handleEditMarginChange = (type: 'detalle' | 'mayor' | 'bulto', val: string) => {
+    const costNum = parseFloat(editCost) || 0;
+    const marginNum = parseFloat(val);
+    if (type === 'detalle') {
+      setEditGananciaDetalle(val);
+      if (costNum > 0 && !isNaN(marginNum) && marginNum >= 0) {
+        setEditDetail(calcPvpFromCostAndMargin(costNum, marginNum, true));
+      }
+    } else if (type === 'mayor') {
+      setEditGananciaMayor(val);
+      if (costNum > 0 && !isNaN(marginNum) && marginNum >= 0) {
+        setEditMayor(calcPvpFromCostAndMargin(costNum, marginNum, true));
+      }
+    } else if (type === 'bulto') {
+      setEditGananciaBulto(val);
+      if (costNum > 0 && !isNaN(marginNum) && marginNum >= 0) {
+        setEditBulto(calcPvpFromCostAndMargin(costNum, marginNum, true));
+      }
+    }
+  };
+
+  const handleEditPriceChange = (type: 'detalle' | 'mayor' | 'bulto', val: string) => {
+    const costNum = parseFloat(editCost) || 0;
+    const priceNum = parseFloat(val) || 0;
+    const taxM = getTaxMultiplier(true);
+    const basePrice = taxM > 0 ? (priceNum / taxM) : priceNum;
+
+    if (type === 'detalle') {
+      setEditDetail(val);
+      if (costNum > 0 && basePrice > costNum) {
+        setEditGananciaDetalle((((basePrice - costNum) / costNum) * 100).toFixed(2));
+      }
+    } else if (type === 'mayor') {
+      setEditMayor(val);
+      if (costNum > 0 && basePrice > costNum) {
+        setEditGananciaMayor((((basePrice - costNum) / costNum) * 100).toFixed(2));
+      }
+    } else if (type === 'bulto') {
+      setEditBulto(val);
+      if (costNum > 0 && basePrice > costNum) {
+        setEditGananciaBulto((((basePrice - costNum) / costNum) * 100).toFixed(2));
+      }
+    }
+  };
 
   const handleOpenEditProduct = (p: Product) => {
     setSelectedProduct(p);
@@ -3068,6 +3485,61 @@ export default function Inventario({
     setEditAGranel(p.a_granel || false);
     setEditVencimiento(p.fecha_vencimiento || '');
     setEditImageUrl(p.imagen_url || '');
+
+    const costVal = p.precio_costo_usd || 0;
+    const detVal = p.precio_detalle_usd || 0;
+    const mayVal = p.precio_mayor_usd || 0;
+    const bulVal = p.precio_bulto_usd || 0;
+
+    const isTaxActive = !p.exento_impuesto;
+    const taxRatePct = p.porcentaje_impuesto && p.porcentaje_impuesto > 0 ? p.porcentaje_impuesto : 16;
+    const taxM = isTaxActive && taxRatePct > 0 ? (1 + taxRatePct / 100) : 1;
+
+    const baseDet = detVal / taxM;
+    const baseMay = mayVal / taxM;
+    const baseBul = bulVal / taxM;
+
+    const gDet = p.ganancia_detalle !== undefined && p.ganancia_detalle > 0 
+      ? p.ganancia_detalle.toString() 
+      : (costVal > 0 && baseDet > costVal 
+          ? (((baseDet - costVal) / costVal) * 100).toFixed(2) 
+          : '30');
+    const gMay = p.ganancia_mayor !== undefined && p.ganancia_mayor > 0 
+      ? p.ganancia_mayor.toString() 
+      : (costVal > 0 && baseMay > costVal 
+          ? (((baseMay - costVal) / costVal) * 100).toFixed(2) 
+          : '15');
+    const gBul = p.ganancia_bulto !== undefined && p.ganancia_bulto > 0 
+      ? p.ganancia_bulto.toString() 
+      : (costVal > 0 && baseBul > costVal 
+          ? (((baseBul - costVal) / costVal) * 100).toFixed(2) 
+          : '8');
+
+    setEditGananciaDetalle(gDet);
+    setEditGananciaMayor(gMay);
+    setEditGananciaBulto(gBul);
+    setEditFijarMargen(p.fijar_margen || false);
+
+    // Si el producto está fijado por margen y tiene costo, asegurar que los precios en los inputs
+    // incluyan su margen exacto e IVA correctamente (PVP final venezolano)
+    if (p.fijar_margen && costVal > 0) {
+      const numDet = parseFloat(gDet);
+      if (!isNaN(numDet) && numDet >= 0) {
+        const base = Math.round(costVal * (1 + numDet / 100) * 100) / 100;
+        setEditDetail((Math.round(base * taxM * 100) / 100).toFixed(2));
+      }
+      const numMay = parseFloat(gMay);
+      if (!isNaN(numMay) && numMay >= 0) {
+        const base = Math.round(costVal * (1 + numMay / 100) * 100) / 100;
+        setEditMayor((Math.round(base * taxM * 100) / 100).toFixed(2));
+      }
+      const numBul = parseFloat(gBul);
+      if (!isNaN(numBul) && numBul >= 0) {
+        const base = Math.round(costVal * (1 + numBul / 100) * 100) / 100;
+        setEditBulto((Math.round(base * taxM * 100) / 100).toFixed(2));
+      }
+    }
+
     setShowEditProdModal(true);
   };
 
@@ -3122,6 +3594,10 @@ export default function Inventario({
       stock_minimo: editAGranel ? (parseFloat(editMinStock) || 0) : (parseInt(editMinStock) || 0),
       cantidad_mayorista: parseInt(editWholesaleQty) || 12,
       cant_bulto: cantBulto,
+      ganancia_detalle: parseFloat(editGananciaDetalle) || 0,
+      ganancia_mayor: parseFloat(editGananciaMayor) || 0,
+      ganancia_bulto: parseFloat(editGananciaBulto) || 0,
+      fijar_margen: editFijarMargen,
       exento_impuesto: !editTaxActive,
       porcentaje_impuesto: editTaxActive ? (parseFloat(editTaxPct) || 0) : 0,
       imagen_url: finalImg,
@@ -3166,6 +3642,10 @@ export default function Inventario({
         minStock: newMinStock,
         wholesaleQty: newWholesaleQty,
         cantBulto: newCantBulto,
+        gananciaDetalle: newGananciaDetalle,
+        gananciaMayor: newGananciaMayor,
+        gananciaBulto: newGananciaBulto,
+        fijarMargen: newFijarMargen,
         taxActive: newTaxActive,
         taxName: newTaxName,
         taxPct: newTaxPct,
@@ -3198,6 +3678,10 @@ export default function Inventario({
         minStock: editMinStock,
         wholesaleQty: editWholesaleQty,
         cantBulto: editCantBulto,
+        gananciaDetalle: editGananciaDetalle,
+        gananciaMayor: editGananciaMayor,
+        gananciaBulto: editGananciaBulto,
+        fijarMargen: editFijarMargen,
         taxActive: editTaxActive,
         taxName: editTaxName,
         taxPct: editTaxPct,
@@ -3232,6 +3716,10 @@ export default function Inventario({
         setNewMinStock(draft.data.minStock || '5');
         setNewWholesaleQty(draft.data.wholesaleQty || '12');
         setNewCantBulto(draft.data.cantBulto || '0');
+        if (draft.data.gananciaDetalle !== undefined) setNewGananciaDetalle(draft.data.gananciaDetalle);
+        if (draft.data.gananciaMayor !== undefined) setNewGananciaMayor(draft.data.gananciaMayor);
+        if (draft.data.gananciaBulto !== undefined) setNewGananciaBulto(draft.data.gananciaBulto);
+        if (draft.data.fijarMargen !== undefined) setNewFijarMargen(draft.data.fijarMargen);
         setNewTaxActive(draft.data.taxActive ?? true);
         setNewTaxName(draft.data.taxName || 'IVA');
         setNewTaxPct(draft.data.taxPct || '16');
@@ -3252,6 +3740,10 @@ export default function Inventario({
         setEditMinStock(draft.data.minStock || '5');
         setEditWholesaleQty(draft.data.wholesaleQty || '12');
         setEditCantBulto(draft.data.cantBulto || '0');
+        if (draft.data.gananciaDetalle !== undefined) setEditGananciaDetalle(draft.data.gananciaDetalle);
+        if (draft.data.gananciaMayor !== undefined) setEditGananciaMayor(draft.data.gananciaMayor);
+        if (draft.data.gananciaBulto !== undefined) setEditGananciaBulto(draft.data.gananciaBulto);
+        if (draft.data.fijarMargen !== undefined) setEditFijarMargen(draft.data.fijarMargen);
         setEditTaxActive(draft.data.taxActive ?? true);
         setEditTaxName(draft.data.taxName || 'IVA');
         setEditTaxPct(draft.data.taxPct || '16');
@@ -3633,6 +4125,10 @@ export default function Inventario({
       precio_bulto_usd: bulto,
       cantidad_mayorista: wholesale,
       cant_bulto: cantBulto,
+      ganancia_detalle: parseFloat(newGananciaDetalle) || 0,
+      ganancia_mayor: parseFloat(newGananciaMayor) || 0,
+      ganancia_bulto: parseFloat(newGananciaBulto) || 0,
+      fijar_margen: newFijarMargen,
       exento_impuesto: !newTaxActive,
       porcentaje_impuesto: newTaxActive ? (parseFloat(newTaxPct) || 0) : 0,
       imagen_url: finalImg || '',
@@ -3652,6 +4148,12 @@ export default function Inventario({
     setNewCost('');
     setNewDetail('');
     setNewMayor('');
+    setNewBulto('');
+    setNewCantBulto('0');
+    setNewGananciaDetalle('30');
+    setNewGananciaMayor('15');
+    setNewGananciaBulto('8');
+    setNewFijarMargen(false);
     setNewTaxActive(true);
     setNewTaxName('IVA');
     setNewTaxPct('16');
@@ -6873,7 +7375,23 @@ export default function Inventario({
                             <input
                               type="checkbox"
                               checked={newTaxActive}
-                              onChange={(e) => setNewTaxActive(e.target.checked)}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                setNewTaxActive(checked);
+                                if (newFijarMargen) {
+                                  const c = parseFloat(newCost) || 0;
+                                  if (c > 0) {
+                                    const pct = parseFloat(newTaxPct) || 16;
+                                    const taxM = checked && pct > 0 ? (1 + pct / 100) : 1;
+                                    const gDet = parseFloat(newGananciaDetalle);
+                                    if (!isNaN(gDet) && gDet >= 0) setNewDetail(calcPvpFromCostAndMargin(c, gDet, false, taxM));
+                                    const gMay = parseFloat(newGananciaMayor);
+                                    if (!isNaN(gMay) && gMay >= 0) setNewMayor(calcPvpFromCostAndMargin(c, gMay, false, taxM));
+                                    const gBul = parseFloat(newGananciaBulto);
+                                    if (!isNaN(gBul) && gBul >= 0) setNewBulto(calcPvpFromCostAndMargin(c, gBul, false, taxM));
+                                  }
+                                }
+                              }}
                               className="rounded border-slate-300 text-winter-inventarioStart focus:ring-winter-inventarioStart w-3.5 h-3.5 cursor-pointer"
                             />
                             <span>Sí</span>
@@ -6893,7 +7411,23 @@ export default function Inventario({
                             max="100"
                             disabled={!newTaxActive}
                             value={newTaxPct}
-                            onChange={(e) => setNewTaxPct(e.target.value)}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setNewTaxPct(val);
+                              if (newFijarMargen && newTaxActive) {
+                                const c = parseFloat(newCost) || 0;
+                                if (c > 0) {
+                                  const pct = parseFloat(val) || 0;
+                                  const taxM = 1 + pct / 100;
+                                  const gDet = parseFloat(newGananciaDetalle);
+                                  if (!isNaN(gDet) && gDet >= 0) setNewDetail(calcPvpFromCostAndMargin(c, gDet, false, taxM));
+                                  const gMay = parseFloat(newGananciaMayor);
+                                  if (!isNaN(gMay) && gMay >= 0) setNewMayor(calcPvpFromCostAndMargin(c, gMay, false, taxM));
+                                  const gBul = parseFloat(newGananciaBulto);
+                                  if (!isNaN(gBul) && gBul >= 0) setNewBulto(calcPvpFromCostAndMargin(c, gBul, false, taxM));
+                                }
+                              }
+                            }}
                             className="w-12 text-center bg-slate-50 border border-slate-200 rounded px-1 py-0.5 font-bold font-mono text-[11px] text-slate-900 disabled:opacity-40 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                           />
                         </div>
@@ -6945,7 +7479,11 @@ export default function Inventario({
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <div className="w-10 h-10 rounded-lg bg-white border border-slate-300 flex items-center justify-center flex-shrink-0 overflow-hidden relative shadow-2xs">
+                      <div 
+                        onClick={() => handleOpenImageViewerModal('new')}
+                        title="Haz clic para ver la imagen en grande y explorar propuestas alternativas"
+                        className="w-10 h-10 rounded-lg bg-white border-2 border-slate-300 hover:border-indigo-500 hover:ring-2 hover:ring-indigo-200 flex items-center justify-center flex-shrink-0 overflow-hidden relative shadow-2xs cursor-pointer group transition-all"
+                      >
                         <div className="text-center p-0.5">
                           <ImageIcon className="w-3.5 h-3.5 text-slate-300 mx-auto" />
                           <span className="text-[6.5px] text-slate-400 font-bold block">Sin Foto</span>
@@ -6955,11 +7493,14 @@ export default function Inventario({
                             key={`new-prod-img-${newImageUrl}`}
                             src={formatImageUrl(newImageUrl)} 
                             alt="Preview" 
-                            className="w-full h-full object-cover absolute inset-0 bg-white" 
+                            className="w-full h-full object-cover absolute inset-0 bg-white group-hover:scale-110 transition-transform duration-200" 
                             onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
                             onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
                           />
                         )}
+                        <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                          <Maximize2 className="w-3.5 h-3.5 text-white drop-shadow" />
+                        </div>
                       </div>
 
                       <div className="flex-1 space-y-1">
@@ -6974,7 +7515,17 @@ export default function Inventario({
                           />
                         </div>
 
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenImageViewerModal('new')}
+                            className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-[9.5px] font-bold py-0.5 px-2 rounded-md flex items-center gap-1 transition-all active:scale-95 cursor-pointer shadow-2xs"
+                            title="Ver imagen en tamaño grande y explorar banco de propuestas"
+                          >
+                            <Eye className="w-3 h-3 text-indigo-600" />
+                            <span>Ver / Propuestas</span>
+                          </button>
+
                           <label className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-[9.5px] font-bold py-0.5 px-2 rounded-md cursor-pointer flex items-center gap-1 transition-all active:scale-95">
                             <UploadCloud className="w-3 h-3 text-slate-600" />
                             <span>{isUploadingManualImage ? 'Subiendo...' : 'Subir'}</span>
@@ -7007,7 +7558,7 @@ export default function Inventario({
                                 const data = await res.json();
                                 if (data.success && data.imageUrl) {
                                   setNewImageUrl(data.imageUrl);
-                                  showToast('✨ Imagen generada con IA para este producto.');
+                                  showToast('✨ Imagen generada con IA. Haz clic en la foto para verla en grande o elegir propuestas.');
                                 } else {
                                   showAlert('No se pudo generar la imagen para este producto.', 'Error IA', 'warning');
                                 }
@@ -7091,19 +7642,47 @@ export default function Inventario({
                       tasaFallback={tasaDia || parseFloat(localStorage.getItem('pos_tasa_activa') || '0') || 0}
                       taxActive={newTaxActive}
                       taxPct={parseFloat(newTaxPct) || 16}
-                      onApplyPrices={({ cost, detail, mayor, bulto }) => {
-                        setNewCost(cost);
-                        setNewDetail(detail);
-                        setNewMayor(mayor);
-                        setNewBulto(bulto);
+                      onApplyPrices={(applied: any) => {
+                        setNewCost(applied.cost);
+                        setNewDetail(applied.detail);
+                        setNewMayor(applied.mayor);
+                        setNewBulto(applied.bulto);
+                        if (applied.marginDetail !== undefined) setNewGananciaDetalle(applied.marginDetail);
+                        if (applied.marginMayor !== undefined) setNewGananciaMayor(applied.marginMayor);
+                        if (applied.marginBulto !== undefined) setNewGananciaBulto(applied.marginBulto);
                       }}
                     />
                   </div>
 
-                  {/* ESTRATEGIA DE PRECIOS ($ USD - 4 COLUMNAS ESPACIOSAS) */}
+                  {/* ESTRATEGIA DE PRECIOS ($ USD - 4 COLUMNAS ESPACIOSAS CON MÁRGENES OPCIONALES) */}
                   <div className="bg-slate-50/80 border border-slate-200 rounded-xl p-2.5 space-y-1.5 shadow-2xs">
-                    <div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
-                      <span>Estrategia de Precios ($ USD)</span>
+                    <div className="flex flex-wrap items-center justify-between gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
+                      <div className="flex items-center gap-2">
+                        <span>Estrategia de Precios ($ USD)</span>
+                        <label className="flex items-center gap-1 cursor-pointer normal-case font-bold text-slate-700 hover:text-emerald-700 bg-white/90 border border-slate-300 rounded-md px-1.5 py-0.5 shadow-2xs transition-all select-none" title="Si está activo, al cambiar el costo se recalcularán automáticamente los precios con sus márgenes (%)">
+                          <input
+                            type="checkbox"
+                            checked={newFijarMargen}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setNewFijarMargen(checked);
+                              if (checked) {
+                                const c = parseFloat(newCost) || 0;
+                                if (c > 0) {
+                                  const gDet = parseFloat(newGananciaDetalle);
+                                  if (!isNaN(gDet) && gDet >= 0) setNewDetail(calcPvpFromCostAndMargin(c, gDet, false));
+                                  const gMay = parseFloat(newGananciaMayor);
+                                  if (!isNaN(gMay) && gMay >= 0) setNewMayor(calcPvpFromCostAndMargin(c, gMay, false));
+                                  const gBul = parseFloat(newGananciaBulto);
+                                  if (!isNaN(gBul) && gBul >= 0) setNewBulto(calcPvpFromCostAndMargin(c, gBul, false));
+                                }
+                              }
+                            }}
+                            className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-3 h-3 cursor-pointer"
+                          />
+                          <span className="text-[9.5px]">Fijar por Margen (%)</span>
+                        </label>
+                      </div>
                       <span className="text-[9px] text-slate-400 font-normal">Jerarquía: Costo &lt; Bulto &lt; Mayor &lt; Detalle</span>
                     </div>
 
@@ -7117,24 +7696,41 @@ export default function Inventario({
                           min="0"
                           placeholder="0.00"
                           value={newCost}
-                          onChange={(e) => setNewCost(e.target.value)}
+                          onChange={(e) => handleNewCostChange(e.target.value)}
                           className="w-full bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-xs text-yellow-700 font-mono font-bold focus:bg-white focus:outline-none"
                         />
+                        <span className="text-[8px] text-slate-400 block mt-0.5 font-mono truncate font-medium">
+                          Costo base del producto
+                        </span>
                       </div>
 
                       {/* Detalle */}
-                      <div className="bg-white border border-emerald-200 rounded-lg p-1.5 shadow-2xs">
-                        <label className="text-[9.5px] font-bold text-emerald-800 block mb-0.5 whitespace-nowrap">Venta Detalle ($)</label>
+                      <div className="bg-white border border-emerald-200 rounded-lg p-1.5 shadow-2xs space-y-1">
+                        <div className="flex items-center justify-between gap-1">
+                          <label className="text-[9.5px] font-bold text-emerald-800 whitespace-nowrap truncate">Venta Detalle ($)</label>
+                          <div className="flex items-center gap-0.5" title="Margen de ganancia sobre costo para Detalle (%)">
+                            <span className="text-[8px] font-extrabold text-emerald-700">%</span>
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              placeholder="30"
+                              value={newGananciaDetalle}
+                              onChange={(e) => handleNewMarginChange('detalle', e.target.value)}
+                              className="w-11 bg-emerald-50/80 border border-emerald-300 rounded px-1 py-0.5 text-[9.5px] text-emerald-900 font-mono font-bold text-right focus:bg-white focus:outline-none"
+                            />
+                          </div>
+                        </div>
                         <input
                           type="number"
                           step="0.01"
                           min="0"
                           placeholder="0.00"
                           value={newDetail}
-                          onChange={(e) => setNewDetail(e.target.value)}
+                          onChange={(e) => handleNewPriceChange('detalle', e.target.value)}
                           className="w-full bg-slate-50 border border-emerald-300 rounded px-1.5 py-1 text-xs text-emerald-700 font-mono font-black focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-slate-500 block mt-0.5 font-mono truncate font-semibold">
+                        <span className="text-[8px] text-slate-500 block font-mono truncate font-semibold">
                           {newTaxActive 
                             ? `Base: $${((parseFloat(newDetail) || 0) / (1 + (parseFloat(newTaxPct) || 16) / 100)).toFixed(2)} + IVA` 
                             : 'Exento de IVA'}
@@ -7142,18 +7738,32 @@ export default function Inventario({
                       </div>
 
                       {/* Mayor */}
-                      <div className="bg-white border border-purple-200 rounded-lg p-1.5 shadow-2xs">
-                        <label className="text-[9.5px] font-bold text-purple-800 block mb-0.5 whitespace-nowrap">Precio Mayor ($)</label>
+                      <div className="bg-white border border-purple-200 rounded-lg p-1.5 shadow-2xs space-y-1">
+                        <div className="flex items-center justify-between gap-1">
+                          <label className="text-[9.5px] font-bold text-purple-800 whitespace-nowrap truncate">Precio Mayor ($)</label>
+                          <div className="flex items-center gap-0.5" title="Margen de ganancia sobre costo para Mayor (%)">
+                            <span className="text-[8px] font-extrabold text-purple-700">%</span>
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              placeholder="15"
+                              value={newGananciaMayor}
+                              onChange={(e) => handleNewMarginChange('mayor', e.target.value)}
+                              className="w-11 bg-purple-50/80 border border-purple-300 rounded px-1 py-0.5 text-[9.5px] text-purple-900 font-mono font-bold text-right focus:bg-white focus:outline-none"
+                            />
+                          </div>
+                        </div>
                         <input
                           type="number"
                           step="0.01"
                           min="0"
                           placeholder="0.00"
                           value={newMayor}
-                          onChange={(e) => setNewMayor(e.target.value)}
+                          onChange={(e) => handleNewPriceChange('mayor', e.target.value)}
                           className="w-full bg-slate-50 border border-purple-300 rounded px-1.5 py-1 text-xs text-purple-800 font-mono font-bold focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-slate-500 block mt-0.5 font-mono truncate font-semibold">
+                        <span className="text-[8px] text-slate-500 block font-mono truncate font-semibold">
                           {newTaxActive 
                             ? `Base: $${((parseFloat(newMayor) || 0) / (1 + (parseFloat(newTaxPct) || 16) / 100)).toFixed(2)} + IVA` 
                             : 'Exento de IVA'}
@@ -7161,18 +7771,32 @@ export default function Inventario({
                       </div>
 
                       {/* Bulto */}
-                      <div className="bg-white border border-amber-200 rounded-lg p-1.5 shadow-2xs">
-                        <label className="text-[9.5px] font-bold text-amber-900 block mb-0.5 whitespace-nowrap">Bulto / Caja ($)</label>
+                      <div className="bg-white border border-amber-200 rounded-lg p-1.5 shadow-2xs space-y-1">
+                        <div className="flex items-center justify-between gap-1">
+                          <label className="text-[9.5px] font-bold text-amber-900 whitespace-nowrap truncate">Bulto / Caja ($)</label>
+                          <div className="flex items-center gap-0.5" title="Margen de ganancia sobre costo para Bulto (%)">
+                            <span className="text-[8px] font-extrabold text-amber-800">%</span>
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              placeholder="8"
+                              value={newGananciaBulto}
+                              onChange={(e) => handleNewMarginChange('bulto', e.target.value)}
+                              className="w-11 bg-amber-50/80 border border-amber-300 rounded px-1 py-0.5 text-[9.5px] text-amber-950 font-mono font-bold text-right focus:bg-white focus:outline-none"
+                            />
+                          </div>
+                        </div>
                         <input
                           type="number"
                           step="0.01"
                           min="0"
                           placeholder="0.00"
                           value={newBulto}
-                          onChange={(e) => setNewBulto(e.target.value)}
+                          onChange={(e) => handleNewPriceChange('bulto', e.target.value)}
                           className="w-full bg-slate-50 border border-amber-300 rounded px-1.5 py-1 text-xs text-amber-950 font-mono font-black focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-slate-500 block mt-0.5 font-mono truncate font-semibold">
+                        <span className="text-[8px] text-slate-500 block font-mono truncate font-semibold">
                           {newTaxActive && (parseFloat(newBulto) || 0) > 0
                             ? `Base: $${((parseFloat(newBulto) || 0) / (1 + (parseFloat(newTaxPct) || 16) / 100)).toFixed(2)} + IVA` 
                             : 'Opcional'}
@@ -7356,7 +7980,23 @@ export default function Inventario({
                             <input
                               type="checkbox"
                               checked={editTaxActive}
-                              onChange={(e) => setEditTaxActive(e.target.checked)}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                setEditTaxActive(checked);
+                                if (editFijarMargen) {
+                                  const c = parseFloat(editCost) || 0;
+                                  if (c > 0) {
+                                    const pct = parseFloat(editTaxPct) || 16;
+                                    const taxM = checked && pct > 0 ? (1 + pct / 100) : 1;
+                                    const gDet = parseFloat(editGananciaDetalle);
+                                    if (!isNaN(gDet) && gDet >= 0) setEditDetail(calcPvpFromCostAndMargin(c, gDet, true, taxM));
+                                    const gMay = parseFloat(editGananciaMayor);
+                                    if (!isNaN(gMay) && gMay >= 0) setEditMayor(calcPvpFromCostAndMargin(c, gMay, true, taxM));
+                                    const gBul = parseFloat(editGananciaBulto);
+                                    if (!isNaN(gBul) && gBul >= 0) setEditBulto(calcPvpFromCostAndMargin(c, gBul, true, taxM));
+                                  }
+                                }
+                              }}
                               className="rounded border-slate-300 text-winter-inventarioStart focus:ring-winter-inventarioStart w-3.5 h-3.5 cursor-pointer"
                             />
                             <span>Sí</span>
@@ -7376,7 +8016,23 @@ export default function Inventario({
                             max="100"
                             disabled={!editTaxActive}
                             value={editTaxPct}
-                            onChange={(e) => setEditTaxPct(e.target.value)}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setEditTaxPct(val);
+                              if (editFijarMargen && editTaxActive) {
+                                const c = parseFloat(editCost) || 0;
+                                if (c > 0) {
+                                  const pct = parseFloat(val) || 0;
+                                  const taxM = 1 + pct / 100;
+                                  const gDet = parseFloat(editGananciaDetalle);
+                                  if (!isNaN(gDet) && gDet >= 0) setEditDetail(calcPvpFromCostAndMargin(c, gDet, true, taxM));
+                                  const gMay = parseFloat(editGananciaMayor);
+                                  if (!isNaN(gMay) && gMay >= 0) setEditMayor(calcPvpFromCostAndMargin(c, gMay, true, taxM));
+                                  const gBul = parseFloat(editGananciaBulto);
+                                  if (!isNaN(gBul) && gBul >= 0) setEditBulto(calcPvpFromCostAndMargin(c, gBul, true, taxM));
+                                }
+                              }
+                            }}
                             className="w-12 text-center bg-slate-50 border border-slate-200 rounded px-1 py-0.5 font-bold font-mono text-[11px] text-slate-900 disabled:opacity-40 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                           />
                         </div>
@@ -7428,7 +8084,11 @@ export default function Inventario({
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <div className="w-10 h-10 rounded-lg bg-white border border-slate-300 flex items-center justify-center flex-shrink-0 overflow-hidden relative shadow-2xs">
+                      <div 
+                        onClick={() => handleOpenImageViewerModal('edit')}
+                        title="Haz clic para ver la imagen en grande y explorar propuestas alternativas"
+                        className="w-10 h-10 rounded-lg bg-white border-2 border-slate-300 hover:border-indigo-500 hover:ring-2 hover:ring-indigo-200 flex items-center justify-center flex-shrink-0 overflow-hidden relative shadow-2xs cursor-pointer group transition-all"
+                      >
                         <div className="text-center p-0.5">
                           <ImageIcon className="w-3.5 h-3.5 text-slate-300 mx-auto" />
                           <span className="text-[6.5px] text-slate-400 font-bold block">Sin Foto</span>
@@ -7438,11 +8098,14 @@ export default function Inventario({
                             key={`edit-prod-img-${editImageUrl}`}
                             src={formatImageUrl(editImageUrl)} 
                             alt="Preview" 
-                            className="w-full h-full object-cover absolute inset-0 bg-white" 
+                            className="w-full h-full object-cover absolute inset-0 bg-white group-hover:scale-110 transition-transform duration-200" 
                             onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
                             onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
                           />
                         )}
+                        <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                          <Maximize2 className="w-3.5 h-3.5 text-white drop-shadow" />
+                        </div>
                       </div>
 
                       <div className="flex-1 space-y-1">
@@ -7457,7 +8120,17 @@ export default function Inventario({
                           />
                         </div>
 
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenImageViewerModal('edit')}
+                            className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-[9.5px] font-bold py-0.5 px-2 rounded-md flex items-center gap-1 transition-all active:scale-95 cursor-pointer shadow-2xs"
+                            title="Ver imagen en tamaño grande y explorar banco de propuestas"
+                          >
+                            <Eye className="w-3 h-3 text-indigo-600" />
+                            <span>Ver / Propuestas</span>
+                          </button>
+
                           <label className="bg-slate-200 hover:bg-slate-300 text-slate-700 text-[9.5px] font-bold py-0.5 px-2 rounded-md cursor-pointer flex items-center gap-1 transition-all active:scale-95">
                             <UploadCloud className="w-3 h-3 text-slate-600" />
                             <span>{isUploadingManualImage ? 'Subiendo...' : 'Subir'}</span>
@@ -7490,7 +8163,7 @@ export default function Inventario({
                                 const data = await res.json();
                                 if (data.success && data.imageUrl) {
                                   setEditImageUrl(data.imageUrl);
-                                  showToast('✨ Imagen generada con IA para este producto.');
+                                  showToast('✨ Imagen generada con IA. Haz clic en la foto para verla en grande o elegir propuestas.');
                                 } else {
                                   showAlert('No se pudo generar la imagen para este producto.', 'Error IA', 'warning');
                                 }
@@ -7569,24 +8242,58 @@ export default function Inventario({
                       initialDetail={editDetail}
                       initialMayor={editMayor}
                       initialBulto={editBulto}
+                      originalProductPrices={selectedProduct ? {
+                        cost: selectedProduct.precio_costo_usd,
+                        detail: selectedProduct.precio_detalle_usd,
+                        mayor: selectedProduct.precio_mayor_usd,
+                        bulto: selectedProduct.precio_bulto_usd
+                      } : undefined}
                       cantBulto={parseInt(editCantBulto) || 1}
                       tasaBCV={bcvRateUSD || parseFloat(localStorage.getItem('pos_bcv_usd') || '0') || 0}
                       tasaFallback={tasaDia || parseFloat(localStorage.getItem('pos_tasa_activa') || '0') || 0}
                       taxActive={editTaxActive}
                       taxPct={parseFloat(editTaxPct) || 16}
-                      onApplyPrices={({ cost, detail, mayor, bulto }) => {
-                        setEditCost(cost);
-                        setEditDetail(detail);
-                        setEditMayor(mayor);
-                        setEditBulto(bulto);
+                      onApplyPrices={(applied: any) => {
+                        setEditCost(applied.cost);
+                        setEditDetail(applied.detail);
+                        setEditMayor(applied.mayor);
+                        setEditBulto(applied.bulto);
+                        if (applied.marginDetail !== undefined) setEditGananciaDetalle(applied.marginDetail);
+                        if (applied.marginMayor !== undefined) setEditGananciaMayor(applied.marginMayor);
+                        if (applied.marginBulto !== undefined) setEditGananciaBulto(applied.marginBulto);
                       }}
                     />
                   </div>
 
-                  {/* ESTRATEGIA DE PRECIOS ($ USD - 4 COLUMNAS ESPACIOSAS) */}
+                  {/* ESTRATEGIA DE PRECIOS ($ USD - 4 COLUMNAS ESPACIOSAS CON MÁRGENES OPCIONALES) */}
                   <div className="bg-slate-50/80 border border-slate-200 rounded-xl p-2.5 space-y-1.5 shadow-2xs">
-                    <div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
-                      <span>Estrategia de Precios ($ USD)</span>
+                    <div className="flex flex-wrap items-center justify-between gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
+                      <div className="flex items-center gap-2">
+                        <span>Estrategia de Precios ($ USD)</span>
+                        <label className="flex items-center gap-1 cursor-pointer normal-case font-bold text-slate-700 hover:text-emerald-700 bg-white/90 border border-slate-300 rounded-md px-1.5 py-0.5 shadow-2xs transition-all select-none" title="Si está activo, al cambiar el costo se recalcularán automáticamente los precios con sus márgenes (%)">
+                          <input
+                            type="checkbox"
+                            checked={editFijarMargen}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setEditFijarMargen(checked);
+                              if (checked) {
+                                const c = parseFloat(editCost) || 0;
+                                if (c > 0) {
+                                  const gDet = parseFloat(editGananciaDetalle);
+                                  if (!isNaN(gDet) && gDet >= 0) setEditDetail(calcPvpFromCostAndMargin(c, gDet, true));
+                                  const gMay = parseFloat(editGananciaMayor);
+                                  if (!isNaN(gMay) && gMay >= 0) setEditMayor(calcPvpFromCostAndMargin(c, gMay, true));
+                                  const gBul = parseFloat(editGananciaBulto);
+                                  if (!isNaN(gBul) && gBul >= 0) setEditBulto(calcPvpFromCostAndMargin(c, gBul, true));
+                                }
+                              }
+                            }}
+                            className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-3 h-3 cursor-pointer"
+                          />
+                          <span className="text-[9.5px]">Fijar por Margen (%)</span>
+                        </label>
+                      </div>
                       <span className="text-[9px] text-slate-400 font-normal">Jerarquía: Costo &lt; Bulto &lt; Mayor &lt; Detalle</span>
                     </div>
 
@@ -7600,24 +8307,41 @@ export default function Inventario({
                           min="0"
                           placeholder="0.00"
                           value={editCost}
-                          onChange={(e) => setEditCost(e.target.value)}
+                          onChange={(e) => handleEditCostChange(e.target.value)}
                           className="w-full bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-xs text-yellow-700 font-mono font-bold focus:bg-white focus:outline-none"
                         />
+                        <span className="text-[8px] text-slate-400 block mt-0.5 font-mono truncate font-medium">
+                          Costo base del producto
+                        </span>
                       </div>
 
                       {/* Detalle */}
-                      <div className="bg-white border border-emerald-200 rounded-lg p-1.5 shadow-2xs">
-                        <label className="text-[9.5px] font-bold text-emerald-800 block mb-0.5 whitespace-nowrap">Venta Detalle ($)</label>
+                      <div className="bg-white border border-emerald-200 rounded-lg p-1.5 shadow-2xs space-y-1">
+                        <div className="flex items-center justify-between gap-1">
+                          <label className="text-[9.5px] font-bold text-emerald-800 whitespace-nowrap truncate">Venta Detalle ($)</label>
+                          <div className="flex items-center gap-0.5" title="Margen de ganancia sobre costo para Detalle (%)">
+                            <span className="text-[8px] font-extrabold text-emerald-700">%</span>
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              placeholder="30"
+                              value={editGananciaDetalle}
+                              onChange={(e) => handleEditMarginChange('detalle', e.target.value)}
+                              className="w-11 bg-emerald-50/80 border border-emerald-300 rounded px-1 py-0.5 text-[9.5px] text-emerald-900 font-mono font-bold text-right focus:bg-white focus:outline-none"
+                            />
+                          </div>
+                        </div>
                         <input
                           type="number"
                           step="0.01"
                           min="0"
                           placeholder="0.00"
                           value={editDetail}
-                          onChange={(e) => setEditDetail(e.target.value)}
+                          onChange={(e) => handleEditPriceChange('detalle', e.target.value)}
                           className="w-full bg-slate-50 border border-emerald-300 rounded px-1.5 py-1 text-xs text-emerald-700 font-mono font-black focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-slate-500 block mt-0.5 font-mono truncate font-semibold">
+                        <span className="text-[8px] text-slate-500 block font-mono truncate font-semibold">
                           {editTaxActive 
                             ? `Base: $${((parseFloat(editDetail) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA` 
                             : 'Exento de IVA'}
@@ -7625,18 +8349,32 @@ export default function Inventario({
                       </div>
 
                       {/* Mayor */}
-                      <div className="bg-white border border-purple-200 rounded-lg p-1.5 shadow-2xs">
-                        <label className="text-[9.5px] font-bold text-purple-800 block mb-0.5 whitespace-nowrap">Precio Mayor ($)</label>
+                      <div className="bg-white border border-purple-200 rounded-lg p-1.5 shadow-2xs space-y-1">
+                        <div className="flex items-center justify-between gap-1">
+                          <label className="text-[9.5px] font-bold text-purple-800 whitespace-nowrap truncate">Precio Mayor ($)</label>
+                          <div className="flex items-center gap-0.5" title="Margen de ganancia sobre costo para Mayor (%)">
+                            <span className="text-[8px] font-extrabold text-purple-700">%</span>
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              placeholder="15"
+                              value={editGananciaMayor}
+                              onChange={(e) => handleEditMarginChange('mayor', e.target.value)}
+                              className="w-11 bg-purple-50/80 border border-purple-300 rounded px-1 py-0.5 text-[9.5px] text-purple-900 font-mono font-bold text-right focus:bg-white focus:outline-none"
+                            />
+                          </div>
+                        </div>
                         <input
                           type="number"
                           step="0.01"
                           min="0"
                           placeholder="0.00"
                           value={editMayor}
-                          onChange={(e) => setEditMayor(e.target.value)}
+                          onChange={(e) => handleEditPriceChange('mayor', e.target.value)}
                           className="w-full bg-slate-50 border border-purple-300 rounded px-1.5 py-1 text-xs text-purple-800 font-mono font-bold focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-slate-500 block mt-0.5 font-mono truncate font-semibold">
+                        <span className="text-[8px] text-slate-500 block font-mono truncate font-semibold">
                           {editTaxActive 
                             ? `Base: $${((parseFloat(editMayor) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA` 
                             : 'Exento de IVA'}
@@ -7644,18 +8382,32 @@ export default function Inventario({
                       </div>
 
                       {/* Bulto */}
-                      <div className="bg-white border border-amber-200 rounded-lg p-1.5 shadow-2xs">
-                        <label className="text-[9.5px] font-bold text-amber-900 block mb-0.5 whitespace-nowrap">Bulto / Caja ($)</label>
+                      <div className="bg-white border border-amber-200 rounded-lg p-1.5 shadow-2xs space-y-1">
+                        <div className="flex items-center justify-between gap-1">
+                          <label className="text-[9.5px] font-bold text-amber-900 whitespace-nowrap truncate">Bulto / Caja ($)</label>
+                          <div className="flex items-center gap-0.5" title="Margen de ganancia sobre costo para Bulto (%)">
+                            <span className="text-[8px] font-extrabold text-amber-800">%</span>
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              placeholder="8"
+                              value={editGananciaBulto}
+                              onChange={(e) => handleEditMarginChange('bulto', e.target.value)}
+                              className="w-11 bg-amber-50/80 border border-amber-300 rounded px-1 py-0.5 text-[9.5px] text-amber-950 font-mono font-bold text-right focus:bg-white focus:outline-none"
+                            />
+                          </div>
+                        </div>
                         <input
                           type="number"
                           step="0.01"
                           min="0"
                           placeholder="0.00"
                           value={editBulto}
-                          onChange={(e) => setEditBulto(e.target.value)}
+                          onChange={(e) => handleEditPriceChange('bulto', e.target.value)}
                           className="w-full bg-slate-50 border border-amber-300 rounded px-1.5 py-1 text-xs text-amber-950 font-mono font-black focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-slate-500 block mt-0.5 font-mono truncate font-semibold">
+                        <span className="text-[8px] text-slate-500 block font-mono truncate font-semibold">
                           {editTaxActive && (parseFloat(editBulto) || 0) > 0
                             ? `Base: $${((parseFloat(editBulto) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA` 
                             : 'Opcional'}
@@ -9066,6 +9818,22 @@ export default function Inventario({
           return true;
         });
 
+        // Instant search inside filtered issues
+        const cleanAuditSearch = auditSearch.trim().toUpperCase();
+        const searchFilteredIssues = filteredIssues.filter(item => {
+          if (!cleanAuditSearch) return true;
+          const desc = (item.currentDescription || '').toUpperCase();
+          const bar = (item.currentBarcode || '').toUpperCase();
+          const cat = (item.currentCategory || '').toUpperCase();
+          return desc.includes(cleanAuditSearch) || bar.includes(cleanAuditSearch) || cat.includes(cleanAuditSearch);
+        });
+
+        // Fast pagination slicing
+        const totalAuditPages = Math.max(1, Math.ceil(searchFilteredIssues.length / auditPageSize));
+        const safeAuditPage = Math.min(Math.max(auditPage, 1), totalAuditPages);
+        const auditStartIndex = (safeAuditPage - 1) * auditPageSize;
+        const displayedIssues = searchFilteredIssues.slice(auditStartIndex, auditStartIndex + auditPageSize);
+
         const countSinPrecios = catalogAuditIssues.filter(i => i.zeroOrInvalidPrices).length;
         const countZeroCost = catalogAuditIssues.filter(i => i.zeroCost).length;
         const countSinCat = catalogAuditIssues.filter(i => i.missingCategory).length;
@@ -9202,27 +9970,61 @@ export default function Inventario({
 
           let updatedCount = 0;
           try {
-            for (let i = 0; i < editedKeys.length; i++) {
-              const keyStr = editedKeys[i];
-              setAuditSaveProgress({ current: i + 1, total: editedKeys.length });
-              const product = products.find(p => String(p.id) === String(keyStr));
-              const edit = editedAuditProducts[keyStr as any];
-              if (product && edit) {
-                const updatedProd: Product = {
-                  ...product,
-                  barcode: edit.barcode !== undefined ? edit.barcode.trim() : product.barcode,
-                  description: edit.description !== undefined ? edit.description.trim().toUpperCase() : product.description,
-                  category: edit.category !== undefined ? edit.category.trim().toUpperCase() : product.category,
-                  stock_minimo: edit.stock_minimo !== undefined ? edit.stock_minimo : product.stock_minimo,
-                  precio_costo_usd: edit.precio_costo_usd !== undefined ? edit.precio_costo_usd : product.precio_costo_usd,
-                  precio_detalle_usd: edit.precio_detalle_usd !== undefined ? edit.precio_detalle_usd : product.precio_detalle_usd,
-                  precio_mayor_usd: edit.precio_mayor_usd !== undefined ? edit.precio_mayor_usd : product.precio_mayor_usd,
-                  precio_bulto_usd: edit.precio_bulto_usd !== undefined ? edit.precio_bulto_usd : (product.precio_bulto_usd || 0),
-                  cant_bulto: edit.cant_bulto !== undefined ? edit.cant_bulto : (product.cant_bulto || 0),
-                  ganancia_bulto: edit.ganancia_bulto !== undefined ? edit.ganancia_bulto : (product.ganancia_bulto || 0),
-                };
-                const ok = await onUpdateProduct(updatedProd);
-                if (ok) updatedCount++;
+            // If more than 5 products edited, use lightning-fast bulk batch save
+            if (editedKeys.length > 5) {
+              const bulkList: Product[] = [];
+              for (const keyStr of editedKeys) {
+                const product = products.find(p => String(p.id) === String(keyStr));
+                const edit = editedAuditProducts[keyStr as any];
+                if (product && edit) {
+                  bulkList.push({
+                    ...product,
+                    barcode: edit.barcode !== undefined ? edit.barcode.trim() : product.barcode,
+                    description: edit.description !== undefined ? edit.description.trim().toUpperCase() : product.description,
+                    category: edit.category !== undefined ? edit.category.trim().toUpperCase() : product.category,
+                    stock_minimo: edit.stock_minimo !== undefined ? edit.stock_minimo : product.stock_minimo,
+                    precio_costo_usd: edit.precio_costo_usd !== undefined ? edit.precio_costo_usd : product.precio_costo_usd,
+                    precio_detalle_usd: edit.precio_detalle_usd !== undefined ? edit.precio_detalle_usd : product.precio_detalle_usd,
+                    precio_mayor_usd: edit.precio_mayor_usd !== undefined ? edit.precio_mayor_usd : product.precio_mayor_usd,
+                    precio_bulto_usd: edit.precio_bulto_usd !== undefined ? edit.precio_bulto_usd : (product.precio_bulto_usd || 0),
+                    cant_bulto: edit.cant_bulto !== undefined ? edit.cant_bulto : (product.cant_bulto || 0),
+                    ganancia_bulto: edit.ganancia_bulto !== undefined ? edit.ganancia_bulto : (product.ganancia_bulto || 0),
+                  });
+                }
+              }
+
+              setAuditSaveProgress({ current: Math.floor(bulkList.length / 2), total: bulkList.length });
+              const savedCount = await onAddProductsBulk(bulkList);
+              setAuditSaveProgress({ current: bulkList.length, total: bulkList.length });
+
+              if (savedCount !== null) {
+                updatedCount = bulkList.length;
+              } else {
+                throw new Error('Fallo al guardar masivamente.');
+              }
+            } else {
+              for (let i = 0; i < editedKeys.length; i++) {
+                const keyStr = editedKeys[i];
+                setAuditSaveProgress({ current: i + 1, total: editedKeys.length });
+                const product = products.find(p => String(p.id) === String(keyStr));
+                const edit = editedAuditProducts[keyStr as any];
+                if (product && edit) {
+                  const updatedProd: Product = {
+                    ...product,
+                    barcode: edit.barcode !== undefined ? edit.barcode.trim() : product.barcode,
+                    description: edit.description !== undefined ? edit.description.trim().toUpperCase() : product.description,
+                    category: edit.category !== undefined ? edit.category.trim().toUpperCase() : product.category,
+                    stock_minimo: edit.stock_minimo !== undefined ? edit.stock_minimo : product.stock_minimo,
+                    precio_costo_usd: edit.precio_costo_usd !== undefined ? edit.precio_costo_usd : product.precio_costo_usd,
+                    precio_detalle_usd: edit.precio_detalle_usd !== undefined ? edit.precio_detalle_usd : product.precio_detalle_usd,
+                    precio_mayor_usd: edit.precio_mayor_usd !== undefined ? edit.precio_mayor_usd : product.precio_mayor_usd,
+                    precio_bulto_usd: edit.precio_bulto_usd !== undefined ? edit.precio_bulto_usd : (product.precio_bulto_usd || 0),
+                    cant_bulto: edit.cant_bulto !== undefined ? edit.cant_bulto : (product.cant_bulto || 0),
+                    ganancia_bulto: edit.ganancia_bulto !== undefined ? edit.ganancia_bulto : (product.ganancia_bulto || 0),
+                  };
+                  const ok = await onUpdateProduct(updatedProd);
+                  if (ok) updatedCount++;
+                }
               }
             }
             setEditedAuditProducts({});
@@ -9294,7 +10096,13 @@ export default function Inventario({
                   </div>
                 </div>
                 <button 
-                  onClick={() => !isSavingAuditCorrections && setShowCatalogAuditModal(false)}
+                  onClick={() => {
+                    if (!isSavingAuditCorrections) {
+                      setShowCatalogAuditModal(false);
+                      setAuditSearch('');
+                      setAuditPage(1);
+                    }
+                  }}
                   disabled={isSavingAuditCorrections}
                   className="text-slate-950/80 hover:text-slate-950 text-base font-bold focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed"
                 >
@@ -9307,7 +10115,7 @@ export default function Inventario({
                 <div className="flex items-center gap-1.5 overflow-x-auto">
                   <button
                     type="button"
-                    onClick={() => setAuditFilterTab('todos')}
+                    onClick={() => { setAuditFilterTab('todos'); setAuditPage(1); }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-extrabold font-sans transition-all flex items-center gap-1.5 ${
                       auditFilterTab === 'todos' ? 'bg-slate-950 text-amber-400 shadow' : 'bg-white text-slate-700 hover:bg-slate-200'
                     }`}
@@ -9318,7 +10126,7 @@ export default function Inventario({
 
                   <button
                     type="button"
-                    onClick={() => setAuditFilterTab('sin_precios')}
+                    onClick={() => { setAuditFilterTab('sin_precios'); setAuditPage(1); }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-extrabold font-sans transition-all flex items-center gap-1.5 ${
                       auditFilterTab === 'sin_precios' ? 'bg-amber-600 text-white shadow' : 'bg-white text-slate-700 hover:bg-slate-200'
                     }`}
@@ -9329,7 +10137,7 @@ export default function Inventario({
 
                   <button
                     type="button"
-                    onClick={() => setAuditFilterTab('sin_categoria')}
+                    onClick={() => { setAuditFilterTab('sin_categoria'); setAuditPage(1); }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-extrabold font-sans transition-all flex items-center gap-1.5 ${
                       auditFilterTab === 'sin_categoria' ? 'bg-amber-600 text-white shadow' : 'bg-white text-slate-700 hover:bg-slate-200'
                     }`}
@@ -9340,7 +10148,7 @@ export default function Inventario({
 
                   <button
                     type="button"
-                    onClick={() => setAuditFilterTab('sin_stock_min')}
+                    onClick={() => { setAuditFilterTab('sin_stock_min'); setAuditPage(1); }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-extrabold font-sans transition-all flex items-center gap-1.5 ${
                       auditFilterTab === 'sin_stock_min' ? 'bg-amber-600 text-white shadow' : 'bg-white text-slate-700 hover:bg-slate-200'
                     }`}
@@ -9351,7 +10159,7 @@ export default function Inventario({
 
                   <button
                     type="button"
-                    onClick={() => setAuditFilterTab('sin_codigo')}
+                    onClick={() => { setAuditFilterTab('sin_codigo'); setAuditPage(1); }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-extrabold font-sans transition-all flex items-center gap-1.5 ${
                       auditFilterTab === 'sin_codigo' ? 'bg-amber-600 text-white shadow' : 'bg-white text-slate-700 hover:bg-slate-200'
                     }`}
@@ -9362,7 +10170,7 @@ export default function Inventario({
 
                   <button
                     type="button"
-                    onClick={() => setAuditFilterTab('sin_descripcion')}
+                    onClick={() => { setAuditFilterTab('sin_descripcion'); setAuditPage(1); }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-extrabold font-sans transition-all flex items-center gap-1.5 ${
                       auditFilterTab === 'sin_descripcion' ? 'bg-amber-600 text-white shadow' : 'bg-white text-slate-700 hover:bg-slate-200'
                     }`}
@@ -9549,10 +10357,87 @@ export default function Inventario({
 
                 {/* Right Panel: Inline Table */}
                 <div className="w-2/3 p-5 flex flex-col overflow-hidden bg-white">
-                  <div className="flex justify-between items-center mb-2">
-                    <label className="text-[10px] uppercase tracking-wider text-slate-400 font-extrabold font-mono">
-                      Inspector de Inconsistencias ({filteredIssues.length})
-                    </label>
+                  <div className="flex flex-wrap justify-between items-center gap-2 mb-2.5">
+                    <div className="flex items-center gap-2">
+                      <label className="text-[10px] uppercase tracking-wider text-slate-500 font-black font-mono">
+                        Inspector ({searchFilteredIssues.length} {searchFilteredIssues.length !== filteredIssues.length ? `de ${filteredIssues.length}` : ''})
+                      </label>
+                      {cleanAuditSearch && (
+                        <span className="text-[9px] font-bold bg-amber-100 text-amber-900 px-1.5 py-0.5 rounded font-mono">
+                          Filtrado por: "{auditSearch}"
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {/* Search box */}
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={auditSearch}
+                          onChange={(e) => {
+                            setAuditSearch(e.target.value);
+                            setAuditPage(1);
+                          }}
+                          placeholder="Buscar producto o código..."
+                          className="w-48 pl-7 pr-6 py-1 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-amber-500 bg-slate-50 focus:bg-white text-slate-800 placeholder-slate-400"
+                        />
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2 pointer-events-none" />
+                        {auditSearch && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAuditSearch('');
+                              setAuditPage(1);
+                            }}
+                            className="absolute right-1.5 top-1.5 text-slate-400 hover:text-slate-600 text-xs px-1"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Page size */}
+                      <select
+                        value={auditPageSize}
+                        onChange={(e) => {
+                          setAuditPageSize(Number(e.target.value));
+                          setAuditPage(1);
+                        }}
+                        className="text-xs border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-slate-700 bg-slate-50 focus:outline-none cursor-pointer"
+                        title="Productos mostrados por página"
+                      >
+                        <option value={30}>30 / pág</option>
+                        <option value={50}>50 / pág</option>
+                        <option value={100}>100 / pág</option>
+                        <option value={200}>200 / pág</option>
+                      </select>
+
+                      {/* Pagination buttons */}
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={safeAuditPage <= 1}
+                          onClick={() => setAuditPage(p => Math.max(1, p - 1))}
+                          className="px-2 py-1 border border-slate-300 rounded bg-slate-50 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-mono font-bold text-slate-700 transition-all"
+                          title="Página anterior"
+                        >
+                          ◀
+                        </button>
+                        <span className="text-[11px] font-mono font-black text-slate-700 px-1 whitespace-nowrap">
+                          {safeAuditPage} / {totalAuditPages}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={safeAuditPage >= totalAuditPages}
+                          onClick={() => setAuditPage(p => Math.min(totalAuditPages, p + 1))}
+                          className="px-2 py-1 border border-slate-300 rounded bg-slate-50 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-mono font-bold text-slate-700 transition-all"
+                          title="Página siguiente"
+                        >
+                          ▶
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="flex-1 border border-slate-200 rounded-xl overflow-hidden flex flex-col min-h-0 shadow-inner">
@@ -9570,14 +10455,14 @@ export default function Inventario({
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 font-sans">
-                          {filteredIssues.length === 0 ? (
+                          {displayedIssues.length === 0 ? (
                             <tr>
                               <td colSpan={7} className="py-12 text-center text-slate-400 italic">
-                                🎉 No se encontraron inconsistencias en este filtro.
+                                {cleanAuditSearch ? `🔍 No se encontraron productos que coincidan con "${auditSearch}".` : '🎉 No se encontraron inconsistencias en este filtro.'}
                               </td>
                             </tr>
                           ) : (
-                            filteredIssues.map(({ product: p, currentBarcode, currentDescription, currentCategory, currentStockMin, currentCost, currentDetail, currentMayor, currentBulto, currentCantBulto, missingCategory, missingBarcode, missingDescription, missingStockMin, zeroCost, zeroDetail, zeroMayor, invalidBulto, zeroOrInvalidPrices }) => {
+                            displayedIssues.map(({ product: p, currentBarcode, currentDescription, currentCategory, currentStockMin, currentCost, currentDetail, currentMayor, currentBulto, currentCantBulto, missingCategory, missingBarcode, missingDescription, missingStockMin, zeroCost, zeroDetail, zeroMayor, invalidBulto, zeroOrInvalidPrices }) => {
                               const edit = editedAuditProducts[p.id];
                               const isEdited = edit !== undefined;
 
@@ -9797,6 +10682,54 @@ export default function Inventario({
                         </tbody>
                       </table>
                     </div>
+
+                    {/* Bottom Pagination Bar */}
+                    {searchFilteredIssues.length > auditPageSize && (
+                      <div className="bg-slate-50 px-4 py-2 border-t border-slate-200 flex items-center justify-between text-xs text-slate-600 font-mono">
+                        <span>
+                          Mostrando <strong>{auditStartIndex + 1}</strong> - <strong>{Math.min(auditStartIndex + auditPageSize, searchFilteredIssues.length)}</strong> de <strong>{searchFilteredIssues.length}</strong> items
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            disabled={safeAuditPage <= 1}
+                            onClick={() => setAuditPage(1)}
+                            className="px-2 py-0.5 border border-slate-300 rounded bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed font-bold"
+                            title="Primera página"
+                          >
+                            ««
+                          </button>
+                          <button
+                            type="button"
+                            disabled={safeAuditPage <= 1}
+                            onClick={() => setAuditPage(p => Math.max(1, p - 1))}
+                            className="px-2.5 py-0.5 border border-slate-300 rounded bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed font-bold"
+                          >
+                            ◀ Anterior
+                          </button>
+                          <span className="px-2 font-bold text-slate-900">
+                            Página {safeAuditPage} de {totalAuditPages}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={safeAuditPage >= totalAuditPages}
+                            onClick={() => setAuditPage(p => Math.min(totalAuditPages, p + 1))}
+                            className="px-2.5 py-0.5 border border-slate-300 rounded bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed font-bold"
+                          >
+                            Siguiente ▶
+                          </button>
+                          <button
+                            type="button"
+                            disabled={safeAuditPage >= totalAuditPages}
+                            onClick={() => setAuditPage(totalAuditPages)}
+                            className="px-2 py-0.5 border border-slate-300 rounded bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed font-bold"
+                            title="Última página"
+                          >
+                            »»
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -9815,7 +10748,11 @@ export default function Inventario({
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    onClick={() => setShowCatalogAuditModal(false)}
+                    onClick={() => {
+                      setShowCatalogAuditModal(false);
+                      setAuditSearch('');
+                      setAuditPage(1);
+                    }}
                     disabled={isSavingAuditCorrections}
                     className="bg-slate-200 hover:bg-slate-300 disabled:opacity-50 disabled:cursor-not-allowed text-slate-700 px-4 py-2 rounded-lg font-bold font-sans transition-all"
                   >
@@ -12844,6 +13781,358 @@ export default function Inventario({
                 className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs px-4 py-1.5 rounded-lg transition-all cursor-pointer"
               >
                 Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: VISOR EN GRANDE Y SELECTOR DE PROPUESTAS DE IMAGEN */}
+      {imageViewerModal.isOpen && (
+        <div 
+          onClick={() => setImageViewerModal(prev => ({ ...prev, isOpen: false }))}
+          className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[140] flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-150 cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-5xl w-full overflow-hidden flex flex-col max-h-[92vh] font-sans text-slate-800 cursor-default"
+          >
+            {/* Header */}
+            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 px-5 py-3.5 flex justify-between items-center text-white select-none">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 bg-indigo-500/20 rounded-lg border border-indigo-400/30">
+                  <ImageIcon className="w-5 h-5 text-indigo-300" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-black uppercase tracking-wider font-mono flex items-center gap-2">
+                    <span>Visor en Grande & Propuestas de Imagen</span>
+                    <span className="bg-indigo-600/60 text-[9px] px-1.5 py-0.5 rounded text-indigo-200 font-sans font-bold">
+                      {imageViewerModal.target === 'edit' ? 'Ficha de Edición' : 'Nuevo Producto'}
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-300 font-medium truncate max-w-md">
+                    Producto: <strong className="text-white">{imageViewerModal.description || 'Sin descripción'}</strong>
+                    {imageViewerModal.barcode && <span className="ml-2 font-mono text-indigo-200">({imageViewerModal.barcode})</span>}
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setImageViewerModal(prev => ({ ...prev, isOpen: false }))}
+                className="text-white/70 hover:text-white text-lg font-bold p-1 rounded-lg hover:bg-white/10 transition-all cursor-pointer"
+                title="Cerrar ventana"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body: Split Layout */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 flex-1 overflow-hidden divide-y lg:divide-y-0 lg:divide-x divide-slate-200">
+              
+              {/* COLUMNA IZQUIERDA: VISTA EN GRANDE DE LA FOTO SELECCIONADA */}
+              <div className="lg:col-span-5 p-4 sm:p-5 flex flex-col bg-slate-50/50 space-y-3 overflow-y-auto">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-600 font-mono flex items-center gap-1.5">
+                    <Maximize2 className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Vista en Grande</span>
+                  </span>
+                  
+                  {/* Status badge */}
+                  {imageViewerModal.previewUrl && imageViewerModal.previewUrl === imageViewerModal.currentUrl ? (
+                    <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <Check className="w-3 h-3 text-emerald-600" />
+                      <span>Imagen Actual</span>
+                    </span>
+                  ) : imageViewerModal.previewUrl ? (
+                    <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse">
+                      <Eye className="w-3 h-3 text-amber-700" />
+                      <span>Previsualizando Propuesta</span>
+                    </span>
+                  ) : (
+                    <span className="bg-slate-200 text-slate-600 text-[10px] font-medium px-2 py-0.5 rounded-full">
+                      Sin Selección
+                    </span>
+                  )}
+                </div>
+
+                {/* Big Image Display Box */}
+                <div className="flex-1 min-h-[260px] sm:min-h-[300px] max-h-[360px] rounded-2xl bg-slate-900/5 border-2 border-dashed border-slate-300 flex items-center justify-center p-3 relative overflow-hidden group shadow-inner">
+                  {imageViewerModal.previewUrl ? (
+                    <img 
+                      key={`big-preview-${imageViewerModal.previewUrl}`}
+                      src={formatImageUrl(imageViewerModal.previewUrl)} 
+                      alt="Vista en Grande"
+                      className="max-h-full max-w-full object-contain rounded-xl drop-shadow-md transition-all group-hover:scale-105 duration-200 bg-white/80"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLElement).style.display = 'none';
+                      }}
+                    />
+                  ) : (
+                    <div className="text-center p-6 space-y-2">
+                      <div className="w-14 h-14 rounded-2xl bg-white border border-slate-200 flex items-center justify-center mx-auto shadow-xs text-slate-300">
+                        <ImageIcon className="w-8 h-8" />
+                      </div>
+                      <p className="text-xs font-bold text-slate-600">No hay imagen en previsualización</p>
+                      <p className="text-[10px] text-slate-400 max-w-xs">
+                        Elige una de las propuestas de la galería o genera una nueva con Inteligencia Artificial.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Main Action for previewed image */}
+                <div className="space-y-2 pt-1">
+                  {imageViewerModal.previewUrl && imageViewerModal.previewUrl !== imageViewerModal.currentUrl ? (
+                    <button
+                      type="button"
+                      disabled={imageViewerModal.isSavingCandidate}
+                      onClick={() => handleSelectProposalImage(imageViewerModal.previewUrl)}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs py-2.5 px-4 rounded-xl shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98 disabled:opacity-50"
+                    >
+                      {imageViewerModal.isSavingCandidate ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Descargando y Guardando Foto...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-4 h-4 text-emerald-200 stroke-[3]" />
+                          <span>Elegir y Asignar esta Imagen al Producto</span>
+                        </>
+                      )}
+                    </button>
+                  ) : imageViewerModal.currentUrl ? (
+                    <div className="flex items-center justify-between gap-2">
+                      <a
+                        href={formatImageUrl(imageViewerModal.currentUrl)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex-1 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-[11px] font-bold py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-2xs"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
+                        <span>Abrir Original</span>
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (imageViewerModal.target === 'edit') setEditImageUrl('');
+                          else setNewImageUrl('');
+                          setImageViewerModal(prev => ({ ...prev, currentUrl: '', previewUrl: '' }));
+                          showToast('Foto removida del producto.');
+                        }}
+                        className="bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 text-[11px] font-bold py-2 px-3 rounded-xl flex items-center gap-1 transition-all"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-red-600" />
+                        <span>Quitar</span>
+                      </button>
+                    </div>
+                  ) : null}
+
+                  <p className="text-[9.5px] text-slate-400 text-center font-medium">
+                    {imageViewerModal.previewUrl?.startsWith('http') 
+                      ? '🌐 Foto web: al seleccionarla se guardará localmente para acceso offline.' 
+                      : '💾 Foto guardada localmente en tu sistema.'}
+                  </p>
+                </div>
+              </div>
+
+              {/* COLUMNA DERECHA: BANCO DE PROPUESTAS, BÚSQUEDA Y GENERADOR IA */}
+              <div className="lg:col-span-7 p-4 sm:p-5 flex flex-col bg-white space-y-3 overflow-hidden">
+                {/* Search Bar & AI Action Buttons */}
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                      <input
+                        type="text"
+                        value={imageViewerModal.searchQuery}
+                        onChange={(e) => setImageViewerModal(prev => ({ ...prev, searchQuery: e.target.value }))}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSearchImageViewerCandidates(imageViewerModal.searchQuery);
+                        }}
+                        placeholder="Buscar propuestas por marca o descripción..."
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-800 font-bold focus:bg-white focus:outline-none focus:border-indigo-500 shadow-2xs"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={imageViewerModal.isLoadingCandidates || !imageViewerModal.searchQuery.trim()}
+                      onClick={() => handleSearchImageViewerCandidates(imageViewerModal.searchQuery)}
+                      className="bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white font-bold text-xs px-3 py-1.5 rounded-xl shadow-2xs flex items-center gap-1 transition-all cursor-pointer"
+                    >
+                      {imageViewerModal.isLoadingCandidates ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                      <span>Buscar</span>
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                    <button
+                      type="button"
+                      disabled={imageViewerModal.isGeneratingAi}
+                      onClick={handleGenerateAiInsideModal}
+                      className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 text-white text-[11px] font-bold py-1.5 px-3 rounded-xl flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer"
+                      title="Generar una nueva fotografía con IA para este producto"
+                    >
+                      {imageViewerModal.isGeneratingAi ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Generando con IA...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                          <span>✨ Generar Nueva Propuesta con IA</span>
+                        </>
+                      )}
+                    </button>
+
+                    <label className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 text-[11px] font-bold py-1.5 px-3 rounded-xl cursor-pointer flex items-center gap-1.5 transition-all shadow-2xs">
+                      <UploadCloud className="w-3.5 h-3.5 text-slate-600" />
+                      <span>Subir desde PC</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            handleUploadImageFile(file, imageViewerModal.target);
+                            // Also read locally for immediate preview in modal
+                            const r = new FileReader();
+                            r.onload = (ev) => {
+                              const b64 = ev.target?.result as string;
+                              if (b64) {
+                                setImageViewerModal(prev => ({
+                                  ...prev,
+                                  previewUrl: b64,
+                                  candidates: [{ url: b64, title: file.name, source: 'Subida Local', isCurrent: true }, ...prev.candidates]
+                                }));
+                              }
+                            };
+                            r.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                {/* Proposals Header info */}
+                <div className="flex items-center justify-between border-t border-slate-100 pt-2 text-[10px] font-bold text-slate-500 font-mono">
+                  <span>PROPUESTAS ENCONTRADAS ({imageViewerModal.candidates.length})</span>
+                  <span className="font-normal text-slate-400">💡 Haz clic en una foto para verla en grande</span>
+                </div>
+
+                {/* Proposals Gallery Grid */}
+                <div className="flex-1 overflow-y-auto pr-1 max-h-[360px]">
+                  {imageViewerModal.isLoadingCandidates ? (
+                    <div className="py-20 flex flex-col items-center justify-center text-slate-500 space-y-2">
+                      <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+                      <span className="text-xs font-bold font-mono">Explorando catálogos web e IA...</span>
+                    </div>
+                  ) : imageViewerModal.candidates.length === 0 ? (
+                    <div className="py-16 text-center text-slate-400 space-y-2">
+                      <ImageIcon className="w-10 h-10 mx-auto text-slate-300" />
+                      <p className="text-xs font-bold text-slate-600">No se encontraron propuestas automáticas</p>
+                      <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
+                        Presiona <strong>"Generar Nueva Propuesta con IA"</strong> o escribe otra palabra clave en el buscador arriba.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                      {imageViewerModal.candidates.map((cand, idx) => {
+                        const isSelected = imageViewerModal.previewUrl === cand.url;
+                        const isCurrent = imageViewerModal.currentUrl === cand.url;
+                        return (
+                          <div
+                            key={`cand-proposal-${idx}-${cand.url}`}
+                            onClick={() => {
+                              setImageViewerModal(prev => ({ ...prev, previewUrl: cand.url }));
+                            }}
+                            className={`rounded-xl p-2 cursor-pointer transition-all flex flex-col items-center text-center relative group select-none border-2 ${
+                              isSelected 
+                                ? 'border-indigo-600 bg-indigo-50/70 ring-2 ring-indigo-400/40 shadow-md' 
+                                : 'border-slate-200 bg-white hover:border-indigo-300 hover:shadow-xs'
+                            }`}
+                          >
+                            {/* Badges on corner */}
+                            <div className="absolute top-2 left-2 z-10 flex flex-col gap-0.5 items-start">
+                              {isCurrent && (
+                                <span className="bg-emerald-600 text-white text-[8px] font-black px-1.5 py-0.5 rounded shadow-xs">
+                                  ACTUAL
+                                </span>
+                              )}
+                              {cand.isAi && (
+                                <span className="bg-purple-600 text-white text-[8px] font-black px-1.5 py-0.5 rounded shadow-xs">
+                                  IA FOTO
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Image Box */}
+                            <div className="w-full h-28 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center overflow-hidden mb-1.5 relative">
+                              <img
+                                src={cand.url}
+                                alt={cand.title || 'Propuesta'}
+                                className="max-h-full max-w-full object-contain p-1 group-hover:scale-105 transition-all duration-200"
+                                onError={(e) => {
+                                  (e.currentTarget.parentElement as HTMLElement).style.display = 'none';
+                                }}
+                              />
+                            </div>
+
+                            {/* Card title & source */}
+                            <span className="text-[9.5px] font-bold text-slate-800 truncate w-full block" title={cand.title}>
+                              {cand.title || 'Foto de producto'}
+                            </span>
+                            <span className="text-[8px] font-mono text-slate-400 uppercase truncate block w-full mt-0.5">
+                              {cand.source || 'Web Comercial'}
+                            </span>
+
+                            {/* Quick Select Button on Hover */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSelectProposalImage(cand.url);
+                              }}
+                              className={`mt-1.5 w-full text-[9px] font-bold py-1 px-1.5 rounded-md transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                                isCurrent 
+                                  ? 'bg-emerald-100 text-emerald-800' 
+                                  : isSelected
+                                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs'
+                                    : 'bg-slate-100 group-hover:bg-indigo-600 group-hover:text-white text-slate-600'
+                              }`}
+                            >
+                              {isCurrent ? (
+                                <span>✔ Asignada</span>
+                              ) : isSelected ? (
+                                <span>✔ Aplicar esta</span>
+                              ) : (
+                                <span>Ver / Elegir</span>
+                              )}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+            </div>
+
+            {/* Footer */}
+            <div className="bg-slate-50 px-5 py-3 border-t border-slate-200 flex items-center justify-between text-xs text-slate-600">
+              <span className="text-[11px] text-slate-500 font-medium">
+                💡 Puedes previsualizar tantas propuestas como desees antes de elegir una definitiva.
+              </span>
+              <button
+                type="button"
+                onClick={() => setImageViewerModal(prev => ({ ...prev, isOpen: false }))}
+                className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-5 py-2 rounded-xl transition-all cursor-pointer shadow-xs"
+              >
+                Cerrar Visor
               </button>
             </div>
           </div>

@@ -741,7 +741,10 @@ const cleanProductObject = (p: any): Product => ({
   precio_bulto_usd: parseFloat(p.precio_bulto_usd) || 0,
   cantidad_mayorista: parseInt(p.cantidad_mayorista) || 12,
   cant_bulto: parseInt(p.cant_bulto) || 0,
-  ganancia_bulto: parseFloat(p.ganancia_bulto) || 0
+  ganancia_detalle: parseFloat(p.ganancia_detalle) || 0,
+  ganancia_mayor: parseFloat(p.ganancia_mayor) || 0,
+  ganancia_bulto: parseFloat(p.ganancia_bulto) || 0,
+  fijar_margen: !!p.fijar_margen
 });
 
   // Refresh products, movements, and price history automatically when entering the inventario tab

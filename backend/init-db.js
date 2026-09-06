@@ -168,7 +168,10 @@ export async function initDatabase() {
 
         ALTER TABLE Productos ADD COLUMN IF NOT EXISTS precio_bulto_usd NUMERIC(12, 2) DEFAULT 0;
         ALTER TABLE Productos ADD COLUMN IF NOT EXISTS cant_bulto INT DEFAULT 0;
+        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS ganancia_detalle NUMERIC(8, 2) DEFAULT 0;
+        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS ganancia_mayor NUMERIC(8, 2) DEFAULT 0;
         ALTER TABLE Productos ADD COLUMN IF NOT EXISTS ganancia_bulto NUMERIC(8, 2) DEFAULT 0;
+        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS fijar_margen BOOLEAN DEFAULT FALSE;
         ALTER TABLE Productos ADD COLUMN IF NOT EXISTS porcentaje_impuesto NUMERIC(5, 2) DEFAULT 0;
         ALTER TABLE Productos ADD COLUMN IF NOT EXISTS a_granel BOOLEAN DEFAULT FALSE;
         ALTER TABLE Productos ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(50);
