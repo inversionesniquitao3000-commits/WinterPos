@@ -470,6 +470,9 @@ try {
   }
 
   client.release();
+
+  // Automatically populate PostgreSQL with sales, closures and transactions if Ventas table is empty
+  await syncJsonBackupsToPostgresIfEmpty();
 } catch (err) {
   console.warn('⚠️ No se pudo conectar a PostgreSQL. Usando almacenamiento JSON local centralizado en el servidor.');
   console.warn('Detalle del error:', err.message);
@@ -2223,6 +2226,318 @@ export async function backupDatabase() {
   };
 }
 
+export async function restoreCierresToPostgres(cierres) {
+  if (!usePostgres || !Array.isArray(cierres) || cierres.length === 0) return;
+  try {
+    const uRes = await pool.query('SELECT id, nombre, usuario FROM Usuarios');
+    const userMap = new Map();
+    uRes.rows.forEach(u => {
+      if (u.nombre) userMap.set(u.nombre.toLowerCase().trim(), u.id);
+      if (u.usuario) userMap.set(u.usuario.toLowerCase().trim(), u.id);
+    });
+    const defaultUserId = uRes.rows[0]?.id || 1;
+
+    for (const c of cierres) {
+      const cId = parseInt(c.id, 10);
+      if (isNaN(cId)) continue;
+      const uName = (c.usuario || '').toLowerCase().trim();
+      const uId = userMap.get(uName) || defaultUserId;
+      const fApertura = c.fechaApertura || c.fecha || getLocalISODateString();
+      const fCierre = c.fechaCierre || (c.status === 'Cerrada' ? (c.fecha || fApertura) : null);
+      const estatus = c.status === 'Abierta' ? 'Abierta' : 'Cerrada';
+      const termName = c.terminal || 'CAJA_PRINCIPAL';
+      const detalles = typeof c === 'object' ? JSON.stringify(c) : '{}';
+
+      await pool.query(
+        `INSERT INTO Cajas_Apertura_Cierre (
+          id, usuario_id, estacion_nombre, monto_apertura_usd, monto_apertura_ves,
+          fecha_apertura, fecha_cierre, monto_cierre_real_usd, monto_cierre_real_ves,
+          monto_cierre_esperado_usd, monto_cierre_esperado_ves, venta_total_usd, utilidad_usd,
+          estatus, detalles_json, vuelto_entregado_usd, vuelto_entregado_ves,
+          ventas_efectivo_usd, ventas_efectivo_ves, abono_clientes_usd, abono_clientes_ves
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+        ON CONFLICT (id) DO UPDATE SET
+          usuario_id = EXCLUDED.usuario_id,
+          estacion_nombre = EXCLUDED.estacion_nombre,
+          fecha_apertura = EXCLUDED.fecha_apertura,
+          fecha_cierre = EXCLUDED.fecha_cierre,
+          monto_cierre_real_usd = EXCLUDED.monto_cierre_real_usd,
+          monto_cierre_real_ves = EXCLUDED.monto_cierre_real_ves,
+          monto_cierre_esperado_usd = EXCLUDED.monto_cierre_esperado_usd,
+          monto_cierre_esperado_ves = EXCLUDED.monto_cierre_esperado_ves,
+          venta_total_usd = EXCLUDED.venta_total_usd,
+          utilidad_usd = EXCLUDED.utilidad_usd,
+          estatus = EXCLUDED.estatus,
+          detalles_json = EXCLUDED.detalles_json`,
+        [
+          cId, uId, termName,
+          parseFloat(c.aperturaUsd || c.monto_apertura_usd || 0),
+          parseFloat(c.aperturaVes || c.monto_apertura_ves || 0),
+          fApertura, fCierre,
+          parseFloat(c.realUsd || c.monto_cierre_real_usd || 0),
+          parseFloat(c.realVes || c.monto_cierre_real_ves || 0),
+          parseFloat(c.expectedUsd || c.monto_cierre_esperado_usd || 0),
+          parseFloat(c.expectedVes || c.monto_cierre_esperado_ves || 0),
+          parseFloat(c.ventaTotalUsd || c.venta_total_usd || 0),
+          parseFloat(c.utilidadUsd || c.utilidad_usd || 0),
+          estatus, detalles,
+          parseFloat(c.vueltosEntregadosUsd || c.vuelto_entregado_usd || 0),
+          parseFloat(c.vueltosEntregadosVes || c.vuelto_entregado_ves || 0),
+          parseFloat(c.ventasEfectivoUsd || c.ventas_efectivo_usd || 0),
+          parseFloat(c.ventasEfectivoVes || c.ventas_efectivo_ves || 0),
+          parseFloat(c.abonoClientesUsd || c.abono_clientes_usd || 0),
+          parseFloat(c.abonoClientesVes || c.abono_clientes_ves || 0)
+        ]
+      );
+    }
+    await pool.query("SELECT setval(pg_get_serial_sequence('Cajas_Apertura_Cierre', 'id'), COALESCE((SELECT MAX(id) FROM Cajas_Apertura_Cierre), 1))");
+    console.log(`✅ [Restore] ${cierres.length} cierres de caja restaurados en PostgreSQL.`);
+  } catch (err) {
+    console.error('Error restaurando cierres en Postgres:', err.message);
+  }
+}
+
+export async function restoreSalesToPostgres(sales) {
+  if (!usePostgres || !Array.isArray(sales) || sales.length === 0) return;
+  try {
+    const [cRes, uRes, pRes] = await Promise.all([
+      pool.query('SELECT id, cedula_rif FROM Clientes'),
+      pool.query('SELECT id, nombre, usuario FROM Usuarios'),
+      pool.query('SELECT id, codigo_barras_clave FROM Productos')
+    ]);
+
+    const clientMap = new Map();
+    cRes.rows.forEach(c => {
+      if (c.cedula_rif) clientMap.set(c.cedula_rif.trim().toUpperCase(), c.id);
+    });
+    const defaultClientId = cRes.rows[0]?.id || 1;
+
+    const userMap = new Map();
+    uRes.rows.forEach(u => {
+      if (u.nombre) userMap.set(u.nombre.toLowerCase().trim(), u.id);
+      if (u.usuario) userMap.set(u.usuario.toLowerCase().trim(), u.id);
+    });
+    const defaultUserId = uRes.rows[0]?.id || 1;
+
+    const prodMap = new Map();
+    pRes.rows.forEach(p => {
+      if (p.codigo_barras_clave) prodMap.set(p.codigo_barras_clave.trim(), p.id);
+    });
+    const defaultProdId = pRes.rows[0]?.id || 1;
+
+    await pool.query('ALTER TABLE IF EXISTS Ventas ALTER COLUMN caja_id DROP NOT NULL').catch(() => {});
+
+    const cajaRes = await pool.query('SELECT id FROM Cajas_Apertura_Cierre');
+    const cajaSet = new Set(cajaRes.rows.map(r => Number(r.id)));
+    const defaultCajaId = cajaRes.rows[0]?.id ? Number(cajaRes.rows[0].id) : null;
+
+    // Clean existing sales tables for clean restore
+    await pool.query('TRUNCATE TABLE Ventas, Ventas_Detalle, Pagos_Venta RESTART IDENTITY CASCADE');
+
+    for (const s of sales) {
+      try {
+        const sId = parseInt(s.id, 10);
+        if (isNaN(sId)) continue;
+
+        const cDoc = (s.client?.cedula_rif || s.clientDoc || '').trim().toUpperCase();
+        const clientId = clientMap.get(cDoc) || defaultClientId;
+
+        const uName = (s.usuario || '').toLowerCase().trim();
+        const userId = userMap.get(uName) || defaultUserId;
+
+        const rawCajaId = parseInt(s.caja_id || s.cajaId, 10);
+        const cajaId = (!isNaN(rawCajaId) && cajaSet.has(rawCajaId)) ? rawCajaId : defaultCajaId;
+
+        const facturaNro = s.factura_nro || `FAC-${String(sId).padStart(6, '0')}`;
+        const tipoDoc = s.tipo_documento || (s.nro_fiscal ? 'FACTURA_FISCAL' : 'NOTA_ENTREGA');
+        const estatusFiscal = s.estatus_fiscal || (s.nro_fiscal ? 'EMITIDA' : 'NO_APLICA');
+        const fecha = s.fecha || getLocalISODateString();
+        const terminal = s.terminal || 'CAJA_PRINCIPAL';
+
+        const subtotal = parseFloat(s.subtotal || s.subtotal_usd || 0) || 0;
+        const descuento = parseFloat(s.descuento || s.descuento_usd || 0) || 0;
+        const totalUSD = parseFloat(s.totalUSD || s.total_usd || 0) || 0;
+        const totalVES = parseFloat(s.totalVES || s.total_ves || 0) || 0;
+        const tasaVal = parseFloat(s.tasa_cambio || (totalVES && totalUSD ? totalVES / totalUSD : 1)) || 1.00;
+
+        const vRes = await pool.query(
+          `INSERT INTO Ventas (
+            id, factura_nro, cliente_id, usuario_id, caja_id, subtotal_usd, descuento_usd,
+            total_usd, total_ves, tasa_cambio, con_ticket, fecha, estacion_nombre,
+            vuelto_usd, vuelto_ves, tipo_documento, nro_fiscal, serial_fiscal, nro_z,
+            estatus_fiscal, base_imponible_usd, iva_usd, exento_usd, igtf_usd, estatus
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+            $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
+          ) ON CONFLICT (id) DO UPDATE SET
+            factura_nro = EXCLUDED.factura_nro,
+            fecha = EXCLUDED.fecha,
+            total_usd = EXCLUDED.total_usd,
+            total_ves = EXCLUDED.total_ves
+          RETURNING id`,
+          [
+            sId, facturaNro, clientId, userId, cajaId, subtotal, descuento,
+            totalUSD, totalVES, tasaVal, s.con_ticket !== false, fecha, terminal,
+            parseFloat(s.vueltoUSD || s.vuelto_usd || 0) || 0, parseFloat(s.vueltoVES || s.vuelto_ves || 0) || 0,
+            tipoDoc, s.nro_fiscal || null, s.serial_fiscal || null, s.nro_z || null,
+            estatusFiscal,
+            parseFloat(s.base_imponible_usd || s.baseImponible || 0) || 0,
+            parseFloat(s.iva_usd || s.iva || 0) || 0,
+            parseFloat(s.exento_usd || s.exento || 0) || 0,
+            parseFloat(s.igtf_usd || s.igtf || 0) || 0,
+            s.estatus || 'Procesada'
+          ]
+        );
+
+        const insertedVentaId = vRes.rows[0].id;
+
+        if (Array.isArray(s.items)) {
+          for (const it of s.items) {
+            const barcode = (it.product?.barcode || it.product?.codigo_barras_clave || '').trim();
+            let prodId = prodMap.get(barcode);
+            if (!prodId && it.product?.id) {
+              prodId = parseInt(it.product.id, 10);
+            }
+            if (!prodId) prodId = defaultProdId;
+
+            const qty = Math.abs(parseFloat(it.qty || 1)) || 1;
+            const priceUSD = parseFloat(it.precio_unitario_usd || it.priceUSD || 0) || 0;
+            const totalUSDItem = parseFloat(it.total_fila_usd || it.totalUSD || (qty * priceUSD)) || 0;
+
+            await pool.query(
+              `INSERT INTO Ventas_Detalle (
+                venta_id, producto_id, cantidad, precio_unitario_usd, tipo_precio, total_fila_usd
+              ) VALUES ($1, $2, $3, $4, $5, $6)`,
+              [insertedVentaId, prodId, qty, priceUSD, it.tipo_precio || 'Detal', totalUSDItem]
+            );
+          }
+        }
+
+        if (Array.isArray(s.pagos)) {
+          for (const p of s.pagos) {
+            await pool.query(
+              `INSERT INTO Pagos_Venta (
+                venta_id, metodo_pago, monto_entregado_usd, monto_entregado_ves, banco_emisor, numero_referencia
+              ) VALUES ($1, $2, $3, $4, $5, $6)`,
+              [
+                insertedVentaId,
+                p.metodo || p.metodo_pago || 'Efectivo$',
+                parseFloat(p.monto || p.monto_entregado_usd || 0) || 0,
+                parseFloat(p.montoVES || p.monto_entregado_ves || 0) || 0,
+                p.banco || p.banco_emisor || '',
+                p.referencia || p.numero_referencia || ''
+              ]
+            );
+          }
+        }
+      } catch (saleErr) {
+        console.warn(`⚠️ Error en venta ${s.id || s.factura_nro}:`, saleErr.message);
+      }
+    }
+
+    await pool.query("SELECT setval(pg_get_serial_sequence('Ventas', 'id'), COALESCE((SELECT MAX(id) FROM Ventas), 1))");
+    await pool.query("SELECT setval(pg_get_serial_sequence('Ventas_Detalle', 'id'), COALESCE((SELECT MAX(id) FROM Ventas_Detalle), 1))");
+    await pool.query("SELECT setval(pg_get_serial_sequence('Pagos_Venta', 'id'), COALESCE((SELECT MAX(id) FROM Pagos_Venta), 1))");
+    await pool.query("SELECT setval('seq_factura', COALESCE((SELECT MAX(CAST(NULLIF(regexp_replace(factura_nro, '\\D', '', 'g'), '') AS INTEGER)) FROM Ventas WHERE factura_nro LIKE 'FAC-%'), 1))");
+    console.log(`✅ [Restore] ${sales.length} ventas y transacciones restauradas en PostgreSQL.`);
+  } catch (err) {
+    console.error('Error restaurando ventas en Postgres:', err.message);
+  }
+}
+
+export async function restoreAbonosToPostgres(abonos) {
+  if (!usePostgres || !Array.isArray(abonos) || abonos.length === 0) return;
+  try {
+    const cRes = await pool.query('SELECT id, cedula_rif FROM Clientes');
+    const clientMap = new Map();
+    cRes.rows.forEach(c => {
+      if (c.cedula_rif) clientMap.set(c.cedula_rif.trim().toUpperCase(), c.id);
+    });
+    const defaultClientId = cRes.rows[0]?.id || 1;
+
+    await pool.query('TRUNCATE TABLE Abonos RESTART IDENTITY CASCADE');
+
+    for (const ab of abonos) {
+      const aId = parseInt(ab.id, 10);
+      if (isNaN(aId)) continue;
+      const cDoc = (ab.cedula_rif || '').trim().toUpperCase();
+      const clientId = clientMap.get(cDoc) || parseInt(ab.cliente_id, 10) || defaultClientId;
+
+      await pool.query(
+        `INSERT INTO Abonos (
+          id, cliente_id, usuario_id, monto_usd, monto_ves, metodo_pago,
+          banco_emisor, numero_referencia, observacion, fecha
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          aId, clientId, 1,
+          parseFloat(ab.monto || ab.monto_usd || 0),
+          parseFloat(ab.monto_ves || 0),
+          ab.metodo_pago || 'Efectivo$',
+          ab.banco_emisor || null,
+          ab.referencia || ab.numero_referencia || null,
+          ab.observacion || '',
+          ab.fecha || getLocalISODateString()
+        ]
+      );
+    }
+    await pool.query("SELECT setval(pg_get_serial_sequence('Abonos', 'id'), COALESCE((SELECT MAX(id) FROM Abonos), 1))");
+    console.log(`✅ [Restore] ${abonos.length} abonos restaurados en PostgreSQL.`);
+  } catch (err) {
+    console.error('Error restaurando abonos en Postgres:', err.message);
+  }
+}
+
+export async function restoreTasasToPostgres(tasas) {
+  if (!usePostgres || !Array.isArray(tasas) || tasas.length === 0) return;
+  try {
+    await pool.query('TRUNCATE TABLE Tasas_Cambio RESTART IDENTITY CASCADE');
+    for (const t of tasas) {
+      const tId = parseInt(t.id, 10);
+      if (isNaN(tId)) continue;
+      await pool.query(
+        `INSERT INTO Tasas_Cambio (id, tasa_cobro, tasa_vuelto, fecha_actualizacion, usuario_id)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [tId, parseFloat(t.tasa_cobro || 0), parseFloat(t.tasa_vuelto || 0), t.fecha_actualizacion || '', 1]
+      );
+    }
+    await pool.query("SELECT setval(pg_get_serial_sequence('Tasas_Cambio', 'id'), COALESCE((SELECT MAX(id) FROM Tasas_Cambio), 1))");
+    console.log(`✅ [Restore] ${tasas.length} tasas de cambio restauradas en PostgreSQL.`);
+  } catch (err) {
+    console.error('Error restaurando tasas en Postgres:', err.message);
+  }
+}
+
+export async function syncJsonBackupsToPostgresIfEmpty() {
+  if (!usePostgres) return;
+  try {
+    const vCheck = await pool.query('SELECT COUNT(*) as count FROM Ventas');
+    const count = parseInt(vCheck.rows[0].count, 10);
+    if (count === 0) {
+      const existingSales = readJsonFile('sales.json', []);
+      const existingCierres = readJsonFile('cierres.json', []);
+      const existingAbonos = readJsonFile('abonos.json', []);
+      const existingTasas = readJsonFile('tasas.json', []);
+
+      if (existingCierres.length > 0) {
+        console.log(`📥 Importando automáticamente ${existingCierres.length} cierres de caja a PostgreSQL...`);
+        await restoreCierresToPostgres(existingCierres);
+      }
+      if (existingSales.length > 0) {
+        console.log(`📥 Importando automáticamente ${existingSales.length} ventas y transacciones a PostgreSQL...`);
+        await restoreSalesToPostgres(existingSales);
+      }
+      if (existingAbonos.length > 0) {
+        await restoreAbonosToPostgres(existingAbonos);
+      }
+      if (existingTasas.length > 0) {
+        await restoreTasasToPostgres(existingTasas);
+      }
+    }
+  } catch (syncErr) {
+    console.error('Error auto-sincronizando ventas a Postgres:', syncErr.message);
+  }
+}
+
 export async function restoreDatabase(data) {
   if (usePostgres) {
     try {
@@ -2350,6 +2665,20 @@ export async function restoreDatabase(data) {
       }
       if (data.config) {
         await saveCompanyConfig(data.config);
+      }
+
+      // Restore Cierres, Ventas, Abonos and Tasas to PostgreSQL
+      if (Array.isArray(data.cierres) && data.cierres.length > 0) {
+        await restoreCierresToPostgres(data.cierres);
+      }
+      if (Array.isArray(data.sales) && data.sales.length > 0) {
+        await restoreSalesToPostgres(data.sales);
+      }
+      if (Array.isArray(data.abonos) && data.abonos.length > 0) {
+        await restoreAbonosToPostgres(data.abonos);
+      }
+      if (Array.isArray(data.tasas) && data.tasas.length > 0) {
+        await restoreTasasToPostgres(data.tasas);
       }
     } catch (err) {
       console.error('Error al restaurar en Postgres:', err.message);

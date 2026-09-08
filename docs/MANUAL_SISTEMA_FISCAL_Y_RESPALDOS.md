@@ -60,9 +60,22 @@ function doPost(e) {
       contentString = JSON.stringify(data, null, 2);
     }
 
-    // Busca si la carpeta ya existe en Google Drive, sino la crea automáticamente
-    var folders = DriveApp.getFoldersByName(folderName);
-    var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(folderName);
+    // Navegación y creación jerárquica de carpetas y subcarpetas (ej: "WinterPOS_Backups/WINTER_PRUEBA")
+    var folder;
+    if (data.folderId && data.folderId.trim()) {
+      try { folder = DriveApp.getFolderById(data.folderId.trim()); } catch (_) {}
+    }
+    if (!folder) {
+      var folderParts = folderName.split(/[/\\]+/).filter(Boolean);
+      var currentFolder = DriveApp.getRootFolder();
+      for (var i = 0; i < folderParts.length; i++) {
+        var part = folderParts[i].trim();
+        if (!part) continue;
+        var subFolders = currentFolder.getFoldersByName(part);
+        currentFolder = subFolders.hasNext() ? subFolders.next() : currentFolder.createFolder(part);
+      }
+      folder = currentFolder;
+    }
     
     // Guarda el archivo de respaldo en la carpeta seleccionada
     var file = folder.createFile(filename, contentString, "application/json");

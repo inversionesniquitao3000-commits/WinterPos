@@ -11,6 +11,7 @@ import {
   getOpenCajas, forceCloseCaja,
   updateClient, deleteClient, getAbonos, deleteProduct, updateProduct, saveProductsBulk, saveClientsBulk,
   saveUser, updateUser, deleteUser, getRoles, saveRole, updateRole, deleteRole, wipeDatabase, backupDatabase, restoreDatabase,
+  restoreCierresToPostgres, restoreSalesToPostgres, restoreAbonosToPostgres, restoreTasasToPostgres, syncJsonBackupsToPostgresIfEmpty,
   readJsonFile, writeJsonFile,
   getMasterPass, saveMasterPass, verifyMasterPass, getAccionistas, saveAccionista, deleteAccionista, getInversiones, saveInversion, deleteInversion,
   getGastosOperativos, saveGastoOperativo, deleteGastoOperativo,
@@ -1770,6 +1771,29 @@ app.post('/api/db/restore', async (req, res) => {
   }
 });
 
+app.post('/api/db/sync-sales-from-json', async (req, res) => {
+  try {
+    const existingSales = readJsonFile('sales.json', []);
+    const existingCierres = readJsonFile('cierres.json', []);
+    const existingAbonos = readJsonFile('abonos.json', []);
+    let countC = 0, countS = 0;
+    if (existingCierres.length > 0) {
+      await restoreCierresToPostgres(existingCierres);
+      countC = existingCierres.length;
+    }
+    if (existingSales.length > 0) {
+      await restoreSalesToPostgres(existingSales);
+      countS = existingSales.length;
+    }
+    if (existingAbonos.length > 0) {
+      await restoreAbonosToPostgres(existingAbonos);
+    }
+    res.json({ success: true, message: `Sincronizadas ${countS} ventas y ${countC} cierres a PostgreSQL.`, countS, countC });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/db/backup/schedule', async (req, res) => {
   try {
     const defaultDir = path.resolve('./data/backups');
@@ -1803,6 +1827,7 @@ app.post('/api/db/backup/schedule', async (req, res) => {
     }
     
     writeJsonFile('backup_schedule.json', sched);
+    setTimeout(runBackupTask, 500);
     res.json({ success: true, config: sched });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1815,64 +1840,125 @@ if (!fs.existsSync(BACKUPS_DIR)) {
   fs.mkdirSync(BACKUPS_DIR, { recursive: true });
 }
 
+let isBackupRunning = false;
+
 async function runBackupTask() {
+  if (isBackupRunning) return;
   try {
     const defaultDir = path.resolve('./data/backups');
-    const sched = readJsonFile('backup_schedule.json', { schedule: 'Diario', lastBackup: '' });
-    if (sched.schedule === 'Desactivado') return;
+    const sched = readJsonFile('backup_schedule.json', { 
+      schedule: 'Diario', 
+      hour: '02:00',
+      lastBackup: '',
+      backupDir: defaultDir
+    });
+    
+    if (!sched || sched.schedule === 'Desactivado') return;
 
     const now = new Date();
+    const currentHour = String(now.getHours()).padStart(2, '0');
+    const currentMinute = String(now.getMinutes()).padStart(2, '0');
+    const currentTimeStr = `${currentHour}:${currentMinute}`;
+    
+    // Fecha local YYYY-MM-DD
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const todayStr = `${year}-${month}-${day}`;
+
+    // Hora programada (por defecto 02:00)
+    const targetHourStr = (sched.hour && sched.hour.includes(':')) ? sched.hour.trim() : '02:00';
+    const [tH, tM] = targetHourStr.split(':').map(val => parseInt(val, 10) || 0);
+    const targetTimeToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), tH, tM, 0, 0);
+
+    const lastBackupTime = sched.lastBackup ? new Date(sched.lastBackup) : null;
+    const hasRunSinceTarget = lastBackupTime && !isNaN(lastBackupTime.getTime()) && lastBackupTime.getTime() >= targetTimeToday.getTime();
+
     let shouldBackup = false;
 
-    if (!sched.lastBackup) {
-      shouldBackup = true;
-    } else {
-      const last = new Date(sched.lastBackup);
-      const diffMs = now.getTime() - last.getTime();
-      const diffHours = diffMs / (1000 * 60 * 60);
-
-      if (sched.schedule === 'Diario' && diffHours >= 23.5) {
+    if (sched.schedule === 'Diario') {
+      // Si ya es o pasó la hora programada hoy y todavía NO se ha ejecutado el respaldo correspondiente a hoy
+      if (now.getTime() >= targetTimeToday.getTime() && !hasRunSinceTarget) {
         shouldBackup = true;
-      } else if (sched.schedule === 'Semanal' && diffHours >= 24 * 7 - 0.5) {
+      }
+    } else if (sched.schedule === 'Semanal') {
+      const isSunday = now.getDay() === 0;
+      if (isSunday && now.getTime() >= targetTimeToday.getTime() && !hasRunSinceTarget) {
         shouldBackup = true;
-      } else if (sched.schedule === 'Mensual' && diffHours >= 24 * 30 - 0.5) {
+      } else if (diffHours >= 24 * 7 && now.getTime() >= targetTimeToday.getTime()) {
+        shouldBackup = true;
+      }
+    } else if (sched.schedule === 'Mensual') {
+      const tomorrow = new Date(now);
+      tomorrow.setDate(now.getDate() + 1);
+      const isLastDayOfMonth = tomorrow.getDate() === 1;
+      if (isLastDayOfMonth && now.getTime() >= targetTimeToday.getTime() && !hasRunSinceTarget) {
+        shouldBackup = true;
+      } else if (diffHours >= 24 * 30 && now.getTime() >= targetTimeToday.getTime()) {
+        shouldBackup = true;
+      }
+    } else if (sched.schedule === 'Especifico') {
+      if (sched.specificDate && sched.specificDate === todayStr && now.getTime() >= targetTimeToday.getTime() && !hasRunSinceTarget) {
         shouldBackup = true;
       }
     }
 
     if (shouldBackup) {
+      isBackupRunning = true;
       const saveDir = sched.backupDir || defaultDir;
       if (!fs.existsSync(saveDir)) {
         fs.mkdirSync(saveDir, { recursive: true });
       }
-      console.log(`⏱️ [Backups] Iniciando copia de seguridad automática programada (${sched.schedule}) en "${saveDir}"...`);
+      
+      console.log(`⏱️ [Backups] Iniciando copia de seguridad programada (${sched.schedule} a las ${targetHourStr}) en "${saveDir}"...`);
       const backupData = await backupDatabase();
-      const fileName = `backup_auto_${now.toISOString().split('T')[0]}_${now.getTime()}.json`;
-      fs.writeFileSync(path.join(saveDir, fileName), JSON.stringify(backupData, null, 2), 'utf8');
+      const timeHMS = `${currentHour}-${currentMinute}-${String(now.getSeconds()).padStart(2, '0')}`;
+      const fileName = `backup_auto_${todayStr}_${timeHMS}.json`;
+      const fullPath = path.join(saveDir, fileName);
+      fs.writeFileSync(fullPath, JSON.stringify(backupData, null, 2), 'utf8');
       
       sched.lastBackup = now.toISOString();
+      if (sched.schedule === 'Especifico') {
+        sched.schedule = 'Desactivado'; // Auto-desactivar respaldo único completado
+      }
       writeJsonFile('backup_schedule.json', sched);
-      console.log(`✅ [Backups] Backup automático guardado correctamente: ${path.join(saveDir, fileName)}`);
+      console.log(`✅ [Backups] Backup local automático guardado: ${fullPath}`);
 
-      // Automatic Google Drive Cloud Sync if enabled
+      // Sincronización automática con Google Drive en la nube si está habilitada
       try {
-        const dConfig = getDriveConfig();
-        if (dConfig.enabled) {
-          uploadBackupToGoogleDrive(backupData, fileName).catch(gErr => {
-            console.warn('⚠️ [Backups] Error en subida automática a Google Drive:', gErr.message);
-          });
+        const dConfig = await getDriveConfig();
+        if (dConfig && dConfig.enabled) {
+          console.log(`☁️ [Backups] Sincronizando respaldo automático con Google Drive (${dConfig.method || 'WEBHOOK'})...`);
+          const driveRes = await uploadBackupToGoogleDrive(backupData, fileName, dConfig);
+          console.log(`✅ [Backups] Google Drive sincronizado exitosamente: ${driveRes?.message || 'OK'}`);
+        } else {
+          console.log('ℹ️ [Backups] Google Drive no sincronizado automáticamente: la opción Cloud está inactiva o deshabilitada.');
         }
-      } catch (gErr) {}
+      } catch (gErr) {
+        console.warn('⚠️ [Backups] Error en subida automática a Google Drive:', gErr.message);
+      }
     }
   } catch (err) {
-    console.error('⚠️ [Backups] Error en backup automático:', err.message);
+    console.error('⚠️ [Backups] Error en ciclo de backup automático:', err.message);
+  } finally {
+    isBackupRunning = false;
   }
 }
 
-// Check every 1 hour
-setInterval(runBackupTask, 3600000);
-// Check once at startup after 5 seconds
-setTimeout(runBackupTask, 5000);
+// Verificación continua cada 20 segundos para coincidir con la hora y minuto exactos
+setInterval(runBackupTask, 20 * 1000);
+// Verificación inicial 10 segundos después del encendido del servidor
+setTimeout(runBackupTask, 10000);
+
+app.all('/api/db/backup/run-scheduler-check', async (req, res) => {
+  try {
+    await runBackupTask();
+    const sched = readJsonFile('backup_schedule.json', {});
+    res.json({ success: true, sched });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ==========================================
 // GOOGLE DRIVE BACKUP ENDPOINTS
@@ -1911,7 +1997,9 @@ app.post('/api/backup/gdrive-test', async (req, res) => {
 app.post('/api/backup/gdrive-sync', async (req, res) => {
   try {
     const backup = await backupDatabase();
-    const fileName = `winterpos_manual_${new Date().toISOString().split('T')[0]}_${Date.now()}.json`;
+    const dNow = new Date();
+    const hms = `${String(dNow.getHours()).padStart(2, '0')}-${String(dNow.getMinutes()).padStart(2, '0')}-${String(dNow.getSeconds()).padStart(2, '0')}`;
+    const fileName = `winterpos_manual_${dNow.toISOString().split('T')[0]}_${hms}.json`;
     const result = await uploadBackupToGoogleDrive(backup, fileName);
     res.json(result);
   } catch (err) {

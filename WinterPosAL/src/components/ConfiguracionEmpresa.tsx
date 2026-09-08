@@ -485,6 +485,7 @@ export default function ConfiguracionEmpresa({
   });
   const [gdriveTesting, setGdriveTesting] = useState(false);
   const [gdriveSyncing, setGdriveSyncing] = useState(false);
+  const [isDownloadingBackup, setIsDownloadingBackup] = useState(false);
 
   const fetchGDriveConfig = async () => {
     try {
@@ -1455,22 +1456,32 @@ export default function ConfiguracionEmpresa({
   };
 
   const handleDownloadBackup = async () => {
+    setIsDownloadingBackup(true);
     try {
       const res = await fetch(getApiUrl('/db/backup'));
-      if (res.ok) {
-        const blob = await res.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `winterpos_backup_${getLocalDateStr()}.json`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        showToast('Respaldo de base de datos descargado con éxito.');
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `HTTP ${res.status}: ${res.statusText}`);
       }
-    } catch (err) {
-      console.error(err);
-      showAlert('Error al generar copia de seguridad.', 'Error de Backup', 'error');
+      const data = await res.json();
+      const jsonStr = JSON.stringify(data, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = window.URL.createObjectURL(blob);
+      const dNow = new Date();
+      const hms = `${String(dNow.getHours()).padStart(2, '0')}-${String(dNow.getMinutes()).padStart(2, '0')}-${String(dNow.getSeconds()).padStart(2, '0')}`;
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `winterpos_backup_${getLocalDateStr()}_${hms}.json`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      a.remove();
+      showToast('✅ Respaldo de base de datos descargado con éxito.');
+    } catch (err: any) {
+      console.error('Error al descargar respaldo:', err);
+      showAlert(`Error al generar copia de seguridad: ${err.message || 'No se pudo conectar con el servidor backend (Puerto 5000).'}`, 'Error de Backup', 'error');
+    } finally {
+      setIsDownloadingBackup(false);
     }
   };
 
@@ -3607,11 +3618,12 @@ export default function ConfiguracionEmpresa({
                   Descargue un respaldo consolidado con toda la información y base de datos local para resguardar su negocio.
                 </p>
                 <button
+                  disabled={isDownloadingBackup}
                   onClick={handleDownloadBackup}
-                  className="w-full bg-sky-600 hover:bg-sky-700 text-white py-3 rounded-lg font-bold font-sans text-xs transition-all shadow-sm flex items-center justify-center gap-2"
+                  className="w-full bg-sky-600 hover:bg-sky-700 disabled:opacity-60 text-white py-3 rounded-lg font-bold font-sans text-xs transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  <Download className="w-4 h-4" />
-                  Generar y Descargar Respaldo (.json)
+                  <Download className={`w-4 h-4 ${isDownloadingBackup ? 'animate-bounce' : ''}`} />
+                  {isDownloadingBackup ? 'Generando Respaldo...' : 'Generar y Descargar Respaldo (.json)'}
                 </button>
               </div>
 

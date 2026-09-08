@@ -2035,7 +2035,50 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                   {finalFilteredSales.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="text-center py-12 text-slate-400 font-sans">
-                        No se han procesado ventas que coincidan con la búsqueda.
+                        {filterEnabled ? (
+                          <div className="flex flex-col items-center justify-center gap-2">
+                            <p className="text-slate-600 font-bold text-xs">
+                              📅 No hay ventas registradas en el rango de fechas seleccionado ({startDate} al {endDate}).
+                            </p>
+                            <p className="text-[11px] text-slate-400">
+                              (Las ventas de su respaldo corresponden a fechas anteriores como Agosto).
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => setFilterEnabled(false)}
+                              className="mt-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-1.5 px-3 rounded-lg text-xs transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+                            >
+                              🔓 Desmarcar "Filtrar por Rango" y Ver Todo el Histórico
+                            </button>
+                          </div>
+                        ) : sales.length === 0 ? (
+                          <div className="flex flex-col items-center justify-center gap-2">
+                            <p className="text-slate-600 font-bold text-xs">
+                              ⚠️ No hay ventas registradas en la base de datos de PostgreSQL.
+                            </p>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  const res = await fetch(getApiUrl('/db/sync-sales-from-json'), { method: 'POST' });
+                                  const data = await res.json();
+                                  if (data.success) {
+                                    window.location.reload();
+                                  } else {
+                                    alert('Error: ' + (data.error || 'No se pudo sincronizar'));
+                                  }
+                                } catch (e: any) {
+                                  alert('Error conectando: ' + e.message);
+                                }
+                              }}
+                              className="mt-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 px-3 rounded-lg text-xs transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+                            >
+                              ⚡ Sincronizar Ventas Ahora a PostgreSQL
+                            </button>
+                          </div>
+                        ) : (
+                          'No se han procesado ventas que coincidan con la búsqueda.'
+                        )}
                       </td>
                     </tr>
                   ) : (

@@ -46,12 +46,18 @@ export async function uploadBackupToGoogleDrive(backupData, fileName = `winterpo
     return { ok: false, message: 'Respaldo en Google Drive no está habilitado.' };
   }
 
+  const folderValue = (config.folderName || config.folderId || 'WinterPOS_Backups').trim();
+  const fileContentString = typeof backupData === 'string' ? backupData : JSON.stringify(backupData, null, 2);
+
   const payloadString = JSON.stringify({
     fileName,
+    filename: fileName,
     timestamp: new Date().toISOString(),
-    folderName: config.folderName || 'WinterPOS_Backups',
-    folderId: config.folderId || '',
-    backup: backupData
+    folderName: folderValue,
+    folder: folderValue,
+    folderId: folderValue,
+    backup: backupData,
+    content: fileContentString
   });
 
   if (config.method === 'WEBHOOK' && config.webhookUrl) {
