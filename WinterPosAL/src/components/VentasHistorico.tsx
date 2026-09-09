@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Sale, CierreCaja, User } from '../types';
 import { History, Printer, ShieldAlert, ShoppingCart, Eye, Edit, Trash2, Search, ChevronUp, ChevronDown, ChevronsUpDown, CheckCircle2, FileDown, MessageCircle, FileText, BarChart3 } from 'lucide-react';
-import { formatNumberToWordsUSD, getLocalDateStr, formatBs } from '../utils';
+import { formatNumberToWordsUSD, getLocalDateStr, formatBs, printCierreTicketReport } from '../utils';
 import { useDialog } from '../hooks/useDialog';
 import CentroReportesModal from './CentroReportesModal';
 
@@ -2666,6 +2666,29 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                   {/* Action Buttons */}
                   <div className="space-y-2">
                     <button
+                      onClick={() => {
+                        if (!selectedCierreRow) return;
+                        const cUser = selectedCierreRow.usuario ? selectedCierreRow.usuario.toLowerCase().trim() : '';
+                        const fAperturaMs = selectedCierreRow.fechaApertura ? new Date(selectedCierreRow.fechaApertura).getTime() : 0;
+                        const fCierreMs = (selectedCierreRow.fechaCierre || selectedCierreRow.fecha) ? new Date(selectedCierreRow.fechaCierre || selectedCierreRow.fecha).getTime() : Date.now();
+                        const shiftSales = (sales || []).filter(s => {
+                          if (cUser && s.usuario && s.usuario.toLowerCase().trim() !== cUser) return false;
+                          const sTime = new Date(s.fecha).getTime();
+                          if (isNaN(sTime)) return true;
+                          const startBoundary = fAperturaMs > 0 ? fAperturaMs - 120000 : 0;
+                          const endBoundary = fCierreMs > 0 ? fCierreMs + 120000 : Date.now();
+                          return sTime >= startBoundary && sTime <= endBoundary;
+                        });
+                        printCierreTicketReport(selectedCierreRow, shiftSales, companyConfig, currentUser);
+                      }}
+                      className="w-full bg-slate-900 hover:bg-black text-white font-bold py-2.5 px-3 rounded-lg text-xs transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                      title="Imprimir comprobante físico de cierre de caja (ticket térmico o impresora estándar)"
+                    >
+                      <Printer className="w-4 h-4 text-amber-400" />
+                      IMPRIMIR TICKET CIERRE
+                    </button>
+
+                    <button
                       onClick={() => setSelectedCierre(selectedCierreRow)}
                       className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-3 rounded-lg text-xs transition-all shadow-sm flex items-center justify-center gap-2"
                     >
@@ -3335,6 +3358,30 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                 </label>
 
                 <div className="flex items-center gap-3 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!selectedCierre) return;
+                      const cUser = selectedCierre.usuario ? selectedCierre.usuario.toLowerCase().trim() : '';
+                      const fAperturaMs = selectedCierre.fechaApertura ? new Date(selectedCierre.fechaApertura).getTime() : 0;
+                      const fCierreMs = (selectedCierre.fechaCierre || selectedCierre.fecha) ? new Date(selectedCierre.fechaCierre || selectedCierre.fecha).getTime() : Date.now();
+                      const shiftSales = (sales || []).filter(s => {
+                        if (cUser && s.usuario && s.usuario.toLowerCase().trim() !== cUser) return false;
+                        const sTime = new Date(s.fecha).getTime();
+                        if (isNaN(sTime)) return true;
+                        const startBoundary = fAperturaMs > 0 ? fAperturaMs - 120000 : 0;
+                        const endBoundary = fCierreMs > 0 ? fCierreMs + 120000 : Date.now();
+                        return sTime >= startBoundary && sTime <= endBoundary;
+                      });
+                      printCierreTicketReport(selectedCierre, shiftSales, companyConfig, currentUser);
+                    }}
+                    className="w-full sm:w-auto bg-slate-900 hover:bg-black active:scale-[0.98] text-white font-black py-2.5 px-4 rounded-xl font-sans text-xs uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                    title="Imprimir comprobante físico de cierre en ticketera térmica (58mm/80mm) o impresora normal"
+                  >
+                    <Printer className="w-4 h-4 text-amber-400" />
+                    <span>IMPRIMIR TICKET</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => handleResendWhatsAppCierre(selectedCierre)}

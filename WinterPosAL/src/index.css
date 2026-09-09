@@ -331,10 +331,26 @@ html[data-font-scale] table th {
   font-size: calc(13.5px * var(--station-font-scale-ratio, 1)) !important;
 }
 
-html[data-font-scale] input:not([type="checkbox"]):not([type="radio"]),
+html[data-font-scale] input:not([type="checkbox"]):not([type="radio"]):not(.pos-payment-input),
 html[data-font-scale] select,
 html[data-font-scale] textarea {
   font-size: calc(13.5px * var(--station-font-scale-ratio, 1)) !important;
+}
+
+/* POS Payment inputs: input boxes stay at normal height, numbers typed inside are prominently large & bold */
+.pos-payment-input,
+html[data-font-scale] input.pos-payment-input {
+  font-size: 22px !important;
+  font-weight: 900 !important;
+  line-height: 1.25 !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+}
+
+.pos-payment-input::placeholder,
+html[data-font-scale] input.pos-payment-input::placeholder {
+  font-size: 14px !important;
+  font-weight: normal !important;
+  color: #94a3b8 !important;
 }
 
 html[data-font-scale] .text-\[9px\],

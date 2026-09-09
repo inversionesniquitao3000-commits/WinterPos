@@ -402,6 +402,263 @@ export function printTicketReceipt(
   printWindow.document.close();
 }
 
+export function printCierreTicketReport(
+  cierreData: any,
+  shiftSales: any[] = [],
+  companyConfig: any,
+  currentUser: any
+) {
+  if (!cierreData) return;
+  const printWindow = window.open('', '_blank', 'width=450,height=700');
+  if (!printWindow) {
+    alert('⚠️ El navegador bloqueó la ventana de impresión. Por favor permita popups para la aplicación.');
+    return;
+  }
+
+  let paperWidth = '80mm';
+  try {
+    const savedPrinter = localStorage.getItem('pos_printer_config');
+    if (savedPrinter) {
+      const cfg = JSON.parse(savedPrinter);
+      if (cfg.anchoPapel) paperWidth = cfg.anchoPapel;
+    }
+  } catch (_) {}
+  if (companyConfig?.printer_ancho_papel) {
+    paperWidth = companyConfig.printer_ancho_papel;
+  }
+
+  const is58mm = paperWidth === '58mm';
+  const bodyWidth = is58mm ? '54mm' : '76mm';
+  const fontSize = is58mm ? '8.5px' : '10px';
+  const titleSize = is58mm ? '11px' : '13px';
+  const companyName = companyConfig?.nombre_empresa || 'INVERSIONES NIQUITAO 3000 C.A.';
+  const companyRif = companyConfig?.rif || 'J-41132631';
+  const companyPhone = companyConfig?.telefono || '0424-2042877';
+  const companyAddress = companyConfig?.direccion || 'CARACAS, VENEZUELA';
+
+  const terminal = cierreData.terminal || localStorage.getItem('pos_terminal_name') || 'CAJA_01';
+  const cajero = (cierreData.usuario || currentUser?.nombre || currentUser?.usuario || 'OPERADOR').toUpperCase();
+  const fechaCierre = cierreData.fechaCierre || cierreData.fecha || new Date().toLocaleString('es-VE');
+  const fechaApertura = cierreData.fechaApertura || localStorage.getItem('pos_apertura_fecha') || '';
+
+  const realUsd = typeof cierreData.realUsd === 'number' ? cierreData.realUsd : (parseFloat(cierreData.realUsd) || 0);
+  const realVes = typeof cierreData.realVes === 'number' ? cierreData.realVes : (parseFloat(cierreData.realVes) || 0);
+  const expectedUsd = cierreData.dineroEnCajaExpected ?? 0;
+  const expectedVes = cierreData.expectedVes ?? 0;
+  const diffUsd = realUsd - expectedUsd;
+  const diffVes = realVes - expectedVes;
+
+  // Filtrar facturas del turno
+  const validSales = (shiftSales || []).filter((s: any) => s && s.factura_nro);
+
+  const salesTableHtml = validSales.length === 0 
+    ? '<tr><td colspan="4" style="text-align:center; padding: 4px; color: #666;">Sin transacciones en este turno</td></tr>'
+    : validSales.map((s: any) => {
+        const isDev = (s.factura_nro || '').startsWith('DEV-');
+        const sign = isDev ? '-' : '';
+        const timeStr = (s.fecha || '').substring(11, 16) || '';
+        const clientShort = (s.client?.nombre || 'P. General').substring(0, 14);
+        const pagosDesc = (s.pagos || []).map((p: any) => {
+          if (p.metodo === 'Efectivo$') return 'Efec$';
+          if (p.metodo === 'EfectivoBs') return 'EfecBs';
+          if (p.metodo === 'TarjetaBs') return 'Tarj';
+          if (p.metodo === 'PagoMovil') return 'PMov';
+          if (p.metodo === 'Biopago') return 'Bio';
+          if (p.metodo === 'CreditoCliente') return 'Cred';
+          return p.metodo || '';
+        }).filter(Boolean).join('+') || 'Cont';
+
+        return `
+          <tr style="${isDev ? 'color: #c00; font-weight: bold;' : ''}">
+            <td style="padding: 2px 0;">${s.factura_nro} ${timeStr ? `(${timeStr})` : ''}</td>
+            <td style="padding: 2px 0; text-align: left;">${clientShort}</td>
+            <td style="padding: 2px 0; text-align: right;">${sign}$${Math.abs(s.totalUSD || 0).toFixed(2)}</td>
+            <td style="padding: 2px 0; text-align: right; font-size: 8px;">${pagosDesc}</td>
+          </tr>
+        `;
+      }).join('');
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Cierre de Caja - ${terminal}</title>
+        <meta charset="utf-8" />
+        <style>
+          @page {
+            margin: 0;
+            size: auto;
+          }
+          body {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: ${fontSize};
+            color: #000;
+            background: #fff;
+            margin: 0;
+            padding: 8px 6px;
+            width: ${bodyWidth};
+            max-width: 100%;
+            box-sizing: border-box;
+          }
+          .text-center { text-align: center; }
+          .text-right { text-align: right; }
+          .bold { font-weight: bold; }
+          .divider {
+            border-top: 1px dashed #000;
+            margin: 4px 0;
+          }
+          .divider-double {
+            border-top: 2px solid #000;
+            margin: 5px 0;
+          }
+          .row-flex {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 2px;
+          }
+          .table-sales {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: ${is58mm ? '7.5px' : '8.5px'};
+            margin-top: 2px;
+          }
+          .table-sales th {
+            border-bottom: 1px solid #000;
+            padding: 2px 0;
+            font-weight: bold;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="text-center">
+          <div class="bold" style="font-size: ${titleSize}; text-transform: uppercase;">${companyName}</div>
+          <div>RIF: ${companyRif}</div>
+          <div style="font-size: 8px;">${companyAddress}</div>
+          <div style="font-size: 8px;">Telf: ${companyPhone}</div>
+        </div>
+
+        <div class="divider-double"></div>
+        <div class="text-center bold" style="font-size: 11px; text-transform: uppercase;">
+          COMPROBANTE DE CIERRE DE CAJA
+        </div>
+        <div class="text-center" style="font-size: 8.5px;">(CORTE OFICIAL DE TURNO / POS)</div>
+        <div class="divider"></div>
+
+        <div class="row-flex"><span>TERMINAL / CAJA:</span><span class="bold">${terminal}</span></div>
+        <div class="row-flex"><span>CAJERO / OPERADOR:</span><span class="bold">${cajero}</span></div>
+        <div class="row-flex"><span>FECHA CIERRE:</span><span class="bold">${fechaCierre}</span></div>
+        ${fechaApertura ? `<div class="row-flex"><span>FECHA APERTURA:</span><span>${fechaApertura}</span></div>` : ''}
+
+        <div class="divider"></div>
+        <div class="bold">FONDO DE APERTURA:</div>
+        <div class="row-flex"><span>Apertura USD:</span><span class="bold">$${(cierreData.aperturaUsd || 0).toFixed(2)}</span></div>
+        <div class="row-flex"><span>Apertura VES:</span><span class="bold">Bs ${formatBs(cierreData.aperturaVes || 0)}</span></div>
+
+        <div class="divider"></div>
+        <div class="bold">RESUMEN DE VENTAS:</div>
+        <div class="row-flex"><span>Total Facturas:</span><span class="bold">${validSales.length}</span></div>
+        <div class="row-flex"><span>Venta Bruta ($):</span><span>$${(cierreData.ventaBrutaUsd || 0).toFixed(2)}</span></div>
+        ${(cierreData.descuentosUsd || 0) > 0 ? `<div class="row-flex"><span>Descuentos ($):</span><span>-$${(cierreData.descuentosUsd || 0).toFixed(2)}</span></div>` : ''}
+        ${(cierreData.devolucionVentasUsd || 0) > 0 ? `<div class="row-flex"><span>Devoluciones ($):</span><span>-$${(cierreData.devolucionVentasUsd || 0).toFixed(2)}</span></div>` : ''}
+        ${(cierreData.devolucionVentasVes || 0) > 0 ? `<div class="row-flex"><span>Devoluciones (Bs):</span><span>-Bs ${formatBs(cierreData.devolucionVentasVes || 0)}</span></div>` : ''}
+        <div class="row-flex bold" style="font-size: 11px; margin-top: 2px;">
+          <span>VENTA NETA USD:</span>
+          <span>$${(cierreData.ventaTotalUsd || 0).toFixed(2)}</span>
+        </div>
+
+        <div class="divider"></div>
+        <div class="bold">DESGLOSE POR FORMA DE PAGO:</div>
+        <div class="row-flex"><span>Efectivo USD:</span><span>$${(cierreData.pagosEfectivoUsd || 0).toFixed(2)}</span></div>
+        <div class="row-flex"><span>Efectivo Bs:</span><span>Bs ${formatBs(cierreData.pagosEfectivoBsVes || 0)}</span></div>
+        <div class="row-flex"><span>Punto / Débito Bs:</span><span>Bs ${formatBs(cierreData.pagosPuntoVes || 0)}</span></div>
+        <div class="row-flex"><span>Pago Móvil Bs:</span><span>Bs ${formatBs(cierreData.pagosPagoMovilVes || 0)}</span></div>
+        <div class="row-flex"><span>Biopago Bs:</span><span>Bs ${formatBs(cierreData.pagosBiopagoVes || 0)}</span></div>
+        ${(cierreData.pagosTarjetaUsd || 0) > 0 ? `<div class="row-flex"><span>Tarjeta USD:</span><span>$${(cierreData.pagosTarjetaUsd || 0).toFixed(2)}</span></div>` : ''}
+        ${(cierreData.pagosCreditoUsd || 0) > 0 ? `<div class="row-flex"><span>A Crédito:</span><span>$${(cierreData.pagosCreditoUsd || 0).toFixed(2)}</span></div>` : ''}
+
+        <div class="divider"></div>
+        <div class="bold">MOVIMIENTOS DE EFECTIVO:</div>
+        ${(cierreData.entradaEfectivoUsd || 0) > 0 ? `<div class="row-flex"><span>+ Entradas ($):</span><span>+$${(cierreData.entradaEfectivoUsd || 0).toFixed(2)}</span></div>` : ''}
+        ${(cierreData.entradaEfectivoVes || 0) > 0 ? `<div class="row-flex"><span>+ Entradas (Bs):</span><span>+Bs ${formatBs(cierreData.entradaEfectivoVes || 0)}</span></div>` : ''}
+        ${(cierreData.salidaEfectivoUsd || 0) > 0 ? `<div class="row-flex"><span>- Salidas ($):</span><span>-$${(cierreData.salidaEfectivoUsd || 0).toFixed(2)}</span></div>` : ''}
+        ${(cierreData.salidaEfectivoVes || 0) > 0 ? `<div class="row-flex"><span>- Salidas (Bs):</span><span>-Bs ${formatBs(cierreData.salidaEfectivoVes || 0)}</span></div>` : ''}
+        ${(cierreData.vueltosEntregadosUsd || 0) > 0 ? `<div class="row-flex"><span>- Vueltos ($):</span><span>-$${(cierreData.vueltosEntregadosUsd || 0).toFixed(2)}</span></div>` : ''}
+        ${(cierreData.vueltosEntregadosVes || 0) > 0 ? `<div class="row-flex"><span>- Vueltos (Bs):</span><span>-Bs ${formatBs(cierreData.vueltosEntregadosVes || 0)}</span></div>` : ''}
+
+        <div class="divider"></div>
+        <div class="bold">ARQUEO FÍSICO Y AUDITORÍA:</div>
+        <div class="row-flex"><span>Gaveta Esperada ($):</span><span>$${expectedUsd.toFixed(2)}</span></div>
+        <div class="row-flex"><span>Físico Recibido ($):</span><span class="bold">$${realUsd.toFixed(2)}</span></div>
+        <div class="row-flex bold">
+          <span>Diferencia USD:</span>
+          <span>${diffUsd >= 0 ? '+' : ''}$${diffUsd.toFixed(2)} (${diffUsd === 0 ? 'CUADRADA' : diffUsd > 0 ? 'SOBRANTE' : 'FALTANTE'})</span>
+        </div>
+
+        <div class="row-flex" style="margin-top: 3px;"><span>Gaveta Esperada (Bs):</span><span>Bs ${formatBs(expectedVes)}</span></div>
+        <div class="row-flex"><span>Físico Recibido (Bs):</span><span class="bold">Bs ${formatBs(realVes)}</span></div>
+        <div class="row-flex bold">
+          <span>Diferencia Bs:</span>
+          <span>${diffVes >= 0 ? '+' : ''}Bs ${formatBs(diffVes)} (${diffVes === 0 ? 'CUADRADA' : diffVes > 0 ? 'SOBRANTE' : 'FALTANTE'})</span>
+        </div>
+
+        <div class="divider"></div>
+        <div class="bold" style="margin-bottom: 2px;">DETALLE DE TRANSACCIONES (${validSales.length}):</div>
+        <table class="table-sales">
+          <thead>
+            <tr>
+              <th style="text-align: left;">DOC</th>
+              <th style="text-align: left;">CLIENTE</th>
+              <th style="text-align: right;">USD</th>
+              <th style="text-align: right;">PAGO</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${salesTableHtml}
+          </tbody>
+        </table>
+
+        ${(cierreData.utilidadUsd || 0) !== 0 ? `
+          <div class="divider"></div>
+          <div class="row-flex bold" style="font-size: 10px;">
+            <span>UTILIDAD NETA TOTAL:</span>
+            <span>$${(cierreData.utilidadUsd || 0).toFixed(2)}</span>
+          </div>
+        ` : ''}
+
+        <div class="divider-double"></div>
+        <div style="margin-top: 25px; text-align: center;">
+          <div style="border-top: 1px solid #000; width: 75%; margin: 0 auto; padding-top: 2px;">
+            Firma Cajero / Operador
+          </div>
+          <div style="font-size: 8px; margin-top: 1px;">${cajero}</div>
+        </div>
+
+        <div style="margin-top: 20px; text-align: center;">
+          <div style="border-top: 1px solid #000; width: 75%; margin: 0 auto; padding-top: 2px;">
+            Firma Supervisor / Administración
+          </div>
+        </div>
+
+        <div class="text-center" style="font-size: 7.5px; margin-top: 12px; color: #444;">
+          WINTERPOS CLOUD - CONTROL INMUTABLE DE CIERRE
+        </div>
+
+        <script>
+          window.onload = function() {
+            window.print();
+            setTimeout(function() {
+              window.close();
+            }, 800);
+          };
+        </script>
+      </body>
+    </html>
+  `;
+
+  printWindow.document.write(htmlContent);
+  printWindow.document.close();
+}
+
 // ==========================================
 // SHARED API HELPER FUNCTIONS
 // ==========================================

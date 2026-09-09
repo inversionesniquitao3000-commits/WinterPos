@@ -10,7 +10,7 @@ import {
   Edit, Minus, Sparkles, Package, QrCode, UploadCloud, Link as LinkIcon, Save,
   CreditCard, Smartphone, Fingerprint, Wallet, Globe, CalendarClock
 } from 'lucide-react';
-import { formatNumberToWordsUSD, printTicketReceipt, formatBs, formatImageUrl } from '../utils';
+import { formatNumberToWordsUSD, printTicketReceipt, printCierreTicketReport, formatBs, formatImageUrl } from '../utils';
 import { useDialog } from '../hooks/useDialog';
 import CambioDivisasModal from './CambioDivisasModal';
 import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
@@ -389,6 +389,7 @@ export default function CajaPOS({
   });
   const [sendToWhatsApp, setSendToWhatsApp] = useState(true);
   const [hideZeroLines, setHideZeroLines] = useState(true);
+  const [printCierreTicket, setPrintCierreTicket] = useState(false);
   const [isSendingWa, setIsSendingWa] = useState(false);
 
   const fetchWaCierreStatus = async () => {
@@ -514,7 +515,8 @@ export default function CajaPOS({
     inventoryDest: 'disponible' | 'merma';
   }>>([]);
   const [devMotivo, setDevMotivo] = useState('');
-  const [devRefundCurrency, setDevRefundCurrency] = useState<'USD' | 'VES'>('USD');
+  const [devRefundCurrency, setDevRefundCurrency] = useState<'USD' | 'VES' | 'MIXTO'>('USD');
+  const [devPhysicalUsdToReturn, setDevPhysicalUsdToReturn] = useState<number>(0);
   const [showDevConfirmModal, setShowDevConfirmModal] = useState(false);
 
   // Canje / Reemplazo State
@@ -563,6 +565,7 @@ export default function CajaPOS({
     setDevSearchTerm('');
     setDevDateFilter(todayStr);
     setDevRefundCurrency('USD');
+    setDevPhysicalUsdToReturn(0);
     setShowDevolucionModal(true);
   };
 
@@ -661,6 +664,7 @@ export default function CajaPOS({
     setDevExchangeItems([]);
     const paidInBs = (sale.pagos || []).some(p => p.metodo !== 'Efectivo$' && p.metodo !== 'CreditoCliente');
     setDevRefundCurrency(paidInBs ? 'VES' : 'USD');
+    setDevPhysicalUsdToReturn(0);
 
     const salesList = allSalesList.length > 0 ? allSalesList : shiftSales;
     const returnInfo = getSaleReturnInfo(sale, salesList);
@@ -776,22 +780,54 @@ export default function CajaPOS({
             montoUSD: -devNetBalance
           }];
         } else {
-          const refundCurrency = devRefundCurrency === 'VES' ? 'EfectivoBs' : 'Efectivo$';
-          const refundUsd = devRefundCurrency === 'USD' ? devNetBalance : 0;
-          const refundVes = devRefundCurrency === 'VES' ? devNetBalance * tasaDia : 0;
+          let refundUsd = 0;
+          let refundVes = 0;
+          let refundCurrencyDesc = '';
+
+          if (devRefundCurrency === 'USD') {
+            refundUsd = devNetBalance;
+            refundVes = 0;
+            refundCurrencyDesc = 'Efectivo $';
+          } else if (devRefundCurrency === 'VES') {
+            refundUsd = 0;
+            refundVes = devNetBalance * tasaDia;
+            refundCurrencyDesc = 'Efectivo Bs';
+          } else {
+            // MIXTO: $ en físico + resto en Bs
+            refundUsd = Math.max(0, Math.min(devNetBalance, devPhysicalUsdToReturn));
+            refundVes = Math.max(0, devNetBalance - refundUsd) * tasaDia;
+            refundCurrencyDesc = `Mixto ($${refundUsd.toFixed(2)} + Bs ${refundVes.toFixed(2)})`;
+          }
 
           onRegisterCajaMovement(
             'Devolucion',
-            `Devolución/Canje Saldo a Favor FAC: ${currentSale.factura_nro} - Motivo: ${devMotivo}`,
+            `Devolución/Canje Saldo a Favor FAC: ${currentSale.factura_nro} (${refundCurrencyDesc}) - Motivo: ${devMotivo}`,
             refundUsd,
             refundVes
           );
 
-          returnPagos = [{ 
-            metodo: refundCurrency as any, 
-            monto: devRefundCurrency === 'USD' ? -devNetBalance : -(devNetBalance * tasaDia), 
-            montoUSD: -devNetBalance 
-          }];
+          returnPagos = [];
+          if (refundUsd > 0) {
+            returnPagos.push({
+              metodo: 'Efectivo$' as any,
+              monto: -refundUsd,
+              montoUSD: -refundUsd
+            });
+          }
+          if (refundVes > 0) {
+            returnPagos.push({
+              metodo: 'EfectivoBs' as any,
+              monto: -refundVes,
+              montoUSD: -(devNetBalance - refundUsd)
+            });
+          }
+          if (returnPagos.length === 0) {
+            returnPagos.push({
+              metodo: 'Efectivo$',
+              monto: 0,
+              montoUSD: 0
+            });
+          }
         }
       } else if (devNetBalance < 0) {
         // Client pays extra difference for higher price replacement items
@@ -3345,6 +3381,15 @@ export default function CajaPOS({
       }
     }
 
+    // Imprimir reporte de cierre físico/ticket si el usuario lo marcó
+    if (printCierreTicket) {
+      try {
+        printCierreTicketReport(cierreResult, shiftSales, companyConfig, currentUser);
+      } catch (printErr) {
+        console.error('Error imprimiendo ticket de cierre:', printErr);
+      }
+    }
+
     await onCerrarCaja(cierreResult.realUsd, cierreResult.realVes ?? 0, {
       ...cierreResult,
       terminal: localStorage.getItem('pos_terminal_name') || 'CAJA_01'
@@ -4679,25 +4724,30 @@ export default function CajaPOS({
                 <div className="grid grid-cols-2 gap-3">
                   {companyConfig.metodos_pago_activos.includes('efectivo_usd') && (
                     <div className={isPaymentSettled && cashUSDVal <= 0 ? 'opacity-50' : ''}>
-                      <label className={`text-xs mb-1 font-sans flex items-center justify-between whitespace-nowrap overflow-hidden h-5 ${cashUSDVal > 0 ? 'text-emerald-800 font-black' : 'text-slate-700 font-bold'}`}>
-                        <span className="flex items-center gap-1.5 min-w-0 truncate">
+                      <label className={`text-[11.5px] mb-1 font-sans flex items-center justify-between gap-1 leading-none ${cashUSDVal > 0 ? 'text-emerald-800 font-black' : 'text-slate-700 font-bold'}`}>
+                        <span className="flex items-center gap-1.5 min-w-0">
                           <DollarSign className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
                           <span className="truncate">Efectivo ($ USD)</span>
                         </span>
-                        {cashUSDVal > 0 && <span className="text-[8.5px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-sans uppercase font-black tracking-tight whitespace-nowrap flex-shrink-0 ml-1">✓ En uso</span>}
+                        {cashUSDVal > 0 && <span className="text-[8px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-sans uppercase font-black tracking-tight whitespace-nowrap flex-shrink-0">✓ EN USO</span>}
                       </label>
                       <input
-                        type="number"
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         placeholder="0.00"
                         value={payCashUSD}
                         disabled={isPaymentSettled && cashUSDVal <= 0}
-                        onChange={(e) => setPayCashUSD(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(',', '.');
+                          if (/^[0-9]*\.?[0-9]*$/.test(val) || val === '') {
+                            setPayCashUSD(val);
+                          }
+                        }}
                         onKeyDown={(e) => handlePaymentKeyDown(e, 'cashUSD')}
-                        className={`w-full border-2 rounded-lg p-2.5 text-base font-mono focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
+                        className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
                           cashUSDVal > 0 
-                            ? 'bg-emerald-50 border-emerald-500 text-emerald-950 font-black ring-2 ring-emerald-400/40 shadow-sm' 
-                            : 'bg-slate-50 border-slate-300 font-bold text-emerald-750'
+                            ? 'bg-emerald-50 border-emerald-500 text-emerald-950 ring-2 ring-emerald-400/40 shadow-sm' 
+                            : 'bg-slate-50 border-slate-300 font-bold text-slate-800'
                         }`}
                       />
                     </div>
@@ -4705,25 +4755,30 @@ export default function CajaPOS({
 
                   {companyConfig.metodos_pago_activos.includes('efectivo_ves') && (
                     <div className={isPaymentSettled && cashVESVal <= 0 ? 'opacity-50' : ''}>
-                      <label className={`text-xs mb-1 font-sans flex items-center justify-between whitespace-nowrap overflow-hidden h-5 ${cashVESVal > 0 ? 'text-purple-900 font-black' : 'text-slate-700 font-bold'}`}>
-                        <span className="flex items-center gap-1.5 min-w-0 truncate">
+                      <label className={`text-[11.5px] mb-1 font-sans flex items-center justify-between gap-1 leading-none ${cashVESVal > 0 ? 'text-purple-900 font-black' : 'text-slate-700 font-bold'}`}>
+                        <span className="flex items-center gap-1.5 min-w-0">
                           <Coins className="w-3.5 h-3.5 text-purple-600 flex-shrink-0" />
                           <span className="truncate">Efectivo (Bs VES)</span>
                         </span>
-                        {cashVESVal > 0 && <span className="text-[8.5px] bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded font-sans uppercase font-black tracking-tight whitespace-nowrap flex-shrink-0 ml-1">✓ En uso</span>}
+                        {cashVESVal > 0 && <span className="text-[8px] bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded font-sans uppercase font-black tracking-tight whitespace-nowrap flex-shrink-0">✓ EN USO</span>}
                       </label>
                       <input
-                        type="number"
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         placeholder="0.00"
                         value={payCashVES}
                         disabled={isPaymentSettled && cashVESVal <= 0}
-                        onChange={(e) => setPayCashVES(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(',', '.');
+                          if (/^[0-9]*\.?[0-9]*$/.test(val) || val === '') {
+                            setPayCashVES(val);
+                          }
+                        }}
                         onKeyDown={(e) => handlePaymentKeyDown(e, 'cashVES')}
-                        className={`w-full border-2 rounded-lg p-2.5 text-base font-mono focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
+                        className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
                           cashVESVal > 0 
-                            ? 'bg-emerald-50 border-emerald-500 text-purple-950 font-black ring-2 ring-emerald-400/40 shadow-sm' 
-                            : 'bg-slate-50 border-slate-300 font-bold text-purple-750'
+                            ? 'bg-emerald-50 border-emerald-500 text-purple-950 ring-2 ring-emerald-400/40 shadow-sm' 
+                            : 'bg-slate-50 border-slate-300 font-bold text-slate-800'
                         }`}
                       />
                     </div>
@@ -4734,24 +4789,29 @@ export default function CajaPOS({
                 <div className="grid grid-cols-2 gap-3 border-t border-slate-200 pt-2">
                   {companyConfig.metodos_pago_activos.includes('pago_movil') && (
                     <div className={`space-y-1 ${isPaymentSettled && pagoMovilVESVal <= 0 ? 'opacity-50' : ''}`}>
-                      <label className={`text-xs font-sans flex items-center justify-between whitespace-nowrap overflow-hidden h-5 ${pagoMovilVESVal > 0 ? 'text-emerald-800 font-black' : 'text-emerald-700 font-bold'}`}>
-                        <span className="flex items-center gap-1.5 min-w-0 truncate">
+                      <label className={`text-[11.5px] font-sans flex items-center justify-between gap-1 leading-none ${pagoMovilVESVal > 0 ? 'text-emerald-800 font-black' : 'text-emerald-700 font-bold'}`}>
+                        <span className="flex items-center gap-1.5 min-w-0">
                           <Smartphone className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
                           <span className="truncate">Pago Móvil (Bs VES)</span>
                         </span>
-                        {pagoMovilVESVal > 0 && <span className="text-[8.5px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-sans uppercase font-black tracking-tight whitespace-nowrap flex-shrink-0 ml-1">✓ En uso</span>}
+                        {pagoMovilVESVal > 0 && <span className="text-[8px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-sans uppercase font-black tracking-tight whitespace-nowrap flex-shrink-0">✓ EN USO</span>}
                       </label>
                       <input
-                        type="number"
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         placeholder="0.00"
                         value={payPagoMovilVES}
                         disabled={isPaymentSettled && pagoMovilVESVal <= 0}
-                        onChange={(e) => setPayPagoMovilVES(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(',', '.');
+                          if (/^[0-9]*\.?[0-9]*$/.test(val) || val === '') {
+                            setPayPagoMovilVES(val);
+                          }
+                        }}
                         onKeyDown={(e) => handlePaymentKeyDown(e, 'pagoMovilVES')}
-                        className={`w-full border-2 rounded-lg p-2.5 text-base font-mono focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
+                        className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
                           pagoMovilVESVal > 0 
-                            ? 'bg-emerald-50 border-emerald-500 text-slate-900 font-black ring-2 ring-emerald-400/40 shadow-sm' 
+                            ? 'bg-emerald-50 border-emerald-500 text-slate-950 ring-2 ring-emerald-400/40 shadow-sm' 
                             : 'bg-slate-50 border-slate-300 font-bold text-slate-800'
                         }`}
                       />
@@ -4760,24 +4820,29 @@ export default function CajaPOS({
 
                   {companyConfig.metodos_pago_activos.includes('biopago') && (
                     <div className={`space-y-1 ${isPaymentSettled && biopagoVESVal <= 0 ? 'opacity-50' : ''}`}>
-                      <label className={`text-xs font-sans flex items-center justify-between whitespace-nowrap overflow-hidden h-5 ${biopagoVESVal > 0 ? 'text-purple-900 font-black' : 'text-purple-800 font-bold'}`}>
-                        <span className="flex items-center gap-1.5 min-w-0 truncate">
+                      <label className={`text-[11.5px] font-sans flex items-center justify-between gap-1 leading-none ${biopagoVESVal > 0 ? 'text-purple-900 font-black' : 'text-purple-800 font-bold'}`}>
+                        <span className="flex items-center gap-1.5 min-w-0">
                           <Fingerprint className="w-3.5 h-3.5 text-purple-600 flex-shrink-0" />
                           <span className="truncate">Biopago (Bs VES)</span>
                         </span>
-                        {biopagoVESVal > 0 && <span className="text-[8.5px] bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded font-sans uppercase font-black tracking-tight whitespace-nowrap flex-shrink-0 ml-1">✓ En uso</span>}
+                        {biopagoVESVal > 0 && <span className="text-[8px] bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded font-sans uppercase font-black tracking-tight whitespace-nowrap flex-shrink-0">✓ EN USO</span>}
                       </label>
                       <input
-                        type="number"
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         placeholder="0.00"
                         value={payBiopagoVES}
                         disabled={isPaymentSettled && biopagoVESVal <= 0}
-                        onChange={(e) => setPayBiopagoVES(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(',', '.');
+                          if (/^[0-9]*\.?[0-9]*$/.test(val) || val === '') {
+                            setPayBiopagoVES(val);
+                          }
+                        }}
                         onKeyDown={(e) => handlePaymentKeyDown(e, 'biopagoVES')}
-                        className={`w-full border-2 rounded-lg p-2.5 text-base font-mono focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
+                        className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
                           biopagoVESVal > 0 
-                            ? 'bg-emerald-50 border-emerald-500 text-slate-900 font-black ring-2 ring-emerald-400/40 shadow-sm' 
+                            ? 'bg-emerald-50 border-emerald-500 text-slate-950 ring-2 ring-emerald-400/40 shadow-sm' 
                             : 'bg-slate-50 border-slate-300 font-bold text-slate-800'
                         }`}
                       />
@@ -4803,7 +4868,7 @@ export default function CajaPOS({
                         placeholder="N° Referencia (>3 dig)..."
                         value={refPagoMovil}
                         onChange={(e) => setRefPagoMovil(e.target.value)}
-                        className="bg-white border-2 border-slate-300 p-2 rounded-lg text-xs font-bold text-yellow-800 outline-none focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 transition-all font-mono"
+                        className="bg-white border-2 border-slate-300 p-2 rounded-lg text-sm font-bold text-yellow-800 outline-none focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 transition-all font-mono"
                       />
                     </div>
                     {!isPagoMovilValid && (
@@ -4818,24 +4883,29 @@ export default function CajaPOS({
                 <div className="grid grid-cols-2 gap-3 border-t border-slate-200 pt-2">
                   {companyConfig.metodos_pago_activos.includes('tarjeta_ves') && (
                     <div className={isPaymentSettled && cardVESVal <= 0 ? 'opacity-50' : ''}>
-                      <label className={`text-xs mb-1 font-sans flex items-center justify-between whitespace-nowrap overflow-hidden h-5 ${cardVESVal > 0 ? 'text-slate-900 font-black' : 'text-slate-700 font-bold'}`}>
-                        <span className="flex items-center gap-1.5 min-w-0 truncate">
+                      <label className={`text-[11.5px] mb-1 font-sans flex items-center justify-between gap-1 leading-none ${cardVESVal > 0 ? 'text-slate-900 font-black' : 'text-slate-700 font-bold'}`}>
+                        <span className="flex items-center gap-1.5 min-w-0">
                           <CreditCard className="w-3.5 h-3.5 text-slate-700 flex-shrink-0" />
                           <span className="truncate">Tarjeta Débito (Bs VES)</span>
                         </span>
-                        {cardVESVal > 0 && <span className="text-[8.5px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-sans uppercase font-black tracking-tight whitespace-nowrap flex-shrink-0 ml-1">✓ En uso</span>}
+                        {cardVESVal > 0 && <span className="text-[8px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-sans uppercase font-black tracking-tight whitespace-nowrap flex-shrink-0">✓ EN USO</span>}
                       </label>
                       <input
-                        type="number"
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         placeholder="0.00"
                         value={payCardVES}
                         disabled={isPaymentSettled && cardVESVal <= 0}
-                        onChange={(e) => setPayCardVES(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(',', '.');
+                          if (/^[0-9]*\.?[0-9]*$/.test(val) || val === '') {
+                            setPayCardVES(val);
+                          }
+                        }}
                         onKeyDown={(e) => handlePaymentKeyDown(e, 'cardVES')}
-                        className={`w-full border-2 rounded-lg p-2.5 text-base font-mono focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
+                        className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
                           cardVESVal > 0 
-                            ? 'bg-emerald-50 border-emerald-500 text-slate-900 font-black ring-2 ring-emerald-400/40 shadow-sm' 
+                            ? 'bg-emerald-50 border-emerald-500 text-slate-950 ring-2 ring-emerald-400/40 shadow-sm' 
                             : 'bg-slate-50 border-slate-300 font-bold text-slate-800'
                         }`}
                       />
@@ -4844,25 +4914,30 @@ export default function CajaPOS({
 
                   {companyConfig.metodos_pago_activos.includes('tarjeta_usd') && (
                     <div className={isPaymentSettled && cardUSDVal <= 0 ? 'opacity-50' : ''}>
-                      <label className={`text-xs mb-1 font-sans flex items-center justify-between whitespace-nowrap overflow-hidden h-5 ${cardUSDVal > 0 ? 'text-blue-900 font-black' : 'text-blue-800 font-bold'}`}>
-                        <span className="flex items-center gap-1.5 min-w-0 truncate">
+                      <label className={`text-[11.5px] mb-1 font-sans flex items-center justify-between gap-1 leading-none ${cardUSDVal > 0 ? 'text-blue-900 font-black' : 'text-blue-800 font-bold'}`}>
+                        <span className="flex items-center gap-1.5 min-w-0">
                           <CreditCard className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
                           <span className="truncate">Tarjeta $ (USD)</span>
                         </span>
-                        {cardUSDVal > 0 && <span className="text-[8.5px] bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded font-sans uppercase font-black tracking-tight whitespace-nowrap flex-shrink-0 ml-1">✓ En uso</span>}
+                        {cardUSDVal > 0 && <span className="text-[8px] bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded font-sans uppercase font-black tracking-tight whitespace-nowrap flex-shrink-0">✓ EN USO</span>}
                       </label>
                       <input
-                        type="number"
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         placeholder="0.00"
                         value={payCardUSD}
                         disabled={isPaymentSettled && cardUSDVal <= 0}
-                        onChange={(e) => setPayCardUSD(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(',', '.');
+                          if (/^[0-9]*\.?[0-9]*$/.test(val) || val === '') {
+                            setPayCardUSD(val);
+                          }
+                        }}
                         onKeyDown={(e) => handlePaymentKeyDown(e, 'cardUSD')}
-                        className={`w-full border-2 rounded-lg p-2.5 text-base font-mono focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
+                        className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
                           cardUSDVal > 0 
-                            ? 'bg-emerald-50 border-emerald-500 text-blue-950 font-black ring-2 ring-emerald-400/40 shadow-sm' 
-                            : 'bg-slate-50 border-slate-300 font-bold text-blue-700'
+                            ? 'bg-emerald-50 border-emerald-500 text-blue-950 ring-2 ring-emerald-400/40 shadow-sm' 
+                            : 'bg-slate-50 border-slate-300 font-bold text-slate-800'
                         }`}
                       />
                     </div>
@@ -4874,25 +4949,30 @@ export default function CajaPOS({
                   <div className="grid grid-cols-2 gap-3 border-t border-slate-200 pt-2">
                     {companyConfig.metodos_pago_activos.includes('binance') && (
                       <div className={isPaymentSettled && binanceUSDVal <= 0 ? 'opacity-50' : ''}>
-                        <label className={`text-xs mb-1 font-sans flex items-center justify-between whitespace-nowrap overflow-hidden h-5 ${binanceUSDVal > 0 ? 'text-yellow-900 font-black' : 'text-yellow-800 font-bold'}`}>
-                          <span className="flex items-center gap-1.5 min-w-0 truncate">
+                        <label className={`text-[11.5px] mb-1 font-sans flex items-center justify-between gap-1 leading-none ${binanceUSDVal > 0 ? 'text-yellow-900 font-black' : 'text-yellow-800 font-bold'}`}>
+                          <span className="flex items-center gap-1.5 min-w-0">
                             <Wallet className="w-3.5 h-3.5 text-yellow-600 flex-shrink-0" />
                             <span className="truncate">Binance ($ USD)</span>
                           </span>
-                          {binanceUSDVal > 0 && <span className="text-[8.5px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-sans uppercase font-black tracking-tight whitespace-nowrap flex-shrink-0 ml-1">✓ En uso</span>}
+                          {binanceUSDVal > 0 && <span className="text-[8px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-sans uppercase font-black tracking-tight whitespace-nowrap flex-shrink-0">✓ EN USO</span>}
                         </label>
                         <input
-                          type="number"
-                          step="0.01"
+                          type="text"
+                          inputMode="decimal"
                           placeholder="0.00"
                           value={payBinanceUSD}
                           disabled={isPaymentSettled && binanceUSDVal <= 0}
-                          onChange={(e) => setPayBinanceUSD(e.target.value)}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(',', '.');
+                            if (/^[0-9]*\.?[0-9]*$/.test(val) || val === '') {
+                              setPayBinanceUSD(val);
+                            }
+                          }}
                           onKeyDown={(e) => handlePaymentKeyDown(e, 'binanceUSD')}
-                          className={`w-full border-2 rounded-lg p-2.5 text-base font-mono focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
+                          className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
                             binanceUSDVal > 0 
-                              ? 'bg-emerald-50 border-emerald-500 text-yellow-950 font-black ring-2 ring-emerald-400/40 shadow-sm' 
-                              : 'bg-slate-50 border-slate-300 font-bold text-yellow-700'
+                              ? 'bg-emerald-50 border-emerald-500 text-yellow-950 ring-2 ring-emerald-400/40 shadow-sm' 
+                              : 'bg-slate-50 border-slate-300 font-bold text-slate-800'
                           }`}
                         />
                       </div>
@@ -4900,25 +4980,30 @@ export default function CajaPOS({
 
                     {companyConfig.metodos_pago_activos.includes('paypal') && (
                       <div className={isPaymentSettled && paypalUSDVal <= 0 ? 'opacity-50' : ''}>
-                        <label className={`text-xs mb-1 font-sans flex items-center justify-between whitespace-nowrap overflow-hidden h-5 ${paypalUSDVal > 0 ? 'text-indigo-900 font-black' : 'text-indigo-800 font-bold'}`}>
-                          <span className="flex items-center gap-1.5 min-w-0 truncate">
+                        <label className={`text-[11.5px] mb-1 font-sans flex items-center justify-between gap-1 leading-none ${paypalUSDVal > 0 ? 'text-indigo-900 font-black' : 'text-indigo-800 font-bold'}`}>
+                          <span className="flex items-center gap-1.5 min-w-0">
                             <Globe className="w-3.5 h-3.5 text-indigo-600 flex-shrink-0" />
                             <span className="truncate">PayPal ($ USD)</span>
                           </span>
-                          {paypalUSDVal > 0 && <span className="text-[8.5px] bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded font-sans uppercase font-black tracking-tight whitespace-nowrap flex-shrink-0 ml-1">✓ En uso</span>}
+                          {paypalUSDVal > 0 && <span className="text-[8px] bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded font-sans uppercase font-black tracking-tight whitespace-nowrap flex-shrink-0">✓ EN USO</span>}
                         </label>
                         <input
-                          type="number"
-                          step="0.01"
+                          type="text"
+                          inputMode="decimal"
                           placeholder="0.00"
                           value={payPaypalUSD}
                           disabled={isPaymentSettled && paypalUSDVal <= 0}
-                          onChange={(e) => setPayPaypalUSD(e.target.value)}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(',', '.');
+                            if (/^[0-9]*\.?[0-9]*$/.test(val) || val === '') {
+                              setPayPaypalUSD(val);
+                            }
+                          }}
                           onKeyDown={(e) => handlePaymentKeyDown(e, 'paypalUSD')}
-                          className={`w-full border-2 rounded-lg p-2.5 text-base font-mono focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
+                          className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
                             paypalUSDVal > 0 
-                              ? 'bg-emerald-50 border-emerald-500 text-indigo-950 font-black ring-2 ring-emerald-400/40 shadow-sm' 
-                              : 'bg-slate-50 border-slate-300 font-bold text-indigo-700'
+                              ? 'bg-emerald-50 border-emerald-500 text-indigo-950 ring-2 ring-emerald-400/40 shadow-sm' 
+                              : 'bg-slate-50 border-slate-300 font-bold text-slate-800'
                           }`}
                         />
                       </div>
@@ -4929,42 +5014,44 @@ export default function CajaPOS({
                 {/* Client Credit limit option */}
                 {companyConfig.metodos_pago_activos.includes('credito') && selectedClient && selectedClient.limite_credito > 0 && (
                   <div className={`border-t border-slate-200 pt-2 space-y-1 ${isPaymentSettled && creditUSDVal <= 0 ? 'opacity-50' : ''}`}>
-                    <label className={`text-xs font-sans flex items-center justify-between whitespace-nowrap overflow-hidden h-5 ${creditUSDVal > 0 ? 'text-red-900 font-black' : 'text-red-700 font-bold'}`}>
-                      <span className="flex items-center gap-1.5 min-w-0 truncate">
+                    <label className={`text-[11.5px] font-sans flex items-center justify-between gap-1 leading-none ${creditUSDVal > 0 ? 'text-red-900 font-black' : 'text-red-700 font-bold'}`}>
+                      <span className="flex items-center gap-1.5 min-w-0">
                         <CalendarClock className="w-3.5 h-3.5 text-red-600 flex-shrink-0" />
                         <span className="truncate">Financiar a Crédito ($ USD)</span>
                       </span>
-                      {creditUSDVal > 0 && <span className="text-[8.5px] bg-red-100 text-red-800 px-1.5 py-0.5 rounded font-sans uppercase font-black tracking-tight whitespace-nowrap flex-shrink-0 ml-1">✓ En uso</span>}
+                      {creditUSDVal > 0 && <span className="text-[8px] bg-red-100 text-red-800 px-1.5 py-0.5 rounded font-sans uppercase font-black tracking-tight whitespace-nowrap flex-shrink-0">✓ EN USO</span>}
                     </label>
                     <div className="flex gap-1.5">
                       <input
-                        type="number"
-                        step="0.01"
-                        placeholder={`Máximo $${selectedClient.credito_disponible.toFixed(2)}`}
+                        type="text"
+                        inputMode="decimal"
+                        placeholder={`Máx $${selectedClient.credito_disponible.toFixed(2)}`}
                         value={payCreditUSD}
                         disabled={isPaymentSettled && creditUSDVal <= 0}
                         onChange={(e) => {
-                          const val = e.target.value;
-                          let numVal = parseFloat(val);
-                          const totalPaidExcludingCreditUSD =
-                            (parseFloat(payCashUSD) || 0) +
-                            ((parseFloat(payCashVES) || 0) / tasaDia) +
-                            ((parseFloat(payCardVES) || 0) / tasaDia) +
-                            ((parseFloat(payPagoMovilVES) || 0) / tasaDia) +
-                            ((parseFloat(payBiopagoVES) || 0) / tasaDia);
-                          const remainingToPay = Math.max(0, totalUSD - totalPaidExcludingCreditUSD);
-                          
-                          if (!isNaN(numVal) && numVal > remainingToPay) {
-                            setPayCreditUSD(remainingToPay.toFixed(2));
-                          } else {
-                            setPayCreditUSD(val);
+                          const val = e.target.value.replace(',', '.');
+                          if (/^[0-9]*\.?[0-9]*$/.test(val) || val === '') {
+                            let numVal = parseFloat(val);
+                            const totalPaidExcludingCreditUSD =
+                              (parseFloat(payCashUSD) || 0) +
+                              ((parseFloat(payCashVES) || 0) / tasaDia) +
+                              ((parseFloat(payCardVES) || 0) / tasaDia) +
+                              ((parseFloat(payPagoMovilVES) || 0) / tasaDia) +
+                              ((parseFloat(payBiopagoVES) || 0) / tasaDia);
+                            const remainingToPay = Math.max(0, totalUSD - totalPaidExcludingCreditUSD);
+                            
+                            if (!isNaN(numVal) && numVal > remainingToPay) {
+                              setPayCreditUSD(remainingToPay.toFixed(2));
+                            } else {
+                              setPayCreditUSD(val);
+                            }
                           }
                         }}
                         onKeyDown={(e) => handlePaymentKeyDown(e, 'creditUSD')}
-                        className={`flex-grow border-2 rounded-lg p-2.5 text-base font-mono focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none transition-all ${
+                        className={`flex-grow border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-xs placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none transition-all ${
                           creditUSDVal > 0 
-                            ? 'bg-emerald-50 border-emerald-500 text-red-950 font-black ring-2 ring-emerald-400/40 shadow-sm' 
-                            : 'bg-slate-50 border-slate-300 font-bold text-red-600'
+                            ? 'bg-emerald-50 border-emerald-500 text-red-950 ring-2 ring-emerald-400/40 shadow-sm' 
+                            : 'bg-slate-50 border-slate-300 font-bold text-slate-800'
                         }`}
                       />
                       <button
@@ -6344,13 +6431,28 @@ export default function CajaPOS({
                       </p>
                     </div>
                   </div>
-                  <button 
-                    onClick={() => { setShowCierreModal(false); setCierreResult(null); }} 
-                    className="text-slate-400 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg font-sans text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
-                  >
-                    <X className="w-4 h-4" />
-                    Cerrar [ESC]
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (cierreResult) {
+                          printCierreTicketReport(cierreResult, shiftSales, companyConfig, currentUser);
+                        }
+                      }}
+                      className="text-slate-700 hover:text-slate-950 bg-slate-100 hover:bg-slate-200 border border-slate-300 px-3 py-1.5 rounded-lg font-sans text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      title="Imprimir comprobante físico de cierre de caja (ticket o formato normal)"
+                    >
+                      <Printer className="w-4 h-4 text-slate-700" />
+                      <span>Imprimir Ticket Cierre</span>
+                    </button>
+                    <button 
+                      onClick={() => { setShowCierreModal(false); setCierreResult(null); }} 
+                      className="text-slate-400 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg font-sans text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                      Cerrar [ESC]
+                    </button>
+                  </div>
                 </div>
 
                 {/* SCROLLABLE BODY CONTAINING ARQUEO CARD */}
@@ -6831,6 +6933,19 @@ export default function CajaPOS({
                           className="w-4 h-4 text-emerald-600 rounded border-slate-300"
                         />
                         <span>Solo con data (Ocultar ceros)</span>
+                      </label>
+
+                      <label className="flex items-center gap-2 bg-amber-50 border border-amber-300/80 rounded-lg px-3 py-2 text-xs cursor-pointer select-none hover:bg-amber-100 transition-all font-sans font-bold text-amber-950 shadow-xs" title="Imprime un comprobante físico detallado de las transacciones y arqueo de caja">
+                        <input
+                          type="checkbox"
+                          checked={printCierreTicket}
+                          onChange={(e) => setPrintCierreTicket(e.target.checked)}
+                          className="w-4 h-4 text-amber-600 rounded border-slate-300"
+                        />
+                        <span className="flex items-center gap-1.5">
+                          <Printer className="w-3.5 h-3.5 text-amber-700" />
+                          <span>Imprimir Cierre (POS / Ticket)</span>
+                        </span>
                       </label>
                     </div>
 
@@ -7621,10 +7736,16 @@ export default function CajaPOS({
                             <div className="text-center md:text-left">
                               <span className="text-[9px] text-slate-500 uppercase block font-sans font-bold">Devolución (A Favor)</span>
                               <strong className="text-emerald-700 text-sm font-black">${devRefundTotal.toFixed(2)} USD</strong>
+                              <span className="text-[10px] text-emerald-800/80 font-bold block mt-0.5">
+                                Bs. {(devRefundTotal * tasaDia).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </span>
                             </div>
                             <div className="text-center md:text-left border-y md:border-y-0 md:border-x border-slate-250 py-1 md:py-0 md:px-3">
                               <span className="text-[9px] text-slate-500 uppercase block font-sans font-bold">Canje (Nuevos)</span>
                               <strong className="text-purple-700 text-sm font-black">${devExchangeTotal.toFixed(2)} USD</strong>
+                              <span className="text-[10px] text-purple-800/80 font-bold block mt-0.5">
+                                Bs. {(devExchangeTotal * tasaDia).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </span>
                             </div>
                             <div className="text-center md:text-right">
                               <span className="text-[9px] text-slate-500 uppercase block font-sans font-bold">
@@ -7633,8 +7754,189 @@ export default function CajaPOS({
                               <strong className={`text-base font-black ${devNetBalance > 0 ? 'text-emerald-600' : devNetBalance < 0 ? 'text-rose-600' : 'text-slate-700'}`}>
                                 ${Math.abs(devNetBalance).toFixed(2)} USD
                               </strong>
+                              <span className={`text-xs font-black block mt-0.5 ${devNetBalance > 0 ? 'text-emerald-700' : devNetBalance < 0 ? 'text-rose-700' : 'text-slate-600'}`}>
+                                Bs. {Math.abs(devNetBalance * tasaDia).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </span>
                             </div>
                           </div>
+
+                          {/* AUXILIAR DE VUELTO / REEMBOLSO MIXTO ($ FÍSICO + BS) */}
+                          {devNetBalance > 0 && (() => {
+                            const effectivePhysicalUsd = Math.max(0, Math.min(devNetBalance, devPhysicalUsdToReturn));
+                            const effectiveBsDifference = Math.max(0, devNetBalance - effectivePhysicalUsd) * tasaDia;
+                            const roundedFloorUsd = Math.floor(devNetBalance);
+
+                            return (
+                              <div className="bg-gradient-to-br from-emerald-50/90 via-teal-50/50 to-sky-50/70 border border-emerald-300 rounded-xl p-3 shadow-xs space-y-2.5">
+                                {/* Header del auxiliar */}
+                                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-200/80 pb-1.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-base leading-none">🧮</span>
+                                    <div>
+                                      <strong className="text-[11px] uppercase font-sans text-emerald-950 font-black tracking-wide block">
+                                        Auxiliar de Reembolso / Vuelto al Cliente
+                                      </strong>
+                                      <span className="text-[9.5px] text-emerald-800 font-sans block">
+                                        Si entrega billetes en $ físico, identifique al instante la diferencia exacta en Bolívares
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="bg-white border border-emerald-300 text-emerald-900 px-2 py-0.5 rounded-lg text-[9.5px] font-mono font-bold shadow-2xs">
+                                    Tasa del día: <strong className="text-emerald-700">Bs. {tasaDia.toFixed(2)}</strong>
+                                  </div>
+                                </div>
+
+                                {/* Grid interactivo */}
+                                <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5 items-center">
+                                  {/* Columna izquierda: Input de $ en físico y botones rápidos */}
+                                  <div className="md:col-span-6 bg-white border border-emerald-200 rounded-lg p-2.5 shadow-2xs space-y-2">
+                                    <div className="flex justify-between items-center">
+                                      <label className="text-[9.5px] font-bold text-slate-700 uppercase font-sans flex items-center gap-1">
+                                        <span>💵 Billete ($ Físico) a entregar:</span>
+                                      </label>
+                                      <span className="text-[9px] font-mono text-slate-400">Máx: ${devNetBalance.toFixed(2)}</span>
+                                    </div>
+
+                                    <div className="flex items-center gap-2 bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1 focus-within:border-emerald-500 focus-within:bg-white transition-all">
+                                      <span className="text-emerald-700 font-bold font-mono text-base">$</span>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        max={devNetBalance}
+                                        step="any"
+                                        value={devPhysicalUsdToReturn === 0 ? '' : devPhysicalUsdToReturn}
+                                        placeholder="0.00"
+                                        onChange={(e) => {
+                                          const raw = e.target.value === '' ? 0 : parseFloat(e.target.value) || 0;
+                                          const val = Math.max(0, Math.min(devNetBalance, raw));
+                                          setDevPhysicalUsdToReturn(val);
+                                          if (val > 0 && val < devNetBalance) {
+                                            setDevRefundCurrency('MIXTO');
+                                          } else if (val === 0) {
+                                            setDevRefundCurrency('VES');
+                                          } else if (val >= devNetBalance) {
+                                            setDevRefundCurrency('USD');
+                                          }
+                                        }}
+                                        className="w-full font-mono font-black text-sm text-slate-900 focus:outline-none bg-transparent"
+                                      />
+                                    </div>
+
+                                    {/* Botones rápidos de denominaciones */}
+                                    <div className="flex flex-wrap items-center gap-1 pt-1 border-t border-slate-150">
+                                      <span className="text-[8.5px] text-slate-400 font-sans uppercase font-bold mr-1">Rápido:</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setDevPhysicalUsdToReturn(0);
+                                          setDevRefundCurrency('VES');
+                                        }}
+                                        className={`text-[9px] font-bold px-2 py-0.5 rounded cursor-pointer transition-all ${
+                                          effectivePhysicalUsd === 0 
+                                            ? 'bg-slate-800 text-white shadow-xs' 
+                                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                        }`}
+                                      >
+                                        $0 (Todo en Bs)
+                                      </button>
+
+                                      {/* Si tiene parte entera (ej: $1.30 -> botón $1), ofrecer billete exacto */}
+                                      {roundedFloorUsd > 0 && roundedFloorUsd < devNetBalance && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setDevPhysicalUsdToReturn(roundedFloorUsd);
+                                            setDevRefundCurrency('MIXTO');
+                                          }}
+                                          className={`text-[9px] font-bold px-2 py-0.5 rounded cursor-pointer transition-all ${
+                                            effectivePhysicalUsd === roundedFloorUsd
+                                              ? 'bg-emerald-700 text-white shadow-xs'
+                                              : 'bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200'
+                                          }`}
+                                        >
+                                          ${roundedFloorUsd} Físico
+                                        </button>
+                                      )}
+
+                                      {[1, 2, 5, 10, 20, 50, 100]
+                                        .filter(bill => bill < devNetBalance && bill !== roundedFloorUsd)
+                                        .map(bill => (
+                                          <button
+                                            key={bill}
+                                            type="button"
+                                            onClick={() => {
+                                              setDevPhysicalUsdToReturn(bill);
+                                              setDevRefundCurrency('MIXTO');
+                                            }}
+                                            className={`text-[9px] font-bold px-2 py-0.5 rounded cursor-pointer transition-all ${
+                                              effectivePhysicalUsd === bill
+                                                ? 'bg-emerald-700 text-white shadow-xs'
+                                                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                            }`}
+                                          >
+                                            ${bill}
+                                          </button>
+                                        ))}
+
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setDevPhysicalUsdToReturn(devNetBalance);
+                                          setDevRefundCurrency('USD');
+                                        }}
+                                        className={`text-[9px] font-bold px-2 py-0.5 rounded cursor-pointer transition-all ${
+                                          effectivePhysicalUsd >= devNetBalance
+                                            ? 'bg-slate-800 text-white shadow-xs'
+                                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                        }`}
+                                      >
+                                        Todo en $ (${devNetBalance.toFixed(2)})
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {/* Columna derecha: Indicador dinámico de vuelto y diferencia en Bs */}
+                                  <div className="md:col-span-6 bg-white border-2 border-emerald-400 rounded-lg p-3 shadow-xs flex flex-col justify-between">
+                                    <div className="flex justify-between items-start">
+                                      <div>
+                                        <span className="text-[9px] font-bold text-slate-500 uppercase font-sans block">
+                                          Diferencia / Vuelto a entregar en Bs:
+                                        </span>
+                                        <span className="text-[10px] font-mono text-emerald-700 font-extrabold block">
+                                          ${(devNetBalance - effectivePhysicalUsd).toFixed(2)} USD restante
+                                        </span>
+                                      </div>
+                                      <span className="text-[8.5px] font-mono text-slate-500 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                                        @ {tasaDia.toFixed(2)} Bs/$
+                                      </span>
+                                    </div>
+
+                                    <div className="my-1.5">
+                                      <div className="text-xl sm:text-2xl font-black font-mono text-emerald-700 leading-tight">
+                                        Bs. {effectiveBsDifference.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </div>
+                                    </div>
+
+                                    <div className="text-[9.5px] font-sans text-slate-700 bg-emerald-50/60 p-1.5 rounded border border-emerald-200/80 leading-snug">
+                                      💡 <strong className="text-emerald-950">Entregar al cliente:</strong>{' '}
+                                      {effectivePhysicalUsd > 0 ? (
+                                        <>
+                                          <strong className="text-emerald-800 font-mono font-bold">${effectivePhysicalUsd.toFixed(2)} USD</strong> en billete físico
+                                          {effectiveBsDifference > 0.001 ? (
+                                            <> + <strong className="text-emerald-800 font-mono font-bold">Bs. {effectiveBsDifference.toFixed(2)} VES</strong> (Efectivo Bs o Pago Móvil)</>
+                                          ) : ' (Reembolso completo en $)'}
+                                        </>
+                                      ) : (
+                                        <>
+                                          <strong className="text-emerald-800 font-mono font-bold">Bs. {(devNetBalance * tasaDia).toFixed(2)} VES</strong> completos (Efectivo Bs o Pago Móvil)
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })()}
 
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             <div>
@@ -7652,7 +7954,9 @@ export default function CajaPOS({
 
                             {devNetBalance < 0 ? (
                               <div>
-                                <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold">Cobrar Diferencia al Cliente vía</label>
+                                <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold">
+                                  Cobrar Diferencia al Cliente vía (Monto: ${Math.abs(devNetBalance).toFixed(2)} / Bs. {Math.abs(devNetBalance * tasaDia).toFixed(2)})
+                                </label>
                                 <select
                                   value={devExchangeDiffMethod}
                                   onChange={(e) => setDevExchangeDiffMethod(e.target.value as any)}
@@ -7668,15 +7972,26 @@ export default function CajaPOS({
                               </div>
                             ) : (
                               <div>
-                                <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold">Moneda de Reembolso (si aplica)</label>
+                                <label className="text-[10px] text-slate-500 block mb-1 font-sans font-bold">Moneda de Reembolso</label>
                                 <select
                                   value={devRefundCurrency}
                                   disabled={selectedReturnInfo.isFullyReturned}
-                                  onChange={(e) => setDevRefundCurrency(e.target.value as 'USD' | 'VES')}
-                                  className="w-full bg-white border border-slate-355 rounded p-2 text-xs text-slate-800 focus:outline-none font-sans disabled:bg-slate-100 disabled:text-slate-400"
+                                  onChange={(e) => {
+                                    const val = e.target.value as 'USD' | 'VES' | 'MIXTO';
+                                    setDevRefundCurrency(val);
+                                    if (val === 'USD') {
+                                      setDevPhysicalUsdToReturn(devNetBalance);
+                                    } else if (val === 'VES') {
+                                      setDevPhysicalUsdToReturn(0);
+                                    } else if (val === 'MIXTO') {
+                                      setDevPhysicalUsdToReturn(Math.floor(devNetBalance) || 1);
+                                    }
+                                  }}
+                                  className="w-full bg-white border border-slate-355 rounded p-2 text-xs text-slate-800 focus:outline-none font-sans font-bold disabled:bg-slate-100 disabled:text-slate-400"
                                 >
-                                  <option value="USD">Dólares ($ USD)</option>
-                                  <option value="VES">Bolívares (Bs VES)</option>
+                                  <option value="USD">Dólares ($ USD completos)</option>
+                                  <option value="VES">Bolívares (Bs VES completos)</option>
+                                  <option value="MIXTO">Mixto ($ en Físico + Resto en Bs)</option>
                                 </select>
                               </div>
                             )}
@@ -7724,7 +8039,11 @@ export default function CajaPOS({
               <p className="text-xs text-slate-700 leading-relaxed font-sans">
                 ¿Está seguro de procesar la devolución de{' '}
                 <strong className="text-rose-700 font-mono font-black">
-                  {devRefundCurrency === 'USD' ? `$${devRefundTotal.toFixed(2)} USD` : `Bs ${(devRefundTotal * tasaDia).toFixed(2)} VES`}
+                  {devRefundCurrency === 'USD' 
+                    ? `$${devNetBalance.toFixed(2)} USD` 
+                    : devRefundCurrency === 'VES' 
+                      ? `Bs ${(devNetBalance * tasaDia).toFixed(2)} VES`
+                      : `$${Math.min(devNetBalance, devPhysicalUsdToReturn).toFixed(2)} USD (Físico) + Bs ${((devNetBalance - Math.min(devNetBalance, devPhysicalUsdToReturn)) * tasaDia).toFixed(2)} VES`}
                 </strong>{' '}
                 y reintegrar el dinero al cliente?
               </p>
@@ -7740,7 +8059,13 @@ export default function CajaPOS({
                 </div>
                 <div className="flex justify-between">
                   <span>Reembolso en:</span>
-                  <strong className="text-slate-850 uppercase font-sans">{devRefundCurrency === 'USD' ? 'Dólares ($)' : 'Bolívares (Bs)'}</strong>
+                  <strong className="text-slate-850 uppercase font-sans">
+                    {devRefundCurrency === 'USD' 
+                      ? 'Dólares ($)' 
+                      : devRefundCurrency === 'VES' 
+                        ? 'Bolívares (Bs)' 
+                        : `Mixto ($${Math.min(devNetBalance, devPhysicalUsdToReturn).toFixed(2)} + Bs)`}
+                  </strong>
                 </div>
               </div>
             </div>
