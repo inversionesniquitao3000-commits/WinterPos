@@ -757,8 +757,10 @@ export async function sendCierreReport(imageBase64, textSummary) {
       if (hasValidImage) {
         const base64Data = imageBase64.split(';base64,').pop().trim();
         const isPdf = imageBase64.startsWith('data:application/pdf');
-        const mediaType = isPdf ? 'application/pdf' : 'image/png';
-        const fileName = isPdf ? `reporte_${Date.now()}.pdf` : `reporte_${Date.now()}.png`;
+        const isJpeg = imageBase64.startsWith('data:image/jpeg') || imageBase64.startsWith('data:image/jpg');
+        const mediaType = isPdf ? 'application/pdf' : (isJpeg ? 'image/jpeg' : 'image/png');
+        const fileExt = isPdf ? 'pdf' : (isJpeg ? 'jpg' : 'png');
+        const fileName = `reporte_${Date.now()}.${fileExt}`;
 
         console.log(`[WhatsApp] Enviando documento adjunto (${mediaType}, intento ${attempt}) a ${target}`);
         const media = new MessageMedia(mediaType, base64Data, fileName);

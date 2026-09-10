@@ -3337,18 +3337,49 @@ export default function CajaPOS({
 
     if (waCierreStatus.enabled && sendToWhatsApp) {
       try {
-        const htmlToImage = await import(/* @vite-ignore */ 'html-to-image');
         const element = document.getElementById('cierre-arqueo-card');
         
         if (element) {
-          imageBase64 = await htmlToImage.toPng(element, { backgroundColor: '#ffffff', quality: 0.95 });
+          // Micro-pausa de estabilización para asegurar que el DOM esté completamente pintado
+          await new Promise(r => setTimeout(r, 150));
+
+          // 1. Intento primario con html-to-image optimizado
+          try {
+            const { toPng } = await import('html-to-image');
+            imageBase64 = await toPng(element, {
+              backgroundColor: '#ffffff',
+              quality: 0.92,
+              skipFonts: true,
+              cacheBust: true,
+              pixelRatio: 1.2
+            });
+          } catch (hErr) {
+            console.warn('[WhatsApp] html-to-image no pudo generar la captura, activando fallback:', hErr);
+          }
+
+          // 2. Fallback de alta resistencia con html2canvas si falla o queda vacía
+          if (!imageBase64 || imageBase64.length < 500 || imageBase64.includes('AAAABJRU5ErkJggg==')) {
+            try {
+              const html2canvas = (await import('html2canvas')).default;
+              const canvas = await html2canvas(element, {
+                backgroundColor: '#ffffff',
+                scale: 1.2,
+                useCORS: true,
+                logging: false,
+                allowTaint: true
+              });
+              imageBase64 = canvas.toDataURL('image/png', 0.92);
+            } catch (h2Err) {
+              console.warn('[WhatsApp] Fallback html2canvas falló:', h2Err);
+            }
+          }
         }
 
         const res = await fetch(getApiUrl('/whatsapp/send-cierre'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            imageBase64: imageBase64 || 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+            imageBase64: imageBase64 || '',
             textSummary: summaryText
           })
         });
@@ -3366,7 +3397,7 @@ export default function CajaPOS({
       if (!waSuccess) {
         fallbackTriggered = true;
         try {
-          if (imageBase64) {
+          if (imageBase64 && imageBase64.length > 500 && !imageBase64.includes('AAAABJRU5ErkJggg==')) {
             const resBlob = await fetch(imageBase64);
             const blob = await resBlob.blob();
             await navigator.clipboard.write([

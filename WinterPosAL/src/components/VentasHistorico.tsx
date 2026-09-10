@@ -175,18 +175,46 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
   const captureCierrePNG = async (c: CierreCaja): Promise<string> => {
     let imageBase64 = '';
     try {
-      const htmlToImage = await import(/* @vite-ignore */ 'html-to-image');
       let element = document.getElementById('cierre-comprobante-card');
       
       // If modal is not open in DOM, render hidden capture element
       if (!element) {
         setCapturingCierre(c);
-        await new Promise(resolve => setTimeout(resolve, 350));
+        await new Promise(resolve => setTimeout(resolve, 400));
         element = document.getElementById('cierre-capture-card');
       }
 
       if (element) {
-        imageBase64 = await htmlToImage.toPng(element, { backgroundColor: '#ffffff', quality: 0.95 });
+        // 1. Intento primario con html-to-image optimizado
+        try {
+          const { toPng } = await import('html-to-image');
+          imageBase64 = await toPng(element, {
+            backgroundColor: '#ffffff',
+            quality: 0.92,
+            skipFonts: true,
+            cacheBust: true,
+            pixelRatio: 1.2
+          });
+        } catch (hErr) {
+          console.warn('[WhatsApp Reenvío] html-to-image falló, intentando fallback html2canvas:', hErr);
+        }
+
+        // 2. Fallback con html2canvas
+        if (!imageBase64 || imageBase64.length < 500 || imageBase64.includes('AAAABJRU5ErkJggg==')) {
+          try {
+            const html2canvas = (await import('html2canvas')).default;
+            const canvas = await html2canvas(element, {
+              backgroundColor: '#ffffff',
+              scale: 1.2,
+              useCORS: true,
+              logging: false,
+              allowTaint: true
+            });
+            imageBase64 = canvas.toDataURL('image/png', 0.92);
+          } catch (h2Err) {
+            console.warn('[WhatsApp Reenvío] Fallback html2canvas falló:', h2Err);
+          }
+        }
       }
     } catch (err) {
       console.warn('Error capturando PNG del cierre:', err);

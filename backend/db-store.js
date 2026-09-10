@@ -3550,6 +3550,18 @@ export async function cerrarCaja(cierre) {
           "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 AND usuario_id = $2 ORDER BY id DESC LIMIT 1",
           [termName, userId]
         );
+        if (activeCaja.rowCount === 0) {
+          activeCaja = await pool.query(
+            "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY id DESC LIMIT 1",
+            [userId]
+          );
+        }
+        if (activeCaja.rowCount === 0) {
+          activeCaja = await pool.query(
+            "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",
+            [termName]
+          );
+        }
       } else {
         activeCaja = await pool.query(
           "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",
@@ -3736,18 +3748,19 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
       if (!isNaN(userId) && userId > 0) {
         if (compartirApertura) {
           activeRes = await pool.query(
-            "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND (usuario_id = $1 OR usuario_id = 1) ORDER BY id DESC LIMIT 1",
-            [userId]
+            "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY (estacion_nombre = $2) DESC, id DESC LIMIT 1",
+            [userId, myTerminal]
           );
         } else {
           activeRes = await pool.query(
-            "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND (estacion_nombre = $1 OR usuario_id = $2 OR usuario_id = 1) ORDER BY id DESC LIMIT 1",
+            "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 AND usuario_id = $2 ORDER BY id DESC LIMIT 1",
             [myTerminal, userId]
           );
         }
       } else {
         activeRes = await pool.query(
-          "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1"
+          "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",
+          [myTerminal]
         );
       }
       if (activeRes.rowCount === 0) {
