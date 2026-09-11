@@ -88,18 +88,22 @@ try {
   });
 
   // Try to connect to test if Postgres is accessible with configured user/pass
+  pool.on('connect', (client) => {
+    client.query(`SET TIME ZONE '${sysTimeZone}'`).catch(() => { });
+  });
+
   const client = await pool.connect();
   await client.query(`SET TIME ZONE '${sysTimeZone}'`).catch(() => { });
   console.log(`✅ Base de datos central PostgreSQL conectada (Zona Horaria: ${sysTimeZone}).`);
   usePostgres = true;
 
-  // Auto-adjust existing UTC timestamps created today that were shifted ahead
+  // Auto-adjust existing UTC timestamps created that were shifted ahead of local machine time
   try {
     await client.query(`
-      UPDATE Ventas SET fecha = fecha - INTERVAL '4 hours' WHERE fecha > NOW();
-      UPDATE Movimientos_Inventario SET fecha = fecha - INTERVAL '4 hours' WHERE fecha > NOW();
-      UPDATE Cajas_Apertura_Cierre SET fecha_apertura = fecha_apertura - INTERVAL '4 hours' WHERE fecha_apertura > NOW();
-      UPDATE Cajas_Apertura_Cierre SET fecha_cierre = fecha_cierre - INTERVAL '4 hours' WHERE fecha_cierre IS NOT NULL AND fecha_cierre > NOW();
+      UPDATE Ventas SET fecha = fecha - INTERVAL '4 hours' WHERE fecha > (NOW() + INTERVAL '5 minutes');
+      UPDATE Movimientos_Inventario SET fecha = fecha - INTERVAL '4 hours' WHERE fecha > (NOW() + INTERVAL '5 minutes');
+      UPDATE Cajas_Apertura_Cierre SET fecha_apertura = fecha_apertura - INTERVAL '4 hours' WHERE fecha_apertura > (NOW() + INTERVAL '5 minutes');
+      UPDATE Cajas_Apertura_Cierre SET fecha_cierre = fecha_cierre - INTERVAL '4 hours' WHERE fecha_cierre IS NOT NULL AND fecha_cierre > (NOW() + INTERVAL '5 minutes');
     `);
   } catch (tzFixErr) {
     // Ignore if timestamps are already local
@@ -3276,20 +3280,22 @@ export async function saveSale(s) {
       const tasaVal = parseFloat(s.tasa_cambio || s.tasa || (s.totalVES && s.totalUSD ? s.totalVES / s.totalUSD : 1)) || 1.00;
       const conTicketVal = s.con_ticket !== false;
 
+      const nowStr = getLocalISODateString();
       const saleRes = await clientTarget.query(
         `INSERT INTO Ventas (
           factura_nro, cliente_id, usuario_id, caja_id, subtotal_usd, descuento_usd, total_usd, total_ves, 
           tasa_cambio, con_ticket,
           estacion_nombre, vuelto_usd, vuelto_ves, tipo_documento, nro_fiscal, serial_fiscal, nro_z, 
-          estatus_fiscal, base_imponible_usd, iva_usd, exento_usd, igtf_usd
+          estatus_fiscal, base_imponible_usd, iva_usd, exento_usd, igtf_usd, fecha
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23) 
          RETURNING id, fecha`,
         [
           factura_nro, clientId, userId, cajaId, s.subtotal, s.descuento, s.totalUSD, s.totalVES,
           tasaVal, conTicketVal,
           s.terminal || 'CAJA_PRINCIPAL', s.vueltoUSD || 0, s.vueltoVES || 0,
-          tipoDoc, nroFiscal, serialFiscal, nroZ, estatusFiscal, baseImp, ivaVal, exentoVal, igtfVal
+          tipoDoc, nroFiscal, serialFiscal, nroZ, estatusFiscal, baseImp, ivaVal, exentoVal, igtfVal,
+          nowStr
         ]
       );
 
@@ -3467,6 +3473,167 @@ export async function getCierres() {
         LEFT JOIN Usuarios u ON c.usuario_id = u.id
         ORDER BY c.id DESC
       `);
+      // Pre-calculate live metrics for any open box (estatus = 'Abierta')
+      const liveDataByCajaId = {};
+      const openBoxes = res.rows.filter(r => r.estatus === 'Abierta');
+      for (const openR of openBoxes) {
+        try {
+          // 1. Live sales and change for this open box
+          const liveSalesRes = await pool.query(`
+            SELECT 
+              COALESCE(SUM(CASE WHEN v.factura_nro LIKE 'DEV-%' THEN -v.total_usd ELSE v.total_usd END), 0) as venta_total_usd,
+              COALESCE(SUM(CASE WHEN v.factura_nro LIKE 'DEV-%' THEN -v.total_ves ELSE v.total_ves END), 0) as venta_total_ves,
+              COALESCE(SUM(v.vuelto_usd), 0) as vuelto_usd,
+              COALESCE(SUM(v.vuelto_ves), 0) as vuelto_ves,
+              COALESCE(SUM(v.descuento_usd), 0) as descuentos_usd
+            FROM Ventas v
+            WHERE v.caja_id = $1 OR (v.caja_id IS NULL AND v.fecha >= $2 AND v.usuario_id = $3)
+          `, [openR.id, openR.fecha_apertura, openR.usuario_id]);
+
+          const sRow = liveSalesRes.rows[0] || {};
+          const liveVentaTotal = parseFloat(sRow.venta_total_usd || 0);
+          const liveVentaTotalVes = parseFloat(sRow.venta_total_ves || 0);
+          const liveVueltosUsd = parseFloat(sRow.vuelto_usd || 0);
+          const liveVueltosVes = parseFloat(sRow.vuelto_ves || 0);
+          const liveDescuentosUsd = parseFloat(sRow.descuentos_usd || 0);
+
+          // 2. Payments breakdown for this open box
+          const livePaymentsRes = await pool.query(`
+            SELECT 
+              LOWER(pv.metodo_pago) as metodo,
+              COALESCE(SUM(pv.monto_entregado_usd), 0) as total_usd,
+              COALESCE(SUM(pv.monto_entregado_ves), 0) as total_ves
+            FROM Pagos_Venta pv
+            JOIN Ventas v ON pv.venta_id = v.id
+            WHERE v.caja_id = $1 OR (v.caja_id IS NULL AND v.fecha >= $2 AND v.usuario_id = $3)
+            GROUP BY LOWER(pv.metodo_pago)
+          `, [openR.id, openR.fecha_apertura, openR.usuario_id]);
+
+          let liveVentasEfectivoUsd = 0;
+          let liveVentasEfectivoVes = 0;
+          let livePagosPagoMovilVes = 0;
+          let livePagosPuntoVes = 0;
+          let livePagosBiopagoVes = 0;
+          let livePagosTransferenciaVes = 0;
+          let livePagosTarjetaUsd = 0;
+          let livePagosZelleUsd = 0;
+          let livePagosBinanceUsd = 0;
+          let livePagosPayPalUsd = 0;
+          let livePagosCreditoUsd = 0;
+
+          for (const p of livePaymentsRes.rows) {
+            const m = (p.metodo || '').toLowerCase().trim();
+            const valUsd = parseFloat(p.total_usd || 0);
+            const valVes = parseFloat(p.total_ves || 0);
+            if (m === 'efectivo$' || m.includes('efectivo$') || m.includes('efectivousd') || m.includes('efectivo_usd') || m.includes('dolares') || (m.includes('efectivo') && !m.includes('bs'))) {
+              liveVentasEfectivoUsd += valUsd;
+            } else if (m === 'efectivobs' || m.includes('efectivobs') || m.includes('efectivo_ves') || m.includes('bolivares') || (m.includes('efectivo') && m.includes('bs'))) {
+              liveVentasEfectivoVes += valVes;
+            } else if (m.includes('pagomovil')) {
+              livePagosPagoMovilVes += valVes;
+            } else if (m.includes('punto') || m.includes('tarjetabs') || m.includes('tarjeta')) {
+              livePagosPuntoVes += valVes;
+            } else if (m.includes('biopago')) {
+              livePagosBiopagoVes += valVes;
+            } else if (m.includes('transferencia')) {
+              livePagosTransferenciaVes += valVes;
+            } else if (m.includes('zelle')) {
+              livePagosZelleUsd += valUsd;
+            } else if (m.includes('binance')) {
+              livePagosBinanceUsd += valUsd;
+            } else if (m.includes('paypal')) {
+              livePagosPayPalUsd += valUsd;
+            } else if (m.includes('credito')) {
+              livePagosCreditoUsd += valUsd;
+            }
+          }
+
+          // Fallback: if liveVentaTotal > 0 and no electronic payments were recorded, all non-BS is cash USD
+          if (liveVentasEfectivoUsd === 0 && liveVentaTotal > 0 && livePagosZelleUsd === 0 && livePagosBinanceUsd === 0 && livePagosPayPalUsd === 0 && livePagosCreditoUsd === 0 && livePagosPagoMovilVes === 0 && livePagosPuntoVes === 0 && livePagosBiopagoVes === 0 && liveVentasEfectivoVes === 0) {
+            liveVentasEfectivoUsd = liveVentaTotal;
+          }
+
+          // 3. Movements (entradas / salidas)
+          const liveMovsRes = await pool.query(`
+            SELECT tipo, COALESCE(SUM(monto_usd), 0) as total_usd, COALESCE(SUM(monto_ves), 0) as total_ves
+            FROM Movimientos_Caja
+            WHERE caja_id = $1 OR (caja_id IS NULL AND fecha >= $2 AND usuario_id = $3)
+            GROUP BY tipo
+          `, [openR.id, openR.fecha_apertura, openR.usuario_id]).catch(() => ({ rows: [] }));
+
+          let liveEntradaUsd = 0, liveEntradaVes = 0, liveSalidaUsd = 0, liveSalidaVes = 0;
+          for (const mov of (liveMovsRes.rows || [])) {
+            if (mov.tipo === 'ENTRADA') {
+              liveEntradaUsd += parseFloat(mov.total_usd || 0);
+              liveEntradaVes += parseFloat(mov.total_ves || 0);
+            } else if (mov.tipo === 'SALIDA') {
+              liveSalidaUsd += parseFloat(mov.total_usd || 0);
+              liveSalidaVes += parseFloat(mov.total_ves || 0);
+            }
+          }
+
+          // 4. Live profit from sold items
+          const liveProfitRes = await pool.query(`
+            SELECT 
+              COALESCE(SUM(
+                CASE WHEN v.factura_nro LIKE 'DEV-%' THEN -1 ELSE 1 END * (
+                  (vd.cantidad * vd.precio_unitario_usd) - (vd.cantidad * COALESCE(p.precio_costo_usd, 0))
+                )
+              ), 0) as utilidad_bruta,
+              COALESCE(SUM(vd.cantidad * COALESCE(p.precio_costo_usd, 0)), 0) as costo_total
+            FROM Ventas_Detalle vd
+            JOIN Ventas v ON vd.venta_id = v.id
+            LEFT JOIN Productos p ON vd.producto_id = p.id
+            WHERE v.caja_id = $1 OR (v.caja_id IS NULL AND v.fecha >= $2 AND v.usuario_id = $3)
+          `, [openR.id, openR.fecha_apertura, openR.usuario_id]).catch(() => ({ rows: [{ utilidad_bruta: 0, costo_total: 0 }] }));
+
+          const profitRow = liveProfitRes.rows[0] || {};
+          const liveUtilidad = parseFloat(profitRow.utilidad_bruta || 0);
+          const liveCosto = parseFloat(profitRow.costo_total || 0);
+
+          const apUsd = parseFloat(openR.monto_apertura_usd || 0);
+          const apVes = parseFloat(openR.monto_apertura_ves || 0);
+          const liveExpectedUsd = Math.max(0, apUsd + liveVentasEfectivoUsd + liveEntradaUsd - liveSalidaUsd);
+          const liveExpectedVes = Math.max(0, apVes + liveVentasEfectivoVes + liveEntradaVes - liveSalidaVes);
+
+          liveDataByCajaId[openR.id] = {
+            ventaTotalUsd: liveVentaTotal,
+            ventasTotalesUsd: liveVentaTotal,
+            ventaTotalVes: liveVentaTotalVes,
+            ventaBrutaUsd: liveVentaTotal + liveDescuentosUsd,
+            descuentosUsd: liveDescuentosUsd,
+            utilidadUsd: liveUtilidad,
+            costoTotalUsd: liveCosto,
+            expectedUsd: liveExpectedUsd,
+            expectedVes: liveExpectedVes,
+            dineroEnCajaExpected: liveExpectedUsd,
+            realUsd: liveExpectedUsd,
+            realVes: liveExpectedVes,
+            ventasEfectivoUsd: liveVentasEfectivoUsd,
+            ventasEfectivoVes: liveVentasEfectivoVes,
+            vueltosEntregadosUsd: liveVueltosUsd,
+            vueltosEntregadosVes: liveVueltosVes,
+            entradaEfectivoUsd: liveEntradaUsd,
+            entradaEfectivoVes: liveEntradaVes,
+            salidaEfectivoUsd: liveSalidaUsd,
+            salidaEfectivoVes: liveSalidaVes,
+            pagosEfectivoUsd: liveVentasEfectivoUsd,
+            pagosEfectivoBsVes: liveVentasEfectivoVes,
+            pagosPagoMovilVes: livePagosPagoMovilVes,
+            pagosPuntoVes: livePagosPuntoVes,
+            pagosBiopagoVes: livePagosBiopagoVes,
+            pagosTransferenciaVes: livePagosTransferenciaVes,
+            pagosTarjetaUsd: livePagosTarjetaUsd,
+            pagosZelleUsd: livePagosZelleUsd,
+            pagosBinanceUsd: livePagosBinanceUsd,
+            pagosPayPalUsd: livePagosPayPalUsd,
+            pagosCreditoUsd: livePagosCreditoUsd,
+          };
+        } catch (liveErr) {
+          console.error('Error calculando live data para caja abierta', openR.id, liveErr.message);
+        }
+      }
+
       return res.rows.map(r => {
         let parsedDetails = {};
         if (r.detalles_json) {
@@ -3476,21 +3643,24 @@ export async function getCierres() {
             console.error('Error parsing detalles_json', e);
           }
         }
+        const isOpenShift = r.estatus === 'Abierta';
+        const live = isOpenShift ? (liveDataByCajaId[r.id] || {}) : {};
+
         const fApertura = r.fecha_apertura ? getLocalISODateString(r.fecha_apertura) : getLocalISODateString();
-        const fCierre = r.estatus === 'Abierta' || !r.fecha_cierre ? null : getLocalISODateString(r.fecha_cierre);
+        const fCierre = isOpenShift || !r.fecha_cierre ? null : getLocalISODateString(r.fecha_cierre);
 
         const cajeroName = parsedDetails.usuario || r.usuario || 'SISTEMA';
 
         const sqlVueltosUsd = parseFloat(r.vuelto_entregado_usd || '0');
         const sqlVueltosVes = parseFloat(r.vuelto_entregado_ves || '0');
 
-        const finalVueltosUsd = sqlVueltosUsd > 0 ? sqlVueltosUsd : (parsedDetails.vueltosEntregadosUsd ?? parsedDetails.vueltosUsd ?? parsedDetails.vueltosEntregadosUSD ?? parsedDetails.vueltoUSD ?? 0);
-        const finalVueltosVes = sqlVueltosVes > 0 ? sqlVueltosVes : (parsedDetails.vueltosEntregadosVes ?? parsedDetails.vueltosVes ?? parsedDetails.vueltosEntregadosVES ?? parsedDetails.vueltoVES ?? 0);
+        const finalVueltosUsd = isOpenShift ? (live.vueltosEntregadosUsd ?? 0) : (sqlVueltosUsd > 0 ? sqlVueltosUsd : (parsedDetails.vueltosEntregadosUsd ?? parsedDetails.vueltosUsd ?? parsedDetails.vueltosEntregadosUSD ?? parsedDetails.vueltoUSD ?? 0));
+        const finalVueltosVes = isOpenShift ? (live.vueltosEntregadosVes ?? 0) : (sqlVueltosVes > 0 ? sqlVueltosVes : (parsedDetails.vueltosEntregadosVes ?? parsedDetails.vueltosVes ?? parsedDetails.vueltosEntregadosVES ?? parsedDetails.vueltoVES ?? 0));
 
         const sqlVentasUsd = parseFloat(r.ventas_efectivo_usd || '0');
         const sqlVentasVes = parseFloat(r.ventas_efectivo_ves || '0');
-        const finalVentasEfectivoUsd = sqlVentasUsd > 0 ? sqlVentasUsd : (parsedDetails.ventasEfectivoUsd ?? 0);
-        const finalVentasEfectivoVes = sqlVentasVes > 0 ? sqlVentasVes : (parsedDetails.ventasEfectivoVes ?? 0);
+        const finalVentasEfectivoUsd = isOpenShift ? (live.ventasEfectivoUsd ?? 0) : (sqlVentasUsd > 0 ? sqlVentasUsd : (parsedDetails.ventasEfectivoUsd ?? 0));
+        const finalVentasEfectivoVes = isOpenShift ? (live.ventasEfectivoVes ?? 0) : (sqlVentasVes > 0 ? sqlVentasVes : (parsedDetails.ventasEfectivoVes ?? 0));
 
         const sqlAbonosUsd = parseFloat(r.abono_clientes_usd || '0');
         const sqlAbonosVes = parseFloat(r.abono_clientes_ves || '0');
@@ -3499,35 +3669,50 @@ export async function getCierres() {
 
         const sqlEntradasUsd = parseFloat(r.entrada_efectivo_usd || '0');
         const sqlEntradasVes = parseFloat(r.entrada_efectivo_ves || '0');
-        const finalEntradasUsd = sqlEntradasUsd > 0 ? sqlEntradasUsd : (parsedDetails.entradaEfectivoUsd ?? 0);
-        const finalEntradasVes = sqlEntradasVes > 0 ? sqlEntradasVes : (parsedDetails.entradaEfectivoVes ?? 0);
+        const finalEntradasUsd = isOpenShift ? (live.entradaEfectivoUsd ?? 0) : (sqlEntradasUsd > 0 ? sqlEntradasUsd : (parsedDetails.entradaEfectivoUsd ?? 0));
+        const finalEntradasVes = isOpenShift ? (live.entradaEfectivoVes ?? 0) : (sqlEntradasVes > 0 ? sqlEntradasVes : (parsedDetails.entradaEfectivoVes ?? 0));
 
         const sqlSalidasUsd = parseFloat(r.salida_efectivo_usd || '0');
         const sqlSalidasVes = parseFloat(r.salida_efectivo_ves || '0');
-        const finalSalidasUsd = sqlSalidasUsd > 0 ? sqlSalidasUsd : (parsedDetails.salidaEfectivoUsd ?? 0);
-        const finalSalidasVes = sqlSalidasVes > 0 ? sqlSalidasVes : (parsedDetails.salidaEfectivoVes ?? 0);
+        const finalSalidasUsd = isOpenShift ? (live.salidaEfectivoUsd ?? 0) : (sqlSalidasUsd > 0 ? sqlSalidasUsd : (parsedDetails.salidaEfectivoUsd ?? 0));
+        const finalSalidasVes = isOpenShift ? (live.salidaEfectivoVes ?? 0) : (sqlSalidasVes > 0 ? sqlSalidasVes : (parsedDetails.salidaEfectivoVes ?? 0));
 
         const sqlDevUsd = parseFloat(r.devolucion_efectivo_usd || '0');
         const sqlDevVes = parseFloat(r.devolucion_efectivo_ves || '0');
         const finalDevUsd = sqlDevUsd > 0 ? sqlDevUsd : (parsedDetails.devolucionEfectivoUsd ?? 0);
         const finalDevVes = sqlDevVes > 0 ? sqlDevVes : (parsedDetails.devolucionEfectivoVes ?? 0);
 
+        const aperturaUsdVal = parseFloat(r.monto_apertura_usd || 0);
+        const aperturaVesVal = parseFloat(r.monto_apertura_ves || 0);
+
+        const ventaTotalUsdVal = isOpenShift ? (live.ventaTotalUsd ?? 0) : (r.venta_total_usd ? parseFloat(r.venta_total_usd) : (parsedDetails.ventaTotalUsd ?? 0));
+        const utilidadUsdVal = isOpenShift ? (live.utilidadUsd ?? 0) : (r.utilidad_usd ? parseFloat(r.utilidad_usd) : (parsedDetails.utilidadUsd ?? 0));
+
+        const expectedUsdVal = isOpenShift ? (live.expectedUsd ?? aperturaUsdVal) : (r.monto_cierre_esperado_usd ? parseFloat(r.monto_cierre_esperado_usd) : 0);
+        const expectedVesVal = isOpenShift ? (live.expectedVes ?? aperturaVesVal) : (r.monto_cierre_esperado_ves ? parseFloat(r.monto_cierre_esperado_ves) : 0);
+
+        const realUsdVal = isOpenShift ? expectedUsdVal : (r.monto_cierre_real_usd ? parseFloat(r.monto_cierre_real_usd) : 0);
+        const realVesVal = isOpenShift ? expectedVesVal : (r.monto_cierre_real_ves ? parseFloat(r.monto_cierre_real_ves) : 0);
+
         return {
           ...parsedDetails,
+          ...live,
           id: r.id,
           usuarioId: r.usuario_id || parsedDetails.usuarioId,
           timestamp: (parsedDetails.id && typeof parsedDetails.id === 'number' && parsedDetails.id > 1000000000000) ? parsedDetails.id : undefined,
           fechaApertura: fApertura,
           fechaCierre: fCierre,
           fecha: fCierre || fApertura,
-          aperturaUsd: parseFloat(r.monto_apertura_usd || 0),
-          aperturaVes: parseFloat(r.monto_apertura_ves || 0),
-          realUsd: r.monto_cierre_real_usd ? parseFloat(r.monto_cierre_real_usd) : 0,
-          realVes: r.monto_cierre_real_ves ? parseFloat(r.monto_cierre_real_ves) : 0,
-          expectedUsd: r.monto_cierre_esperado_usd ? parseFloat(r.monto_cierre_esperado_usd) : 0,
-          expectedVes: r.monto_cierre_esperado_ves ? parseFloat(r.monto_cierre_esperado_ves) : 0,
-          ventaTotalUsd: r.venta_total_usd ? parseFloat(r.venta_total_usd) : 0,
-          utilidadUsd: r.utilidad_usd ? parseFloat(r.utilidad_usd) : 0,
+          aperturaUsd: aperturaUsdVal,
+          aperturaVes: aperturaVesVal,
+          realUsd: realUsdVal,
+          realVes: realVesVal,
+          expectedUsd: expectedUsdVal,
+          expectedVes: expectedVesVal,
+          dineroEnCajaExpected: expectedUsdVal,
+          ventaTotalUsd: ventaTotalUsdVal,
+          ventasTotalesUsd: ventaTotalUsdVal,
+          utilidadUsd: utilidadUsdVal,
           vueltosEntregadosUsd: finalVueltosUsd,
           vueltosEntregadosVes: finalVueltosVes,
           ventasEfectivoUsd: finalVentasEfectivoUsd,
@@ -3542,7 +3727,7 @@ export async function getCierres() {
           devolucionEfectivoVes: finalDevVes,
           usuario: cajeroName,
           terminal: r.terminal || parsedDetails.terminal || 'CAJA_PRINCIPAL',
-          status: r.estatus === 'Abierta' ? 'Abierta' : 'Cerrada',
+          status: isOpenShift ? 'Abierta' : 'Cerrada',
         };
       });
     } catch (err) {

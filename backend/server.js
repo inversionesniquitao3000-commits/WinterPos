@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-// WinterPos API Server - Margin & Profit Support Active v1.1.2
+// WinterPos API Server - Margin & Profit Support Active v1.1.3
 import os from 'os';
 import {
   getCompanyConfig, saveCompanyConfig, getUsers, getProducts, saveProduct,

@@ -2274,8 +2274,44 @@ export default function App() {
     vueltoUSD: number;
     vueltoVES: number;
   }) => {
-    // 1. Increment/Decrement products stock and log Kardex (FAC- decrements, DEV- increments)
     const isDev = sale.factura_nro.startsWith('DEV-');
+
+    const tempSaleObj: Sale = {
+      ...sale,
+      fecha: getLocalISODateString(),
+      usuario: currentUser?.nombre || 'SISTEMA',
+      terminal: terminalName
+    };
+
+    // 1. Send to server FIRST — server returns the definitive factura_nro from seq_factura
+    let saved: any;
+    try {
+      const res = await fetch(getApiUrl('/sales'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(tempSaleObj)
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        const errMsg = errData.error || `Error HTTP ${res.status} al guardar la venta en el servidor.`;
+        console.error('❌ Error al registrar venta en servidor:', errMsg);
+        throw new Error(errMsg);
+      }
+
+      saved = await res.json();
+    } catch (err: any) {
+      console.error('❌ Fallo de red/servidor al registrar venta:', err.message);
+      throw err;
+    }
+
+    const confirmedSale: Sale = {
+      ...tempSaleObj,
+      factura_nro: (saved && saved.factura_nro) ? saved.factura_nro : tempSaleObj.factura_nro,
+      id: saved?.id ?? tempSaleObj.id
+    };
+
+    // 2. ONLY ONCE SERVER CONFIRMED: Update local inventory and Kardex
     setProducts(prevProds =>
       prevProds.map(p => {
         const item = sale.items.find(i => (i.product?.id === p.id || i.product?.barcode === p.barcode));
@@ -2298,7 +2334,7 @@ export default function App() {
             qty: stockDelta,
             stock_anterior: p.stock_actual,
             stock_posterior: nextStock,
-            motivo: isDev ? `Devolución Facturada: ${sale.factura_nro}` : `Venta Facturada: ${sale.factura_nro}`,
+            motivo: isDev ? `Devolución Facturada: ${confirmedSale.factura_nro}` : `Venta Facturada: ${confirmedSale.factura_nro}`,
             usuario: currentUser?.nombre || 'SISTEMA'
           };
           setMovements(prevMovs => [...prevMovs, newMov]);
@@ -2309,7 +2345,7 @@ export default function App() {
       })
     );
 
-    // 2. Increment/Decrement client pending balance if Credit was used (supports credit sales and credit returns)
+    // 3. Increment/Decrement client pending balance if Credit was used
     const creditPayment = sale.pagos?.find(p => p.metodo === 'CreditoCliente');
     if (creditPayment && creditPayment.montoUSD !== 0) {
       setClients(prevClients =>
@@ -2328,75 +2364,32 @@ export default function App() {
       );
     }
 
-    // 3. Log sale to processed list with a temporary invoice number
-    const tempSaleObj: Sale = {
-      ...sale,
-      fecha: getLocalISODateString(),
-      usuario: currentUser?.nombre || 'SISTEMA',
-      terminal: terminalName
-    };
-    setSales(prev => [...prev, tempSaleObj]);
-    setShiftSales(prev => [...prev, tempSaleObj]);
+    // 4. Update sales list and shift sales with the CONFIRMED sale (purging any pending/phantom items)
+    setSales(prev => [...prev.filter(s => s.factura_nro !== 'FAC-PENDIENTE'), confirmedSale]);
+    setShiftSales(prev => [...prev.filter(s => s.factura_nro !== 'FAC-PENDIENTE'), confirmedSale]);
 
-    // 4. Increment cash counters
+    // 5. Increment cash drawer counters
     let cashUSDReceived = 0;
     let cashVESReceived = 0;
-
     sale.pagos.forEach(p => {
-      if (p.metodo === 'Efectivo$') cashUSDReceived += p.monto;
-      if (p.metodo === 'EfectivoBs') cashVESReceived += p.monto;
+      const m = (p.metodo || '').toLowerCase().trim();
+      if (m === 'efectivo$' || m.includes('efectivo$') || m.includes('efectivousd') || (m.includes('efectivo') && !m.includes('bs'))) {
+        cashUSDReceived += (p.montoUSD || p.monto || 0);
+      }
+      if (m === 'efectivobs' || m.includes('efectivobs') || (m.includes('efectivo') && m.includes('bs'))) {
+        cashVESReceived += (p.montoVES || p.monto || 0);
+      }
     });
 
     const nextVentasUsd = cajaVentasUsd + cashUSDReceived - sale.vueltoUSD;
     const nextVentasVes = cajaVentasVes + cashVESReceived - sale.vueltoVES;
-
     setCajaVentasUsd(nextVentasUsd);
     setCajaVentasVes(nextVentasVes);
-
     localStorage.setItem('pos_ventas_usd', nextVentasUsd.toString());
     localStorage.setItem('pos_ventas_ves', nextVentasVes.toString());
 
-    // 5. Send to server — server returns the definitive factura_nro from seq_factura
-    try {
-      const res = await fetch(getApiUrl('/sales'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(tempSaleObj)
-      });
-
-      if (!res.ok) {
-        // Server returned error (HTTP 500) — ROLLBACK local state to avoid phantom sale
-        const errData = await res.json().catch(() => ({}));
-        const errMsg = errData.error || `Error HTTP ${res.status} al guardar la venta en el servidor.`;
-        console.error('❌ Error al registrar venta en servidor:', errMsg);
-
-        // Revert optimistic local state updates
-        setSales(prev => prev.filter(s => s !== tempSaleObj));
-        setShiftSales(prev => prev.filter(s => s !== tempSaleObj));
-        setCajaVentasUsd(cajaVentasUsd);
-        setCajaVentasVes(cajaVentasVes);
-        localStorage.setItem('pos_ventas_usd', cajaVentasUsd.toString());
-        localStorage.setItem('pos_ventas_ves', cajaVentasVes.toString());
-
-        throw new Error(errMsg);
-      }
-
-      const saved = await res.json();
-      if (saved && saved.factura_nro && saved.factura_nro !== tempSaleObj.factura_nro) {
-        // Update state with the confirmed server-assigned invoice number
-        const confirmedSale: Sale = { ...tempSaleObj, factura_nro: saved.factura_nro, id: saved.id };
-        setSales(prev => prev.map(s => s === tempSaleObj ? confirmedSale : s));
-        setShiftSales(prev => prev.map(s => s === tempSaleObj ? confirmedSale : s));
-        // Refresh the invoice reference display with the new last number
-        fetchLastInvoice();
-        return confirmedSale; // Return confirmed sale so CajaPOS can print the real number
-      }
-      fetchLastInvoice();
-      return tempSaleObj;
-    } catch (err) {
-      // Re-throw so CajaPOS can display the error alert to the operator
-      throw err;
-    }
+    fetchLastInvoice();
+    return confirmedSale;
   };
 
   const confirmLogoutUser = () => {

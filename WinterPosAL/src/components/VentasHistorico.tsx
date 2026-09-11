@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Sale, CierreCaja, User } from '../types';
 import { History, Printer, ShieldAlert, ShoppingCart, Eye, Edit, Trash2, Search, ChevronUp, ChevronDown, ChevronsUpDown, CheckCircle2, FileDown, MessageCircle, FileText, BarChart3 } from 'lucide-react';
 import { formatNumberToWordsUSD, getLocalDateStr, formatBs, printCierreTicketReport } from '../utils';
@@ -435,7 +435,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
 
   // Filter sales list by date range and document type if enabled
   const filteredSales = useMemo(() => {
-    let list = sales;
+    let list = (sales || []).filter(s => s && s.factura_nro && s.factura_nro !== 'FAC-PENDIENTE');
     if (filterEnabled) {
       list = list.filter(s => {
         if (!s.fecha) return false;
@@ -755,23 +755,36 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
     });
   }, [filteredCierres, cierresSearchTerm, cierresSortField, cierresSortDir]);
 
+  const getShiftSalesForCierre = useCallback((c: any) => {
+    if (!c || !sales || sales.length === 0) return [];
+    const isOpen = c.status === 'Abierta' || !c.fechaCierre;
+    const cUser = c.usuario ? c.usuario.toLowerCase().trim() : '';
+    const fAperturaMs = c.fechaApertura ? new Date(c.fechaApertura).getTime() : 0;
+    const fCierreMs = (!isOpen && (c.fechaCierre || c.fecha)) ? new Date(c.fechaCierre || c.fecha).getTime() : Date.now();
+    const startBoundary = fAperturaMs > 0 ? fAperturaMs - 120000 : 0;
+    const endBoundary = isOpen ? (Date.now() + 86400000) : (fCierreMs > 0 ? fCierreMs + 120000 : Date.now());
+
+    return sales.filter(s => {
+      if (s.caja_id && c.id && Number(s.caja_id) === Number(c.id)) {
+        return true;
+      }
+      if (cUser && s.usuario && s.usuario.toLowerCase().trim() !== cUser) {
+        if (c.usuarioId && s.usuario_id && String(c.usuarioId) !== String(s.usuario_id)) {
+          return false;
+        }
+      }
+      const sTime = new Date(s.fecha).getTime();
+      if (isNaN(sTime)) return true;
+      return sTime >= startBoundary && sTime <= endBoundary;
+    });
+  }, [sales]);
+
   const filteredCierresTotals = useMemo(() => {
     let totalUtilidadSinIVA = 0;
     let totalUtilidadConIVA = 0;
     
     finalFilteredCierres.forEach(c => {
-      const cUser = c.usuario ? c.usuario.toLowerCase().trim() : '';
-      const fAperturaMs = c.fechaApertura ? new Date(c.fechaApertura).getTime() : 0;
-      const fCierreMs = (c.fechaCierre || c.fecha) ? new Date(c.fechaCierre || c.fecha).getTime() : Date.now();
-
-      const shiftSales = (sales || []).filter(s => {
-        if (cUser && s.usuario && s.usuario.toLowerCase().trim() !== cUser) return false;
-        const sTime = new Date(s.fecha).getTime();
-        if (isNaN(sTime)) return true;
-        const startBoundary = fAperturaMs > 0 ? fAperturaMs - 120000 : 0;
-        const endBoundary = fCierreMs > 0 ? fCierreMs + 120000 : Date.now();
-        return sTime >= startBoundary && sTime <= endBoundary;
-      });
+      const shiftSales = getShiftSalesForCierre(c);
 
       let cSinIVA = 0;
       let cConIVA = 0;
@@ -2484,56 +2497,79 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                       const dineroEnCajaExpected = c.dineroEnCajaExpected ?? (c as any).expectedUsd ?? 0;
                       const realUsd = c.realUsd ?? 0;
                       const realVes = c.realVes ?? 0;
-                      const diffUsd = realUsd - dineroEnCajaExpected;
+                      const isOpen = c.status === 'Abierta' || !c.fechaCierre;
                       const aperturaUsd = c.aperturaUsd ?? 0;
                       const aperturaVes = c.aperturaVes ?? 0;
-                      const ventaTotalUsd = c.ventaTotalUsd ?? 0;
+                      const shiftSales = getShiftSalesForCierre(c);
+
+                      const liveVentasTotal = shiftSales.reduce((acc, s) => {
+                        const isDev = s.factura_nro?.startsWith('DEV-');
+                        return acc + (isDev ? -(s.totalUSD || 0) : (s.totalUSD || 0));
+                      }, 0);
+
+                      const effectiveVentaTotalUsd = (isOpen && liveVentasTotal > 0) ? liveVentasTotal : (c.ventaTotalUsd ?? 0);
+
+                      let liveCashUsd = 0;
+                      let liveCashVes = 0;
+                      shiftSales.forEach(s => {
+                        const isDev = s.factura_nro?.startsWith('DEV-');
+                        const mult = isDev ? -1 : 1;
+                        if (!s.pagos || s.pagos.length === 0) {
+                          liveCashUsd += (s.totalUSD || 0) * mult;
+                        } else {
+                          s.pagos.forEach((p: any) => {
+                            const m = (p.metodo || '').toLowerCase().trim();
+                            const valUsd = parseFloat(p.montoUSD || p.monto || 0);
+                            const valVes = parseFloat(p.montoVES || 0);
+                            if (m === 'efectivo$' || m.includes('efectivo$') || m.includes('efectivousd') || m.includes('efectivo_usd') || m.includes('dolares') || (m.includes('efectivo') && !m.includes('bs'))) {
+                              liveCashUsd += valUsd * mult;
+                            } else if (m === 'efectivobs' || m.includes('efectivobs') || m.includes('efectivo_ves') || m.includes('bolivares') || (m.includes('efectivo') && m.includes('bs'))) {
+                              liveCashVes += (valVes || valUsd * (s.tasa_cambio || 1)) * mult;
+                            }
+                          });
+                        }
+                      });
+
+                      const effectiveDineroExpectedUsd = isOpen
+                        ? ((c.dineroEnCajaExpected && c.dineroEnCajaExpected > 0) ? c.dineroEnCajaExpected : Math.max(0, aperturaUsd + liveCashUsd + (c.abonoClientesUsd || 0) + (c.entradaEfectivoUsd || 0) - (c.salidaEfectivoUsd || 0)))
+                        : (c.dineroEnCajaExpected ?? (c as any).expectedUsd ?? 0);
+
+                      const effectiveExpectedVes = isOpen
+                        ? ((c.expectedVes && c.expectedVes > 0) ? c.expectedVes : Math.max(0, aperturaVes + liveCashVes + (c.abonoClientesVes || 0) + (c.entradaEfectivoVes || 0) - (c.salidaEfectivoVes || 0)))
+                        : (c.expectedVes ?? 0);
+
+                      const effectiveRealUsd = isOpen ? effectiveDineroExpectedUsd : (c.realUsd ?? 0);
+                      const effectiveRealVes = isOpen ? effectiveExpectedVes : (c.realVes ?? 0);
+                      const diffUsd = isOpen ? 0 : (effectiveRealUsd - effectiveDineroExpectedUsd);
+
                       let rowUtilidadSinIVA = 0;
                       let rowUtilidadConIVA = 0;
 
-                      if (sales && sales.length > 0) {
-                        const cUser = c.usuario ? c.usuario.toLowerCase().trim() : '';
-                        const fAperturaMs = c.fechaApertura ? new Date(c.fechaApertura).getTime() : 0;
-                        const fCierreMs = (c.fechaCierre || c.fecha) ? new Date(c.fechaCierre || c.fecha).getTime() : Date.now();
+                      if (shiftSales.length > 0) {
+                        shiftSales.forEach(s => {
+                          const isDev = s.factura_nro?.startsWith('DEV-');
+                          const mult = isDev ? -1 : 1;
+                          let saleCost = 0;
+                          let saleVentaSinIVA = 0;
 
-                        const shiftSales = sales.filter(s => {
-                          if (cUser && s.usuario && s.usuario.toLowerCase().trim() !== cUser) return false;
-                          const sTime = new Date(s.fecha).getTime();
-                          if (isNaN(sTime)) return true;
-                          const startBoundary = fAperturaMs > 0 ? fAperturaMs - 120000 : 0;
-                          const endBoundary = fCierreMs > 0 ? fCierreMs + 120000 : Date.now();
-                          return sTime >= startBoundary && sTime <= endBoundary;
-                        });
+                          (s.items || []).forEach(item => {
+                            const itemCost = item.product?.precio_costo_usd ?? (item as any)?.precio_costo_usd ?? (item as any)?.costo_usd ?? 0;
+                            const qty = typeof item.qty === 'number' ? item.qty : (parseFloat(String(item.qty)) || 0);
+                            const unitPrice = item.priceUSD ?? (item as any)?.precio_unitario_usd ?? (qty > 0 ? (item.totalUSD ?? (item as any)?.total_fila_usd ?? 0) / qty : 0);
+                            const lineSale = unitPrice * qty;
+                            const isExempt = item.product?.exento_impuesto === true || (item.product?.porcentaje_impuesto !== undefined && item.product?.porcentaje_impuesto === 0) || (item as any)?.exento_impuesto === true || ((item.product?.description || '').toLowerCase().includes('harina pan'));
+                            const lineSaleSinIVA = isExempt ? lineSale : (lineSale / 1.16);
 
-                        if (shiftSales.length > 0) {
-                          shiftSales.forEach(s => {
-                            const isDev = s.factura_nro?.startsWith('DEV-');
-                            const mult = isDev ? -1 : 1;
-                            let saleCost = 0;
-                            let saleVentaSinIVA = 0;
-
-                            (s.items || []).forEach(item => {
-                              const itemCost = item.product?.precio_costo_usd ?? (item as any)?.precio_costo_usd ?? (item as any)?.costo_usd ?? 0;
-                              const qty = typeof item.qty === 'number' ? item.qty : (parseFloat(String(item.qty)) || 0);
-                              const unitPrice = item.priceUSD ?? (item as any)?.precio_unitario_usd ?? (qty > 0 ? (item.totalUSD ?? (item as any)?.total_fila_usd ?? 0) / qty : 0);
-                              const lineSale = unitPrice * qty;
-                              const isExempt = item.product?.exento_impuesto === true || (item.product?.porcentaje_impuesto !== undefined && item.product?.porcentaje_impuesto === 0) || (item as any)?.exento_impuesto === true || ((item.product?.description || '').toLowerCase().includes('harina pan'));
-                              const lineSaleSinIVA = isExempt ? lineSale : (lineSale / 1.16);
-
-                              saleCost += itemCost * qty;
-                              saleVentaSinIVA += lineSaleSinIVA;
-                            });
-
-                            const totalUSD = Math.abs(s.totalUSD || 0);
-                            rowUtilidadSinIVA += (saleVentaSinIVA - saleCost) * mult;
-                            rowUtilidadConIVA += (totalUSD - saleCost) * mult;
+                            saleCost += itemCost * qty;
+                            saleVentaSinIVA += lineSaleSinIVA;
                           });
-                        } else {
-                          rowUtilidadConIVA = ventaTotalUsd - (c.costoTotalUsd ?? 0);
-                          rowUtilidadSinIVA = typeof c.utilidadUsd === 'number' && c.utilidadUsd > 0 ? c.utilidadUsd : (rowUtilidadConIVA / 1.16);
-                        }
+
+                          const totalUSD = Math.abs(s.totalUSD || 0);
+                          rowUtilidadSinIVA += (saleVentaSinIVA - saleCost) * mult;
+                          rowUtilidadConIVA += (totalUSD - saleCost) * mult;
+                        });
                       } else {
-                        rowUtilidadConIVA = ventaTotalUsd - (c.costoTotalUsd ?? 0);
+                        rowUtilidadConIVA = effectiveVentaTotalUsd - (c.costoTotalUsd ?? 0);
                         rowUtilidadSinIVA = typeof c.utilidadUsd === 'number' && c.utilidadUsd > 0 ? c.utilidadUsd : (rowUtilidadConIVA / 1.16);
                       }
 
@@ -2580,7 +2616,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                           </td>
                           <td className="px-3 py-2.5 font-mono text-[10px] text-slate-700">{c.fechaApertura || c.fecha || 'N/A'}</td>
                           <td className="px-3 py-2.5 font-mono text-[10px]">
-                            {c.status === 'Abierta' || !c.fechaCierre ? (
+                            {isOpen ? (
                               <span className="text-amber-700 font-bold text-[9px] bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded font-sans uppercase">-- EN CURSO --</span>
                             ) : (
                               <span className="text-slate-700">{c.fechaCierre}</span>
@@ -2598,13 +2634,40 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                             <div>${aperturaUsd.toFixed(2)}</div>
                             <div className="text-[9px] text-slate-400">Bs {aperturaVes.toFixed(2)}</div>
                           </td>
-                          <td className="px-4 py-2.5 text-right font-mono font-bold">${ventaTotalUsd.toFixed(2)}</td>
-                          <td className="px-4 py-2.5 text-right font-mono text-slate-700 font-semibold">
-                            <div>${realUsd.toFixed(2)}</div>
-                            <div className="text-[9px] text-purple-650">Bs {realVes.toFixed(2)}</div>
+                          <td className="px-4 py-2.5 text-right font-mono font-bold">
+                            {isOpen ? (
+                              <div className="flex flex-col items-end">
+                                <span className="text-emerald-700">${effectiveVentaTotalUsd.toFixed(2)}</span>
+                                <span className="text-[8px] text-emerald-700 bg-emerald-100/70 border border-emerald-300/60 px-1 rounded font-sans font-black">EN VIVO</span>
+                              </div>
+                            ) : (
+                              <span>${effectiveVentaTotalUsd.toFixed(2)}</span>
+                            )}
                           </td>
-                          <td className={`px-4 py-2.5 text-right font-mono font-bold ${diffUsd >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            ${diffUsd.toFixed(2)}
+                          <td className="px-4 py-2.5 text-right font-mono text-slate-700 font-semibold">
+                            {isOpen ? (
+                              <div>
+                                <div className="text-emerald-700 font-bold">${effectiveDineroExpectedUsd.toFixed(2)}</div>
+                                <div className="text-[8px] text-slate-500 font-sans font-medium">(Gaveta esperada)</div>
+                                <div className="text-[9px] text-purple-650">Bs {effectiveExpectedVes.toFixed(2)}</div>
+                              </div>
+                            ) : (
+                              <div>
+                                <div>${effectiveRealUsd.toFixed(2)}</div>
+                                <div className="text-[9px] text-purple-650">Bs {effectiveRealVes.toFixed(2)}</div>
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono font-bold">
+                            {isOpen ? (
+                              <span className="text-amber-700 font-bold text-[9px] bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded font-sans uppercase">
+                                EN CURSO
+                              </span>
+                            ) : (
+                              <span className={diffUsd >= 0 ? 'text-green-600' : 'text-red-600'}>
+                                ${diffUsd.toFixed(2)}
+                              </span>
+                            )}
                           </td>
                           <td className="px-4 py-2.5 text-right font-mono">
                             <div className="text-emerald-700 font-black text-xs" title="Utilidad Neta Real (Sin IVA / Fiscal)">
@@ -2674,39 +2737,52 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
               ) : selectedCierreRow ? (
                 <div className="space-y-3.5">
                   {/* Selected Row Card */}
-                  <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg text-xs space-y-1.5 shadow-inner">
-                    <div className="text-[9px] text-slate-400 uppercase font-mono font-bold">CIERRE SELECCIONADO</div>
-                    <strong className="text-slate-800 font-bold block text-[13px]">{selectedCierreRow.fechaCierre || selectedCierreRow.fecha}</strong>
-                    <div className="text-slate-600 text-[11px] font-medium uppercase">
-                      Cajero: <span className="text-slate-900 font-bold">{selectedCierreRow.usuario}</span>
-                      {selectedCierreRow.terminal && (
-                        <span className="ml-1 text-[9px] bg-slate-200 text-slate-700 px-1 py-0.2 rounded font-mono">
-                          {selectedCierreRow.terminal}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex justify-between border-t border-slate-200/80 pt-1.5 mt-1 font-mono text-[11px]">
-                      <span>Venta Total:</span>
-                      <strong className="text-emerald-700 font-bold">${(selectedCierreRow.ventaTotalUsd || 0).toFixed(2)}</strong>
-                    </div>
-                  </div>
+                  {(() => {
+                    const isOpen = selectedCierreRow.status === 'Abierta' || !selectedCierreRow.fechaCierre;
+                    const shiftSales = getShiftSalesForCierre(selectedCierreRow);
+                    const liveVentasTotal = shiftSales.reduce((acc, s) => {
+                      const isDev = s.factura_nro?.startsWith('DEV-');
+                      return acc + (isDev ? -(s.totalUSD || 0) : (s.totalUSD || 0));
+                    }, 0);
+                    const effectiveVentaTotal = (isOpen && liveVentasTotal > 0) ? liveVentasTotal : (selectedCierreRow.ventaTotalUsd || 0);
+
+                    return (
+                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg text-xs space-y-1.5 shadow-inner">
+                        <div className="flex justify-between items-center">
+                          <span className="text-[9px] text-slate-400 uppercase font-mono font-bold">
+                            {isOpen ? 'TURNO EN CURSO' : 'CIERRE SELECCIONADO'}
+                          </span>
+                          {isOpen && (
+                            <span className="bg-emerald-100 text-emerald-800 text-[8.5px] font-black px-1.5 py-0.2 rounded font-sans uppercase">
+                              🟢 EN VIVO
+                            </span>
+                          )}
+                        </div>
+                        <strong className="text-slate-800 font-bold block text-[13px]">
+                          {isOpen ? (selectedCierreRow.fechaApertura || selectedCierreRow.fecha) : (selectedCierreRow.fechaCierre || selectedCierreRow.fecha)}
+                        </strong>
+                        <div className="text-slate-600 text-[11px] font-medium uppercase">
+                          Cajero: <span className="text-slate-900 font-bold">{selectedCierreRow.usuario}</span>
+                          {selectedCierreRow.terminal && (
+                            <span className="ml-1 text-[9px] bg-slate-200 text-slate-700 px-1 py-0.2 rounded font-mono">
+                              {selectedCierreRow.terminal}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex justify-between border-t border-slate-200/80 pt-1.5 mt-1 font-mono text-[11px]">
+                          <span>Venta Total:</span>
+                          <strong className="text-emerald-700 font-bold">${effectiveVentaTotal.toFixed(2)}</strong>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Action Buttons */}
                   <div className="space-y-2">
                     <button
                       onClick={() => {
                         if (!selectedCierreRow) return;
-                        const cUser = selectedCierreRow.usuario ? selectedCierreRow.usuario.toLowerCase().trim() : '';
-                        const fAperturaMs = selectedCierreRow.fechaApertura ? new Date(selectedCierreRow.fechaApertura).getTime() : 0;
-                        const fCierreMs = (selectedCierreRow.fechaCierre || selectedCierreRow.fecha) ? new Date(selectedCierreRow.fechaCierre || selectedCierreRow.fecha).getTime() : Date.now();
-                        const shiftSales = (sales || []).filter(s => {
-                          if (cUser && s.usuario && s.usuario.toLowerCase().trim() !== cUser) return false;
-                          const sTime = new Date(s.fecha).getTime();
-                          if (isNaN(sTime)) return true;
-                          const startBoundary = fAperturaMs > 0 ? fAperturaMs - 120000 : 0;
-                          const endBoundary = fCierreMs > 0 ? fCierreMs + 120000 : Date.now();
-                          return sTime >= startBoundary && sTime <= endBoundary;
-                        });
+                        const shiftSales = getShiftSalesForCierre(selectedCierreRow);
                         printCierreTicketReport(selectedCierreRow, shiftSales, companyConfig, currentUser);
                       }}
                       className="w-full bg-slate-900 hover:bg-black text-white font-bold py-2.5 px-3 rounded-lg text-xs transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
@@ -2798,12 +2874,88 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
 
       {/* DETAIL MODAL: COMPROBANTE DE CIERRE FISCAL */}
       {selectedCierre && (() => {
-        const dineroEnCajaExpected = selectedCierre.dineroEnCajaExpected ?? (selectedCierre as any).expectedUsd ?? 0;
-        const realUsd = selectedCierre.realUsd ?? 0;
-        const diffUsd = realUsd - dineroEnCajaExpected;
+        const isOpen = selectedCierre.status === 'Abierta' || !selectedCierre.fechaCierre;
+        const shiftSales = getShiftSalesForCierre(selectedCierre);
+
+        // Precalculate live sales and breakdown if open
+        const liveVentasTotalesUsd = shiftSales.reduce((acc, s) => {
+          const isDev = s.factura_nro?.startsWith('DEV-');
+          return acc + (isDev ? -(s.totalUSD || 0) : (s.totalUSD || 0));
+        }, 0);
+        const liveDescuentosUsd = shiftSales.reduce((acc, s) => acc + (s.descuento || 0), 0);
+
+        let livePagosEfectivoUsd = 0;
+        let livePagosEfectivoBsVes = 0;
+        let livePagosPagoMovilVes = 0;
+        let livePagosPuntoVes = 0;
+        let livePagosBiopagoVes = 0;
+        let livePagosTransferenciaVes = 0;
+        let livePagosTarjetaUsd = 0;
+        let livePagosZelleUsd = 0;
+        let livePagosBinanceUsd = 0;
+        let livePagosPayPalUsd = 0;
+        let livePagosCreditoUsd = 0;
+
+        shiftSales.forEach(s => {
+          const isDev = s.factura_nro?.startsWith('DEV-');
+          const mult = isDev ? -1 : 1;
+          if (!s.pagos || s.pagos.length === 0) {
+            livePagosEfectivoUsd += (s.totalUSD || 0) * mult;
+          } else {
+            s.pagos.forEach((p: any) => {
+              const m = (p.metodo || '').toLowerCase().trim();
+              const valUsd = parseFloat(p.montoUSD || p.monto || 0);
+              const valVes = parseFloat(p.montoVES || 0);
+              if (m === 'efectivo$' || m.includes('efectivo$') || m.includes('efectivousd') || m.includes('efectivo_usd') || m.includes('dolares') || (m.includes('efectivo') && !m.includes('bs'))) {
+                livePagosEfectivoUsd += valUsd * mult;
+              } else if (m === 'efectivobs' || m.includes('efectivobs') || m.includes('efectivo_ves') || m.includes('bolivares') || (m.includes('efectivo') && m.includes('bs'))) {
+                livePagosEfectivoBsVes += (valVes || valUsd * (s.tasa_cambio || 1)) * mult;
+              } else if (m.includes('pagomovil')) {
+                livePagosPagoMovilVes += (valVes || valUsd * (s.tasa_cambio || 1)) * mult;
+              } else if (m.includes('punto') || m.includes('tarjetabs') || m.includes('tarjeta')) {
+                livePagosPuntoVes += (valVes || valUsd * (s.tasa_cambio || 1)) * mult;
+              } else if (m.includes('biopago')) {
+                livePagosBiopagoVes += (valVes || valUsd * (s.tasa_cambio || 1)) * mult;
+              } else if (m.includes('transferencia')) {
+                livePagosTransferenciaVes += (valVes || valUsd * (s.tasa_cambio || 1)) * mult;
+              } else if (m.includes('zelle')) {
+                livePagosZelleUsd += valUsd * mult;
+              } else if (m.includes('binance')) {
+                livePagosBinanceUsd += valUsd * mult;
+              } else if (m.includes('paypal')) {
+                livePagosPayPalUsd += valUsd * mult;
+              } else if (m.includes('credito')) {
+                livePagosCreditoUsd += valUsd * mult;
+              }
+            });
+          }
+        });
+
         const aperturaUsd = selectedCierre.aperturaUsd ?? 0;
         const aperturaVes = selectedCierre.aperturaVes ?? 0;
-        const ventasEfectivoUsd = selectedCierre.ventasEfectivoUsd ?? 0;
+
+        const ventasTotalesUsd = (isOpen && liveVentasTotalesUsd > 0) ? liveVentasTotalesUsd : (selectedCierre.ventasTotalesUsd ?? selectedCierre.ventaTotalUsd ?? 0);
+        const ventaTotalUsd = ventasTotalesUsd;
+        const descuentosUsd = (isOpen && liveDescuentosUsd > 0) ? liveDescuentosUsd : (selectedCierre.descuentosUsd ?? 0);
+        const ventaBrutaUsd = ventasTotalesUsd + descuentosUsd;
+
+        const liveNonCashUsd = livePagosTarjetaUsd + livePagosZelleUsd + livePagosBinanceUsd + livePagosPayPalUsd + livePagosCreditoUsd + (livePagosPagoMovilVes + livePagosPuntoVes + livePagosBiopagoVes + livePagosTransferenciaVes) / (tasaDia > 0 ? tasaDia : 1);
+        if (livePagosEfectivoUsd === 0 && liveVentasTotalesUsd > 0 && liveNonCashUsd === 0 && livePagosEfectivoBsVes === 0) {
+          livePagosEfectivoUsd = liveVentasTotalesUsd;
+        }
+
+        const ventasEfectivoUsd = (isOpen && livePagosEfectivoUsd > 0) ? livePagosEfectivoUsd : (selectedCierre.ventasEfectivoUsd ?? 0);
+        const pagosEfectivoUsd = ventasEfectivoUsd;
+        const pagosEfectivoBsVes = (isOpen && livePagosEfectivoBsVes > 0) ? livePagosEfectivoBsVes : ((selectedCierre as any).pagosEfectivoBsVes ?? selectedCierre.ventasEfectivoVes ?? 0);
+        const pagosPagoMovilVes = (isOpen && livePagosPagoMovilVes > 0) ? livePagosPagoMovilVes : ((selectedCierre as any).pagosPagoMovilVes ?? 0);
+        const pagosBiopagoVes = (isOpen && livePagosBiopagoVes > 0) ? livePagosBiopagoVes : ((selectedCierre as any).pagosBiopagoVes ?? 0);
+        const pagosPuntoVes = (isOpen && livePagosPuntoVes > 0) ? livePagosPuntoVes : ((selectedCierre as any).pagosPuntoVes ?? 0);
+        const pagosTransferenciaVes = (isOpen && livePagosTransferenciaVes > 0) ? livePagosTransferenciaVes : ((selectedCierre as any).pagosTransferenciaVes ?? 0);
+        const pagosTarjetaUsd = (isOpen && livePagosTarjetaUsd > 0) ? livePagosTarjetaUsd : (selectedCierre.pagosTarjetaUsd ?? 0);
+        const pagosBinanceUsd = (isOpen && livePagosBinanceUsd > 0) ? livePagosBinanceUsd : (selectedCierre.pagosBinanceUsd ?? 0);
+        const pagosPayPalUsd = (isOpen && livePagosPayPalUsd > 0) ? livePagosPayPalUsd : (selectedCierre.pagosPayPalUsd ?? 0);
+        const pagosCreditoUsd = (isOpen && livePagosCreditoUsd > 0) ? livePagosCreditoUsd : (selectedCierre.pagosCreditoUsd ?? 0);
+
         const abonoClientesUsd = selectedCierre.abonoClientesUsd ?? (selectedCierre as any).abonosUsd ?? 0;
         const abonoClientesVes = selectedCierre.abonoClientesVes ?? (selectedCierre as any).abonosVes ?? 0;
         const abonosEfectivoUsd = selectedCierre.abonosEfectivoUsd ?? 0;
@@ -2820,46 +2972,29 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         const salidaEfectivoVes = selectedCierre.salidaEfectivoVes ?? 0;
         const devolucionEfectivoUsd = selectedCierre.devolucionEfectivoUsd ?? 0;
         const devolucionEfectivoVes = selectedCierre.devolucionEfectivoVes ?? 0;
-        
-        const ventasTotalesUsd = selectedCierre.ventasTotalesUsd ?? 0;
-        const descuentosUsd = selectedCierre.descuentosUsd ?? 0;
-        const ventaBrutaUsd = selectedCierre.ventaBrutaUsd ?? 0;
-        
-        const pagosEfectivoUsd = selectedCierre.pagosEfectivoUsd ?? 0;
-        const pagosEfectivoBsVes = (selectedCierre as any).pagosEfectivoBsVes ?? 0;
-        const pagosPagoMovilVes = (selectedCierre as any).pagosPagoMovilVes ?? 0;
-        const pagosBiopagoVes = (selectedCierre as any).pagosBiopagoVes ?? 0;
-        const pagosPuntoVes = (selectedCierre as any).pagosPuntoVes ?? 0;
-        const pagosTransferenciaVes = (selectedCierre as any).pagosTransferenciaVes ?? 0;
-        const pagosTarjetaUsd = selectedCierre.pagosTarjetaUsd ?? 0;
-        const pagosBinanceUsd = selectedCierre.pagosBinanceUsd ?? 0;
-        const pagosPayPalUsd = selectedCierre.pagosPayPalUsd ?? 0;
-        const pagosCreditoUsd = selectedCierre.pagosCreditoUsd ?? 0;
         const devolucionVentasUsd = selectedCierre.devolucionVentasUsd ?? 0;
         const devolucionVentasVes = selectedCierre.devolucionVentasVes ?? 0;
-        const ventaTotalUsd = selectedCierre.ventaTotalUsd ?? 0;
-        
-        const realVes = Math.max(0, selectedCierre.realVes ?? 0);
-        let expectedVes = Math.max(0, selectedCierre.expectedVes ?? 0);
 
-        if (expectedVes === 0) {
-          expectedVes = Math.max(0, aperturaVes + pagosEfectivoBsVes + abonoClientesVes + entradaEfectivoVes - salidaEfectivoVes - devolucionEfectivoVes);
-        }
+        const dineroEnCajaExpected = isOpen
+          ? Math.max(0, aperturaUsd + ventasEfectivoUsd + abonosEfectivoUsd + entradaEfectivoUsd - salidaEfectivoUsd - devolucionEfectivoUsd)
+          : (selectedCierre.dineroEnCajaExpected ?? (selectedCierre as any).expectedUsd ?? 0);
+
+        let expectedVes = isOpen
+          ? Math.max(0, aperturaVes + pagosEfectivoBsVes + abonoClientesVes + entradaEfectivoVes - salidaEfectivoVes - devolucionEfectivoVes)
+          : Math.max(0, selectedCierre.expectedVes ?? (aperturaVes + pagosEfectivoBsVes + abonoClientesVes + entradaEfectivoVes - salidaEfectivoVes - devolucionEfectivoVes));
+
+        const realUsd = isOpen ? dineroEnCajaExpected : (selectedCierre.realUsd ?? 0);
+        const realVes = isOpen ? expectedVes : Math.max(0, selectedCierre.realVes ?? 0);
+        const diffUsd = isOpen ? 0 : (realUsd - dineroEnCajaExpected);
 
         const rawCosto = selectedCierre.costoTotalUsd;
         let costoTotalUsd = typeof rawCosto === 'number' && rawCosto > 0 ? rawCosto : 0;
 
-        if (!costoTotalUsd && sales && sales.length > 0) {
-          const cierreDateStr = selectedCierre.fecha ? selectedCierre.fecha.split(',')[0].trim() : '';
-          const matchingSales = sales.filter(s => {
-            const sDate = s.fecha ? s.fecha.split(',')[0].trim() : '';
-            return sDate === cierreDateStr || s.fecha === selectedCierre.fecha;
-          });
-
-          costoTotalUsd = matchingSales.reduce((acc, sale) => {
+        if (!costoTotalUsd && shiftSales && shiftSales.length > 0) {
+          costoTotalUsd = shiftSales.reduce((acc, sale) => {
             const isDev = sale.factura_nro?.startsWith('DEV-');
             const mult = isDev ? -1 : 1;
-            return acc + (sale.items || []).reduce((itemAcc, item) => {
+            return acc + (sale.items || []).reduce((itemAcc: number, item: any) => {
               const itemCost = item.product?.precio_costo_usd ?? (item as any).precio_costo_usd ?? (item as any).costo_usd ?? 0;
               const qty = typeof item.qty === 'number' ? item.qty : (parseFloat(String(item.qty)) || 0);
               return itemAcc + (itemCost * qty * mult);
@@ -2925,13 +3060,8 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         };
 
         let subtotalNetoUsd = selectedCierre.subtotalNetoUsd ?? (selectedCierre as any).subtotalUsd ?? 0;
-        if (!subtotalNetoUsd && sales && sales.length > 0) {
-          const cierreDateStr = selectedCierre.fecha ? selectedCierre.fecha.split(',')[0].trim() : '';
-          const matchingSales = sales.filter(s => {
-            const sDate = s.fecha ? s.fecha.split(',')[0].trim() : '';
-            return sDate === cierreDateStr || s.fecha === selectedCierre.fecha;
-          });
-          subtotalNetoUsd = matchingSales.reduce((acc, sale) => {
+        if (!subtotalNetoUsd && shiftSales && shiftSales.length > 0) {
+          subtotalNetoUsd = shiftSales.reduce((acc, sale) => {
             return acc + calculateSaleNetWithoutIVA(sale);
           }, 0);
         }
@@ -2944,10 +3074,15 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
               {/* Sticky Top Header Bar */}
               <div className="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between flex-shrink-0 shadow-md">
                 <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span className={`w-2.5 h-2.5 rounded-full ${isOpen ? 'bg-emerald-400 animate-ping' : 'bg-emerald-400 animate-pulse'}`}></span>
                   <h3 className="text-sm font-black uppercase tracking-wider font-sans">
-                    Comprobante de Cierre de Caja
+                    {isOpen ? 'Previsualización de Turno en Vivo (Caja Abierta)' : 'Comprobante de Cierre de Caja'}
                   </h3>
+                  {isOpen && (
+                    <span className="ml-2 bg-emerald-700 text-emerald-100 text-[10px] font-extrabold px-2 py-0.5 rounded font-mono">
+                      EN CURSO
+                    </span>
+                  )}
                 </div>
                 <button 
                   onClick={() => setSelectedCierre(null)} 
@@ -2956,6 +3091,18 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                   ✕ Cerrar [ESC]
                 </button>
               </div>
+
+              {isOpen && (
+                <div className="bg-emerald-50 border-b border-emerald-200 px-5 py-2.5 flex items-center justify-between text-xs text-emerald-900 font-semibold shadow-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></span>
+                    <span>Mostrando previsualización en tiempo real de ventas y gaveta acumuladas para este turno abierto.</span>
+                  </div>
+                  <span className="bg-emerald-200 text-emerald-800 px-2 py-0.5 rounded text-[9.5px] font-bold uppercase font-mono">
+                    {shiftSales.length} {shiftSales.length === 1 ? 'Transacción' : 'Transacciones'}
+                  </span>
+                </div>
+              )}
 
               {/* Scrollable Receipt Body (Clean PNG Capture target) */}
               <div id="cierre-comprobante-card" className="p-5 sm:p-6 overflow-y-auto flex-1 bg-slate-50 space-y-5 scrollbar-thin">
@@ -3311,12 +3458,25 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                       <div className={`p-4 ${boxBgClass} border rounded-lg text-sm font-mono select-text space-y-1 transition-all`}>
                         <div className="text-slate-600 font-sans text-[12px] mb-1.5 font-bold uppercase tracking-wide">Dólares USD:</div>
                         <div className="flex justify-between"><span>Gaveta Esperado:</span> <span>${dineroEnCajaExpected.toFixed(2)}</span></div>
-                        <div className="flex justify-between"><span>Recibido Real:</span> <span className="text-emerald-700 font-bold">${realUsd.toFixed(2)}</span></div>
+                        <div className="flex justify-between">
+                          <span>Recibido Real:</span> 
+                          {isOpen ? (
+                            <span className="text-amber-700 font-sans font-bold text-[11px] bg-amber-100/80 px-2 py-0.5 rounded">
+                              En Curso (Arqueo al cierre)
+                            </span>
+                          ) : (
+                            <span className="text-emerald-700 font-bold">${realUsd.toFixed(2)}</span>
+                          )}
+                        </div>
                         <div className="flex justify-between border-t border-dashed border-slate-300 pt-1.5 font-bold text-slate-800">
                           <span>Diferencia:</span>
-                          <span className={diffUsd >= 0 ? 'text-emerald-600' : 'text-rose-600 font-black'}>
-                            ${diffUsd.toFixed(2)}
-                          </span>
+                          {isOpen ? (
+                            <span className="text-slate-400 font-sans text-xs font-normal">Pendiente de cierre</span>
+                          ) : (
+                            <span className={diffUsd >= 0 ? 'text-emerald-600' : 'text-rose-600 font-black'}>
+                              ${diffUsd.toFixed(2)}
+                            </span>
+                          )}
                         </div>
                       </div>
                     );
@@ -3359,12 +3519,25 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                       <div className={`p-4 ${boxBgClass} border rounded-lg text-sm font-mono select-text space-y-1 transition-all`}>
                         <div className="text-slate-600 font-sans text-[12px] mb-1.5 font-bold uppercase tracking-wide">Bolívares BS:</div>
                         <div className="flex justify-between"><span>Gaveta Esperado:</span> <span>Bs {expectedVes.toFixed(2)}</span></div>
-                        <div className="flex justify-between"><span>Recibido Real:</span> <span className="text-purple-755 font-bold">Bs {realVes.toFixed(2)}</span></div>
+                        <div className="flex justify-between">
+                          <span>Recibido Real:</span> 
+                          {isOpen ? (
+                            <span className="text-amber-700 font-sans font-bold text-[11px] bg-amber-100/80 px-2 py-0.5 rounded">
+                              En Curso (Arqueo al cierre)
+                            </span>
+                          ) : (
+                            <span className="text-purple-755 font-bold">Bs {realVes.toFixed(2)}</span>
+                          )}
+                        </div>
                         <div className="flex justify-between border-t border-dashed border-slate-300 pt-1.5 font-bold text-slate-800">
                           <span>Diferencia:</span>
-                          <span className={diffVes >= 0 ? 'text-emerald-600' : 'text-rose-600 font-black'}>
-                            Bs {diffVes.toFixed(2)}
-                          </span>
+                          {isOpen ? (
+                            <span className="text-slate-400 font-sans text-xs font-normal">Pendiente de cierre</span>
+                          ) : (
+                            <span className={diffVes >= 0 ? 'text-emerald-600' : 'text-rose-600 font-black'}>
+                              Bs {diffVes.toFixed(2)}
+                            </span>
+                          )}
                         </div>
                       </div>
                     );
@@ -3390,17 +3563,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                     type="button"
                     onClick={() => {
                       if (!selectedCierre) return;
-                      const cUser = selectedCierre.usuario ? selectedCierre.usuario.toLowerCase().trim() : '';
-                      const fAperturaMs = selectedCierre.fechaApertura ? new Date(selectedCierre.fechaApertura).getTime() : 0;
-                      const fCierreMs = (selectedCierre.fechaCierre || selectedCierre.fecha) ? new Date(selectedCierre.fechaCierre || selectedCierre.fecha).getTime() : Date.now();
-                      const shiftSales = (sales || []).filter(s => {
-                        if (cUser && s.usuario && s.usuario.toLowerCase().trim() !== cUser) return false;
-                        const sTime = new Date(s.fecha).getTime();
-                        if (isNaN(sTime)) return true;
-                        const startBoundary = fAperturaMs > 0 ? fAperturaMs - 120000 : 0;
-                        const endBoundary = fCierreMs > 0 ? fCierreMs + 120000 : Date.now();
-                        return sTime >= startBoundary && sTime <= endBoundary;
-                      });
+                      const shiftSales = getShiftSalesForCierre(selectedCierre);
                       printCierreTicketReport(selectedCierre, shiftSales, companyConfig, currentUser);
                     }}
                     className="w-full sm:w-auto bg-slate-900 hover:bg-black active:scale-[0.98] text-white font-black py-2.5 px-4 rounded-xl font-sans text-xs uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
@@ -4252,23 +4415,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
       {/* DETALLES DE FACTURAS DE ESTE CIERRE DE CAJA */}
       {cierreInvoicesModal && (() => {
         const c = cierreInvoicesModal;
-        const fAperturaMs = c.fechaApertura ? new Date(c.fechaApertura).getTime() : 0;
-        const fCierreMs = (c.fechaCierre || c.fecha) ? new Date(c.fechaCierre || c.fecha).getTime() : Date.now();
-
-        const shiftInvoices = sales.filter(s => {
-          if (c.usuario && s.usuario) {
-            const uCierre = c.usuario.toLowerCase().trim();
-            const uSale = s.usuario.toLowerCase().trim();
-            if (uCierre !== uSale && c.usuarioId && s.usuario_id && String(c.usuarioId) !== String(s.usuario_id)) {
-              return false;
-            }
-          }
-          const sTime = new Date(s.fecha).getTime();
-          if (isNaN(sTime)) return true;
-          const startBoundary = fAperturaMs > 0 ? fAperturaMs - 120000 : 0;
-          const endBoundary = fCierreMs > 0 ? fCierreMs + 120000 : Date.now();
-          return sTime >= startBoundary && sTime <= endBoundary;
-        });
+        const shiftInvoices = getShiftSalesForCierre(c);
 
         const q = cierreInvoiceSearch.toLowerCase().trim();
         const filteredInvoices = !q ? shiftInvoices : shiftInvoices.filter(s =>
