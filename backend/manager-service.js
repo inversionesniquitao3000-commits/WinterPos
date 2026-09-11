@@ -1,7 +1,8 @@
 import {
   getSales, getCierres, getOpenCajas, getProducts, getClients,
   getProveedores, getCompras, getPagosProveedores, getAbonos,
-  getTasaHistory, getCompanyConfig, getGastosOperativos, getAccionistas, getInversiones
+  getTasaHistory, getCompanyConfig, getGastosOperativos, getAccionistas, getInversiones,
+  getMovimientosCajaByCajaId
 } from './db-store.js';
 
 function getTodayString() {
@@ -201,62 +202,123 @@ export async function getManagerKPIs() {
  */
 export async function getManagerCajasLive() {
   const openCajas = await getOpenCajas();
-  const allSales = await getSales(200);
+  const allSales = await getSales(1000);
   const todayStr = getTodayString();
 
   const result = [];
   for (const c of openCajas) {
-    const termName = c.estacion_nombre || c.terminal || 'CAJA';
+    const termName = c.terminal || c.estacion_nombre || 'CAJA_01';
     const cId = c.id;
+    const fechaApertura = c.fechaApertura || c.fecha_apertura || '';
+    const aperturaYMD = fechaApertura ? fechaApertura.substring(0, 10) : todayStr;
 
-    // Filter sales assigned to this cash drawer
+    // Filter sales assigned to this cash drawer session
     const cajaSales = allSales.filter(s => {
-      const matchCaja = (s.caja_id && String(s.caja_id) === String(cId)) || s.terminal === termName;
-      const matchDate = s.fecha && s.fecha.includes(todayStr);
-      return matchCaja && matchDate && s.estatus !== 'Anulada';
+      if (s.estatus === 'Anulada') return false;
+      // 1. Direct match by exact caja_id session
+      if (s.caja_id && String(s.caja_id) === String(cId)) return true;
+      // 2. Terminal name match and sale date on or after shift opening date
+      const sTerm = String(s.terminal || '').trim().toUpperCase();
+      const cTerm = String(termName).trim().toUpperCase();
+      if (sTerm && cTerm && sTerm === cTerm) {
+        const sYMD = s.fecha ? s.fecha.substring(0, 10) : '';
+        return !sYMD || sYMD >= aperturaYMD;
+      }
+      return false;
     });
 
     let salesUsd = 0;
     let salesVes = 0;
-    let cashUsd = 0;
-    let cashVes = 0;
+    let cashSalesUsd = 0;
+    let cashSalesVes = 0;
     let electronicUsd = 0;
 
     for (const s of cajaSales) {
-      salesUsd += parseFloat(s.total_usd || s.totalUSD) || 0;
-      salesVes += parseFloat(s.total_ves || s.totalVES) || 0;
+      const sTotUsd = parseFloat(s.totalUSD ?? s.total_usd ?? 0) || 0;
+      const sTotVes = parseFloat(s.totalVES ?? s.total_ves ?? 0) || 0;
+      salesUsd += sTotUsd;
+      salesVes += sTotVes;
 
-      const payments = s.payments || [];
-      for (const p of payments) {
-        const meth = (p.metodo_pago || p.method || '').toLowerCase();
-        const pUsd = parseFloat(p.monto_usd || p.amountUSD) || 0;
-        const pVes = parseFloat(p.monto_ves || p.amountVES) || 0;
+      // Handle payments array (s.pagos or s.payments)
+      const pagos = s.pagos || s.payments || [];
+      for (const p of pagos) {
+        const meth = String(p.metodo || p.metodo_pago || p.method || '').toLowerCase().trim();
+        const pUsd = parseFloat(p.montoUSD ?? p.monto ?? p.monto_usd ?? p.amountUSD ?? 0) || 0;
+        const pVes = parseFloat(p.montoVES ?? p.monto_ves ?? p.amountVES ?? 0) || 0;
 
-        if (meth.includes('usd') || meth === 'efectivo_usd') {
-          cashUsd += pUsd;
-        } else if (meth.includes('ves') || meth === 'efectivo_ves') {
-          cashVes += pVes;
+        // Detection of cash payments ($ and Bs)
+        const isCashUsd = meth === 'efectivo$' || meth === 'efectivo_usd' || meth === 'efectivousd' || (meth.includes('efectivo') && (meth.includes('$') || meth.includes('usd')));
+        const isCashVes = meth === 'efectivobs' || meth === 'efectivo_ves' || meth === 'efectivoves' || (meth.includes('efectivo') && (meth.includes('bs') || meth.includes('ves')));
+        const isGenericCash = meth === 'efectivo';
+
+        if (isCashUsd || (isGenericCash && pUsd > 0 && pVes === 0)) {
+          cashSalesUsd += pUsd;
+        } else if (isCashVes || (isGenericCash && pVes > 0)) {
+          cashSalesVes += pVes;
         } else {
           electronicUsd += pUsd;
         }
       }
+
+      // If customer was given change from cash drawer, subtract change
+      const vUsd = parseFloat(s.vueltoUSD ?? s.vuelto_usd ?? 0) || 0;
+      const vVes = parseFloat(s.vueltoVES ?? s.vuelto_ves ?? 0) || 0;
+      if (vUsd > 0) cashSalesUsd -= vUsd;
+      if (vVes > 0) cashSalesVes -= vVes;
     }
 
-    const aperturaUsd = parseFloat(c.monto_apertura_usd) || 0;
-    const aperturaVes = parseFloat(c.monto_apertura_ves) || 0;
+    // Cash Drawer Base amounts on Opening
+    const aperturaUsd = parseFloat(c.montoAperturaUsd ?? c.monto_apertura_usd ?? 0) || 0;
+    const aperturaVes = parseFloat(c.montoAperturaVes ?? c.monto_apertura_ves ?? 0) || 0;
+
+    // Shift Cash In / Cash Out Movements
+    let shiftEntradasUsd = 0;
+    let shiftEntradasVes = 0;
+    let shiftSalidasUsd = 0;
+    let shiftSalidasVes = 0;
+
+    try {
+      const movs = await getMovimientosCajaByCajaId(cId);
+      for (const m of movs) {
+        const mUsd = parseFloat(m.monto_usd || 0);
+        const mVes = parseFloat(m.monto_ves || 0);
+        const tipo = m.tipo;
+        const mPago = String(m.metodo_pago || 'EFECTIVO').toUpperCase();
+        const isCashUsd = mPago.includes('USD') || mPago.includes('$') || mPago === 'EFECTIVO';
+        const isCashVes = mPago.includes('VES') || mPago.includes('BS');
+
+        if (tipo === 'Entrada') {
+          if (isCashUsd && mUsd > 0) shiftEntradasUsd += mUsd;
+          if (isCashVes && mVes > 0) shiftEntradasVes += mVes;
+        } else if (tipo === 'Salida' || tipo === 'Devolucion') {
+          if (isCashUsd && mUsd > 0) shiftSalidasUsd += mUsd;
+          if (isCashVes && mVes > 0) shiftSalidasVes += mVes;
+        }
+      }
+    } catch (movErr) {
+      console.warn('Error reading live cash drawer movements:', movErr.message);
+    }
+
+    // Live Cash Expected in Drawer: Base + Cash Sales + Entradas - Salidas
+    const cashExpectedUsd = Math.max(0, aperturaUsd + cashSalesUsd + shiftEntradasUsd - shiftSalidasUsd);
+    const cashExpectedVes = Math.max(0, aperturaVes + cashSalesVes + shiftEntradasVes - shiftSalidasVes);
 
     result.push({
       id: c.id,
       terminal: termName,
-      cajero: c.usuario_nombre || c.usuario || 'Operador',
-      fechaApertura: c.fecha_apertura,
-      aperturaUsd,
-      aperturaVes,
+      cajero: c.usuarioNombre || c.usuario_nombre || c.usuario || 'Operador',
+      fechaApertura,
+      aperturaUsd: Math.round(aperturaUsd * 100) / 100,
+      aperturaVes: Math.round(aperturaVes * 100) / 100,
       salesUsd: Math.round(salesUsd * 100) / 100,
       salesVes: Math.round(salesVes * 100) / 100,
-      cashExpectedUsd: Math.round((aperturaUsd + cashUsd) * 100) / 100,
-      cashExpectedVes: Math.round((aperturaVes + cashVes) * 100) / 100,
+      cashSalesUsd: Math.round(cashSalesUsd * 100) / 100,
+      cashSalesVes: Math.round(cashSalesVes * 100) / 100,
+      cashExpectedUsd: Math.round(cashExpectedUsd * 100) / 100,
+      cashExpectedVes: Math.round(cashExpectedVes * 100) / 100,
       electronicUsd: Math.round(electronicUsd * 100) / 100,
+      entradasUsd: Math.round(shiftEntradasUsd * 100) / 100,
+      salidasUsd: Math.round(shiftSalidasUsd * 100) / 100,
       totalTickets: cajaSales.length,
       status: 'Abierta'
     });

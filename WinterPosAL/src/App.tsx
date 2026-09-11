@@ -2697,7 +2697,21 @@ export default function App() {
   if (isMobileMode && hasModulePermission('movil', 'ver')) {
     return (
       <Suspense fallback={<div className="flex items-center justify-center min-h-screen bg-slate-950 text-white"><div className="w-8 h-8 border-4 border-sky-500 border-t-transparent rounded-full animate-spin"></div></div>}>
-        <MobileApp onSwitchToDesktop={() => setIsMobileMode(false)} />
+        <MobileApp 
+          onSwitchToDesktop={() => setIsMobileMode(false)}
+          products={products}
+          clients={clients}
+          companyConfig={companyConfig}
+          tasaDia={tasaDia}
+          tasaVuelto={tasaVuelto}
+          currentUser={currentUser}
+          cajaAbierta={cajaAbierta}
+          montoAperturaUsd={montoAperturaUsd}
+          montoAperturaVes={montoAperturaVes}
+          onAbrirCaja={handleAbrirCaja}
+          onRegisterSale={handleRegisterSale}
+          onAddClient={handleAddClient}
+        />
       </Suspense>
     );
   }

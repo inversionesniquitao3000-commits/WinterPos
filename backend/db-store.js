@@ -3034,7 +3034,7 @@ export async function getSales(limit = null, sinceId = null, excludeTerminal = n
       }
 
       const salesRes = await pool.query(`
-        SELECT v.id, v.factura_nro, v.fecha, v.subtotal_usd, v.descuento_usd, v.total_usd, v.total_ves, v.con_ticket,
+        SELECT v.id, v.caja_id, v.factura_nro, v.fecha, v.subtotal_usd, v.descuento_usd, v.total_usd, v.total_ves, v.con_ticket,
                v.vuelto_usd as "vueltoUSD", v.vuelto_ves as "vueltoVES",
                v.tipo_documento, v.nro_fiscal, v.serial_fiscal, v.nro_z, v.estatus_fiscal,
                v.base_imponible_usd, v.iva_usd, v.exento_usd, v.igtf_usd,
@@ -3082,6 +3082,7 @@ export async function getSales(limit = null, sinceId = null, excludeTerminal = n
 
       return salesRes.rows.map(row => ({
         id: row.id,
+        caja_id: row.caja_id,
         factura_nro: row.factura_nro,
         fecha: getLocalISODateString(new Date(row.fecha)),
         caja_estatus: row.caja_estatus || 'Cerrada',
@@ -3638,10 +3639,15 @@ export async function cerrarCaja(cierre) {
           [termName]
         );
       }
+      if (activeCaja.rowCount === 0) {
+        activeCaja = await pool.query(
+          "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1"
+        );
+      }
       if (activeCaja.rowCount > 0) {
         const cajaId = activeCaja.rows[0].id;
 
-        const ventaTotalUsd = cierre.ventaTotalUsd ?? 0;
+        const ventaTotalUsd = cierre.ventaTotalUsd ?? cierre.total_ventas_usd ?? cierre.venta_total_usd ?? 0;
         const utilidadUsd = cierre.utilidadUsd ?? 0;
         const detallesJson = JSON.stringify(cierre);
         const nowStr = getLocalISODateString();
@@ -3671,27 +3677,27 @@ export async function cerrarCaja(cierre) {
             devolucion_efectivo_ves = $21
            WHERE id = $8`,
           [
-            cierre.expectedUsd || cierre.dineroEnCajaExpected || 0,
-            cierre.expectedVes || 0,
-            cierre.realUsd || 0,
-            cierre.realVes || 0,
-            ventaTotalUsd,
-            utilidadUsd,
+            cierre.expectedUsd ?? cierre.dineroEnCajaExpected ?? cierre.total_esperado_usd ?? cierre.monto_cierre_esperado_usd ?? 0, 
+            cierre.expectedVes ?? cierre.total_esperado_ves ?? cierre.monto_cierre_esperado_ves ?? 0, 
+            cierre.realUsd ?? cierre.total_real_usd ?? cierre.monto_cierre_real_usd ?? 0, 
+            cierre.realVes ?? cierre.total_real_ves ?? cierre.monto_cierre_real_ves ?? 0, 
+            ventaTotalUsd, 
+            utilidadUsd, 
             detallesJson,
             cajaId,
             nowStr,
             cierre.vueltosEntregadosUsd ?? cierre.vueltosUsd ?? 0,
             cierre.vueltosEntregadosVes ?? cierre.vueltosVes ?? 0,
-            cierre.ventasEfectivoUsd || 0,
-            cierre.ventasEfectivoVes || 0,
-            cierre.abonoClientesUsd || cierre.abonosUsd || 0,
-            cierre.abonoClientesVes || cierre.abonosVes || 0,
-            cierre.entradaEfectivoUsd || 0,
-            cierre.entradaEfectivoVes || 0,
-            cierre.salidaEfectivoUsd || 0,
-            cierre.salidaEfectivoVes || 0,
-            cierre.devolucionEfectivoUsd || 0,
-            cierre.devolucionEfectivoVes || 0
+            cierre.ventasEfectivoUsd ?? cierre.total_ventas_usd ?? 0,
+            cierre.ventasEfectivoVes ?? cierre.total_ventas_ves ?? 0,
+            cierre.abonoClientesUsd ?? cierre.abonosUsd ?? 0,
+            cierre.abonoClientesVes ?? cierre.abonosVes ?? 0,
+            cierre.entradaEfectivoUsd ?? 0,
+            cierre.entradaEfectivoVes ?? 0,
+            cierre.salidaEfectivoUsd ?? 0,
+            cierre.salidaEfectivoVes ?? 0,
+            cierre.devolucionEfectivoUsd ?? 0,
+            cierre.devolucionEfectivoVes ?? 0
           ]
         );
         return true;
@@ -4139,9 +4145,13 @@ export async function getOpenCajas() {
         terminal: r.terminal || 'CAJA_PRINCIPAL',
         montoAperturaUsd: parseFloat(r.monto_apertura_usd || 0),
         montoAperturaVes: parseFloat(r.monto_apertura_ves || 0),
+        monto_apertura_usd: parseFloat(r.monto_apertura_usd || 0),
+        monto_apertura_ves: parseFloat(r.monto_apertura_ves || 0),
         fechaApertura: getLocalISODateString(r.fecha_apertura),
+        fecha_apertura: getLocalISODateString(r.fecha_apertura),
         usuario: r.usuario || 'Desconocido',
         usuarioNombre: r.usuario_nombre || r.usuario || 'Desconocido',
+        usuario_nombre: r.usuario_nombre || r.usuario || 'Desconocido',
         rol: r.rol || 'Cajero'
       }));
     } catch (err) {
@@ -4157,13 +4167,31 @@ export async function getOpenCajas() {
       terminal: activeCheck.terminal || 'CAJA_01',
       montoAperturaUsd: activeCheck.aperturaUsd || 0,
       montoAperturaVes: activeCheck.aperturaVes || 0,
+      monto_apertura_usd: activeCheck.aperturaUsd || 0,
+      monto_apertura_ves: activeCheck.aperturaVes || 0,
       fechaApertura: activeCheck.fechaApertura || getLocalISODateString(),
+      fecha_apertura: activeCheck.fechaApertura || getLocalISODateString(),
       usuario: activeCheck.usuario || 'Usuario',
       usuarioNombre: activeCheck.usuarioNombre || 'Usuario',
+      usuario_nombre: activeCheck.usuarioNombre || 'Usuario',
       rol: 'Cajero'
     }];
   }
   return [];
+}
+
+export async function getMovimientosCajaByCajaId(cajaId) {
+  if (usePostgres) {
+    try {
+      const res = await pool.query("SELECT * FROM Movimientos_Caja WHERE caja_id = $1 ORDER BY id ASC", [cajaId]);
+      return res.rows;
+    } catch (e) {
+      console.error('Error en getMovimientosCajaByCajaId:', e.message);
+      return [];
+    }
+  }
+  const all = readJsonFile('movimientos_caja.json', []);
+  return all.filter(m => String(m.caja_id) === String(cajaId));
 }
 
 export async function forceCloseCaja(cajaId, adminName = 'ADMINISTRADOR') {

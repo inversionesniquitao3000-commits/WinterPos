@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Briefcase, RefreshCw, Phone } from 'lucide-react';
+import { Briefcase, RefreshCw, Phone, MessageSquare, DollarSign, PlusCircle, AlertCircle } from 'lucide-react';
+import { getApiBaseUrl } from '../utils';
+import MobileAbonoModal from './MobileAbonoModal';
+import MobileGastoModal from './MobileGastoModal';
 
 interface FinancialData {
   totalCxC_USD: number;
@@ -31,14 +34,26 @@ interface FinancialData {
   }>;
 }
 
-export default function MobileFinanzas() {
+interface MobileFinanzasProps {
+  tasaDia?: number;
+  companyConfig?: any;
+}
+
+export default function MobileFinanzas({ tasaDia = 1, companyConfig }: MobileFinanzasProps) {
   const [data, setData] = useState<FinancialData | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'cxc' | 'cxp' | 'gastos'>('cxc');
 
+  // Modal states
+  const [selectedClientForAbono, setSelectedClientForAbono] = useState<any | null>(null);
+  const [isGastoModalOpen, setIsGastoModalOpen] = useState(false);
+
+  const activeTasa = tasaDia > 0 ? tasaDia : 1;
+  const companyName = companyConfig?.nombre || 'WinterPOS';
+
   const fetchFinances = async () => {
     try {
-      const res = await fetch('/api/manager/financial-summary');
+      const res = await fetch(`${getApiBaseUrl()}/manager/financial-summary`);
       if (res.ok) {
         const json = await res.json();
         setData(json);
@@ -54,14 +69,49 @@ export default function MobileFinanzas() {
     fetchFinances();
   }, []);
 
+  const handleSendWhatsAppCobranza = (debtor: any) => {
+    let rawPhone = (debtor.telefono || '').replace(/\D/g, '');
+    if (!rawPhone) {
+      alert('Este cliente no tiene número telefónico registrado.');
+      return;
+    }
+
+    // Format for Venezuelan numbers if needed (e.g. 0414 -> 58414)
+    if (rawPhone.startsWith('0')) {
+      rawPhone = '58' + rawPhone.slice(1);
+    } else if (!rawPhone.startsWith('58') && rawPhone.length === 10) {
+      rawPhone = '58' + rawPhone;
+    }
+
+    const deudaUSD = debtor.saldoPendiente || 0;
+    const deudaVES = deudaUSD * activeTasa;
+
+    const message = `Estimado(a) *${debtor.nombre}*, un saludo cordial de parte de *${companyName}*.\n\nLe recordamos amablemente que mantiene un saldo pendiente en cuenta de *$${deudaUSD.toFixed(2)}* (${deudaVES.toLocaleString('es-VE', { minimumFractionDigits: 2 })} Bs).\n\nQuedamos a su entera disposición para coordinar o verificar su pago. ¡Agradecemos su preferencia!`;
+
+    const waUrl = `https://wa.me/${rawPhone}?text=${encodeURIComponent(message)}`;
+    window.open(waUrl, '_blank');
+  };
+
   return (
     <div className="space-y-3 pb-20 pt-2 px-3">
       {/* Header Summary */}
       <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 border border-slate-700/60 rounded-2xl p-4 shadow-lg">
-        <h2 className="text-base font-black text-white flex items-center gap-2 mb-3">
-          <Briefcase className="w-5 h-5 text-amber-400" />
-          Mando Financiero y Créditos
-        </h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-base font-black text-white flex items-center gap-2">
+            <Briefcase className="w-5 h-5 text-amber-400" />
+            Mando Financiero & Créditos
+          </h2>
+          <button
+            onClick={() => {
+              setLoading(true);
+              fetchFinances();
+            }}
+            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition"
+            title="Refrescar datos"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-blue-400' : ''}`} />
+          </button>
+        </div>
 
         <div className="grid grid-cols-2 gap-2">
           <div className="bg-slate-800/80 rounded-xl p-3 border border-amber-900/30">
@@ -122,9 +172,14 @@ export default function MobileFinanzas() {
         </div>
       ) : activeTab === 'cxc' ? (
         <div className="space-y-2">
-          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-1">
-            Top Clientes con Saldo Pendiente
-          </h3>
+          <div className="flex items-center justify-between px-1">
+            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+              Clientes con Saldo Pendiente
+            </h3>
+            <span className="text-[11px] text-amber-400 font-bold">
+              {data?.topDebtors?.length || 0} deudor(es)
+            </span>
+          </div>
 
           {!data?.topDebtors || data.topDebtors.length === 0 ? (
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center text-slate-400 text-xs">
@@ -132,30 +187,54 @@ export default function MobileFinanzas() {
             </div>
           ) : (
             data.topDebtors.map((d) => (
-              <div key={d.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 shadow-md flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-1.5 mb-0.5">
-                    <span className="text-[10px] font-mono font-bold text-slate-400 bg-slate-800 px-1.5 py-0.2 rounded">
-                      {d.cedula_rif}
-                    </span>
-                    {d.telefono ? (
-                      <span className="text-[10px] text-slate-400 flex items-center gap-0.5">
-                        <Phone className="w-2.5 h-2.5" />
-                        {d.telefono}
+              <div key={d.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 shadow-md space-y-2.5">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <span className="text-[10px] font-mono font-bold text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded">
+                        {d.cedula_rif}
                       </span>
-                    ) : null}
+                      {d.telefono && (
+                        <span className="text-[10px] text-slate-400 flex items-center gap-0.5">
+                          <Phone className="w-2.5 h-2.5" />
+                          {d.telefono}
+                        </span>
+                      )}
+                    </div>
+                    <h4 className="font-bold text-xs text-white leading-tight">{d.nombre}</h4>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      Límite de crédito: ${d.limiteCredito?.toFixed(2) || '0.00'}
+                    </p>
                   </div>
-                  <h4 className="font-bold text-xs text-white">{d.nombre}</h4>
-                  <p className="text-[10px] text-slate-400 mt-0.5">
-                    Límite: ${d.limiteCredito.toFixed(2)}
-                  </p>
+
+                  <div className="text-right">
+                    <span className="text-[10px] font-bold uppercase text-amber-400/80 block">Debe</span>
+                    <span className="text-base font-black text-amber-300 font-mono">
+                      ${d.saldoPendiente?.toFixed(2)}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono block">
+                      {(d.saldoPendiente * activeTasa).toLocaleString('es-VE', { minimumFractionDigits: 2 })} Bs
+                    </span>
+                  </div>
                 </div>
 
-                <div className="text-right">
-                  <span className="text-[10px] font-bold uppercase text-amber-400/80 block">Debe</span>
-                  <span className="text-base font-black text-amber-300 font-mono">
-                    ${d.saldoPendiente.toFixed(2)}
-                  </span>
+                {/* Actions: Abonar & WhatsApp Cobranza */}
+                <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800/80">
+                  <button
+                    onClick={() => handleSendWhatsAppCobranza(d)}
+                    className="py-1.5 px-2.5 rounded-xl bg-emerald-950/60 border border-emerald-500/30 hover:bg-emerald-900/60 text-emerald-300 text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Recordar WhatsApp</span>
+                  </button>
+
+                  <button
+                    onClick={() => setSelectedClientForAbono(d)}
+                    className="py-1.5 px-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-black flex items-center justify-center gap-1.5 transition shadow-sm active:scale-95"
+                  >
+                    <DollarSign className="w-3.5 h-3.5" />
+                    <span>Abonar Cuenta</span>
+                  </button>
                 </div>
               </div>
             ))
@@ -176,14 +255,14 @@ export default function MobileFinanzas() {
               <div key={p.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 shadow-md flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-1.5 mb-0.5">
-                    <span className="text-[10px] font-mono font-bold text-slate-400 bg-slate-800 px-1.5 py-0.2 rounded">
+                    <span className="text-[10px] font-mono font-bold text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded">
                       {p.rif}
                     </span>
-                    {p.diasCredito > 0 ? (
+                    {p.diasCredito > 0 && (
                       <span className="text-[10px] text-slate-400">
                         {p.diasCredito} días crédito
                       </span>
-                    ) : null}
+                    )}
                   </div>
                   <h4 className="font-bold text-xs text-white">{p.razonSocial}</h4>
                 </div>
@@ -191,7 +270,7 @@ export default function MobileFinanzas() {
                 <div className="text-right">
                   <span className="text-[10px] font-bold uppercase text-rose-400/80 block">Por Pagar</span>
                   <span className="text-base font-black text-rose-400 font-mono">
-                    ${p.saldoPendienteUSD.toFixed(2)}
+                    ${p.saldoPendienteUSD?.toFixed(2)}
                   </span>
                 </div>
               </div>
@@ -217,9 +296,19 @@ export default function MobileFinanzas() {
 
           {/* Gastos Recientes */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-md">
-            <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
-              Gastos Operativos Registrados
-            </h3>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                Gastos Operativos
+              </h3>
+              <button
+                onClick={() => setIsGastoModalOpen(true)}
+                className="py-1.5 px-3 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition active:scale-95"
+              >
+                <PlusCircle className="w-3.5 h-3.5" />
+                <span>Registrar Gasto</span>
+              </button>
+            </div>
+
             <div className="text-lg font-black text-rose-400 font-mono mb-3">
               Total: ${data?.totalGastosUSD?.toFixed(2) || '0.00'}
             </div>
@@ -239,6 +328,28 @@ export default function MobileFinanzas() {
           </div>
         </div>
       )}
+
+      {/* Modal Abono a Clientes CxC */}
+      <MobileAbonoModal
+        isOpen={Boolean(selectedClientForAbono)}
+        onClose={() => setSelectedClientForAbono(null)}
+        client={selectedClientForAbono}
+        tasaDia={activeTasa}
+        onSuccess={() => {
+          fetchFinances();
+        }}
+      />
+
+      {/* Modal Registrar Gasto Operativo */}
+      <MobileGastoModal
+        isOpen={isGastoModalOpen}
+        onClose={() => setIsGastoModalOpen(false)}
+        tasaDia={activeTasa}
+        onSuccess={() => {
+          fetchFinances();
+        }}
+      />
     </div>
   );
 }
+
