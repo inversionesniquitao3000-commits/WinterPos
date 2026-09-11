@@ -18,6 +18,7 @@ export interface MobileProductStockItem {
 interface MobileStockModalProps {
   isOpen: boolean;
   product: MobileProductStockItem | null;
+  currentUser?: any;
   onClose: () => void;
   onStockUpdated: (productId: number, newStock: number) => void;
 }
@@ -25,6 +26,7 @@ interface MobileStockModalProps {
 export default function MobileStockModal({
   isOpen,
   product,
+  currentUser,
   onClose,
   onStockUpdated
 }: MobileStockModalProps) {
@@ -102,30 +104,53 @@ export default function MobileStockModal({
         throw new Error('No se pudo actualizar el stock en el servidor');
       }
 
-      // 2. Register inventory movement record for audit
+      // 2. Register inventory movement record for Kardex audit
       const deltaQty = Math.abs(computedNewStock - currentStock);
-      const effectiveType = mode === 'set_exact' ? 'Ajuste' : movementType;
-      const effectiveMotivo = motivo.trim() || (
-        mode === 'set_exact' 
-          ? `Ajuste de inventario físico móvil (Conteo exacto: ${computedNewStock})`
-          : `${effectiveType} rápida desde app móvil (${deltaQty} ${isGranel ? 'kg' : 'uds'})`
-      );
+      if (deltaQty > 0) {
+        let movementKind = movementType;
+        if (mode === 'set_exact') {
+          movementKind = computedNewStock >= currentStock ? 'Entrada' : 'Salida';
+        }
 
-      try {
-        await fetch(`${getApiBaseUrl()}/movements`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            productCode: product.barcode,
-            type: effectiveType,
-            qty: deltaQty,
-            stock_anterior: currentStock,
-            stock_posterior: computedNewStock,
-            motivo: effectiveMotivo
-          })
-        });
-      } catch (movErr) {
-        console.warn('Advertencia registrando movimiento:', movErr);
+        const isNegative = movementKind === 'Salida' || movementKind === 'Merma';
+        const signedQty = isNegative ? -deltaQty : deltaQty;
+
+        const effectiveMotivo = motivo.trim() || (
+          mode === 'set_exact' 
+            ? `Ajuste físico móvil (${computedNewStock >= currentStock ? '+' : '-'}${deltaQty} ${isGranel ? 'kg' : 'uds'} -> Conteo: ${computedNewStock})`
+            : `${movementKind} rápida desde app móvil (${isNegative ? '-' : '+'}${deltaQty} ${isGranel ? 'kg' : 'uds'})`
+        );
+
+        let opUser = currentUser?.nombre || currentUser?.usuario || '';
+        if (!opUser) {
+          try {
+            const saved = localStorage.getItem('pos_current_user');
+            if (saved) {
+              const parsed = JSON.parse(saved);
+              opUser = parsed.nombre || parsed.usuario || '';
+            }
+          } catch {}
+        }
+
+        try {
+          await fetch(`${getApiBaseUrl()}/movements`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              productId: product.id,
+              productCode: product.barcode,
+              productDescription: product.description,
+              type: movementKind,
+              qty: signedQty,
+              stock_anterior: currentStock,
+              stock_posterior: computedNewStock,
+              motivo: effectiveMotivo,
+              usuario: opUser || 'Móvil'
+            })
+          });
+        } catch (movErr) {
+          console.warn('Advertencia registrando movimiento en Kardex:', movErr);
+        }
       }
 
       onStockUpdated(product.id, computedNewStock);

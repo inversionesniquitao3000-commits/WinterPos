@@ -436,6 +436,9 @@ try {
   } catch (enumErr) {
     console.log("ℹ️ Nota: No se pudo alterar tipo_movimiento_inv (puede que ya exista o no sea compatible):", enumErr.message);
   }
+  try {
+    await client.query("ALTER TYPE tipo_movimiento_inv ADD VALUE IF NOT EXISTS 'Ajuste'");
+  } catch (enumErr) { }
 
   console.log('📋 Migración de base de datos PostgreSQL completada (columnas de cierres verificadas).');
 
@@ -837,7 +840,9 @@ export async function getSyncSummary() {
           (SELECT COUNT(*) FROM Productos) as products_count,
           (SELECT COALESCE(ROUND(SUM(COALESCE(id, 0) + COALESCE(stock_actual, 0) + COALESCE(precio_detalle_usd, 0)) * 100) / 100, 0) FROM Productos) as products_sig,
           (SELECT COUNT(*) FROM Abonos) as abonos_count,
-          (SELECT COALESCE(ROUND(SUM(COALESCE(id, 0) + COALESCE(monto_usd, 0) + COALESCE(monto_ves, 0)) * 100) / 100, 0) FROM Abonos) as abonos_sig
+          (SELECT COALESCE(ROUND(SUM(COALESCE(id, 0) + COALESCE(monto_usd, 0) + COALESCE(monto_ves, 0)) * 100) / 100, 0) FROM Abonos) as abonos_sig,
+          (SELECT COUNT(*) FROM Movimientos_Inventario) as movements_count,
+          (SELECT COALESCE(MAX(id), 0) FROM Movimientos_Inventario) as last_movement_id
       `);
       if (res.rowCount > 0) {
         const row = res.rows[0];
@@ -854,7 +859,9 @@ export async function getSyncSummary() {
           productsCount: parseInt(row.products_count || 0, 10),
           productsSig: parseFloat(row.products_sig || 0),
           abonosCount: parseInt(row.abonos_count || 0, 10),
-          abonosSig: parseFloat(row.abonos_sig || 0)
+          abonosSig: parseFloat(row.abonos_sig || 0),
+          movementsCount: parseInt(row.movements_count || 0, 10),
+          lastMovementId: parseInt(row.last_movement_id || 0, 10)
         };
       }
     } catch (err) {
@@ -2879,23 +2886,107 @@ export async function getMovements() {
 }
 
 export async function saveMovement(m) {
+  if (!m) return null;
   if (usePostgres) {
     try {
-      const prodRes = await pool.query('SELECT id FROM Productos WHERE codigo_barras_clave = $1', [m.productCode]);
-      const userRes = await pool.query('SELECT id FROM Usuarios LIMIT 1');
-
-      if (prodRes.rowCount > 0) {
-        const prodId = prodRes.rows[0].id;
-        const userId = userRes.rowCount > 0 ? userRes.rows[0].id : 1;
-
-        const res = await pool.query(
-          `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
-           VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, fecha`,
-          [prodId, userId, m.type, m.qty, m.stock_anterior, m.stock_posterior, m.motivo]
+      // 1. Resolve product ID (by explicit productId, product_id, productCode, or description)
+      let prodId = m.productId || m.producto_id || null;
+      if (!prodId && m.productCode) {
+        const prodRes = await pool.query(
+          'SELECT id FROM Productos WHERE TRIM(UPPER(codigo_barras_clave)) = TRIM(UPPER($1)) OR id::text = $1 LIMIT 1',
+          [String(m.productCode).trim()]
         );
+        if (prodRes.rowCount > 0) prodId = prodRes.rows[0].id;
+      }
+      if (!prodId && m.productDescription) {
+        const prodRes2 = await pool.query(
+          'SELECT id FROM Productos WHERE TRIM(UPPER(descripcion)) = TRIM(UPPER($1)) LIMIT 1',
+          [String(m.productDescription).trim()]
+        );
+        if (prodRes2.rowCount > 0) prodId = prodRes2.rows[0].id;
+      }
+
+      // 2. Resolve user ID (by explicit usuario_id, or name lookup)
+      let userId = 1;
+      if (m.usuario_id) {
+        userId = parseInt(m.usuario_id, 10) || 1;
+      } else if (m.usuario) {
+        const uRes = await pool.query(
+          'SELECT id FROM Usuarios WHERE TRIM(UPPER(nombre)) = TRIM(UPPER($1)) OR TRIM(UPPER(usuario)) = TRIM(UPPER($1)) LIMIT 1',
+          [String(m.usuario).trim()]
+        );
+        if (uRes.rowCount > 0) {
+          userId = uRes.rows[0].id;
+        } else {
+          const firstU = await pool.query('SELECT id FROM Usuarios LIMIT 1');
+          if (firstU.rowCount > 0) userId = firstU.rows[0].id;
+        }
+      } else {
+        const firstU = await pool.query('SELECT id FROM Usuarios LIMIT 1');
+        if (firstU.rowCount > 0) userId = firstU.rows[0].id;
+      }
+
+      // 3. Normalize type to valid PostgreSQL enum
+      let normType = m.type || 'Entrada';
+      const validTypes = ['Entrada', 'Salida', 'Merma', 'Venta', 'Devolucion', 'Entrada Rápida', 'Ajuste'];
+      if (!validTypes.includes(normType)) {
+        if (normType.toLowerCase().includes('merma')) normType = 'Merma';
+        else if (normType.toLowerCase().includes('salida')) normType = 'Salida';
+        else if (normType.toLowerCase().includes('devoluc')) normType = 'Devolucion';
+        else if (normType.toLowerCase().includes('venta')) normType = 'Venta';
+        else if (normType.toLowerCase().includes('ajuste')) {
+          normType = (parseFloat(m.stock_posterior) >= parseFloat(m.stock_anterior)) ? 'Entrada' : 'Salida';
+        } else {
+          normType = (parseFloat(m.qty) >= 0) ? 'Entrada' : 'Salida';
+        }
+      }
+
+      // 4. Ensure non-zero qty and correct sign
+      let cleanQty = parseFloat(m.qty) || 0;
+      if (cleanQty === 0) {
+        cleanQty = (parseFloat(m.stock_posterior) || 0) - (parseFloat(m.stock_anterior) || 0);
+      }
+      if (cleanQty === 0) {
+        cleanQty = 0.001; // Avoid CHECK (cantidad <> 0) constraint
+      }
+      if ((normType === 'Salida' || normType === 'Merma' || normType === 'Venta') && cleanQty > 0) {
+        cleanQty = -cleanQty;
+      } else if ((normType === 'Entrada' || normType === 'Devolucion' || normType === 'Entrada Rápida') && cleanQty < 0) {
+        cleanQty = Math.abs(cleanQty);
+      }
+
+      if (prodId) {
+        const stockAnt = parseFloat(m.stock_anterior) || 0;
+        const stockPost = parseFloat(m.stock_posterior) || 0;
+        const motivoText = String(m.motivo || 'Ajuste de inventario').substring(0, 255);
+
+        let res;
+        try {
+          res = await pool.query(
+            `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
+             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, fecha`,
+            [prodId, userId, normType, cleanQty, stockAnt, stockPost, motivoText]
+          );
+        } catch (insertErr) {
+          // If custom enum like 'Ajuste' is rejected by Postgres enum, fallback to 'Entrada' or 'Salida'
+          if (insertErr.message && insertErr.message.includes('tipo_movimiento_inv')) {
+            const fallbackType = cleanQty >= 0 ? 'Entrada' : 'Salida';
+            res = await pool.query(
+              `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
+               VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, fecha`,
+              [prodId, userId, fallbackType, cleanQty, stockAnt, stockPost, motivoText]
+            );
+            normType = fallbackType;
+          } else {
+            throw insertErr;
+          }
+        }
+
         return {
           ...m,
           id: res.rows[0].id,
+          type: normType,
+          qty: cleanQty,
           date: getLocalISODateString(new Date(res.rows[0].fecha))
         };
       }

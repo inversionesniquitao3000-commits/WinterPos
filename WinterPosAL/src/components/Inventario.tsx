@@ -1071,7 +1071,7 @@ export default function Inventario({
   const [localMovements, setLocalMovements] = useState<InventoryMovement[]>([]);
 
   useEffect(() => {
-    if (Array.isArray(movements) && movements.length > 0) {
+    if (Array.isArray(movements)) {
       setLocalMovements(movements);
     }
   }, [movements]);
@@ -1089,6 +1089,12 @@ export default function Inventario({
       console.error('Error refrescando Kardex:', e);
     }
   };
+
+  useEffect(() => {
+    if (activeSubTab === 'movimientos') {
+      refreshKardexMovements();
+    }
+  }, [activeSubTab]);
 
 
 
@@ -4793,7 +4799,10 @@ export default function Inventario({
           Catálogo
         </button>
         <button
-          onClick={() => setActiveSubTab('movimientos')}
+          onClick={() => {
+            setActiveSubTab('movimientos');
+            refreshKardexMovements();
+          }}
           className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all ${activeSubTab === 'movimientos'
               ? 'bg-white border-slate-200 text-slate-900 shadow-2xs font-extrabold'
               : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
@@ -5914,6 +5923,7 @@ export default function Inventario({
                   <option value="Entrada">Entrada</option>
                   <option value="Salida">Salida</option>
                   <option value="Entrada Rápida">Entrada Rápida</option>
+                  <option value="Ajuste">Ajuste</option>
                 </select>
               </div>
 
@@ -5965,6 +5975,7 @@ export default function Inventario({
                       if (m.type === 'Salida') typeColor = 'text-orange-700 bg-orange-50 border-orange-200';
                       if (m.type === 'Merma') typeColor = 'text-red-700 bg-red-50 border-red-200 font-bold';
                       if (m.type === 'Devolucion' || m.type === 'Devolución') typeColor = 'text-yellow-700 bg-yellow-50 border-yellow-250 font-bold';
+                      if (m.type === 'Ajuste') typeColor = 'text-indigo-700 bg-indigo-50 border-indigo-200 font-bold';
 
                       const relatedProd = safeProducts.find(p => p.barcode === m.productCode || p.description === m.productDescription);
                       const isBulk = relatedProd?.a_granel === true || (m as any).a_granel === true;
@@ -6009,7 +6020,7 @@ export default function Inventario({
                               {m.type}
                             </span>
                           </td>
-                          <td className={`px-4 py-2.5 text-center font-black font-mono ${m.type === 'Salida' || m.type === 'Merma' ? 'text-red-600' : (m.qty > 0 ? 'text-green-600' : 'text-red-600')}`}>
+                          <td className={`px-4 py-2.5 text-center font-black font-mono ${m.type === 'Salida' || m.type === 'Merma' || m.qty < 0 ? 'text-red-600' : (m.qty > 0 ? 'text-green-600' : 'text-slate-600')}`}>
                             {m.type === 'Salida' || m.type === 'Merma' ? `-${formatKardexVal(Math.abs(m.qty), false, isBulk)}` : formatKardexVal(m.qty, true, isBulk)}
                           </td>
                           <td className="px-4 py-2.5 text-center font-mono text-slate-500">{formatKardexVal(m.stock_anterior, false, isBulk)}</td>

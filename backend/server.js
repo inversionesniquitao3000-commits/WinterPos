@@ -653,6 +653,9 @@ app.get('/api/sync/poll', async (req, res) => {
     const clientAbonosSig = parseFloat(req.query.abonos_sig) || 0;
     const roundedClientAbonosSig = Math.round(clientAbonosSig * 100) / 100;
 
+    const clientMovementsCount = parseInt(req.query.movements_count) || 0;
+    const clientLastMovementId = parseInt(req.query.last_movement_id) || 0;
+
     const result = {
       sales: [],
       tasas: null,        // null = no changes; array = full updated list
@@ -660,6 +663,7 @@ app.get('/api/sync/poll', async (req, res) => {
       clients: null,      // null = no changes; array = full updated list
       products: null,     // null = no changes; array = full updated list
       abonos: null,
+      movements: null,    // null = no changes; array = full updated list (Kardex)
       sessionClosed: false,
       serverTime: new Date().toISOString()
     };
@@ -704,6 +708,12 @@ app.get('/api/sync/poll', async (req, res) => {
         Math.abs(summary.abonosSig - roundedClientAbonosSig) > 0.01) {
         result.abonos = await getAbonos();
       }
+
+      // 7. Movements / Kardex sync: compare count and last movement id
+      if (summary.movementsCount !== clientMovementsCount ||
+        summary.lastMovementId !== clientLastMovementId) {
+        result.movements = await getMovements();
+      }
     } else {
       // JSON / Fallback mode
       const allSales = await getSales();
@@ -746,6 +756,12 @@ app.get('/api/sync/poll', async (req, res) => {
       if (abonosList.length !== clientAbonosCount || serverAbonosSig !== roundedClientAbonosSig) {
         result.abonos = abonosList;
       }
+
+      const movementsList = await getMovements();
+      const maxMovId = movementsList.length > 0 ? Math.max(...movementsList.map(m => m.id || 0)) : 0;
+      if (movementsList.length !== clientMovementsCount || maxMovId !== clientLastMovementId) {
+        result.movements = movementsList;
+      }
     }
 
     // Company config sync: check in-memory cached company config
@@ -770,7 +786,7 @@ app.get('/api/sync/poll', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('Error en /api/sync/poll:', err.message);
-    res.json({ sales: [], tasas: null, cierres: null, abonos: null, sessionClosed: false, serverTime: new Date().toISOString() });
+    res.json({ sales: [], tasas: null, cierres: null, abonos: null, movements: null, sessionClosed: false, serverTime: new Date().toISOString() });
   }
 });
 

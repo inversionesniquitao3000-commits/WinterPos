@@ -931,6 +931,11 @@ export default function App() {
         const abonosCount = safeAbonos.length;
         const abonosSig = safeAbonos.reduce((acc, a) => acc + (a?.id || 0) + (a?.monto || 0) + (a?.monto_ves || 0), 0);
 
+        // Calculate movements / Kardex parameters
+        const safeMovementsList = Array.isArray(movements) ? movements : [];
+        const movementsCount = safeMovementsList.length;
+        const maxMovementId = safeMovementsList.reduce((max, m) => Math.max(max, m?.id || 0), 0);
+
         const params = new URLSearchParams({
           since_id: String(maxSaleId),
           last_tasa_cobro: String(lastTasaCobro),
@@ -945,6 +950,8 @@ export default function App() {
           products_sig: String(productsSig),
           abonos_count: String(abonosCount),
           abonos_sig: String(abonosSig),
+          movements_count: String(movementsCount),
+          last_movement_id: String(maxMovementId),
           config_name: companyConfigRef.current?.nombre_comercio || '',
           config_rif: companyConfigRef.current?.rif || '',
           config_sig: `${companyConfigRef.current?.nombre_comercio || ''}_${companyConfigRef.current?.rif || ''}_${companyConfigRef.current?.tamano_foto_buscador_pos || 'mediana'}_${companyConfigRef.current?.mostrar_fotos_en_buscador_pos !== false}_${companyConfigRef.current?.limite_productos_buscador_pos || 5}`,
@@ -1044,6 +1051,13 @@ export default function App() {
         if (data.abonos) {
           console.log('[Sync] Historial de abonos de clientes actualizado desde otra terminal.');
           setAbonos(data.abonos);
+        }
+
+        // 8. Kardex movements updated in real time from mobile or another station
+        if (data.movements && Array.isArray(data.movements)) {
+          console.log(`[Sync] Kardex actualizado en tiempo real (${data.movements.length} movimientos).`);
+          setMovements(data.movements);
+          localStorage.setItem('pos_movements', JSON.stringify(data.movements));
         }
 
         // 7. Session closure detection for non-administrators

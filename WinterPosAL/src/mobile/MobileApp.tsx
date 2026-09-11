@@ -304,7 +304,7 @@ export default function MobileApp({
           )
         )}
 
-        {activeTab === 'inventario' && <MobileInventario />}
+        {activeTab === 'inventario' && <MobileInventario currentUser={currentUser} />}
         {activeTab === 'cajas' && <MobileCajas />}
         {activeTab === 'finanzas' && (
           <MobileFinanzas 

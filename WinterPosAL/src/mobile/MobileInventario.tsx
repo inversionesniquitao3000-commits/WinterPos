@@ -34,7 +34,11 @@ interface ProductItem {
   porcentaje_impuesto?: number;
 }
 
-export default function MobileInventario() {
+interface MobileInventarioProps {
+  currentUser?: any;
+}
+
+export default function MobileInventario({ currentUser }: MobileInventarioProps = {}) {
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -650,6 +654,7 @@ export default function MobileInventario() {
       <MobileStockModal
         isOpen={isStockModalOpen}
         product={productForStock}
+        currentUser={currentUser}
         onClose={() => {
           setIsStockModalOpen(false);
           setProductForStock(null);
