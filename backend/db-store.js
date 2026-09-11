@@ -4,8 +4,8 @@ import pg from 'pg';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { initDatabase } from './init-db.js';
-import { 
-  mockUsers, mockProducts, mockClients, mockTasaHistory, mockConfig 
+import {
+  mockUsers, mockProducts, mockClients, mockTasaHistory, mockConfig
 } from './mockData.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -36,17 +36,17 @@ function getLocalISODateString(d = new Date()) {
   if (typeof d === 'string') {
     const trimmed = d.trim();
     if (!trimmed) return '';
-    
+
     // 1. Date-only format: YYYY-MM-DD -> return as-is (do NOT parse as UTC midnight)
     if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
       return trimmed;
     }
-    
+
     // 2. Local date-time format: YYYY-MM-DD HH:mm or YYYY-MM-DD HH:mm:ss -> return YYYY-MM-DD HH:mm as-is
     if (/^\d{4}-\d{2}-\d{2}[\sT]+\d{2}:\d{2}/.test(trimmed) && !trimmed.includes('Z') && !trimmed.includes('+')) {
       return trimmed.replace('T', ' ').substring(0, 16);
     }
-    
+
     // 3. ISO format with explicit UTC timezone (Z or offset): parse to convert UTC to local system time
     if (trimmed.includes('Z') || (trimmed.includes('+') && !trimmed.startsWith('+'))) {
       const parsed = new Date(trimmed);
@@ -89,7 +89,7 @@ try {
 
   // Try to connect to test if Postgres is accessible with configured user/pass
   const client = await pool.connect();
-  await client.query(`SET TIME ZONE '${sysTimeZone}'`).catch(() => {});
+  await client.query(`SET TIME ZONE '${sysTimeZone}'`).catch(() => { });
   console.log(`✅ Base de datos central PostgreSQL conectada (Zona Horaria: ${sysTimeZone}).`);
   usePostgres = true;
 
@@ -104,7 +104,7 @@ try {
   } catch (tzFixErr) {
     // Ignore if timestamps are already local
   }
-  
+
   // Run schema migration to add new closure fields and high-performance indexes if they do not exist
   await client.query(`
     CREATE TABLE IF NOT EXISTS Roles (
@@ -432,7 +432,7 @@ try {
   } catch (enumErr) {
     console.log("ℹ️ Nota: No se pudo alterar tipo_movimiento_inv (puede que ya exista o no sea compatible):", enumErr.message);
   }
-  
+
   console.log('📋 Migración de base de datos PostgreSQL completada (columnas de cierres verificadas).');
 
   // Sync master_pass from config.json → PG (one-time migration if DB column is NULL)
@@ -448,7 +448,7 @@ try {
           if (licData?.payload?.cliente) initName = licData.payload.cliente;
           if (licData?.payload?.rif) initRif = licData.payload.rif;
         }
-      } catch (_) {}
+      } catch (_) { }
       await client.query("INSERT INTO Configuracion_Empresa (nombre_comercio, rif, master_pass) VALUES ($1, $2, '1234')", [initName, initRif]);
       console.log(`🔑 Fila de Configuracion_Empresa inicializada para '${initName}' con Master Pass por defecto (1234).`);
     } else if (!mpRow.rows[0].master_pass) {
@@ -458,7 +458,7 @@ try {
         try {
           const jsonData = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
           if (jsonData.master_pass) jsonPass = String(jsonData.master_pass);
-        } catch (_) {}
+        } catch (_) { }
       }
       await client.query('UPDATE Configuracion_Empresa SET master_pass = $1 WHERE id = $2', [jsonPass, mpRow.rows[0].id]);
       console.log(`🔑 Master Pass sincronizado a PostgreSQL.`);
@@ -660,7 +660,7 @@ export async function getGDriveConfigDb() {
             ? JSON.parse(res.rows[0].gdrive_config)
             : res.rows[0].gdrive_config;
           return { ...defaultGDriveConfig, ...parsed };
-        } catch (_) {}
+        } catch (_) { }
       }
     } catch (err) {
       console.error('Error en getGDriveConfigDb (Postgres):', err.message);
@@ -759,7 +759,7 @@ export async function getWhatsConfigDb() {
             ? JSON.parse(res.rows[0].whatsapp_config)
             : res.rows[0].whatsapp_config;
           return { ...defaultWhatsAppConfig, ...parsed };
-        } catch (_) {}
+        } catch (_) { }
       }
     } catch (err) {
       console.error('Error en getWhatsConfigDb (Postgres):', err.message);
@@ -1231,9 +1231,9 @@ export async function getClients() {
     try {
       const res = await pool.query('SELECT * FROM Clientes ORDER BY id ASC');
       let rows = res.rows;
-      
+
       // Auto-heal: Ensure Consumidor Final (V-00000000) always exists in DB
-      const hasGeneric = rows.some(r => 
+      const hasGeneric = rows.some(r =>
         (r.cedula_rif && r.cedula_rif.trim().toUpperCase() === 'V-00000000') ||
         (r.nombre && /consumidor\s*final|publico\s*general|público\s*general|cliente\s*ocasional/i.test(r.nombre))
       );
@@ -1247,7 +1247,7 @@ export async function getClients() {
           if (insertRes.rows.length > 0) {
             rows.unshift(insertRes.rows[0]);
           }
-        } catch (_) {}
+        } catch (_) { }
       }
 
       // Sort so generic client (V-00000000 / Consumidor Final) is ALWAYS at index 0
@@ -1290,21 +1290,60 @@ export async function getClients() {
 }
 
 export async function saveClient(c) {
+  const cedula = (c.cedula_rif || '').trim().toUpperCase();
+  const digitsOnly = cedula.replace(/\D/g, '');
+  if (digitsOnly.length < 4) {
+    throw new Error('La cédula o RIF debe contener al menos 4 dígitos numéricos válidos.');
+  }
+
+  const nombre = (c.nombre || '').trim().toUpperCase();
+  if (!nombre) {
+    throw new Error('El nombre o razón social del cliente es obligatorio.');
+  }
+
+  const limiteCred = parseFloat(c.limite_credito) || 0;
+  const creditoDisp = c.credito_disponible !== undefined && c.credito_disponible !== null
+    ? parseFloat(c.credito_disponible)
+    : limiteCred;
+
   if (usePostgres) {
     try {
+      const existing = await pool.query('SELECT id, nombre FROM Clientes WHERE cedula_rif = $1', [cedula]);
+      if (existing.rowCount > 0) {
+        throw new Error(`Ya existe un cliente registrado con la cédula/RIF ${cedula} (${existing.rows[0].nombre}).`);
+      }
       const res = await pool.query(
         `INSERT INTO Clientes (cedula_rif, nombre, telefono, direccion, limite_credito, credito_disponible, porcentaje_descuento, estado, aplica_precio_costo)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-        [c.cedula_rif, c.nombre, c.telefono, c.direccion, c.limite_credito, c.credito_disponible, c.porcentaje_descuento, c.estado, !!c.aplica_precio_costo]
+        [cedula, nombre, c.telefono || '', c.direccion || '', limiteCred, creditoDisp, parseFloat(c.porcentaje_descuento) || 0, c.estado || 'Activo', !!c.aplica_precio_costo]
       );
-      return { ...c, id: res.rows[0].id, saldo_pendiente: (c.limite_credito || 0) - (c.credito_disponible || 0), aplica_precio_costo: !!c.aplica_precio_costo };
+      return {
+        ...c,
+        id: res.rows[0].id,
+        cedula_rif: cedula,
+        nombre: nombre,
+        limite_credito: limiteCred,
+        credito_disponible: creditoDisp,
+        saldo_pendiente: Math.max(0, limiteCred - creditoDisp),
+        aplica_precio_costo: !!c.aplica_precio_costo
+      };
     } catch (err) {
       console.error('Error en saveClient (Postgres):', err.message);
+      throw err;
     }
   }
   let clients = readJsonFile('clients.json', mockClients);
   if (!Array.isArray(clients)) clients = [...mockClients];
-  const newClient = { ...c, id: Date.now(), saldo_pendiente: (c.limite_credito || 0) - (c.credito_disponible || 0), aplica_precio_costo: !!c.aplica_precio_costo };
+  const newClient = {
+    ...c,
+    id: Date.now(),
+    cedula_rif: cedula,
+    nombre: nombre,
+    limite_credito: limiteCred,
+    credito_disponible: creditoDisp,
+    saldo_pendiente: Math.max(0, limiteCred - creditoDisp),
+    aplica_precio_costo: !!c.aplica_precio_costo
+  };
   clients.push(newClient);
   writeJsonFile('clients.json', clients);
   return newClient;
@@ -1312,7 +1351,7 @@ export async function saveClient(c) {
 
 export async function saveClientsBulk(clientsArray, mode = 'update') {
   if (!Array.isArray(clientsArray) || clientsArray.length === 0) return [];
-  
+
   if (usePostgres) {
     let client;
     try {
@@ -1356,7 +1395,7 @@ export async function saveClientsBulk(clientsArray, mode = 'update') {
       return results;
     } catch (err) {
       if (client) {
-        try { await client.query('ROLLBACK'); } catch (_) {}
+        try { await client.query('ROLLBACK'); } catch (_) { }
       }
       console.error('Error en saveClientsBulk (Postgres):', err.message);
       throw err;
@@ -1477,7 +1516,7 @@ export async function registerAbono(clientId, montoUsd, montoVes, metodoPago = '
           const nextCredito = Math.min(parseFloat(client.limite_credito || '0'), parseFloat(client.credito_disponible || '0') + amountUSD);
           await pool.query('UPDATE Clientes SET credito_disponible = $1 WHERE id = $2', [nextCredito, realClientId]);
         }
-        
+
         try {
           // Determine active caja_id for this abono
           let abonoCajaId = null;
@@ -1487,7 +1526,7 @@ export async function registerAbono(clientId, montoUsd, montoVes, metodoPago = '
               [usuarioId || null]
             );
             if (abonoCajaRes.rowCount > 0) abonoCajaId = abonoCajaRes.rows[0].id;
-          } catch (_) {}
+          } catch (_) { }
           await pool.query(
             `INSERT INTO Abonos (cliente_id, usuario_id, caja_id, monto_usd, monto_ves, metodo_pago, numero_referencia, observacion, fecha)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)`,
@@ -1547,7 +1586,7 @@ export async function registerAbono(clientId, montoUsd, montoVes, metodoPago = '
         clients[idx].credito_disponible = Math.min(clients[idx].limite_credito, clients[idx].credito_disponible + amountUSD);
       }
       writeJsonFile('clients.json', clients);
-      
+
       const abonos = readJsonFile('abonos.json', []);
       abonos.push({
         id: Date.now(),
@@ -1580,7 +1619,7 @@ export async function updateClient(id, c) {
         const debt = oldLimit - oldAvail;
         newCredito = Math.max(0, parseFloat(c.limite_credito) - debt);
       }
-      
+
       const res = await pool.query(
         `UPDATE Clientes SET 
           cedula_rif = $1, 
@@ -1595,7 +1634,7 @@ export async function updateClient(id, c) {
          WHERE id = $10 RETURNING *`,
         [c.cedula_rif, c.nombre, c.telefono, c.direccion, parseFloat(c.limite_credito), newCredito, parseFloat(c.porcentaje_descuento), c.estado || 'Activo', !!c.aplica_precio_costo, id]
       );
-      
+
       if (res.rowCount > 0) {
         const r = res.rows[0];
         return {
@@ -1617,7 +1656,7 @@ export async function updateClient(id, c) {
       throw err;
     }
   }
-  
+
   const clients = readJsonFile('clients.json', mockClients);
   const idx = clients.findIndex(client => client.id === parseInt(id) || client.id === id);
   if (idx !== -1) {
@@ -1625,7 +1664,7 @@ export async function updateClient(id, c) {
     const debt = current.saldo_pendiente || 0;
     const newLimit = parseFloat(c.limite_credito);
     const newAvail = Math.max(0, newLimit - debt);
-    
+
     clients[idx] = {
       ...current,
       cedula_rif: c.cedula_rif,
@@ -1656,14 +1695,14 @@ export async function deleteClient(id) {
           throw new Error('No se puede eliminar un cliente con deuda pendiente.');
         }
       }
-      
+
       // Update any Ventas that refer to this client to reference the generic client
       const genericRes = await pool.query("SELECT id FROM Clientes WHERE cedula_rif = 'V-00000000' LIMIT 1");
       if (genericRes.rowCount > 0) {
         const genericId = genericRes.rows[0].id;
         await pool.query('UPDATE Ventas SET cliente_id = $1 WHERE cliente_id = $2', [genericId, id]);
       }
-      
+
       const res = await pool.query('DELETE FROM Clientes WHERE id = $1 RETURNING id', [id]);
       return res.rowCount > 0;
     } catch (err) {
@@ -1671,7 +1710,7 @@ export async function deleteClient(id) {
       throw err;
     }
   }
-  
+
   const clients = readJsonFile('clients.json', mockClients);
   const idx = clients.findIndex(client => client.id === parseInt(id) || client.id === id);
   if (idx !== -1) {
@@ -2055,7 +2094,7 @@ export async function wipeDatabase(options) {
     }
 
     if (options.wipeInventory) {
-      try { await pool.query('TRUNCATE TABLE Productos, Movimientos_Inventario, Historial_Precios RESTART IDENTITY CASCADE'); } catch (e) {}
+      try { await pool.query('TRUNCATE TABLE Productos, Movimientos_Inventario, Historial_Precios RESTART IDENTITY CASCADE'); } catch (e) { }
       writeJsonFile('products.json', []);
       writeJsonFile('movements.json', []);
       writeJsonFile('price-history.json', []);
@@ -2065,13 +2104,13 @@ export async function wipeDatabase(options) {
       try {
         await pool.query('UPDATE Productos SET stock_actual = 0');
         await pool.query('TRUNCATE TABLE Movimientos_Inventario RESTART IDENTITY CASCADE');
-      } catch (e) {}
+      } catch (e) { }
       const products = readJsonFile('products.json', []);
       writeJsonFile('products.json', products.map(p => ({ ...p, stock_actual: 0 })));
       writeJsonFile('movements.json', []);
     }
     if (options.wipeSales) {
-      try { await pool.query('TRUNCATE TABLE Ventas, Ventas_Detalle, Pagos_Venta, Cajas_Apertura_Cierre, Movimientos_Caja RESTART IDENTITY CASCADE'); } catch (e) {}
+      try { await pool.query('TRUNCATE TABLE Ventas, Ventas_Detalle, Pagos_Venta, Cajas_Apertura_Cierre, Movimientos_Caja RESTART IDENTITY CASCADE'); } catch (e) { }
       writeJsonFile('sales.json', []);
       writeJsonFile('abonos.json', []);
       writeJsonFile('cierres.json', []);
@@ -2081,23 +2120,23 @@ export async function wipeDatabase(options) {
       try {
         await pool.query("DELETE FROM Clientes WHERE LOWER(cedula_rif) <> 'v-00000000'");
         await pool.query("UPDATE Clientes SET limite_credito = 0, credito_disponible = 0, porcentaje_descuento = 0");
-      } catch (e) {}
+      } catch (e) { }
       writeJsonFile('clients.json', [{ id: 1, cedula_rif: 'V-00000000', nombre: 'Consumidor Final', limite_credito: 0, credito_disponible: 0, porcentaje_descuento: 0, estado: 'Activo' }]);
     }
     if (options.wipeClientBalancesOnly) {
       try {
         await pool.query("TRUNCATE TABLE Abonos RESTART IDENTITY CASCADE");
         await pool.query("UPDATE Clientes SET credito_disponible = limite_credito");
-      } catch (e) {}
+      } catch (e) { }
       writeJsonFile('abonos.json', []);
     }
     if (options.wipeAccionistas) {
-      try { await pool.query('TRUNCATE TABLE Accionistas, Inversiones_Accionistas RESTART IDENTITY CASCADE'); } catch (e) {}
+      try { await pool.query('TRUNCATE TABLE Accionistas, Inversiones_Accionistas RESTART IDENTITY CASCADE'); } catch (e) { }
       writeJsonFile('accionistas.json', []);
       writeJsonFile('inversiones.json', []);
     }
     if (options.wipeRatesHistory) {
-      try { await pool.query('TRUNCATE TABLE Tasas_Cambio RESTART IDENTITY CASCADE'); } catch (e) {}
+      try { await pool.query('TRUNCATE TABLE Tasas_Cambio RESTART IDENTITY CASCADE'); } catch (e) { }
       writeJsonFile('tasa_history.json', []);
       writeJsonFile('tasas.json', []);
     }
@@ -2325,7 +2364,7 @@ export async function restoreSalesToPostgres(sales) {
     });
     const defaultProdId = pRes.rows[0]?.id || 1;
 
-    await pool.query('ALTER TABLE IF EXISTS Ventas ALTER COLUMN caja_id DROP NOT NULL').catch(() => {});
+    await pool.query('ALTER TABLE IF EXISTS Ventas ALTER COLUMN caja_id DROP NOT NULL').catch(() => { });
 
     const cajaRes = await pool.query('SELECT id FROM Cajas_Apertura_Cierre');
     const cajaSet = new Set(cajaRes.rows.map(r => Number(r.id)));
@@ -2550,8 +2589,8 @@ export async function restoreDatabase(data) {
              estado, a_granel, fecha_vencimiento, porcentaje_impuesto) 
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
             [p.id, p.barcode || p.codigo_barras_clave, p.description || p.descripcion, p.category || p.categoria, p.stock_actual, p.stock_minimo,
-             p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.precio_bulto_usd || 0, p.cantidad_mayorista || 12, p.cant_bulto || 0, parseFloat(p.ganancia_detalle) || 0, parseFloat(p.ganancia_mayor) || 0, parseFloat(p.ganancia_bulto) || 0, !!p.fijar_margen, p.exento_impuesto, p.imagen_url || '',
-             p.estado || 'Activo', p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
+            p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.precio_bulto_usd || 0, p.cantidad_mayorista || 12, p.cant_bulto || 0, parseFloat(p.ganancia_detalle) || 0, parseFloat(p.ganancia_mayor) || 0, parseFloat(p.ganancia_bulto) || 0, !!p.fijar_margen, p.exento_impuesto, p.imagen_url || '',
+            p.estado || 'Activo', p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
           );
         }
         await pool.query("SELECT setval(pg_get_serial_sequence('Productos', 'id'), COALESCE((SELECT MAX(id) FROM Productos), 1))");
@@ -2750,7 +2789,7 @@ export async function saveTasa(t) {
       } else {
         userId = null;
       }
-      
+
       const tasaCobro = parseFloat(t.tasa_cobro) || 0;
       const tasaVuelto = parseFloat(t.tasa_vuelto) || tasaCobro;
       const tasaOficial = parseFloat(t.tasa_oficial || t.tasa_cobro || 0);
@@ -2769,7 +2808,7 @@ export async function saveTasa(t) {
         if (opRes.rowCount > 0 && opRes.rows[0].nombre) opName = opRes.rows[0].nombre;
       }
 
-      return { 
+      return {
         id: res.rows[0].id,
         tasa_cobro: tasaCobro,
         tasa_vuelto: tasaVuelto,
@@ -2840,11 +2879,11 @@ export async function saveMovement(m) {
     try {
       const prodRes = await pool.query('SELECT id FROM Productos WHERE codigo_barras_clave = $1', [m.productCode]);
       const userRes = await pool.query('SELECT id FROM Usuarios LIMIT 1');
-      
+
       if (prodRes.rowCount > 0) {
         const prodId = prodRes.rows[0].id;
         const userId = userRes.rowCount > 0 ? userRes.rows[0].id : 1;
-        
+
         const res = await pool.query(
           `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
            VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, fecha`,
@@ -2944,11 +2983,11 @@ export async function savePriceHistory(h) {
     try {
       const prodRes = await pool.query('SELECT id FROM Productos WHERE codigo_barras_clave = $1', [h.productCode]);
       const userRes = await pool.query('SELECT id FROM Usuarios LIMIT 1');
-      
+
       if (prodRes.rowCount > 0) {
         const prodId = prodRes.rows[0].id;
         const userId = userRes.rowCount > 0 ? userRes.rows[0].id : 1;
-        
+
         const res = await pool.query(
           `INSERT INTO Historial_Precios (producto_id, usuario_id, tipo_precio, precio_anterior, precio_nuevo, motivo)
            VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, fecha`,
@@ -3110,10 +3149,42 @@ export async function saveSale(s) {
     const clientTarget = await pool.connect();
     try {
       await clientTarget.query('BEGIN');
-      
+
       // Get IDs
-      const clientDoc = s.client?.cedula_rif || s.client?.cedula || 'V-00000000';
-      const clientRes = await clientTarget.query('SELECT id FROM Clientes WHERE cedula_rif = $1 OR id = $2', [clientDoc, s.client?.id || 0]);
+      let clientId = 1;
+      let clientRow = null;
+      if (s.client?.id && Number(s.client.id) > 0 && Number(s.client.id) < 1000000000) {
+        const idRes = await clientTarget.query('SELECT id, cedula_rif, nombre, limite_credito, credito_disponible FROM Clientes WHERE id = $1', [Number(s.client.id)]);
+        if (idRes.rowCount > 0) {
+          clientId = idRes.rows[0].id;
+          clientRow = idRes.rows[0];
+        }
+      }
+      if (!clientRow) {
+        const rawDoc = (s.client?.cedula_rif || s.client?.cedula || '').trim();
+        if (rawDoc && rawDoc !== 'V-' && rawDoc !== 'V-00000000' && rawDoc !== '00000000') {
+          const docRes = await clientTarget.query('SELECT id, cedula_rif, nombre, limite_credito, credito_disponible FROM Clientes WHERE cedula_rif = $1', [rawDoc]);
+          if (docRes.rowCount > 0) {
+            clientId = docRes.rows[0].id;
+            clientRow = docRes.rows[0];
+          }
+        }
+      }
+
+      // Validar si la venta utiliza Crédito de Cliente
+      const totalCreditoUSD = (s.pagos || [])
+        .filter(p => p.metodo === 'CreditoCliente')
+        .reduce((sum, p) => sum + (parseFloat(p.montoUSD || p.monto) || 0), 0);
+
+      if (totalCreditoUSD > 0) {
+        if (!clientRow || clientId === 1) {
+          throw new Error('No se puede otorgar crédito al cliente general o cliente no registrado en el sistema.');
+        }
+        const disponible = parseFloat(clientRow.credito_disponible || 0);
+        if (disponible < (totalCreditoUSD - 0.001)) {
+          throw new Error(`Crédito insuficiente para "${clientRow.nombre}". Disponible: $${disponible.toFixed(2)}, Requerido: $${totalCreditoUSD.toFixed(2)}.`);
+        }
+      }
       const myTerminal = s.terminal || s.estacion_nombre || 'CAJA_PRINCIPAL';
 
       let userId = 1;
@@ -3158,9 +3229,8 @@ export async function saveSale(s) {
         activeCaja = await clientTarget.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
       }
 
-      const clientId = clientRes.rowCount > 0 ? clientRes.rows[0].id : 1;
       const cajaId = activeCaja.rowCount > 0 ? activeCaja.rows[0].id : 1;
-      
+
       // Safe sequence generator for invoice numbers (auto-creates seq_factura if missing)
       const fetchNextSeqFactura = async () => {
         try {
@@ -3215,15 +3285,15 @@ export async function saveSale(s) {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22) 
          RETURNING id, fecha`,
         [
-          factura_nro, clientId, userId, cajaId, s.subtotal, s.descuento, s.totalUSD, s.totalVES, 
+          factura_nro, clientId, userId, cajaId, s.subtotal, s.descuento, s.totalUSD, s.totalVES,
           tasaVal, conTicketVal,
           s.terminal || 'CAJA_PRINCIPAL', s.vueltoUSD || 0, s.vueltoVES || 0,
           tipoDoc, nroFiscal, serialFiscal, nroZ, estatusFiscal, baseImp, ivaVal, exentoVal, igtfVal
         ]
       );
-      
+
       const saleId = saleRes.rows[0].id;
-      
+
       // Insert Items & adjust stock
       const isDevSale = factura_nro.startsWith('DEV-');
       for (const item of s.items) {
@@ -3236,7 +3306,7 @@ export async function saveSale(s) {
           const prodId = prodRes.rows[0].id;
           const currentStock = parseFloat(prodRes.rows[0].stock_actual || 0);
           const isGranel = !!prodRes.rows[0].a_granel;
-          
+
           const rawQty = Math.abs(item.qty);
           const cleanQty = isGranel ? rawQty : Math.round(rawQty);
           const stockDelta = isDevSale ? cleanQty : -cleanQty;
@@ -3245,24 +3315,24 @@ export async function saveSale(s) {
             newStock = Math.round(newStock);
           }
           newStock = Math.max(0, newStock);
-          
+
           // Insert details
           await clientTarget.query(
             `INSERT INTO Ventas_Detalle (venta_id, producto_id, cantidad, precio_unitario_usd, tipo_precio, total_fila_usd)
              VALUES ($1, $2, $3, $4, $5, $6)`,
             [
-              saleId, 
-              prodId, 
-              cleanQty, 
-              item.precio_unitario_usd || item.priceUSD || item.product?.precio_detalle_usd || 0, 
-              item.tipo_precio || item.priceType || 'Detalle', 
+              saleId,
+              prodId,
+              cleanQty,
+              item.precio_unitario_usd || item.priceUSD || item.product?.precio_detalle_usd || 0,
+              item.tipo_precio || item.priceType || 'Detalle',
               item.total_fila_usd || item.totalUSD || (cleanQty * (item.priceUSD || item.product?.precio_detalle_usd || 0))
             ]
           );
-          
+
           // Update Stock (increment for DEV-, decrement for FAC-)
           await clientTarget.query('UPDATE Productos SET stock_actual = $1 WHERE id = $2', [newStock, prodId]);
-          
+
           // Log Kardex
           await clientTarget.query(
             `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
@@ -3271,7 +3341,7 @@ export async function saveSale(s) {
           );
         }
       }
-      
+
       // Insert Payments
       for (const p of s.pagos) {
         // Adjust client credit if Credit was used (positive for credit purchase, negative for credit return)
@@ -3284,7 +3354,7 @@ export async function saveSale(s) {
             );
           }
         }
-        
+
         const saleRate = parseFloat(s.tasa_cambio || s.tasa || (s.totalVES && s.totalUSD ? s.totalVES / s.totalUSD : 1)) || 1.00;
         let payUSD = parseFloat(p.montoUSD || 0);
         let payVES = parseFloat(p.montoVES || 0);
@@ -3325,7 +3395,7 @@ export async function saveSale(s) {
           }
         }
       }
-      
+
       await clientTarget.query('COMMIT');
       return {
         ...s,
@@ -3503,7 +3573,7 @@ export async function abrirCaja(usd, ves, usuarioId, terminal, usuarioNombre) {
       await pool.query(
         "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = $2 WHERE (usuario_id = $1 OR estacion_nombre = $3) AND estatus = 'Abierta'",
         [userId, nowStr, termName]
-      ).catch(() => {});
+      ).catch(() => { });
 
       const res = await pool.query(
         `INSERT INTO Cajas_Apertura_Cierre (usuario_id, estacion_nombre, monto_apertura_usd, monto_apertura_ves, estatus, fecha_apertura)
@@ -3518,7 +3588,7 @@ export async function abrirCaja(usd, ves, usuarioId, terminal, usuarioNombre) {
   }
 
   const activeCheck = readJsonFile('caja_activa.json', { abierta: false });
-  
+
   activeCheck.abierta = true;
   activeCheck.aperturaUsd = usd;
   activeCheck.aperturaVes = ves;
@@ -3601,13 +3671,13 @@ export async function cerrarCaja(cierre) {
             devolucion_efectivo_ves = $21
            WHERE id = $8`,
           [
-            cierre.expectedUsd || cierre.dineroEnCajaExpected || 0, 
-            cierre.expectedVes || 0, 
-            cierre.realUsd || 0, 
-            cierre.realVes || 0, 
-            ventaTotalUsd, 
-            utilidadUsd, 
-            detallesJson, 
+            cierre.expectedUsd || cierre.dineroEnCajaExpected || 0,
+            cierre.expectedVes || 0,
+            cierre.realUsd || 0,
+            cierre.realVes || 0,
+            ventaTotalUsd,
+            utilidadUsd,
+            detallesJson,
             cajaId,
             nowStr,
             cierre.vueltosEntregadosUsd ?? cierre.vueltosUsd ?? 0,
@@ -3634,7 +3704,7 @@ export async function cerrarCaja(cierre) {
 
   const cierres = readJsonFile('cierres.json', []);
   const activeCheck = readJsonFile('caja_activa.json', { abierta: false });
-  
+
   const newCierreObj = {
     ...cierre,
     id: cierre.id || Date.now(),
@@ -3649,10 +3719,10 @@ export async function cerrarCaja(cierre) {
     usuario: cierre.usuario || 'Anderson Laguna',
     status: 'Cerrada'
   };
-  
+
   cierres.push(newCierreObj);
   writeJsonFile('cierres.json', cierres);
-  
+
   activeCheck.abierta = false;
   writeJsonFile('caja_activa.json', activeCheck);
   return true;
@@ -3676,9 +3746,9 @@ export async function updateCierre(id, updated) {
           detalles_json = $9
          WHERE id = $10`,
         [
-          updated.aperturaUsd, 
-          updated.aperturaVes, 
-          updated.realUsd, 
+          updated.aperturaUsd,
+          updated.aperturaVes,
+          updated.realUsd,
           updated.realVes,
           updated.expectedUsd || updated.dineroEnCajaExpected,
           updated.expectedVes || 0,
@@ -3768,7 +3838,7 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
       }
       const caja = activeRes.rows[0];
       const cajaId = caja.id;
-      
+
       const salesRes = await pool.query(`
         SELECT v.id, v.factura_nro, v.fecha, v.subtotal_usd, v.descuento_usd, v.total_usd, v.total_ves, v.con_ticket,
                v.vuelto_usd, v.vuelto_ves,
@@ -3807,11 +3877,11 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
         WHERE v.caja_id = $1
         ORDER BY v.id ASC
       `, [cajaId]);
-      
+
       const shiftSalesList = [];
       let salesCashUsd = 0;
       let salesCashVes = 0;
-      
+
       for (const row of salesRes.rows) {
         let cashUsd = 0;
         let cashVes = 0;
@@ -3826,7 +3896,7 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
             montoVES: mVES
           };
         });
-        
+
         let vUSD = parseFloat(row.vuelto_usd || '0');
         let vVES = parseFloat(row.vuelto_ves || '0');
         if (vUSD === 0 && row.payments_json && row.payments_json.length > 0) {
@@ -3837,7 +3907,7 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
         }
         salesCashUsd += (cashUsd - vUSD);
         salesCashVes += (cashVes - vVES);
-        
+
         shiftSalesList.push({
           id: row.id,
           factura_nro: row.factura_nro,
@@ -3869,7 +3939,7 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
           terminal: row.terminal
         });
       }
-      
+
       const movsRes = await pool.query("SELECT * FROM Movimientos_Caja WHERE caja_id = $1", [cajaId]);
       let totalMovUsd = 0;
       let totalMovVes = 0;
@@ -3894,7 +3964,7 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
         const desc = m.descripcion || '';
         const descUpper = desc.toUpperCase();
         const mPago = String(m.metodo_pago || 'EFECTIVO').toUpperCase();
-        
+
         const isPunto = mPago === 'PUNTO' || mPago.includes('TARJETA') || descUpper.includes('PUNTO');
         const isBiopago = mPago === 'BIOPAGO' || descUpper.includes('BIOPAGO');
         const isPagoMovil = mPago === 'PAGO_MOVIL' || mPago === 'PAGOMOVIL' || descUpper.includes('PAGO MÓVIL') || descUpper.includes('PAGO_MOVIL');
@@ -3960,7 +4030,7 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
         if (sqlAbonosUsd > shiftAbonosUsd) shiftAbonosUsd = sqlAbonosUsd;
         if (sqlAbonosVes > shiftAbonosVes) shiftAbonosVes = sqlAbonosVes;
       }
-      
+
       return {
         abierta: true,
         aperturaUsd: parseFloat(caja.monto_apertura_usd || 0),
@@ -3990,15 +4060,15 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
       console.error('Error en getCajaEstado (Postgres):', err.message);
     }
   }
-  
+
   const activeCheck = readJsonFile('caja_activa.json', { abierta: false });
   if (!activeCheck.abierta) {
     return { abierta: false };
   }
-  
+
   const sales = readJsonFile('sales.json', []);
   const activeSales = sales.filter(s => s.fecha >= activeCheck.fechaApertura);
-  
+
   let salesCashUsd = 0;
   let salesCashVes = 0;
   activeSales.forEach(s => {
@@ -4011,14 +4081,14 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
     salesCashUsd += (cashUsd - (s.vueltoUSD || 0));
     salesCashVes += (cashVes - (s.vueltoVES || 0));
   });
-  
+
   const movimientos = activeCheck.movimientos || [];
   let shiftAbonosUsd = 0;
   let shiftEntradasUsd = 0;
   let shiftSalidasUsd = 0;
   let totalMovUsd = 0;
   let totalMovVes = 0;
-  
+
   movimientos.forEach(m => {
     if (m.tipo === 'Entrada') {
       totalMovUsd += m.usd;
@@ -4034,7 +4104,7 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
       shiftSalidasUsd += m.usd;
     }
   });
-  
+
   return {
     abierta: true,
     aperturaUsd: activeCheck.aperturaUsd,
@@ -4102,10 +4172,10 @@ export async function forceCloseCaja(cajaId, adminName = 'ADMINISTRADOR') {
       const id = parseInt(cajaId);
       const cajaRes = await pool.query('SELECT * FROM Cajas_Apertura_Cierre WHERE id = $1', [id]);
       if (cajaRes.rowCount === 0) return { success: false, message: 'Caja no encontrada.' };
-      
+
       const caja = cajaRes.rows[0];
       const nowStr = getLocalISODateString();
-      
+
       // Calculate sales under this caja
       const salesRes = await pool.query('SELECT COALESCE(SUM(total_usd), 0) as total FROM Ventas WHERE caja_id = $1', [id]);
       const ventaTotal = parseFloat(salesRes.rows[0]?.total || 0);
@@ -4132,9 +4202,9 @@ export async function forceCloseCaja(cajaId, adminName = 'ADMINISTRADOR') {
         }),
         id
       ]);
-      
-      return { 
-        success: true, 
+
+      return {
+        success: true,
         usuarioId: caja.usuario_id,
         terminal: caja.estacion_nombre
       };
@@ -4143,7 +4213,7 @@ export async function forceCloseCaja(cajaId, adminName = 'ADMINISTRADOR') {
       throw err;
     }
   }
-  
+
   const activeCheck = readJsonFile('caja_activa.json', { abierta: false });
   activeCheck.abierta = false;
   writeJsonFile('caja_activa.json', activeCheck);
@@ -4237,7 +4307,7 @@ export async function deleteProduct(id) {
       throw err;
     }
   }
-  
+
   // JSON Fallback
   let products = readJsonFile('products.json', []);
   const initialLen = products.length;
@@ -4297,7 +4367,7 @@ export async function saveProductsBulk(products) {
       throw err;
     }
   }
-  
+
   // JSON fallback
   const allProducts = readJsonFile('products.json', mockProducts);
   const savedList = [];
@@ -4305,7 +4375,7 @@ export async function saveProductsBulk(products) {
     const isGranel = !!p.a_granel;
     const stockActual = isGranel ? (p.stock_actual || 0) : Math.round(p.stock_actual || 0);
     const stockMinimo = isGranel ? (p.stock_minimo || 0) : Math.round(p.stock_minimo || 0);
-    
+
     const cleanedP = {
       ...p,
       stock_actual: stockActual,
@@ -4353,7 +4423,7 @@ export async function getMasterPass() {
           const licData = JSON.parse(fs.readFileSync(licPath, 'utf8'));
           if (licData?.payload?.cliente) initName = licData.payload.cliente;
         }
-      } catch (_) {}
+      } catch (_) { }
       await pool.query("INSERT INTO Configuracion_Empresa (nombre_comercio, master_pass) VALUES ($1, '1234')", [initName]);
       return '1234';
     } catch (err) {
@@ -4383,7 +4453,7 @@ export async function saveMasterPass(newPass) {
           const licData = JSON.parse(fs.readFileSync(licPath, 'utf8'));
           if (licData?.payload?.cliente) initName = licData.payload.cliente;
         }
-      } catch (_) {}
+      } catch (_) { }
       await pool.query("INSERT INTO Configuracion_Empresa (nombre_comercio, master_pass) VALUES ($1, $2)", [initName, passStr]);
       console.log(`✅ Master Pass creado en PostgreSQL.`);
       return true;

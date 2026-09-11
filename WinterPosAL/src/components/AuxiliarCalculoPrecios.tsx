@@ -20,6 +20,10 @@ interface AuxiliarCalculoPreciosProps {
   taxPct?: number;
   storageKey?: string;
   onToggleExpand?: (expanded: boolean) => void;
+  autoApply?: boolean;
+  isModalMode?: boolean;
+  applyButtonLabel?: string;
+  defaultEnabled?: boolean;
 }
 
 export default function AuxiliarCalculoPrecios({
@@ -35,25 +39,31 @@ export default function AuxiliarCalculoPrecios({
   taxActive = false,
   taxPct = 16,
   storageKey = 'pos_aux_general_draft',
-  onToggleExpand
+  onToggleExpand,
+  autoApply,
+  isModalMode = false,
+  applyButtonLabel,
+  defaultEnabled
 }: AuxiliarCalculoPreciosProps) {
+  const effectiveAutoApply = autoApply !== undefined ? autoApply : !isModalMode;
   const effectiveStorageKey = storageKey || 'pos_aux_general_draft';
 
   // Determine effective rate
   const isBcvAvailable = tasaBCV > 0;
-  const effectiveRate = isBcvAvailable 
-    ? tasaBCV 
+  const effectiveRate = isBcvAvailable
+    ? tasaBCV
     : (tasaFallback > 0 ? tasaFallback : 742.23);
 
   // Initialize states with saved draft from storage if available
   const [isEnabled, setIsEnabled] = useState<boolean>(() => {
+    if (isModalMode || defaultEnabled === true) return true;
     try {
       const saved = localStorage.getItem(effectiveStorageKey);
       if (saved) {
         const d = JSON.parse(saved);
         if (typeof d.isEnabled === 'boolean') return d.isEnabled;
       }
-    } catch (_) {}
+    } catch (_) { }
     return false;
   });
 
@@ -65,7 +75,7 @@ export default function AuxiliarCalculoPrecios({
         const d = JSON.parse(saved);
         if (typeof d.totalCost === 'string') return d.totalCost;
       }
-    } catch (_) {}
+    } catch (_) { }
     return '';
   });
 
@@ -76,7 +86,7 @@ export default function AuxiliarCalculoPrecios({
         const d = JSON.parse(saved);
         if (d.currency === 'USD' || d.currency === 'VES') return d.currency;
       }
-    } catch (_) {}
+    } catch (_) { }
     return 'USD';
   });
 
@@ -87,7 +97,7 @@ export default function AuxiliarCalculoPrecios({
         const d = JSON.parse(saved);
         if (typeof d.units === 'string') return d.units;
       }
-    } catch (_) {}
+    } catch (_) { }
     return '1';
   });
 
@@ -98,7 +108,7 @@ export default function AuxiliarCalculoPrecios({
         const d = JSON.parse(saved);
         if (typeof d.customRate === 'string') return d.customRate;
       }
-    } catch (_) {}
+    } catch (_) { }
     return effectiveRate.toFixed(2);
   });
 
@@ -109,10 +119,10 @@ export default function AuxiliarCalculoPrecios({
         const d = JSON.parse(saved);
         if (typeof d.isCustomEditing === 'boolean') return d.isCustomEditing;
       }
-    } catch (_) {}
+    } catch (_) { }
     return false;
   });
-  
+
   // Profit margin states (%)
   const [marginDetail, setMarginDetail] = useState<string>(() => {
     try {
@@ -121,7 +131,7 @@ export default function AuxiliarCalculoPrecios({
         const d = JSON.parse(saved);
         if (typeof d.marginDetail === 'string') return d.marginDetail;
       }
-    } catch (_) {}
+    } catch (_) { }
     return '30';
   });
 
@@ -132,7 +142,7 @@ export default function AuxiliarCalculoPrecios({
         const d = JSON.parse(saved);
         if (typeof d.marginMayor === 'string') return d.marginMayor;
       }
-    } catch (_) {}
+    } catch (_) { }
     return '15';
   });
 
@@ -143,7 +153,7 @@ export default function AuxiliarCalculoPrecios({
         const d = JSON.parse(saved);
         if (typeof d.marginBulto === 'string') return d.marginBulto;
       }
-    } catch (_) {}
+    } catch (_) { }
     return '8';
   });
 
@@ -162,7 +172,7 @@ export default function AuxiliarCalculoPrecios({
         marginBulto,
         updatedAt: new Date().toISOString()
       }));
-    } catch (_) {}
+    } catch (_) { }
   }, [effectiveStorageKey, isEnabled, totalCost, currency, units, customRate, isCustomEditing, marginDetail, marginMayor, marginBulto]);
 
   // If effectiveStorageKey changes, reload values for that key
@@ -171,7 +181,7 @@ export default function AuxiliarCalculoPrecios({
       const saved = localStorage.getItem(effectiveStorageKey);
       if (saved) {
         const d = JSON.parse(saved);
-        if (typeof d.isEnabled === 'boolean') setIsEnabled(d.isEnabled);
+        if (typeof d.isEnabled === 'boolean') setIsEnabled(isModalMode || defaultEnabled === true ? true : d.isEnabled);
         if (typeof d.totalCost === 'string') setTotalCost(d.totalCost);
         if (d.currency === 'USD' || d.currency === 'VES') setCurrency(d.currency);
         if (typeof d.units === 'string') setUnits(d.units);
@@ -180,9 +190,19 @@ export default function AuxiliarCalculoPrecios({
         if (typeof d.marginDetail === 'string') setMarginDetail(d.marginDetail);
         if (typeof d.marginMayor === 'string') setMarginMayor(d.marginMayor);
         if (typeof d.marginBulto === 'string') setMarginBulto(d.marginBulto);
+      } else {
+        if (isModalMode || defaultEnabled === true) setIsEnabled(true);
+        setTotalCost('');
+        setCurrency('USD');
+        setUnits('1');
+        setIsCustomEditing(false);
+        setCustomRate(isBcvAvailable ? tasaBCV.toFixed(2) : effectiveRate.toFixed(2));
+        setMarginDetail('30');
+        setMarginMayor('15');
+        setMarginBulto('8');
       }
-    } catch (_) {}
-  }, [effectiveStorageKey]);
+    } catch (_) { }
+  }, [effectiveStorageKey, isModalMode, defaultEnabled, isBcvAvailable, tasaBCV, effectiveRate]);
 
   // Initial previous prices for comparison guide (prioritize originalProductPrices from database)
   const prevCost = originalProductPrices?.cost !== undefined ? originalProductPrices.cost : (parseFloat(initialCost) || 0);
@@ -222,15 +242,15 @@ export default function AuxiliarCalculoPrecios({
   // Derived calculations with zero-error safety
   const parsedTotalCost = Math.max(parseFloat(totalCost) || 0, 0);
   const parsedUnits = Math.max(parseFloat(units) || 1, 0.001);
-  const activeRateNum = isCustomEditing 
+  const activeRateNum = isCustomEditing
     ? (parseFloat(customRate) || effectiveRate || 1)
     : (effectiveRate || parseFloat(customRate) || 1);
-  
+
   const parsedRate = Math.max(activeRateNum, 0.0001);
 
   // Total cost converted to USD
   const totalCostUSD = currency === 'VES' ? (parsedTotalCost / parsedRate) : parsedTotalCost;
-  
+
   // Calculated unit cost in USD
   const unitCostUSD = parsedTotalCost > 0 ? (totalCostUSD / parsedUnits) : (parseFloat(initialCost) || 0);
 
@@ -291,7 +311,7 @@ export default function AuxiliarCalculoPrecios({
 
   // Real-time synchronization callback to parent form when auxiliary values change
   useEffect(() => {
-    if (isEnabled && unitCostUSD >= 0 && (pctDetail > 0 || pctMayor > 0 || pctBulto > 0)) {
+    if (effectiveAutoApply && isEnabled && unitCostUSD >= 0 && (pctDetail > 0 || pctMayor > 0 || pctBulto > 0)) {
       onApplyPrices?.({
         cost: unitCostUSD.toFixed(2),
         detail: finalDetailToApply.toFixed(2),
@@ -302,7 +322,7 @@ export default function AuxiliarCalculoPrecios({
         marginBulto: marginBulto
       } as any);
     }
-  }, [isEnabled, unitCostUSD, finalDetailToApply, finalMayorToApply, finalBultoToApply, marginDetail, marginMayor, marginBulto]);
+  }, [effectiveAutoApply, isEnabled, unitCostUSD, finalDetailToApply, finalMayorToApply, finalBultoToApply, marginDetail, marginMayor, marginBulto]);
 
   const [appliedToast, setAppliedToast] = useState(false);
 
@@ -323,48 +343,49 @@ export default function AuxiliarCalculoPrecios({
   };
 
   return (
-    <div className={`transition-all duration-300 rounded-xl border-2 ${
-      isEnabled 
-        ? 'bg-amber-50/70 border-amber-400 shadow-md p-3' 
+    <div className={`transition-all duration-300 rounded-xl border-2 ${isModalMode
+        ? 'bg-amber-50/50 border-amber-300 p-3 shadow-xs'
+        : isEnabled
+        ? 'bg-amber-50/70 border-amber-400 shadow-md p-3'
         : 'bg-slate-50 border-dashed border-slate-300 p-2.5 hover:border-amber-300'
-    }`}>
+      }`}>
       {/* HEADER / TOGGLE BAR */}
-      <div className="flex items-center justify-between">
-        <label className="flex items-center gap-2 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={isEnabled}
-            onChange={(e) => handleToggle(e.target.checked)}
-            className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-slate-350 cursor-pointer"
-          />
-          <div className="flex items-center gap-1.5">
-            <Calculator className={`w-4 h-4 ${isEnabled ? 'text-amber-700' : 'text-slate-500'}`} />
-            <span className={`text-xs font-extrabold font-sans uppercase tracking-wide ${
-              isEnabled ? 'text-amber-900' : 'text-slate-700'
-            }`}>
-              🧮 Auxiliar de Cálculo de Precios (Lote & Márgenes)
-            </span>
-          </div>
-        </label>
+      {!isModalMode && (
+        <div className="flex items-center justify-between">
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={isEnabled}
+              onChange={(e) => handleToggle(e.target.checked)}
+              className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 border-slate-350 cursor-pointer"
+            />
+            <div className="flex items-center gap-1.5">
+              <Calculator className={`w-4 h-4 ${isEnabled ? 'text-amber-700' : 'text-slate-500'}`} />
+              <span className={`text-xs font-extrabold font-sans uppercase tracking-wide ${isEnabled ? 'text-amber-900' : 'text-slate-700'
+                }`}>
+                🧮 Auxiliar de Cálculo de Precios (Lote & Márgenes)
+              </span>
+            </div>
+          </label>
 
-        <button
-          type="button"
-          onClick={() => handleToggle(!isEnabled)}
-          className={`text-[11px] font-bold px-2.5 py-1 rounded flex items-center gap-1 transition-all ${
-            isEnabled 
-              ? 'bg-amber-200 hover:bg-amber-300 text-amber-900' 
-              : 'bg-slate-200 hover:bg-slate-300 text-slate-700'
-          }`}
-        >
-          <span>{isEnabled ? 'Ocultar Auxiliar' : 'Usar Auxiliar'}</span>
-          {isEnabled ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-        </button>
-      </div>
+          <button
+            type="button"
+            onClick={() => handleToggle(!isEnabled)}
+            className={`text-[11px] font-bold px-2.5 py-1 rounded flex items-center gap-1 transition-all ${isEnabled
+                ? 'bg-amber-200 hover:bg-amber-300 text-amber-900'
+                : 'bg-slate-200 hover:bg-slate-300 text-slate-700'
+              }`}
+          >
+            <span>{isEnabled ? 'Ocultar Auxiliar' : 'Usar Auxiliar'}</span>
+            {isEnabled ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+      )}
 
       {/* EXPANDABLE BODY */}
-      {isEnabled && (
-        <div className="mt-3 space-y-2.5 pt-2.5 border-t border-amber-200/80 animate-fade-in font-sans text-slate-800">
-          
+      {(isEnabled || isModalMode) && (
+        <div className={`${!isModalMode ? 'mt-3 pt-2.5 border-t border-amber-200/80' : ''} space-y-2.5 font-sans text-slate-800 animate-fade-in`}>
+
           {/* SECTION 1: COST CALCULATOR */}
           <div className="bg-white border border-amber-200 rounded-lg p-2.5 space-y-2 shadow-sm">
             <div className="flex justify-between items-center">
@@ -372,7 +393,7 @@ export default function AuxiliarCalculoPrecios({
                 <DollarSign className="w-3.5 h-3.5 text-amber-600" />
                 1. Costo de Compra (Lote / Empaque)
               </span>
-              
+
               {/* Rate Status Indicator */}
               <div className="flex items-center gap-1 text-[10px]">
                 {isBcvAvailable ? (
@@ -463,11 +484,10 @@ export default function AuxiliarCalculoPrecios({
                         setCustomRate(parseFloat(customRate).toFixed(2));
                       }
                     }}
-                    className={`w-full border rounded p-1.5 text-xs font-mono font-bold focus:outline-none ${
-                      isBcvAvailable && !isCustomEditing 
-                        ? 'bg-slate-100 text-slate-700 border-slate-300 cursor-not-allowed' 
+                    className={`w-full border rounded p-1.5 text-xs font-mono font-bold focus:outline-none ${isBcvAvailable && !isCustomEditing
+                        ? 'bg-slate-100 text-slate-700 border-slate-300 cursor-not-allowed'
                         : 'bg-emerald-50/70 text-emerald-900 border-emerald-400 focus:bg-white focus:border-emerald-600'
-                    }`}
+                      }`}
                   />
                 </div>
               )}
@@ -560,11 +580,10 @@ export default function AuxiliarCalculoPrecios({
                         key={pct}
                         type="button"
                         onClick={() => setMarginDetail(pct)}
-                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded border transition-all ${
-                          marginDetail === pct 
-                            ? 'bg-emerald-600 text-white border-emerald-600' 
+                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded border transition-all ${marginDetail === pct
+                            ? 'bg-emerald-600 text-white border-emerald-600'
                             : 'bg-white text-emerald-800 border-emerald-300 hover:bg-emerald-100'
-                        }`}
+                          }`}
                       >
                         {pct}%
                       </button>
@@ -608,11 +627,10 @@ export default function AuxiliarCalculoPrecios({
                         key={pct}
                         type="button"
                         onClick={() => setMarginMayor(pct)}
-                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded border transition-all ${
-                          marginMayor === pct 
-                            ? 'bg-purple-600 text-white border-purple-600' 
+                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded border transition-all ${marginMayor === pct
+                            ? 'bg-purple-600 text-white border-purple-600'
                             : 'bg-white text-purple-800 border-purple-300 hover:bg-purple-100'
-                        }`}
+                          }`}
                       >
                         {pct}%
                       </button>
@@ -659,11 +677,10 @@ export default function AuxiliarCalculoPrecios({
                         key={pct}
                         type="button"
                         onClick={() => setMarginBulto(pct)}
-                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded border transition-all ${
-                          marginBulto === pct 
-                            ? 'bg-amber-600 text-white border-amber-600' 
+                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded border transition-all ${marginBulto === pct
+                            ? 'bg-amber-600 text-white border-amber-600'
                             : 'bg-white text-amber-800 border-amber-300 hover:bg-amber-100'
-                        }`}
+                          }`}
                       >
                         {pct}%
                       </button>
@@ -779,21 +796,20 @@ export default function AuxiliarCalculoPrecios({
             <span className="text-[10px] font-bold text-amber-900">
               {appliedToast ? (
                 <span className="text-emerald-700 font-extrabold flex items-center gap-1 animate-pulse bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
-                  ⚡ ¡Precios aplicados a los campos de la ficha técnica!
+                  ⚡ ¡Precios calculados y aplicados correctamente!
                 </span>
               ) : (
-                <span>💡 Presiona "Aplicar al Producto" para transferir estos precios a la ficha.</span>
+                <span>💡 Presiona "{applyButtonLabel || 'Aplicar al Producto'}" para transferir estos precios.</span>
               )}
             </span>
             <button
               type="button"
               onClick={handleManualApply}
-              className={`text-white text-[11px] font-extrabold px-3 py-1 rounded-lg transition-all flex items-center gap-1 shadow-sm active:scale-95 shrink-0 ${
-                appliedToast ? 'bg-emerald-600 hover:bg-emerald-700 ring-2 ring-emerald-300' : 'bg-amber-600 hover:bg-amber-700'
-              }`}
+              className={`text-white text-[11px] font-extrabold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 shadow-sm active:scale-95 shrink-0 ${appliedToast ? 'bg-emerald-600 hover:bg-emerald-700 ring-2 ring-emerald-300' : 'bg-amber-600 hover:bg-amber-700'
+                }`}
             >
               <Zap className="w-3.5 h-3.5" />
-              <span>{appliedToast ? '¡Aplicado!' : 'Aplicar al Producto'}</span>
+              <span>{appliedToast ? '¡Aplicado!' : (applyButtonLabel || 'Aplicar al Producto')}</span>
             </button>
           </div>
         </div>

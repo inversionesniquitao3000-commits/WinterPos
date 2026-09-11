@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Client, User, Sale, Abono, CompanyConfig } from '../types';
-import { 
-  Users, Plus, DollarSign, Search, ChevronUp, ChevronDown, 
-  ChevronsUpDown, Edit, Download, FileText, TrendingUp, 
+import {
+  Users, Plus, DollarSign, Search, ChevronUp, ChevronDown,
+  ChevronsUpDown, Edit, Download, FileText, TrendingUp,
   Info, AlertCircle, RefreshCw, MinusCircle, Settings, FileSpreadsheet, Upload, CheckCircle2,
   MessageCircle, X
 } from 'lucide-react';
@@ -79,8 +79,8 @@ interface ClientesProps {
   onAddClient: (newClient: Client) => void;
   onAddClientsBulk?: (clientsArray: any[], mode: 'update' | 'skip') => Promise<number | null>;
   onRegisterAbono: (
-    clientId: number, 
-    amountUSD: number, 
+    clientId: number,
+    amountUSD: number,
     payments: import('../types').AbonoPayment[],
     observacion?: string
   ) => void;
@@ -91,16 +91,16 @@ interface ClientesProps {
   tasaDia?: number;
 }
 
-export default function Clientes({ 
-  clients = [], 
-  currentUser: _currentUser, 
+export default function Clientes({
+  clients = [],
+  currentUser: _currentUser,
   cajaAbierta: _cajaAbierta = true,
   companyConfig,
   getApiUrl,
-  onAddClient, 
+  onAddClient,
   onAddClientsBulk,
-  onRegisterAbono, 
-  onUpdateClient, 
+  onRegisterAbono,
+  onUpdateClient,
   onDeleteClient,
   sales = [],
   abonos = [],
@@ -116,10 +116,10 @@ export default function Clientes({
 
   // Navigation / Tabs
   const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'historial' | 'ranking' | 'creditos'>('catalogo');
-  
+
   // Selection
   const [selectedRowClient, setSelectedRowClient] = useState<Client | null>(null);
-  
+
   // Search / Filters
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedInvoice, setExpandedInvoice] = useState<string | null>(null);
@@ -211,7 +211,7 @@ export default function Clientes({
   const handleSendWhatsAppSingleClient = async (c: Client) => {
     const dateStr = new Date().toLocaleString('es-VE');
     const companyName = companyConfig?.nombre_comercio || 'INVERSIONES NIQUITAO 3000 C.A.';
-    
+
     // Fetch custom WhatsApp template from backend config
     let template = '';
     try {
@@ -222,13 +222,13 @@ export default function Clientes({
           template = data.config.cobroClientesMessageTemplate;
         }
       }
-    } catch (_) {}
+    } catch (_) { }
 
     if (!template.trim()) {
       template = DEFAULT_COBRO_CLIENTES_WA_TEMPLATE;
     }
 
-    const saldoVes = tasaDia > 1 
+    const saldoVes = tasaDia > 1
       ? (c.saldo_pendiente * tasaDia).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
       : '0.00';
 
@@ -492,18 +492,18 @@ export default function Clientes({
 
   // 2. Credits and Abonos chronological list
   const creditAbonoList = useMemo(() => {
-    const list: { 
-      tipo: 'Crédito' | 'Abono' | 'Devolución'; 
-      fecha: string; 
-      ref: string; 
-      nombre: string; 
-      cedula_rif: string; 
+    const list: {
+      tipo: 'Crédito' | 'Abono' | 'Devolución';
+      fecha: string;
+      ref: string;
+      nombre: string;
+      cedula_rif: string;
       monto: number;
       metodo: string;
       metodoRaw: string;
       referencia?: string;
     }[] = [];
-    
+
     const safeSales = Array.isArray(sales) ? sales : [];
     const safeAbonos = Array.isArray(abonos) ? abonos : [];
 
@@ -512,8 +512,8 @@ export default function Clientes({
       if (!s) return;
       const creditPayment = s.pagos?.find(p => p.metodo === 'CreditoCliente');
       if (creditPayment && (creditPayment.monto !== 0 || (creditPayment as any).montoUSD !== 0)) {
-        const rawMonto = (creditPayment as any).montoUSD !== undefined && (creditPayment as any).montoUSD !== 0 
-          ? (creditPayment as any).montoUSD 
+        const rawMonto = (creditPayment as any).montoUSD !== undefined && (creditPayment as any).montoUSD !== 0
+          ? (creditPayment as any).montoUSD
           : creditPayment.monto;
         const isDev = (s.factura_nro || '').startsWith('DEV-') || rawMonto < 0;
         list.push({
@@ -562,7 +562,7 @@ export default function Clientes({
     }
     if (searchTerm.trim() !== '') {
       const term = searchTerm.toLowerCase();
-      list = list.filter(item => 
+      list = list.filter(item =>
         (item.tipo || '').toLowerCase().includes(term) ||
         (item.fecha || '').toLowerCase().includes(term) ||
         (item.ref || '').toLowerCase().includes(term) ||
@@ -634,14 +634,23 @@ export default function Clientes({
     showAlert('Abono registrado con éxito. El crédito disponible del cliente ha sido restablecido.', 'Abono Registrado', 'success');
   };
 
-  const handleCreateClient = (e: React.FormEvent) => {
+  const handleCreateClient = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName.trim() || !newDoc.trim()) {
+    const cleanDoc = newDoc.trim().toUpperCase();
+    const cleanName = newName.trim().toUpperCase();
+
+    if (!cleanName || !cleanDoc) {
       showAlert('Cédula/RIF y Nombre son requeridos.', 'Campos Requeridos', 'warning');
       return;
     }
 
-    if (clients.some(c => c.cedula_rif.toUpperCase() === newDoc.trim().toUpperCase())) {
+    const docDigits = cleanDoc.replace(/\D/g, '');
+    if (docDigits.length < 4) {
+      showAlert('La Cédula o RIF debe contener al menos 4 dígitos numéricos válidos.', 'Documento Inválido', 'warning');
+      return;
+    }
+
+    if (clients.some(c => (c.cedula_rif || '').trim().toUpperCase() === cleanDoc)) {
       showAlert('Ya existe un cliente registrado con esa Cédula o RIF.', 'Documento Duplicado', 'error');
       return;
     }
@@ -651,8 +660,8 @@ export default function Clientes({
 
     const newClient: Client = {
       id: Date.now(),
-      cedula_rif: newDoc.trim().toUpperCase(),
-      nombre: newName.trim().toUpperCase(),
+      cedula_rif: cleanDoc,
+      nombre: cleanName,
       telefono: newPhone.trim(),
       direccion: newAddress.trim(),
       limite_credito: limit,
@@ -663,17 +672,21 @@ export default function Clientes({
       aplica_precio_costo: newPrecioCosto
     };
 
-    onAddClient(newClient);
-    setShowAddModal(false);
-    
-    // Reset form
-    setNewName('');
-    setNewDoc('');
-    setNewPhone('');
-    setNewAddress('');
-    setNewCreditLimit('0');
-    setNewDiscount('0');
-    setNewPrecioCosto(false);
+    try {
+      await onAddClient(newClient);
+      setShowAddModal(false);
+
+      // Reset form
+      setNewName('');
+      setNewDoc('');
+      setNewPhone('');
+      setNewAddress('');
+      setNewCreditLimit('0');
+      setNewDiscount('0');
+      setNewPrecioCosto(false);
+    } catch (err: any) {
+      showAlert(err.message || 'Error al guardar el cliente en el servidor.', 'Error al Crear', 'error');
+    }
   };
 
   const handleOpenEdit = () => {
@@ -692,13 +705,21 @@ export default function Clientes({
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedRowClient) return;
+    const cleanEditName = editName.trim().toUpperCase();
+    const cleanEditDoc = editDoc.trim().toUpperCase();
 
-    if (!editName.trim() || !editDoc.trim()) {
+    if (!cleanEditName || !cleanEditDoc) {
       showAlert('Cédula/RIF y Nombre son requeridos.', 'Campos Requeridos', 'warning');
       return;
     }
 
-    if (clients.some(c => c.cedula_rif.toUpperCase() === editDoc.trim().toUpperCase() && c.id !== selectedRowClient.id)) {
+    const docDigits = cleanEditDoc.replace(/\D/g, '');
+    if (docDigits.length < 4) {
+      showAlert('La Cédula o RIF debe contener al menos 4 dígitos numéricos válidos.', 'Documento Inválido', 'warning');
+      return;
+    }
+
+    if (clients.some(c => (c.cedula_rif || '').trim().toUpperCase() === cleanEditDoc && c.id !== selectedRowClient.id)) {
       showAlert('Ya existe otro cliente registrado con esa Cédula o RIF.', 'Documento Duplicado', 'error');
       return;
     }
@@ -1159,10 +1180,10 @@ export default function Clientes({
       if (activeSubTab === 'catalogo') {
         const filterDescription = debtFilterMode === 'with_debt' ? 'Solo con Deuda (> $0)'
           : debtFilterMode === 'no_debt' ? 'Sin Deuda ($0.00)'
-          : debtFilterMode === 'debt_gt' ? `Deuda > $${debtThreshold}`
-          : debtFilterMode === 'debt_lte' ? `Deuda ≤ $${debtThreshold}`
-          : debtFilterMode === 'debt_eq' ? `Deuda = $${debtThreshold}`
-          : 'Todos los Clientes';
+            : debtFilterMode === 'debt_gt' ? `Deuda > $${debtThreshold}`
+              : debtFilterMode === 'debt_lte' ? `Deuda ≤ $${debtThreshold}`
+                : debtFilterMode === 'debt_eq' ? `Deuda = $${debtThreshold}`
+                  : 'Todos los Clientes';
 
         const clientsWithDebt = filteredClients.filter(c => c.saldo_pendiente > 0.01);
 
@@ -1244,44 +1265,40 @@ export default function Clientes({
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-1">
         <button
           onClick={() => setActiveSubTab('catalogo')}
-          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all flex items-center gap-1.5 ${
-            activeSubTab === 'catalogo'
+          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all flex items-center gap-1.5 ${activeSubTab === 'catalogo'
               ? 'bg-white border-slate-200 text-slate-900 shadow-2xs font-extrabold'
               : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
-          }`}
+            }`}
         >
           <Users className="w-3.5 h-3.5" />
           Catálogo
         </button>
         <button
           onClick={() => setActiveSubTab('historial')}
-          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all flex items-center gap-1.5 ${
-            activeSubTab === 'historial'
+          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all flex items-center gap-1.5 ${activeSubTab === 'historial'
               ? 'bg-white border-slate-200 text-slate-900 shadow-2xs font-extrabold'
               : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
-          }`}
+            }`}
         >
           <FileText className="w-3.5 h-3.5" />
           Historial Detalle
         </button>
         <button
           onClick={() => setActiveSubTab('ranking')}
-          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all flex items-center gap-1.5 ${
-            activeSubTab === 'ranking'
+          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all flex items-center gap-1.5 ${activeSubTab === 'ranking'
               ? 'bg-white border-slate-200 text-slate-900 shadow-2xs font-extrabold'
               : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
-          }`}
+            }`}
         >
           <TrendingUp className="w-3.5 h-3.5" />
           Movimientos por Ranking
         </button>
         <button
           onClick={() => setActiveSubTab('creditos')}
-          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all flex items-center gap-1.5 ${
-            activeSubTab === 'creditos'
+          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all flex items-center gap-1.5 ${activeSubTab === 'creditos'
               ? 'bg-white border-slate-200 text-slate-900 shadow-2xs font-extrabold'
               : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
-          }`}
+            }`}
         >
           <DollarSign className="w-3.5 h-3.5" />
           Créditos / Abonos
@@ -1372,8 +1389,8 @@ export default function Clientes({
             <div>
               <span className="font-semibold text-slate-500">Total Clientes:</span>{' '}
               <span className="font-mono text-xs font-bold text-slate-700">
-                {debtFilterMode !== 'all' || searchTerm.trim() || costoFilterMode !== 'all' 
-                  ? `${filteredClients.length} de ${totalClients}` 
+                {debtFilterMode !== 'all' || searchTerm.trim() || costoFilterMode !== 'all'
+                  ? `${filteredClients.length} de ${totalClients}`
                   : totalClients}
               </span>
             </div>
@@ -1383,10 +1400,10 @@ export default function Clientes({
 
       {/* MAIN CONTAINER LAYOUT: CONTENT + SIDEBAR ACTION BUTTONS */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        
+
         {/* LEFT COLUMN: THE ACTIVE TAB VIEW CONTENT */}
         <div className="lg:col-span-10 space-y-4">
-          
+
           {/* TAB 1: CATÁLOGO */}
           {activeSubTab === 'catalogo' && (
             <div className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm animate-fade-in flex flex-col">
@@ -1456,8 +1473,8 @@ export default function Clientes({
                       filteredClients.map(c => {
                         const isSelected = selectedRowClient?.id === c.id;
                         return (
-                          <tr 
-                            key={c.id} 
+                          <tr
+                            key={c.id}
                             onClick={() => setSelectedRowClient(isSelected ? null : c)}
                             onContextMenu={(e) => {
                               e.preventDefault();
@@ -1475,25 +1492,25 @@ export default function Clientes({
                             <td className="px-3 py-2.5 font-sans font-medium uppercase">{c.nombre}</td>
                             <td className="px-3 py-2.5 font-mono font-bold text-slate-500">{c.cedula_rif}</td>
                             <td className="px-3 py-2.5 font-sans">
-                               {c.telefono && c.telefono.trim() !== '' && c.telefono.trim() !== '0' ? (
-                                 <div className="flex items-center gap-1.5">
-                                   <span className="font-mono text-slate-700 font-bold">{c.telefono}</span>
-                                   <button
-                                     type="button"
-                                     onClick={(e) => {
-                                       e.stopPropagation();
-                                       handleSendWhatsAppSingleClient(c);
-                                     }}
-                                     className="p-1 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-600 hover:text-emerald-800 transition-all border border-emerald-200 shadow-2xs active:scale-95 cursor-pointer"
-                                     title={`Enviar recordatorio de pago por WhatsApp a ${c.nombre}`}
-                                   >
-                                     <MessageCircle className="w-3.5 h-3.5 fill-emerald-600 text-emerald-600" />
-                                   </button>
-                                 </div>
-                               ) : (
-                                 <span className="text-slate-400 italic text-[10px]">Sin teléfono</span>
-                               )}
-                             </td>
+                              {c.telefono && c.telefono.trim() !== '' && c.telefono.trim() !== '0' ? (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-mono text-slate-700 font-bold">{c.telefono}</span>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleSendWhatsAppSingleClient(c);
+                                    }}
+                                    className="p-1 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-600 hover:text-emerald-800 transition-all border border-emerald-200 shadow-2xs active:scale-95 cursor-pointer"
+                                    title={`Enviar recordatorio de pago por WhatsApp a ${c.nombre}`}
+                                  >
+                                    <MessageCircle className="w-3.5 h-3.5 fill-emerald-600 text-emerald-600" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 italic text-[10px]">Sin teléfono</span>
+                              )}
+                            </td>
                             <td className="px-3 py-2.5 text-center font-mono">${fmtUSD(c.limite_credito)}</td>
                             <td className="px-3 py-2.5 text-center font-mono text-slate-600">${fmtUSD(c.credito_disponible)}</td>
                             <td className={`px-3 py-2.5 text-center font-mono font-extrabold ${safeNum(c.saldo_pendiente) > 0.01 ? 'text-red-550' : 'text-slate-400'}`}>
@@ -1523,45 +1540,45 @@ export default function Clientes({
                             </td>
                             {/* NEW NAVIGATION BUTTONS IN ROW TO DIRECTLY GO TO SUBMODULES */}
                             <td className="px-3 py-2">
-                               <div className="flex justify-center gap-1.5">
-                                 <button
-                                   onClick={(e) => {
-                                     e.stopPropagation();
-                                     handleSendWhatsAppSingleClient(c);
-                                   }}
-                                   className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded border border-emerald-300 font-sans font-bold transition-all flex items-center gap-1 text-[9px] shadow-2xs active:scale-95 cursor-pointer"
-                                   title="Enviar recordatorio de pago vía WhatsApp"
-                                 >
-                                   <MessageCircle className="w-3 h-3 text-emerald-600" />
-                                   <span>WhatsApp</span>
-                                 </button>
+                              <div className="flex justify-center gap-1.5">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleSendWhatsAppSingleClient(c);
+                                  }}
+                                  className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded border border-emerald-300 font-sans font-bold transition-all flex items-center gap-1 text-[9px] shadow-2xs active:scale-95 cursor-pointer"
+                                  title="Enviar recordatorio de pago vía WhatsApp"
+                                >
+                                  <MessageCircle className="w-3 h-3 text-emerald-600" />
+                                  <span>WhatsApp</span>
+                                </button>
 
-                                 <button
-                                   onClick={(e) => {
-                                     e.stopPropagation();
-                                     setSelectedRowClient(c);
-                                     setActiveSubTab('historial');
-                                   }}
-                                   className="bg-slate-50 hover:bg-sky-100 hover:text-sky-700 text-slate-650 px-2 py-0.5 rounded border border-slate-300 hover:border-sky-300 font-sans font-bold transition-all flex items-center gap-0.5 text-[9px] shadow-sm active:scale-95 cursor-pointer"
-                                   title="Ir a Historial Detalle de este cliente"
-                                 >
-                                   <FileText className="w-3 h-3 text-sky-650" />
-                                   <span>Historial</span>
-                                 </button>
-                                 <button
-                                   onClick={(e) => {
-                                     e.stopPropagation();
-                                     setSelectedRowClient(c);
-                                     setActiveSubTab('creditos');
-                                   }}
-                                   className="bg-slate-50 hover:bg-amber-100 hover:text-amber-700 text-slate-650 px-2 py-0.5 rounded border border-slate-300 hover:border-amber-300 font-sans font-bold transition-all flex items-center gap-0.5 text-[9px] shadow-sm active:scale-95 cursor-pointer"
-                                   title="Ir a Créditos / Abonos de este cliente"
-                                 >
-                                   <DollarSign className="w-3 h-3 text-amber-650" />
-                                   <span>Créditos</span>
-                                 </button>
-                               </div>
-                             </td>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedRowClient(c);
+                                    setActiveSubTab('historial');
+                                  }}
+                                  className="bg-slate-50 hover:bg-sky-100 hover:text-sky-700 text-slate-650 px-2 py-0.5 rounded border border-slate-300 hover:border-sky-300 font-sans font-bold transition-all flex items-center gap-0.5 text-[9px] shadow-sm active:scale-95 cursor-pointer"
+                                  title="Ir a Historial Detalle de este cliente"
+                                >
+                                  <FileText className="w-3 h-3 text-sky-650" />
+                                  <span>Historial</span>
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedRowClient(c);
+                                    setActiveSubTab('creditos');
+                                  }}
+                                  className="bg-slate-50 hover:bg-amber-100 hover:text-amber-700 text-slate-650 px-2 py-0.5 rounded border border-slate-300 hover:border-amber-300 font-sans font-bold transition-all flex items-center gap-0.5 text-[9px] shadow-sm active:scale-95 cursor-pointer"
+                                  title="Ir a Créditos / Abonos de este cliente"
+                                >
+                                  <DollarSign className="w-3 h-3 text-amber-650" />
+                                  <span>Créditos</span>
+                                </button>
+                              </div>
+                            </td>
                           </tr>
                         );
                       })
@@ -1735,8 +1752,8 @@ export default function Clientes({
                         const clientObj = clients.find(c => c.cedula_rif === r.cedula_rif);
 
                         return (
-                          <tr 
-                            key={r.cedula_rif} 
+                          <tr
+                            key={r.cedula_rif}
                             onClick={() => {
                               if (clientObj) setSelectedRowClient(clientObj);
                             }}
@@ -1842,8 +1859,8 @@ export default function Clientes({
                         const clientObj = clients.find(c => c.cedula_rif === item.cedula_rif);
 
                         return (
-                          <tr 
-                            key={idx} 
+                          <tr
+                            key={idx}
                             onClick={() => {
                               if (clientObj) setSelectedRowClient(clientObj);
                             }}
@@ -1861,16 +1878,14 @@ export default function Clientes({
                             className="hover:bg-slate-55 transition-colors cursor-pointer"
                           >
                             <td className="px-4 py-2.5">
-                              <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-sans font-bold flex items-center w-fit gap-1 ${
-                                isCredit ? 'bg-orange-100 text-orange-850' : 
-                                isDev ? 'bg-purple-100 text-purple-850' : 
-                                'bg-emerald-100 text-emerald-850'
-                              }`}>
-                                <span className={`w-1.5 h-1.5 rounded-full ${
-                                  isCredit ? 'bg-orange-500' : 
-                                  isDev ? 'bg-purple-500' : 
-                                  'bg-emerald-500'
-                                }`} />
+                              <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-sans font-bold flex items-center w-fit gap-1 ${isCredit ? 'bg-orange-100 text-orange-850' :
+                                  isDev ? 'bg-purple-100 text-purple-850' :
+                                    'bg-emerald-100 text-emerald-850'
+                                }`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${isCredit ? 'bg-orange-500' :
+                                    isDev ? 'bg-purple-500' :
+                                      'bg-emerald-500'
+                                  }`} />
                                 {item.tipo}
                               </span>
                             </td>
@@ -1885,12 +1900,11 @@ export default function Clientes({
                                 <span className="text-[10px] font-bold text-purple-600">Devolución / Nota Crédito</span>
                               ) : (
                                 <div className="flex flex-col">
-                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold w-fit ${
-                                    item.metodoRaw === 'Efectivo$' ? 'bg-emerald-100 text-emerald-800' :
-                                    item.metodoRaw === 'EfectivoBs' ? 'bg-teal-100 text-teal-800' :
-                                    item.metodoRaw === 'Biopago' ? 'bg-sky-100 text-sky-800' :
-                                    'bg-purple-100 text-purple-800'
-                                  }`}>
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold w-fit ${item.metodoRaw === 'Efectivo$' ? 'bg-emerald-100 text-emerald-800' :
+                                      item.metodoRaw === 'EfectivoBs' ? 'bg-teal-100 text-teal-800' :
+                                        item.metodoRaw === 'Biopago' ? 'bg-sky-100 text-sky-800' :
+                                          'bg-purple-100 text-purple-800'
+                                    }`}>
                                     {item.metodo}
                                   </span>
                                   {item.referencia && (
@@ -1899,9 +1913,8 @@ export default function Clientes({
                                 </div>
                               )}
                             </td>
-                            <td className={`px-4 py-2.5 text-right font-mono font-extrabold ${
-                              isCredit ? 'text-orange-600' : isDev ? 'text-purple-600' : 'text-emerald-600'
-                            }`}>
+                            <td className={`px-4 py-2.5 text-right font-mono font-extrabold ${isCredit ? 'text-orange-600' : isDev ? 'text-purple-600' : 'text-emerald-600'
+                              }`}>
                               {isCredit ? '+' : '-'}${fmtUSD(item.monto)}
                             </td>
                           </tr>
@@ -1918,7 +1931,7 @@ export default function Clientes({
 
         {/* RIGHT COLUMN: ACTION BUTTONS PANEL */}
         <div className="lg:col-span-2 space-y-3 sticky top-2 self-start">
-          
+
           <div className="bg-slate-150 border border-slate-200 rounded-lg p-3 shadow-inner flex flex-col justify-start h-fit">
             <h4 className="text-[10px] font-sans font-extrabold text-slate-500 uppercase tracking-widest border-b border-slate-200 pb-1.5 mb-3 flex items-center gap-1">
               <Settings className="w-3.5 h-3.5 text-slate-400" />
@@ -1938,7 +1951,7 @@ export default function Clientes({
 
             {/* Vertically stacked buttons */}
             <div className="flex flex-col gap-2.5">
-              
+
               {/* BUTTON 1: AGREGAR */}
               {hasPermission('crear') && (
                 <button
@@ -1968,10 +1981,10 @@ export default function Clientes({
                   disabled={!selectedRowClient || selectedRowClient.saldo_pendiente > 0.01}
                   className="w-full bg-red-655 hover:bg-red-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-350 text-white border border-red-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all enabled:active:scale-95 disabled:cursor-not-allowed"
                   title={
-                    !selectedRowClient 
-                      ? "Seleccione un cliente en el Catálogo para eliminar" 
-                      : selectedRowClient.saldo_pendiente > 0.01 
-                        ? "No se puede eliminar un cliente con deuda pendiente" 
+                    !selectedRowClient
+                      ? "Seleccione un cliente en el Catálogo para eliminar"
+                      : selectedRowClient.saldo_pendiente > 0.01
+                        ? "No se puede eliminar un cliente con deuda pendiente"
                         : "Eliminar cliente permanentemente"
                   }
                 >
@@ -1986,12 +1999,12 @@ export default function Clientes({
                 disabled={!selectedRowClient || selectedRowClient.saldo_pendiente <= 0.01 || !hasPermission('editar')}
                 className="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-350 text-white border border-amber-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all enabled:active:scale-95 disabled:cursor-not-allowed"
                 title={
-                  !selectedRowClient 
-                    ? "Seleccione un cliente en el Catálogo para registrar abono" 
+                  !selectedRowClient
+                    ? "Seleccione un cliente en el Catálogo para registrar abono"
                     : !hasPermission('editar')
                       ? "No posee permisos para registrar abonos"
-                      : selectedRowClient.saldo_pendiente <= 0.01 
-                        ? "El cliente seleccionado no presenta deuda pendiente" 
+                      : selectedRowClient.saldo_pendiente <= 0.01
+                        ? "El cliente seleccionado no presenta deuda pendiente"
                         : "Registrar abono de crédito"
                 }
               >
@@ -2474,7 +2487,7 @@ export default function Clientes({
       {showBulkModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white border border-slate-300 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            
+
             {/* Header */}
             <div className="bg-purple-900 text-white p-4 flex items-center justify-between border-b border-purple-800">
               <div className="flex items-center gap-2.5">
@@ -2498,10 +2511,10 @@ export default function Clientes({
 
             {/* Modal Body */}
             <div className="p-6 overflow-y-auto space-y-6 flex-grow">
-              
+
               {/* Instructions & Template Download */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                
+
                 <div className="md:col-span-2 bg-purple-50/60 border border-purple-200/80 p-3.5 rounded-lg text-xs text-purple-950 font-sans leading-relaxed space-y-1.5">
                   <div className="font-bold flex items-center gap-1.5 text-purple-900">
                     <Info className="w-4 h-4 text-purple-700" />
@@ -2583,7 +2596,7 @@ export default function Clientes({
                           const pageText = textContent.items.map((item: any) => item.str).join(' ');
                           fullText += pageText + '\n';
                         }
-                        
+
                         // Parse PDF line by line or pattern search
                         const lines = fullText.split('\n');
                         const docRegex = /([VJEGvjeg][-\s]?\d{6,9})/g;
@@ -2595,7 +2608,7 @@ export default function Clientes({
                             // Extract numeric amounts if present
                             const nums = line.match(/\$?(\d+[\d,.]*)/g) || [];
                             const parsedNums = nums.map(n => parseFloat(n.replace('$', '').replace(',', '.'))).filter(n => !isNaN(n));
-                            
+
                             const nameCandidate = line.replace(doc, '').replace(/[0-9$,.-]/g, '').trim();
 
                             rawClients.push({
@@ -2674,7 +2687,7 @@ export default function Clientes({
                   }}
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                 />
-                
+
                 {bulkFileLoading ? (
                   <div className="flex flex-col items-center justify-center py-4 space-y-2">
                     <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
@@ -2698,7 +2711,7 @@ export default function Clientes({
               {/* Preview Table & Duplicate Strategy Selector */}
               {parsedBulkClients.length > 0 && (
                 <div className="space-y-4 animate-in fade-in duration-300">
-                  
+
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-50 p-3 rounded-lg border border-slate-200">
                     <div className="flex items-center gap-3 text-xs font-sans">
                       <span className="font-bold text-slate-700">Resumen Carga:</span>
@@ -2818,7 +2831,7 @@ export default function Clientes({
 
       {/* MENÚ CONTEXTUAL FLOTANTE (CLIC DERECHO EN CLIENTE O MOVIMIENTO) */}
       {contextMenu && (
-        <div 
+        <div
           onClick={(e) => e.stopPropagation()}
           style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
           className="fixed z-[120] w-72 bg-white/95 backdrop-blur-md border border-slate-200 rounded-xl shadow-2xl overflow-hidden py-1 text-slate-700 font-sans text-xs animate-scale-in select-none"
@@ -2878,11 +2891,10 @@ export default function Clientes({
                         setSelectedRowClient(c);
                         handleOpenAbono();
                       }}
-                      className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 font-bold transition-colors ${
-                        c.saldo_pendiente <= 0.01
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 font-bold transition-colors ${c.saldo_pendiente <= 0.01
                           ? 'opacity-40 cursor-not-allowed text-slate-400'
                           : 'hover:bg-amber-50 hover:text-amber-900 text-slate-700 cursor-pointer'
-                      }`}
+                        }`}
                     >
                       <DollarSign className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
                       <span>Registrar Abono / Pago</span>
@@ -2942,11 +2954,10 @@ export default function Clientes({
                           setSelectedRowClient(c);
                           handleDeleteClick();
                         }}
-                        className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 font-bold transition-colors ${
-                          c.saldo_pendiente > 0.01
+                        className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 font-bold transition-colors ${c.saldo_pendiente > 0.01
                             ? 'opacity-40 cursor-not-allowed text-slate-400'
                             : 'hover:bg-rose-50 text-rose-600 hover:text-rose-700 cursor-pointer'
-                        }`}
+                          }`}
                         title={c.saldo_pendiente > 0.01 ? "No se puede eliminar un cliente con deuda" : "Eliminar cliente"}
                       >
                         <MinusCircle className="w-3.5 h-3.5 text-rose-600 flex-shrink-0" />
@@ -2974,16 +2985,14 @@ export default function Clientes({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
                       <span className="text-[11px] font-bold text-white truncate uppercase">{item.nombre}</span>
-                      <span className={`text-[8px] px-1 py-0.2 rounded font-sans font-bold ${
-                        isCredit ? 'bg-orange-600 text-white' : isDev ? 'bg-purple-600 text-white' : 'bg-emerald-600 text-white'
-                      }`}>
+                      <span className={`text-[8px] px-1 py-0.2 rounded font-sans font-bold ${isCredit ? 'bg-orange-600 text-white' : isDev ? 'bg-purple-600 text-white' : 'bg-emerald-600 text-white'
+                        }`}>
                         {item.tipo}
                       </span>
                     </div>
                     <span className="text-[10px] text-slate-400 font-mono font-bold block">{item.ref} • {item.fecha}</span>
-                    <span className={`text-[9.5px] font-mono font-extrabold block mt-0.5 ${
-                      isCredit ? 'text-orange-400' : isDev ? 'text-purple-400' : 'text-emerald-400'
-                    }`}>
+                    <span className={`text-[9.5px] font-mono font-extrabold block mt-0.5 ${isCredit ? 'text-orange-400' : isDev ? 'text-purple-400' : 'text-emerald-400'
+                      }`}>
                       {isCredit ? '+' : '-'}${item.monto.toFixed(2)} USD
                     </span>
                   </div>

@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
-import { 
-  mockUsers, 
-  mockConfig 
+import {
+  mockUsers,
+  mockConfig
 } from './mockData';
-import { 
-  User, Product, Client, TasaHistoryItem, CompanyConfig, 
+import {
+  User, Product, Client, TasaHistoryItem, CompanyConfig,
   InventoryMovement, PriceAdjustmentHistory, SaleItem, Payment,
   Sale, CierreCaja, Abono, CierreDetails,
   Proveedor, Compra, PagoProveedor, CotizacionProveedor
@@ -35,7 +35,7 @@ const RepositorioDocumental = lazy(() => import('./components/RepositorioDocumen
 const LicenciaModal = lazy(() => import('./components/LicenciaModal'));
 const ManualAccesoMovilModal = lazy(() => import('./components/ManualAccesoMovilModal'));
 const MobileApp = lazy(() => import('./mobile/MobileApp'));
-import { 
+import {
   ShoppingBag, Package, Users, Truck,
   TrendingUp, Settings, LogOut, Globe, Cpu, History, Printer, CheckCircle2, ShieldCheck, Briefcase,
   Smartphone, QrCode, PauseCircle, Play, Palette, Sun, Moon,
@@ -45,10 +45,10 @@ import { printTicketReceipt, formatBs, formatUSD, getApiBaseUrl } from './utils'
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  
+
   // Detección de entorno: Acceso directo Desktop vs Navegador Web estándar
-  const isDesktopMode = new URLSearchParams(window.location.search).get('mode') === 'desktop' || 
-    window.navigator.userAgent.includes('Electron') || 
+  const isDesktopMode = new URLSearchParams(window.location.search).get('mode') === 'desktop' ||
+    window.navigator.userAgent.includes('Electron') ||
     window.matchMedia('(display-mode: standalone)').matches;
 
   const [isFullscreen, setIsFullscreen] = useState(() => !!document.fullscreenElement);
@@ -59,7 +59,7 @@ export default function App() {
       setIsFullscreen(isFs);
       if (isFs) {
         if ('keyboard' in navigator && (navigator as any).keyboard?.lock) {
-          (navigator as any).keyboard.lock(['Escape']).catch(() => {});
+          (navigator as any).keyboard.lock(['Escape']).catch(() => { });
         }
       } else {
         if ('keyboard' in navigator && (navigator as any).keyboard?.unlock) {
@@ -69,7 +69,7 @@ export default function App() {
     };
     document.addEventListener('fullscreenchange', handleFsChange);
     if (document.fullscreenElement && 'keyboard' in navigator && (navigator as any).keyboard?.lock) {
-      (navigator as any).keyboard.lock(['Escape']).catch(() => {});
+      (navigator as any).keyboard.lock(['Escape']).catch(() => { });
     }
     return () => {
       document.removeEventListener('fullscreenchange', handleFsChange);
@@ -81,7 +81,7 @@ export default function App() {
       if ('keyboard' in navigator && (navigator as any).keyboard?.unlock) {
         (navigator as any).keyboard.unlock();
       }
-      document.exitFullscreen().catch(() => {});
+      document.exitFullscreen().catch(() => { });
       try {
         window.resizeTo(980, 600);
         const screenW = window.screen.availWidth || 1366;
@@ -89,14 +89,14 @@ export default function App() {
         const left = Math.max(0, Math.round((screenW - 980) / 2));
         const top = Math.max(0, Math.round((screenH - 600) / 2));
         window.moveTo(left, top);
-      } catch (_) {}
+      } catch (_) { }
     } else {
       try {
         await document.documentElement.requestFullscreen();
         if ('keyboard' in navigator && (navigator as any).keyboard?.lock) {
           await (navigator as any).keyboard.lock(['Escape']);
         }
-      } catch (_) {}
+      } catch (_) { }
     }
   };
 
@@ -119,7 +119,7 @@ export default function App() {
     localStorage.setItem('pos_terminal_name', name);
     return name;
   });
-  
+
   // App States populated from local storage / backend API
   const [products, setProducts] = useState<Product[]>(() => {
     try {
@@ -136,7 +136,7 @@ export default function App() {
       const saved = localStorage.getItem('pos_clients');
       const parsed = saved ? JSON.parse(saved) : null;
       if (Array.isArray(parsed)) return parsed;
-    } catch (_) {}
+    } catch (_) { }
     return [
       { id: 1, cedula_rif: 'V-00000000', nombre: 'CONSUMIDOR FINAL', telefono: '', direccion: 'LOCAL', limite_credito: 0, credito_disponible: 0, porcentaje_descuento: 0, estado: 'Activo', saldo_pendiente: 0 }
     ];
@@ -323,7 +323,7 @@ export default function App() {
         if (u && u.id) {
           return localStorage.getItem(`pos_caja_abierta_u_${u.id}`) === 'true';
         }
-      } catch (_) {}
+      } catch (_) { }
     }
     return false;
   });
@@ -335,7 +335,7 @@ export default function App() {
         if (u && u.id) {
           return parseFloat(localStorage.getItem(`pos_apertura_usd_u_${u.id}`) || '0');
         }
-      } catch (_) {}
+      } catch (_) { }
     }
     return 0;
   });
@@ -349,7 +349,7 @@ export default function App() {
         if (u && u.id) {
           return parseFloat(localStorage.getItem(`pos_apertura_ves_u_${u.id}`) || '0');
         }
-      } catch (_) {}
+      } catch (_) { }
     }
     return 0;
   });
@@ -433,7 +433,7 @@ export default function App() {
     const timer = setTimeout(() => {
       try {
         localStorage.setItem('pos_products', JSON.stringify(products));
-      } catch (_) {}
+      } catch (_) { }
     }, 600);
     return () => clearTimeout(timer);
   }, [products]);
@@ -442,7 +442,7 @@ export default function App() {
     const timer = setTimeout(() => {
       try {
         localStorage.setItem('pos_clients', JSON.stringify(clients));
-      } catch (_) {}
+      } catch (_) { }
     }, 600);
     return () => clearTimeout(timer);
   }, [clients]);
@@ -535,9 +535,9 @@ export default function App() {
         mode = isLocalHost ? 'local' : 'remote';
         localStorage.setItem('pos_db_mode', mode);
       }
-      
+
       let ip = localStorage.getItem('pos_lan_ip');
-      
+
       if (mode === 'local') {
         try {
           const res = await fetch(`http://localhost:5000/api/status`);
@@ -548,7 +548,7 @@ export default function App() {
               localStorage.setItem('pos_lan_ip', data.localIp);
             }
           }
-        } catch (_) {}
+        } catch (_) { }
       }
 
       setLanIP(ip || (mode === 'remote' ? window.location.hostname : '127.0.0.1'));
@@ -646,7 +646,7 @@ export default function App() {
             return;
           }
         }
-      } catch (_) {}
+      } catch (_) { }
 
       // Fallback a endpoints individuales en caso de servidores antiguos
       try {
@@ -731,21 +731,21 @@ export default function App() {
     }
   }, [activeTab, lanIP, dbMode]);
 
-const cleanProductObject = (p: any): Product => ({
-  ...p,
-  stock_actual: parseFloat(p.stock_actual) || 0,
-  stock_minimo: parseFloat(p.stock_minimo) || 0,
-  precio_costo_usd: parseFloat(p.precio_costo_usd) || 0,
-  precio_detalle_usd: parseFloat(p.precio_detalle_usd) || 0,
-  precio_mayor_usd: parseFloat(p.precio_mayor_usd) || 0,
-  precio_bulto_usd: parseFloat(p.precio_bulto_usd) || 0,
-  cantidad_mayorista: parseInt(p.cantidad_mayorista) || 12,
-  cant_bulto: parseInt(p.cant_bulto) || 0,
-  ganancia_detalle: parseFloat(p.ganancia_detalle) || 0,
-  ganancia_mayor: parseFloat(p.ganancia_mayor) || 0,
-  ganancia_bulto: parseFloat(p.ganancia_bulto) || 0,
-  fijar_margen: !!p.fijar_margen
-});
+  const cleanProductObject = (p: any): Product => ({
+    ...p,
+    stock_actual: parseFloat(p.stock_actual) || 0,
+    stock_minimo: parseFloat(p.stock_minimo) || 0,
+    precio_costo_usd: parseFloat(p.precio_costo_usd) || 0,
+    precio_detalle_usd: parseFloat(p.precio_detalle_usd) || 0,
+    precio_mayor_usd: parseFloat(p.precio_mayor_usd) || 0,
+    precio_bulto_usd: parseFloat(p.precio_bulto_usd) || 0,
+    cantidad_mayorista: parseInt(p.cantidad_mayorista) || 12,
+    cant_bulto: parseInt(p.cant_bulto) || 0,
+    ganancia_detalle: parseFloat(p.ganancia_detalle) || 0,
+    ganancia_mayor: parseFloat(p.ganancia_mayor) || 0,
+    ganancia_bulto: parseFloat(p.ganancia_bulto) || 0,
+    fijar_margen: !!p.fijar_margen
+  });
 
   // Refresh products, movements, and price history automatically when entering the inventario tab
   useEffect(() => {
@@ -860,7 +860,7 @@ const cleanProductObject = (p: any): Product => ({
           const usersData = await usersRes.json();
           setUsers(usersData);
         }
-      } catch (_) {}
+      } catch (_) { }
     };
     fetchInitialConfigAndUsers();
   }, [lanIP, dbMode]);
@@ -906,13 +906,13 @@ const cleanProductObject = (p: any): Product => ({
 
         // Calculate max known IDs from current state
         const maxSaleId = safeSales.reduce((max, s) => Math.max(max, s?.id || 0), 0);
-        
+
         // Calculate latest active rate details
         const currentTasaObj = safeTasas[safeTasas.length - 1];
         const lastTasaCobro = currentTasaObj ? (currentTasaObj.tasa_cobro || 0) : 0;
         const lastTasaVuelto = currentTasaObj ? (currentTasaObj.tasa_vuelto || 0) : 0;
         const tasasCount = safeTasas.length;
-        
+
         // Calculate cierres parameters
         const cierresCount = safeCierres.length;
         const maxCierreId = safeCierres.reduce((max, c) => Math.max(max, c?.id || 0), 0);
@@ -1013,7 +1013,7 @@ const cleanProductObject = (p: any): Product => ({
                 }
               }
             })
-            .catch(() => {});
+            .catch(() => { });
         }
 
         // 3. Tasa updated from another terminal
@@ -1049,7 +1049,7 @@ const cleanProductObject = (p: any): Product => ({
         // 7. Session closure detection for non-administrators
         if (data.sessionClosed && user && user.rol.toLowerCase() !== 'administrador') {
           console.warn('[Sync] Cierre de caja detectado para el usuario actual. Finalizando sesión en la red local.');
-          
+
           const uKey = `u_${user.id}`;
           localStorage.removeItem(`pos_caja_abierta_${uKey}`);
           localStorage.removeItem(`pos_apertura_usd_${uKey}`);
@@ -1059,7 +1059,7 @@ const cleanProductObject = (p: any): Product => ({
           localStorage.removeItem(`pos_movimientos_usd_${uKey}`);
           localStorage.removeItem(`pos_movimientos_ves_${uKey}`);
           localStorage.removeItem(`pos_apertura_fecha_${uKey}`);
-          
+
           setCajaAbierta(false);
           setMontoAperturaUsd(0);
           setMontoAperturaVes(0);
@@ -1068,7 +1068,7 @@ const cleanProductObject = (p: any): Product => ({
           setCajaMovimientosUsd(0);
           setCajaMovimientosVes(0);
           setShiftSales([]);
-          
+
           setSessionNotice('⚠️ Su turno de caja ha sido cerrado desde la red local. Su sesión fue finalizada. Inicie sesión nuevamente para realizar una nueva apertura.');
           setCurrentUser(null);
         }
@@ -1283,7 +1283,7 @@ const cleanProductObject = (p: any): Product => ({
   useEffect(() => {
     const handleGlobalKeys = (e: KeyboardEvent) => {
       if (!currentUser) return;
-      
+
       if (e.key === 'F1' && hasModulePermission('caja', 'ver')) {
         e.preventDefault();
         setActiveTab('caja');
@@ -1423,7 +1423,7 @@ const cleanProductObject = (p: any): Product => ({
       if (autoMode === 'off') return;
 
       const intervalVal = localStorage.getItem('pos_auto_tasa_interval') || '10';
-      const intervalMs = intervalVal === 'fixed' 
+      const intervalMs = intervalVal === 'fixed'
         ? 60 * 1000 // Si es hora fija, revisar cada 1 minuto si ya es la hora
         : (parseInt(intervalVal, 10) || 10) * 60 * 1000;
 
@@ -1549,14 +1549,14 @@ const cleanProductObject = (p: any): Product => ({
     const normalizedType = type === 'Devolución' ? 'Devolucion' : type;
     const isAdd = normalizedType === 'Entrada' || normalizedType === 'Devolucion' || normalizedType === 'Entrada Rápida';
     const multiplier = isAdd ? 1 : -1;
-    
+
     const cleanQty = product.a_granel ? qty : Math.round(qty);
     let nextStock = product.stock_actual + cleanQty * multiplier;
     if (!product.a_granel) {
       nextStock = Math.round(nextStock);
     }
     nextStock = Math.max(0, nextStock);
-    
+
     setProducts(prev =>
       prev.map(p => {
         if (p.id === prodId) {
@@ -1863,12 +1863,21 @@ const cleanProductObject = (p: any): Product => ({
   };
 
   const handleAddClient = async (cli: Client) => {
-    const saved = await postApiData('/clientes', cli);
-    if (saved) {
-      setClients(prev => [...prev, saved]);
-    } else {
-      setClients(prev => [...prev, cli]);
+    const res = await fetch(getApiUrl('/clientes'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cli)
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || `Error ${res.status}: No se pudo registrar el cliente en el servidor.`);
     }
+    const saved = await res.json();
+    setClients(prev => {
+      const filtered = prev.filter(c => c.id !== saved.id && c.cedula_rif !== saved.cedula_rif);
+      return [...filtered, saved];
+    });
+    return saved;
   };
 
   const handleAddClientsBulk = async (clientsArray: any[], mode: 'update' | 'skip' = 'update') => {
@@ -1896,7 +1905,7 @@ const cleanProductObject = (p: any): Product => ({
   };
 
   const handleRegisterAbono = async (
-    clientId: number, 
+    clientId: number,
     amountUSD: number,   // total abono in USD (for client credit update)
     payments: import('./types').AbonoPayment[],  // one entry per payment method used
     observacion: string = ''
@@ -2006,12 +2015,12 @@ const cleanProductObject = (p: any): Product => ({
       const uKey = currentUser ? `u_${currentUser.id}` : 'guest';
 
       // 1. Send opening request to centralized server
-      await postApiData('/cajas/abrir', { 
-        usd, 
-        ves, 
-        usuarioId: currentUser?.id, 
-        usuarioNombre: currentUser?.nombre, 
-        terminal: terminalName 
+      await postApiData('/cajas/abrir', {
+        usd,
+        ves,
+        usuarioId: currentUser?.id,
+        usuarioNombre: currentUser?.nombre,
+        terminal: terminalName
       });
 
       // 2. Set active state and local cache
@@ -2022,7 +2031,7 @@ const cleanProductObject = (p: any): Product => ({
       setCajaVentasVes(0);
       setCajaMovimientosUsd(0);
       setCajaMovimientosVes(0);
-      
+
       // Reset shift metrics - ALL variables must be zeroed for a clean new session
       setShiftSales([]);
       setShiftAbonosUsd(0);
@@ -2056,7 +2065,7 @@ const cleanProductObject = (p: any): Product => ({
       localStorage.setItem(`pos_movimientos_usd_${uKey}`, '0');
       localStorage.setItem(`pos_movimientos_ves_${uKey}`, '0');
       localStorage.setItem(`pos_apertura_fecha_${uKey}`, getLocalISODateString());
-      
+
       // Clean up legacy global keys
       localStorage.removeItem('pos_caja_abierta');
       localStorage.removeItem('pos_apertura_usd');
@@ -2067,14 +2076,14 @@ const cleanProductObject = (p: any): Product => ({
   };
 
   const handleCerrarCaja = async (
-    realUsd: number, 
+    realUsd: number,
     realVes: number,
     details?: CierreDetails
   ): Promise<CierreCaja> => {
     const uKey = currentUser ? `u_${currentUser.id}` : 'guest';
     const expectedUsd = montoAperturaUsd + cajaVentasUsd + cajaMovimientosUsd;
     const expectedVes = montoAperturaVes + cajaVentasVes + cajaMovimientosVes;
-    
+
     // Calculate total cost of items sold during this shift
     const costoTotalUsd = shiftSales.reduce((acc, sale) => {
       return acc + (sale.items || []).reduce((itemAcc, item) => {
@@ -2083,7 +2092,7 @@ const cleanProductObject = (p: any): Product => ({
     }, 0);
     const ventaTotalUsd = details?.ventaTotalUsd ?? shiftSales.reduce((acc, s) => acc + s.totalUSD, 0);
     const utilidadUsd = Math.max(0, ventaTotalUsd - costoTotalUsd);
-    
+
     const newCierre: CierreCaja = {
       ...details,
       id: Date.now(),
@@ -2115,7 +2124,7 @@ const cleanProductObject = (p: any): Product => ({
       vueltosEntregadosUsd: details?.vueltosEntregadosUsd ?? 0,
       vueltosEntregadosVes: details?.vueltosEntregadosVes ?? 0,
       dineroEnCajaExpected: details?.dineroEnCajaExpected ?? expectedUsd,
-      
+
       // Detailed sales metrics
       ventasTotalesUsd: details?.ventasTotalesUsd ?? shiftSales.reduce((acc, s) => acc + s.totalUSD, 0),
       descuentosUsd: details?.descuentosUsd ?? shiftSales.reduce((acc, s) => acc + s.descuento, 0),
@@ -2136,7 +2145,7 @@ const cleanProductObject = (p: any): Product => ({
       devolucionVentasVes: details?.devolucionVentasVes ?? 0,
       ventaTotalUsd,
     };
-    
+
     setCierres(prev => [...prev, newCierre]);
 
     setCajaAbierta(false);
@@ -2194,9 +2203,9 @@ const cleanProductObject = (p: any): Product => ({
 
 
   const handleRegisterCajaMovement = async (
-    type: 'Entrada' | 'Salida' | 'Devolucion', 
-    description: string, 
-    usd: number, 
+    type: 'Entrada' | 'Salida' | 'Devolucion',
+    description: string,
+    usd: number,
     ves: number,
     metodoPago: string = 'EFECTIVO',
     comisionVes: number = 0,
@@ -2279,7 +2288,7 @@ const cleanProductObject = (p: any): Product => ({
             nextStock = Math.round(nextStock);
           }
           nextStock = Math.max(0, nextStock);
-          
+
           const newMov: InventoryMovement = {
             id: Math.random(),
             date: getLocalISODateString(),
@@ -2332,7 +2341,7 @@ const cleanProductObject = (p: any): Product => ({
     // 4. Increment cash counters
     let cashUSDReceived = 0;
     let cashVESReceived = 0;
-    
+
     sale.pagos.forEach(p => {
       if (p.metodo === 'Efectivo$') cashUSDReceived += p.monto;
       if (p.metodo === 'EfectivoBs') cashVESReceived += p.monto;
@@ -2360,7 +2369,7 @@ const cleanProductObject = (p: any): Product => ({
         const errData = await res.json().catch(() => ({}));
         const errMsg = errData.error || `Error HTTP ${res.status} al guardar la venta en el servidor.`;
         console.error('❌ Error al registrar venta en servidor:', errMsg);
-        
+
         // Revert optimistic local state updates
         setSales(prev => prev.filter(s => s !== tempSaleObj));
         setShiftSales(prev => prev.filter(s => s !== tempSaleObj));
@@ -2368,7 +2377,7 @@ const cleanProductObject = (p: any): Product => ({
         setCajaVentasVes(cajaVentasVes);
         localStorage.setItem('pos_ventas_usd', cajaVentasUsd.toString());
         localStorage.setItem('pos_ventas_ves', cajaVentasVes.toString());
-        
+
         throw new Error(errMsg);
       }
 
@@ -2396,7 +2405,7 @@ const cleanProductObject = (p: any): Product => ({
     try {
       localStorage.removeItem('pos_paused_product_draft');
       window.dispatchEvent(new Event('pos_paused_draft_changed'));
-    } catch (_) {}
+    } catch (_) { }
     setCurrentUser(null);
     setActiveTab('caja');
   };
@@ -2442,7 +2451,7 @@ const cleanProductObject = (p: any): Product => ({
             setCurrentUser(null);
           }
         }
-      } catch (_) {}
+      } catch (_) { }
     };
 
     sendHeartbeat();
@@ -2512,7 +2521,7 @@ const cleanProductObject = (p: any): Product => ({
       if (res.ok) {
         const saved = await res.json();
         setCompras(prev => [saved, ...prev]);
-        
+
         // Refresh products to get updated stock and costs
         try {
           const pRes = await fetch(getApiUrl('/productos'));
@@ -2520,19 +2529,19 @@ const cleanProductObject = (p: any): Product => ({
             const pData = await pRes.json();
             setProducts(pData.map(cleanProductObject));
           }
-        } catch (_) {}
+        } catch (_) { }
 
         // Refresh movements
         try {
           const mRes = await fetch(getApiUrl('/movements'));
           if (mRes.ok) setMovements(await mRes.json());
-        } catch (_) {}
+        } catch (_) { }
 
         // Refresh proveedores to update debt
         try {
           const provRes = await fetch(getApiUrl('/proveedores'));
           if (provRes.ok) setProveedores(await provRes.json());
-        } catch (_) {}
+        } catch (_) { }
 
         return saved;
       } else {
@@ -2564,7 +2573,7 @@ const cleanProductObject = (p: any): Product => ({
           ]);
           if (provRes.ok) setProveedores(await provRes.json());
           if (compRes.ok) setCompras(await compRes.json());
-        } catch (_) {}
+        } catch (_) { }
 
         return true;
       }
@@ -2590,7 +2599,7 @@ const cleanProductObject = (p: any): Product => ({
             setCotizacionesProveedores(await cRes.json());
             return true;
           }
-        } catch (_) {}
+        } catch (_) { }
         setCotizacionesProveedores(prev => [saved, ...prev]);
         return true;
       }
@@ -2627,7 +2636,7 @@ const cleanProductObject = (p: any): Product => ({
       if (compRes.ok) setCompras(await compRes.json());
       if (pagosRes.ok) setPagosProveedores(await pagosRes.json());
       if (cotRes.ok) setCotizacionesProveedores(await cotRes.json());
-    } catch (_) {}
+    } catch (_) { }
   };
 
   const hasModulePermission = (modulo: string, accion: 'ver' | 'crear' | 'editar' | 'eliminar' = 'ver') => {
@@ -2698,10 +2707,10 @@ const cleanProductObject = (p: any): Product => ({
   if (isLicenseBlocking || showLicenseModalManually) {
     return (
       <Suspense fallback={<div className="flex items-center justify-center min-h-screen bg-slate-950 text-white"><div className="w-8 h-8 border-4 border-sky-500 border-t-transparent rounded-full animate-spin"></div></div>}>
-        <LicenciaModal 
-          licenseStatus={licenseStatus} 
-          onLicenseActivated={fetchLicenseStatus} 
-          getApiUrl={getApiUrl} 
+        <LicenciaModal
+          licenseStatus={licenseStatus}
+          onLicenseActivated={fetchLicenseStatus}
+          getApiUrl={getApiUrl}
           onClose={isLicenseBlocking ? undefined : () => setShowLicenseModalManually(false)}
         />
       </Suspense>
@@ -2710,7 +2719,7 @@ const cleanProductObject = (p: any): Product => ({
 
   if (!currentUser) {
     return (
-      <LoginTerminal 
+      <LoginTerminal
         onLoginSuccess={(user) => {
           setSessionNotice('');
           sessionStartRef.current = Date.now();
@@ -2720,14 +2729,14 @@ const cleanProductObject = (p: any): Product => ({
             document.documentElement.requestFullscreen()
               .then(() => {
                 if ('keyboard' in navigator && (navigator as any).keyboard?.lock) {
-                  (navigator as any).keyboard.lock(['Escape']).catch(() => {});
+                  (navigator as any).keyboard.lock(['Escape']).catch(() => { });
                 }
               })
-              .catch(() => {});
+              .catch(() => { });
           }
-        }} 
-        systemUsers={users} 
-        companyConfig={companyConfig} 
+        }}
+        systemUsers={users}
+        companyConfig={companyConfig}
         sessionNotice={sessionNotice}
         onOpenLicenseModal={() => setShowLicenseModalManually(true)}
       />
@@ -2736,10 +2745,10 @@ const cleanProductObject = (p: any): Product => ({
 
   return (
     <div className="h-screen bg-theme-main text-slate-800 dark:text-slate-100 flex flex-col overflow-hidden font-mono selection:bg-winter-blueBtn selection:text-white transition-colors duration-300">
-      
+
       {/* HEADER SECTION - Dynamic Theme Header */}
       <header className="bg-theme-header border-b border-slate-700/20 px-6 py-4 flex flex-row items-center justify-between gap-4 select-none relative z-20 shadow-md text-white flex-shrink-0 transition-colors duration-300">
-        
+
         {/* Left operator info */}
         <div className="flex items-center gap-3 flex-shrink-0">
           <div className="w-10 h-10 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center text-emerald-450 font-black shadow-inner">
@@ -2768,9 +2777,9 @@ const cleanProductObject = (p: any): Product => ({
         {/* Center business brand */}
         <div className="text-center flex-grow mx-4 flex items-center justify-center gap-2.5 min-w-0">
           {companyConfig?.logo_url && (
-            <img 
-              src={companyConfig.logo_url} 
-              alt="Logo Comercio" 
+            <img
+              src={companyConfig.logo_url}
+              alt="Logo Comercio"
               className="w-8 h-8 object-contain rounded bg-white/10 p-0.5 border border-white/20 shadow-xs flex-shrink-0"
             />
           )}
@@ -2808,7 +2817,7 @@ const cleanProductObject = (p: any): Product => ({
             </div>
           )}
 
-          <div 
+          <div
             onClick={() => setActiveTab('tasa')}
             className="bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 border border-emerald-500/60 px-3.5 py-1 rounded-lg flex items-center gap-2 shadow-md hover:border-emerald-400 transition-all cursor-pointer group"
             title="Haga clic para consultar o actualizar la Tasa de Cambio BCV"
@@ -2858,11 +2867,10 @@ const cleanProductObject = (p: any): Product => ({
         {hasModulePermission('caja', 'ver') && (
           <button
             onClick={() => setActiveTab('caja')}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${
-              activeTab === 'caja'
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${activeTab === 'caja'
                 ? 'tab-grad-caja text-white shadow-md ring-1 ring-white/20'
                 : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-            }`}
+              }`}
           >
             <ShoppingBag className="w-5 h-5 flex-shrink-0" />
             <span>F1 CAJA</span>
@@ -2872,11 +2880,10 @@ const cleanProductObject = (p: any): Product => ({
         {hasModulePermission('inventario', 'ver') && (
           <button
             onClick={() => setActiveTab('inventario')}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${
-              activeTab === 'inventario'
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${activeTab === 'inventario'
                 ? 'tab-grad-inventario text-white shadow-md ring-1 ring-white/20'
                 : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-            }`}
+              }`}
           >
             <Package className="w-5 h-5 flex-shrink-0" />
             <span>F2 Inventario</span>
@@ -2886,11 +2893,10 @@ const cleanProductObject = (p: any): Product => ({
         {hasModulePermission('ventas', 'ver') && (
           <button
             onClick={() => setActiveTab('ventas')}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${
-              activeTab === 'ventas'
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${activeTab === 'ventas'
                 ? 'tab-grad-ventas text-white shadow-md ring-1 ring-white/20'
                 : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-            }`}
+              }`}
           >
             <History className="w-5 h-5 flex-shrink-0" />
             <span>F3 Ventas</span>
@@ -2900,11 +2906,10 @@ const cleanProductObject = (p: any): Product => ({
         {hasModulePermission('clientes', 'ver') && (
           <button
             onClick={() => setActiveTab('clientes')}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${
-              activeTab === 'clientes'
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${activeTab === 'clientes'
                 ? 'tab-grad-clientes text-white shadow-md ring-1 ring-white/20'
                 : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-            }`}
+              }`}
           >
             <Users className="w-5 h-5 flex-shrink-0" />
             <span>F4 Clientes</span>
@@ -2914,11 +2919,10 @@ const cleanProductObject = (p: any): Product => ({
         {hasModulePermission('proveedores', 'ver') && (
           <button
             onClick={() => setActiveTab('proveedores')}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${
-              activeTab === 'proveedores'
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${activeTab === 'proveedores'
                 ? 'tab-grad-proveedores text-white shadow-md ring-1 ring-white/20'
                 : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-            }`}
+              }`}
           >
             <Truck className="w-5 h-5 flex-shrink-0" />
             <span>F5 Proveedores</span>
@@ -2935,11 +2939,10 @@ const cleanProductObject = (p: any): Product => ({
                 setShowMasterPassModal(true);
               }
             }}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${
-              activeTab === 'inversiones'
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${activeTab === 'inversiones'
                 ? 'tab-grad-inversiones text-white shadow-md ring-1 ring-white/20'
                 : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-            }`}
+              }`}
             title="Módulo de Control de Inversiones y Accionistas [F6] (Requiere Master Pass)"
           >
             <Briefcase className="w-5 h-5 flex-shrink-0" />
@@ -2951,11 +2954,10 @@ const cleanProductObject = (p: any): Product => ({
         {hasModulePermission('documentos', 'ver') && (
           <button
             onClick={() => setActiveTab('documentos')}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${
-              activeTab === 'documentos'
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${activeTab === 'documentos'
                 ? 'tab-grad-documentos text-white shadow-md ring-1 ring-white/20'
                 : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-            }`}
+              }`}
             title="Bóveda de Documentos Legales y Fiscales de la Empresa [F7]"
           >
             <ShieldCheck className="w-5 h-5 flex-shrink-0 text-blue-400" />
@@ -2966,11 +2968,10 @@ const cleanProductObject = (p: any): Product => ({
         {hasModulePermission('tasa', 'ver') && (
           <button
             onClick={() => setActiveTab('tasa')}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${
-              activeTab === 'tasa'
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${activeTab === 'tasa'
                 ? 'tab-grad-tasa text-white shadow-md ring-1 ring-white/20'
                 : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-            }`}
+              }`}
           >
             <TrendingUp className="w-5 h-5 flex-shrink-0" />
             <span>F9 Tasa</span>
@@ -2980,11 +2981,10 @@ const cleanProductObject = (p: any): Product => ({
         {hasModulePermission('config', 'ver') && (
           <button
             onClick={() => setActiveTab('config')}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${
-              activeTab === 'config'
+            className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-sm sm:text-[15px] font-black font-sans rounded-lg transition-all active:scale-[0.98] cursor-pointer ${activeTab === 'config'
                 ? 'tab-grad-config text-white shadow-md ring-1 ring-white/20'
                 : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-            }`}
+              }`}
           >
             <Settings className="w-5 h-5 flex-shrink-0" />
             <span>F10 Config.</span>
@@ -3354,15 +3354,15 @@ const cleanProductObject = (p: any): Product => ({
 
       {/* MODAL DE REIMPRESIÓN DE TICKET */}
       {reprintSale && (
-        <div 
+        <div
           onClick={() => setReprintSale(null)}
           className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-mono text-slate-800"
         >
-          <div 
+          <div
             onClick={(e) => e.stopPropagation()}
             className="bg-slate-900 border border-slate-750 rounded-2xl overflow-hidden w-full max-w-md shadow-2xl p-5 space-y-4"
           >
-            
+
             {/* Currency Selector Toggle */}
             <div className="bg-slate-950 p-2 rounded-xl border border-slate-800 flex items-center justify-between">
               <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-slate-400">
@@ -3372,22 +3372,20 @@ const cleanProductObject = (p: any): Product => ({
                 <button
                   type="button"
                   onClick={() => setReprintCurrency('USD')}
-                  className={`px-3 py-1 text-[11px] font-extrabold font-sans rounded-md transition-all ${
-                    reprintCurrency === 'USD'
+                  className={`px-3 py-1 text-[11px] font-extrabold font-sans rounded-md transition-all ${reprintCurrency === 'USD'
                       ? 'bg-emerald-600 text-white shadow'
                       : 'text-slate-400 hover:text-white'
-                  }`}
+                    }`}
                 >
                   💵 $ (USD)
                 </button>
                 <button
                   type="button"
                   onClick={() => setReprintCurrency('VES')}
-                  className={`px-3 py-1 text-[11px] font-extrabold font-sans rounded-md transition-all ${
-                    reprintCurrency === 'VES'
+                  className={`px-3 py-1 text-[11px] font-extrabold font-sans rounded-md transition-all ${reprintCurrency === 'VES'
                       ? 'bg-blue-600 text-white shadow'
                       : 'text-slate-400 hover:text-white'
-                  }`}
+                    }`}
                 >
                   🇻🇪 Bs (VES)
                 </button>
@@ -3444,10 +3442,10 @@ const cleanProductObject = (p: any): Product => ({
                       const priceNumUSD = item.priceUSD ? item.priceUSD : (item.precioUSD ? item.precioUSD : 0);
                       const totalNumUSD = item.totalUSD ? item.totalUSD : (priceNumUSD * rawQty);
 
-                      const priceDisplay = isVES 
+                      const priceDisplay = isVES
                         ? formatBs(priceNumUSD * tasaVenta)
                         : `$${priceNumUSD.toFixed(2)}`;
-                      const totalDisplay = isVES 
+                      const totalDisplay = isVES
                         ? formatBs(totalNumUSD * tasaVenta)
                         : `$${totalNumUSD.toFixed(2)}`;
 
@@ -3653,7 +3651,7 @@ const cleanProductObject = (p: any): Product => ({
 
       {/* DOCK FLOTANTE GLOBAL PARA REANUDAR PRODUCTO PAUSADO DESDE CUALQUIER MÓDULO (F1 - F10) */}
       {pausedProductDraft && currentUser && (
-        <div 
+        <div
           onClick={handleGlobalResumePausedDraft}
           className="fixed bottom-5 right-5 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white pl-4 pr-5 py-3 rounded-2xl shadow-2xl z-[999] flex items-center gap-3.5 cursor-pointer border border-amber-500/50 hover:border-amber-400 select-none group transition-all animate-bounce"
           title="Haga clic para reanudar el registro/edición del producto pausado"

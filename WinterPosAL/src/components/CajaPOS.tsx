@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Product, Client, User, CompanyConfig, SaleItem, Payment, Sale, CierreCaja, CierreDetails, Abono, DivisaOperation } from '../types';
-import { 
-  ShoppingBag, Search, Trash2, 
-  XCircle, ArrowUpRight, 
+import {
+  ShoppingBag, Search, Trash2,
+  XCircle, ArrowUpRight,
   Calculator, CheckCircle2, Ticket,
   Clock, ListOrdered, Plus, AlertCircle, DollarSign, RotateCcw, Printer,
   Calendar, Lock, Coins, RefreshCw, ShieldCheck, FileText,
@@ -23,7 +23,7 @@ interface CajaPOSProps {
   tasaDia: number;
   tasaVuelto: number;
   currentUser: User;
-  onAddClient?: (cli: Client) => Promise<void> | void;
+  onAddClient?: (cli: Client) => Promise<Client | void> | Client | void;
   onRegisterSale: (sale: {
     factura_nro: string;
     client: Client;
@@ -43,7 +43,7 @@ interface CajaPOSProps {
   montoAperturaVes: number;
   onAbrirCaja: (usd: number, ves: number) => void;
   onCerrarCaja: (
-    realUsd: number, 
+    realUsd: number,
     realVes: number,
     details?: CierreDetails
   ) => Promise<CierreCaja>;
@@ -418,7 +418,7 @@ export default function CajaPOS({
           const termName = localStorage.getItem('pos_terminal_name') || 'CAJA_01';
           const uKey = currentUser?.id || currentUser?.usuario || 'default';
           let aperturaStr = localStorage.getItem(`pos_apertura_fecha_${uKey}`) || localStorage.getItem(`pos_apertura_fecha_${currentUser?.usuario}`) || localStorage.getItem('pos_apertura_fecha') || '';
-          
+
           // Also try to get fresh estado from server
           try {
             const estadoRes = await fetch(getApiUrl(`/cajas/estado?terminal=${encodeURIComponent(termName)}&usuarioId=${currentUser.id}&usuarioNombre=${encodeURIComponent(currentUser.nombre)}`));
@@ -454,8 +454,8 @@ export default function CajaPOS({
           }
 
           // Check if any sale in current shift had Euro payments
-          const hasEurInSales = (shiftSales || []).some(s => 
-            s && !s.factura_nro?.startsWith('DEV-') && (s.pagos || []).some((p: any) => 
+          const hasEurInSales = (shiftSales || []).some(s =>
+            s && !s.factura_nro?.startsWith('DEV-') && (s.pagos || []).some((p: any) =>
               p.metodo === 'Efectivo€' || p.metodo === 'EUR' || (p as any).currency === 'EUR' || (p.metodo && p.metodo.includes('€'))
             )
           );
@@ -480,8 +480,8 @@ export default function CajaPOS({
 
   const handleProcessDivisaOperation = (op: any) => {
     if (op.tipo_operacion === 'COMPRA_DIVISA') {
-      const usdAmount = op.currency === 'USD' 
-        ? op.monto_divisa 
+      const usdAmount = op.currency === 'USD'
+        ? op.monto_divisa
         : (op.monto_ves_entregado && tasaDia > 0 ? op.monto_ves_entregado / tasaDia : op.monto_divisa);
       const vesSalida = op.monto_ves_entregado;
       onRegisterCajaMovement('Entrada', `[CAMBIO DIVISAS] Recepción ${op.monto_divisa} ${op.currency} a tasa ${op.tasa_aplicada.toFixed(2)}`, usdAmount, 0);
@@ -505,12 +505,12 @@ export default function CajaPOS({
   const [devSearchTerm, setDevSearchTerm] = useState('');
   const [allSalesList, setAllSalesList] = useState<Sale[]>([]);
   const [devSelectedSale, setDevSelectedSale] = useState<Sale | null>(null);
-  const [devItems, setDevItems] = useState<Array<{ 
-    product: Product; 
-    qty: number; 
-    prevReturnedQty: number; 
-    remainingQty: number; 
-    priceUSD: number; 
+  const [devItems, setDevItems] = useState<Array<{
+    product: Product;
+    qty: number;
+    prevReturnedQty: number;
+    remainingQty: number;
+    priceUSD: number;
     returnQty: number;
     inventoryDest: 'disponible' | 'merma';
   }>>([]);
@@ -597,7 +597,7 @@ export default function CajaPOS({
 
     if (devSearchTerm.trim() === '') return sortedSales;
     const term = devSearchTerm.toLowerCase();
-    return sortedSales.filter(sale => 
+    return sortedSales.filter(sale =>
       sale.factura_nro?.toLowerCase().includes(term) ||
       sale.client?.nombre?.toLowerCase().includes(term) ||
       sale.client?.cedula_rif?.toLowerCase().includes(term)
@@ -611,11 +611,11 @@ export default function CajaPOS({
     }
 
     const rawDevCode = `DEV-${sale.factura_nro.replace('FAC-', '')}`;
-    const affectedSales = salesList.filter(s => 
-      s && s.factura_nro && s.factura_nro.startsWith('DEV-') && 
-      ((s as any).factura_afectada === sale.factura_nro || 
-       s.factura_nro === rawDevCode || 
-       s.factura_nro.startsWith(`${rawDevCode}-`))
+    const affectedSales = salesList.filter(s =>
+      s && s.factura_nro && s.factura_nro.startsWith('DEV-') &&
+      ((s as any).factura_afectada === sale.factura_nro ||
+        s.factura_nro === rawDevCode ||
+        s.factura_nro.startsWith(`${rawDevCode}-`))
     );
 
     const itemReturnedQtys: Record<string, number> = {};
@@ -639,7 +639,7 @@ export default function CajaPOS({
       const code = item.product?.barcode || (item as any).barcode || '';
       const originalQty = typeof item.qty === 'number' ? item.qty : (parseFloat(String(item.qty || 0)) || 0);
       const returnedQty = itemReturnedQtys[code] || 0;
-      
+
       totalOriginalQty += originalQty;
       totalReturnedQty += Math.min(originalQty, returnedQty);
     });
@@ -683,7 +683,7 @@ export default function CajaPOS({
         description: description,
         precio_costo_usd: item?.product?.precio_costo_usd || 0
       } as Product;
-      
+
       return {
         product: fullProd,
         qty: qty,
@@ -768,7 +768,7 @@ export default function CajaPOS({
     try {
       const isCreditSale = currentSale.pagos?.some(p => p.metodo === 'CreditoCliente');
       const hasExchange = devExchangeItems.length > 0;
-      
+
       let returnPagos: Payment[] = [];
 
       if (devNetBalance > 0) {
@@ -870,15 +870,15 @@ export default function CajaPOS({
       // Register return sale DEV-...
       const rawDevCode = `DEV-${currentSale.factura_nro.replace('FAC-', '')}`;
       const salesList = allSalesList.length > 0 ? allSalesList : shiftSales;
-      const existingDevs = salesList.filter(s => 
-        s && s.factura_nro && s.factura_nro.startsWith('DEV-') && 
-        ((s as any).factura_afectada === currentSale.factura_nro || 
-         s.factura_nro === rawDevCode || 
-         s.factura_nro.startsWith(`${rawDevCode}-`))
+      const existingDevs = salesList.filter(s =>
+        s && s.factura_nro && s.factura_nro.startsWith('DEV-') &&
+        ((s as any).factura_afectada === currentSale.factura_nro ||
+          s.factura_nro === rawDevCode ||
+          s.factura_nro.startsWith(`${rawDevCode}-`))
       );
 
-      const devFacturaNro = existingDevs.length === 0 
-        ? rawDevCode 
+      const devFacturaNro = existingDevs.length === 0
+        ? rawDevCode
         : `${rawDevCode}-${existingDevs.length + 1}`;
 
       const returnSaleResult = {
@@ -935,7 +935,7 @@ export default function CajaPOS({
       } else {
         showToast(`Devolución de $${devRefundTotal.toFixed(2)} USD procesada con éxito. El inventario y la caja han sido actualizados.`, 'success');
       }
-      
+
       setShowDevolucionModal(false);
       setDevSelectedSale(null);
       setDevItems([]);
@@ -996,7 +996,7 @@ export default function CajaPOS({
       });
     }
   }, [clients, defaultClient]);
-  
+
   // Searchable Client Combobox State
   const [clientSearchTerm, setClientSearchTerm] = useState<string>('');
   const [isClientDropdownOpen, setIsClientDropdownOpen] = useState<boolean>(false);
@@ -1125,9 +1125,9 @@ export default function CajaPOS({
       };
     }));
   };
-  
+
   const [selectedSeller, setSelectedSeller] = useState<string>(currentUser.nombre);
-  
+
   const [searchProdTerm, setSearchProdTerm] = useState<string>(() => {
     return sessionStorage.getItem('pos_caja_search_term') || '';
   });
@@ -1209,7 +1209,7 @@ export default function CajaPOS({
       }
     }
   }, [searchSelectedIndex]);
-  
+
   const [saleItems, setSaleItems] = useState<SaleItem[]>(() => {
     try {
       const saved = localStorage.getItem('pos_current_cart');
@@ -1258,7 +1258,7 @@ export default function CajaPOS({
     if (entradaBarcode.trim() === "") return [];
     return products.filter(
       p => p.description.toLowerCase().includes(entradaBarcode.toLowerCase()) ||
-           p.barcode.toLowerCase().includes(entradaBarcode.toLowerCase())
+        p.barcode.toLowerCase().includes(entradaBarcode.toLowerCase())
     );
   }, [entradaBarcode, products]);
 
@@ -1270,7 +1270,7 @@ export default function CajaPOS({
     }
     const exactMatch = products.find(
       p => p.barcode.toUpperCase() === entradaBarcode.trim().toUpperCase() ||
-           p.id.toString() === entradaBarcode.trim()
+        p.id.toString() === entradaBarcode.trim()
     );
     if (exactMatch) {
       setMatchedProduct(exactMatch);
@@ -1291,9 +1291,9 @@ export default function CajaPOS({
 
     try {
       await onUpdateProductStock(
-        matchedProduct.id, 
-        'Entrada Rápida', 
-        qty, 
+        matchedProduct.id,
+        'Entrada Rápida',
+        qty,
         'Entrada Rápida desde Caja POS'
       );
       showToast(`Entrada Rápida procesada con éxito: Se añadieron ${qty} unidades a "${matchedProduct.description}".`, 'success');
@@ -1334,7 +1334,7 @@ export default function CajaPOS({
 
   const handleConfirmHold = () => {
     const finalTag = holdTag.trim() || `Ticket ${ticketsOnHold.length + 1} - ${selectedClient.nombre}`;
-    
+
     const newHold = {
       id: Date.now(),
       fecha: new Date().toLocaleString(),
@@ -1346,7 +1346,7 @@ export default function CajaPOS({
 
     setTicketsOnHold(prev => [...prev, newHold]);
     setShowHoldModal(false);
-    
+
     // Clear active POS state
     setSaleItems([]);
     setDiscountPct(0);
@@ -1374,7 +1374,7 @@ export default function CajaPOS({
     setSaleItems(hold.items);
     setDiscountPct(hold.discount);
     setSelectedClient(hold.client);
-    
+
     setTicketsOnHold(prev => prev.filter(h => h.id !== hold.id));
     setShowOnHoldModal(false);
   };
@@ -1405,7 +1405,7 @@ export default function CajaPOS({
       }
       const def = localStorage.getItem('pos_default_tipo_documento');
       if (def === 'NOTA_ENTREGA' || def === 'FACTURA_FISCAL') return def;
-    } catch (_) {}
+    } catch (_) { }
     return 'FACTURA_FISCAL';
   });
 
@@ -1422,7 +1422,7 @@ export default function CajaPOS({
     setTipoDocumento(tipo);
     try {
       localStorage.setItem('pos_tipo_documento_activo', tipo);
-    } catch (_) {}
+    } catch (_) { }
   };
 
   // If user has no permission to emit no-fiscal, force FACTURA_FISCAL
@@ -1431,7 +1431,7 @@ export default function CajaPOS({
       setTipoDocumento('FACTURA_FISCAL');
       try {
         localStorage.setItem('pos_tipo_documento_activo', 'FACTURA_FISCAL');
-      } catch (_) {}
+      } catch (_) { }
     }
   }, [canEmitNoFiscal, tipoDocumento]);
 
@@ -1509,7 +1509,7 @@ export default function CajaPOS({
     return () => window.removeEventListener('keydown', handleCartKeys);
   }, [saleItems, selectedItemIndex]);
 
-  
+
   // Mixed payment values
   const [payCashUSD, setPayCashUSD] = useState('');
   const [payCashVES, setPayCashVES] = useState('');
@@ -2032,7 +2032,7 @@ export default function CajaPOS({
       showToast('Debe abrir la caja registradora para poder realizar ventas.', 'error');
       return;
     }
-    
+
     // Strict block: do not add to sales list if there is no stock
     if (prod.stock_actual <= 0) {
       showToast(`Sin Existencias: El producto "${prod.description}" no cuenta con stock disponible en almacén.`, 'error');
@@ -2161,7 +2161,7 @@ export default function CajaPOS({
 
   const handleOpenCheckout = () => {
     if (saleItems.length === 0) return;
-    
+
     resetPaymentFields();
     setShowCheckoutModal(true);
   };
@@ -2212,10 +2212,10 @@ export default function CajaPOS({
     const paypalUSD = method === 'paypalUSD' ? 0 : (parseFloat(payPaypalUSD) || 0);
     const creditUSD = method === 'creditUSD' ? 0 : (parseFloat(payCreditUSD) || 0);
 
-    const paidOtherUSD = cashUSD + cashVESInUSD + cardVESInUSD + cardUSD + 
-                         pagoMovilVESInUSD + biopagoVESInUSD + binanceUSD + 
-                         paypalUSD + creditUSD;
-                         
+    const paidOtherUSD = cashUSD + cashVESInUSD + cardVESInUSD + cardUSD +
+      pagoMovilVESInUSD + biopagoVESInUSD + binanceUSD +
+      paypalUSD + creditUSD;
+
     return Math.max(0, Math.round((totalUSD - paidOtherUSD) * 100) / 100);
   };
 
@@ -2288,8 +2288,27 @@ export default function CajaPOS({
 
   const handleCreateQuickClient = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!quickDoc.trim() || !quickName.trim()) {
+    const cleanDoc = quickDoc.trim().toUpperCase();
+    const cleanName = quickName.trim().toUpperCase();
+
+    if (!cleanDoc || !cleanName) {
       showAlert('Por favor ingrese la Cédula/RIF y el Nombre o Razón Social del cliente.', 'Campos Requeridos', 'warning');
+      return;
+    }
+
+    const docDigits = cleanDoc.replace(/\D/g, '');
+    if (docDigits.length < 4) {
+      showAlert('La Cédula o RIF debe contener al menos 4 dígitos numéricos válidos (ej. V-12345678).', 'Documento Inválido', 'warning');
+      return;
+    }
+
+    const existingCli = clients.find(c => (c.cedula_rif || '').trim().toUpperCase() === cleanDoc);
+    if (existingCli) {
+      showAlert(`Ya existe un cliente registrado con la cédula/RIF ${cleanDoc} (${existingCli.nombre}). Se seleccionará dicho cliente.`, 'Cliente Existente', 'info');
+      setSelectedClient(existingCli);
+      setDiscountPct(existingCli.porcentaje_descuento || 0);
+      localStorage.setItem('pos_current_client_doc', existingCli.cedula_rif);
+      setShowQuickClientModal(false);
       return;
     }
 
@@ -2298,8 +2317,8 @@ export default function CajaPOS({
 
     const newCli: Client = {
       id: Date.now(),
-      cedula_rif: quickDoc.trim().toUpperCase(),
-      nombre: quickName.trim().toUpperCase(),
+      cedula_rif: cleanDoc,
+      nombre: cleanName,
       telefono: quickPhone.trim(),
       direccion: quickAddress.trim(),
       limite_credito: limit,
@@ -2310,25 +2329,33 @@ export default function CajaPOS({
       saldo_pendiente: 0
     };
 
-    if (onAddClient) {
-      await onAddClient(newCli);
+    try {
+      let clientToSelect = newCli;
+      if (onAddClient) {
+        const savedCli = await onAddClient(newCli);
+        if (savedCli) {
+          clientToSelect = savedCli as Client;
+        }
+      }
+
+      // Automatically set as active POS client
+      setSelectedClient(clientToSelect);
+      setDiscountPct(clientToSelect.porcentaje_descuento);
+      localStorage.setItem('pos_current_client_doc', clientToSelect.cedula_rif);
+      showToast(`Cliente "${clientToSelect.nombre}" registrado y seleccionado exitosamente.`, 'success');
+
+      // Reset fields & close modal
+      setQuickDoc('');
+      setQuickName('');
+      setQuickPhone('');
+      setQuickAddress('');
+      setQuickCreditLimit('0');
+      setQuickDiscount('0');
+      setQuickPrecioCosto(false);
+      setShowQuickClientModal(false);
+    } catch (err: any) {
+      showAlert(err.message || 'Ocurrió un error al registrar el cliente en el servidor.', 'Error al Registrar', 'error');
     }
-
-    // Automatically set as active POS client
-    setSelectedClient(newCli);
-    setDiscountPct(newCli.porcentaje_descuento);
-    localStorage.setItem('pos_current_client_doc', newCli.cedula_rif);
-    showToast(`Cliente "${newCli.nombre}" registrado y seleccionado exitosamente.`, 'success');
-
-    // Reset fields & close modal
-    setQuickDoc('');
-    setQuickName('');
-    setQuickPhone('');
-    setQuickAddress('');
-    setQuickCreditLimit('0');
-    setQuickDiscount('0');
-    setQuickPrecioCosto(false);
-    setShowQuickClientModal(false);
   };
 
   const handleConfirmCheckout = async (shouldPrint: boolean = false) => {
@@ -2729,7 +2756,7 @@ export default function CajaPOS({
           if (Array.isArray(opsData)) {
             const aperturaMs = fetchedFechaApertura ? new Date(fetchedFechaApertura).getTime() : 0;
             const termName = localStorage.getItem('pos_terminal_name') || 'CAJA_01';
-            
+
             shiftDivisaOps = opsData.filter((op: any) => {
               const opTime = op.timestamp || (op.fecha ? new Date(op.fecha).getTime() : 0);
               // Exclude operations prior to current session opening
@@ -2800,488 +2827,488 @@ export default function CajaPOS({
         return acc;
       }, 0);
 
-    const cambioDivisasUsd = shiftDivisaOps.reduce((acc, op) => {
-      if (op.tipo_operacion === 'COMPRA_DIVISA' && (op.currency === 'USD' || !op.currency)) {
-        return acc + (Number(op.monto_divisa) || 0);
-      }
-      return acc;
-    }, 0);
-
-    const cambioDivisasEur = shiftDivisaOps.reduce((acc, op) => {
-      if (op.tipo_operacion === 'COMPRA_DIVISA' && op.currency === 'EUR') {
-        return acc + (Number(op.monto_divisa) || 0);
-      }
-      return acc;
-    }, 0);
-
-    const cambioDivisasVesSalida = shiftDivisaOps.reduce((acc, op) => {
-      if (op.tipo_operacion === 'COMPRA_DIVISA') {
-        return acc + (Number(op.monto_ves_entregado) || 0);
-      }
-      return acc;
-    }, 0);
-
-    const cambioDivisasCount = shiftDivisaOps.filter(op => op.tipo_operacion === 'COMPRA_DIVISA').length;
-
-    // Helper payment conversion functions
-    const getPayUsd = (p: Payment) => {
-      if (!p) return 0;
-      if (typeof p.montoUSD === 'number' && !isNaN(p.montoUSD) && p.montoUSD > 0) return p.montoUSD;
-      if (p.metodo === 'Efectivo$' || p.metodo === 'Tarjeta$' || p.metodo === 'Binance' || p.metodo === 'PayPal' || p.metodo === 'CreditoCliente') {
-        return typeof p.monto === 'number' && !isNaN(p.monto) ? p.monto : 0;
-      }
-      const ves = typeof p.montoVES === 'number' && !isNaN(p.montoVES) && p.montoVES > 0
-        ? p.montoVES
-        : (typeof (p as any).montoBs === 'number' && !isNaN((p as any).montoBs) && (p as any).montoBs > 0
-          ? (p as any).montoBs
-          : (typeof (p as any).monto_entregado_ves === 'number' && !isNaN((p as any).monto_entregado_ves) && (p as any).monto_entregado_ves > 0
-            ? (p as any).monto_entregado_ves
-            : (typeof p.monto === 'number' && !isNaN(p.monto) ? p.monto : 0)));
-      return (tasaDia && tasaDia > 0) ? (ves / tasaDia) : (p.monto || 0);
-    };
-
-    const getPayVes = (p: Payment) => {
-      if (!p) return 0;
-      if (typeof p.montoVES === 'number' && !isNaN(p.montoVES) && p.montoVES > 0) return p.montoVES;
-      if (typeof (p as any).montoBs === 'number' && !isNaN((p as any).montoBs) && (p as any).montoBs > 0) return (p as any).montoBs;
-      if (typeof (p as any).monto_entregado_ves === 'number' && !isNaN((p as any).monto_entregado_ves) && (p as any).monto_entregado_ves > 0) return (p as any).monto_entregado_ves;
-      
-      const isBs = ['efectivobs', 'tarjetabs', 'pagomovil', 'biopago'].includes(String(p.metodo || '').toLowerCase());
-      if (isBs) {
-        if (typeof p.monto === 'number' && !isNaN(p.monto)) {
-          if (p.montoUSD && Math.abs(p.monto - p.montoUSD) < 0.001) {
-            return p.monto * (tasaDia || 1);
-          }
-          return p.monto > 50 ? p.monto : p.monto * (tasaDia || 1);
+      const cambioDivisasUsd = shiftDivisaOps.reduce((acc, op) => {
+        if (op.tipo_operacion === 'COMPRA_DIVISA' && (op.currency === 'USD' || !op.currency)) {
+          return acc + (Number(op.monto_divisa) || 0);
         }
-      }
-      
-      if (typeof p.montoUSD === 'number' && !isNaN(p.montoUSD) && p.montoUSD > 0) {
-        return p.montoUSD * (tasaDia || 1);
-      }
-      return (typeof p.monto === 'number' && !isNaN(p.monto) ? p.monto : 0) * (tasaDia || 1);
-    };
+        return acc;
+      }, 0);
 
-    // Detailed metrics calculation
-    const aperturaUsd = targetAperturaUsd;
-    const aperturaVes = targetAperturaVes;
-    const ventasEfectivoUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) return acc;
-      const cashPay = (sale.pagos || []).find(p => p.metodo === 'Efectivo$');
-      return acc + (cashPay ? getPayUsd(cashPay) : 0);
-    }, 0);
-    const ventasEfectivoVes = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) return acc;
-      const cashPay = (sale.pagos || []).find(p => p.metodo === 'EfectivoBs');
-      return acc + (cashPay ? getPayVes(cashPay) : 0);
-    }, 0);
-    // Detailed abonos metrics calculation for active shift
-    const abonosEfectivoUsd = targetShiftAbonos.reduce((acc, a) => {
-      const m = String(a.metodo_pago || '');
-      if (m === 'Efectivo$' || m === 'USD') return acc + (a.monto || 0);
-      return acc;
-    }, 0);
-    const abonosEfectivoBsVes = targetShiftAbonos.reduce((acc, a) => {
-      const m = String(a.metodo_pago || '');
-      if (m === 'EfectivoBs' || m === 'VES' || m === 'Bolivares') return acc + (a.monto_ves || (a.monto || 0) * tasaDia);
-      return acc;
-    }, 0);
-    const abonosEfectivoBsUsd = targetShiftAbonos.reduce((acc, a) => {
-      const m = String(a.metodo_pago || '');
-      if (m === 'EfectivoBs' || m === 'VES' || m === 'Bolivares') return acc + (a.monto || 0);
-      return acc;
-    }, 0);
-    const abonosBiopagoVes = targetShiftAbonos.reduce((acc, a) => {
-      const m = String(a.metodo_pago || '');
-      if (m === 'Biopago') return acc + (a.monto_ves || (a.monto || 0) * tasaDia);
-      return acc;
-    }, 0);
-    const abonosBiopagoUsd = targetShiftAbonos.reduce((acc, a) => {
-      const m = String(a.metodo_pago || '');
-      if (m === 'Biopago') return acc + (a.monto || 0);
-      return acc;
-    }, 0);
-    const abonosPagoMovilVes = targetShiftAbonos.reduce((acc, a) => {
-      const m = String(a.metodo_pago || '');
-      if (m === 'PagoMovil') return acc + (a.monto_ves || (a.monto || 0) * tasaDia);
-      return acc;
-    }, 0);
-    const abonosPagoMovilUsd = targetShiftAbonos.reduce((acc, a) => {
-      const m = String(a.metodo_pago || '');
-      if (m === 'PagoMovil') return acc + (a.monto || 0);
-      return acc;
-    }, 0);
-    const abonosPuntoVes = targetShiftAbonos.reduce((acc, a) => {
-      const m = String(a.metodo_pago || '');
-      if (m === 'TarjetaBs' || m === 'Punto') return acc + (a.monto_ves || (a.monto || 0) * tasaDia);
-      return acc;
-    }, 0);
-    const abonosPuntoUsd = targetShiftAbonos.reduce((acc, a) => {
-      const m = String(a.metodo_pago || '');
-      if (m === 'TarjetaBs' || m === 'Punto') return acc + (a.monto || 0);
-      return acc;
-    }, 0);
-    const abonosTarjetaUsd = targetShiftAbonos.reduce((acc, a) => {
-      const m = String(a.metodo_pago || '');
-      if (m === 'Tarjeta$') return acc + (a.monto || 0);
-      return acc;
-    }, 0);
-    const abonosZelleUsd = targetShiftAbonos.reduce((acc, a) => {
-      const m = String(a.metodo_pago || '');
-      if (m === 'Zelle') return acc + (a.monto || 0);
-      return acc;
-    }, 0);
-    const abonosBinanceUsd = targetShiftAbonos.reduce((acc, a) => {
-      const m = String(a.metodo_pago || '');
-      if (m === 'Binance') return acc + (a.monto || 0);
-      return acc;
-    }, 0);
-    const abonosPayPalUsd = targetShiftAbonos.reduce((acc, a) => {
-      const m = String(a.metodo_pago || '');
-      if (m === 'PayPal') return acc + (a.monto || 0);
-      return acc;
-    }, 0);
-    const abonoClientesUsd = abonosEfectivoUsd + abonosEfectivoBsUsd + abonosBiopagoUsd + abonosPagoMovilUsd + abonosPuntoUsd + abonosTarjetaUsd + abonosZelleUsd + abonosBinanceUsd + abonosPayPalUsd;
+      const cambioDivisasEur = shiftDivisaOps.reduce((acc, op) => {
+        if (op.tipo_operacion === 'COMPRA_DIVISA' && op.currency === 'EUR') {
+          return acc + (Number(op.monto_divisa) || 0);
+        }
+        return acc;
+      }, 0);
 
-    const entradaEfectivoUsd = targetEntradaUsd;
-    const entradaEfectivoVes = targetEntradaVes;
-    const salidaEfectivoUsd = targetSalidaUsd;
-    const salidaEfectivoVes = targetSalidaVes;
-    const devolucionEfectivoUsd = targetDevolucionUsd;
-    const devolucionEfectivoVes = targetDevolucionVes;
-    const vueltosEntregadosUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) return acc;
-      if (typeof sale.vueltoUSD === 'number' && sale.vueltoUSD > 0) return acc + sale.vueltoUSD;
-      if (typeof (sale as any).vuelto_usd === 'number' && (sale as any).vuelto_usd > 0) return acc + (sale as any).vuelto_usd;
-      return acc;
-    }, 0);
+      const cambioDivisasVesSalida = shiftDivisaOps.reduce((acc, op) => {
+        if (op.tipo_operacion === 'COMPRA_DIVISA') {
+          return acc + (Number(op.monto_ves_entregado) || 0);
+        }
+        return acc;
+      }, 0);
 
-    const vueltosEntregadosVes = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) return acc;
-      if (typeof sale.vueltoVES === 'number' && sale.vueltoVES > 0) return acc + sale.vueltoVES;
-      if (typeof (sale as any).vuelto_ves === 'number' && (sale as any).vuelto_ves > 0) return acc + (sale as any).vuelto_ves;
-      
-      const cashPayUsd = (sale.pagos || []).find((p: any) => p.metodo === 'Efectivo$');
-      const cashPayVes = (sale.pagos || []).find((p: any) => p.metodo === 'EfectivoBs');
-      const cashUsdMonto = cashPayUsd ? (cashPayUsd.montoUSD || cashPayUsd.monto || 0) : 0;
-      const cashVesMonto = cashPayVes ? (cashPayVes.montoVES || cashPayVes.montoBs || (cashPayVes.monto && cashPayVes.monto > 100 ? cashPayVes.monto : 0)) : 0;
+      const cambioDivisasCount = shiftDivisaOps.filter(op => op.tipo_operacion === 'COMPRA_DIVISA').length;
 
-      if (cashUsdMonto > sale.totalUSD) {
-        const diffUsd = cashUsdMonto - sale.totalUSD;
-        return acc + parseFloat((diffUsd * tasaDia).toFixed(2));
-      } else if (cashVesMonto > (sale.totalVES || sale.totalUSD * tasaDia)) {
-        const diffVes = cashVesMonto - (sale.totalVES || sale.totalUSD * tasaDia);
-        return acc + parseFloat(diffVes.toFixed(2));
-      }
-      return acc;
-    }, 0);
+      // Helper payment conversion functions
+      const getPayUsd = (p: Payment) => {
+        if (!p) return 0;
+        if (typeof p.montoUSD === 'number' && !isNaN(p.montoUSD) && p.montoUSD > 0) return p.montoUSD;
+        if (p.metodo === 'Efectivo$' || p.metodo === 'Tarjeta$' || p.metodo === 'Binance' || p.metodo === 'PayPal' || p.metodo === 'CreditoCliente') {
+          return typeof p.monto === 'number' && !isNaN(p.monto) ? p.monto : 0;
+        }
+        const ves = typeof p.montoVES === 'number' && !isNaN(p.montoVES) && p.montoVES > 0
+          ? p.montoVES
+          : (typeof (p as any).montoBs === 'number' && !isNaN((p as any).montoBs) && (p as any).montoBs > 0
+            ? (p as any).montoBs
+            : (typeof (p as any).monto_entregado_ves === 'number' && !isNaN((p as any).monto_entregado_ves) && (p as any).monto_entregado_ves > 0
+              ? (p as any).monto_entregado_ves
+              : (typeof p.monto === 'number' && !isNaN(p.monto) ? p.monto : 0)));
+        return (tasaDia && tasaDia > 0) ? (ves / tasaDia) : (p.monto || 0);
+      };
 
-    const cambioDivisasTotalUsdEquiv = cambioDivisasUsd + (tasaDia > 0 ? (cambioDivisasVesSalida - (cambioDivisasUsd * tasaDia)) / tasaDia : cambioDivisasEur);
-    const rawExpectedUsd = aperturaUsd + ventasEfectivoUsd + abonosEfectivoUsd + entradaEfectivoUsd + cambioDivisasTotalUsdEquiv - salidaEfectivoUsd - devolucionEfectivoUsd - vueltosEntregadosUsd;
-    const dineroEnCajaExpected = Math.max(0, parseFloat(rawExpectedUsd.toFixed(2)));
+      const getPayVes = (p: Payment) => {
+        if (!p) return 0;
+        if (typeof p.montoVES === 'number' && !isNaN(p.montoVES) && p.montoVES > 0) return p.montoVES;
+        if (typeof (p as any).montoBs === 'number' && !isNaN((p as any).montoBs) && (p as any).montoBs > 0) return (p as any).montoBs;
+        if (typeof (p as any).monto_entregado_ves === 'number' && !isNaN((p as any).monto_entregado_ves) && (p as any).monto_entregado_ves > 0) return (p as any).monto_entregado_ves;
 
-    const rawExpectedVes = aperturaVes + ventasEfectivoVes + abonosEfectivoBsVes + entradaEfectivoVes - salidaEfectivoVes - devolucionEfectivoVes - vueltosEntregadosVes;
-    const expectedVes = Math.max(0, parseFloat(rawExpectedVes.toFixed(2)));
-    
-    const ventasTotalesUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) return acc;
-      return acc + (sale.totalUSD || 0);
-    }, 0);
-    const descuentosUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) return acc;
-      return acc + (sale.descuento || 0);
-    }, 0);
-    const ventaBrutaUsd = ventasTotalesUsd + descuentosUsd;
+        const isBs = ['efectivobs', 'tarjetabs', 'pagomovil', 'biopago'].includes(String(p.metodo || '').toLowerCase());
+        if (isBs) {
+          if (typeof p.monto === 'number' && !isNaN(p.monto)) {
+            if (p.montoUSD && Math.abs(p.monto - p.montoUSD) < 0.001) {
+              return p.monto * (tasaDia || 1);
+            }
+            return p.monto > 50 ? p.monto : p.monto * (tasaDia || 1);
+          }
+        }
 
-    const pagosEfectivoUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) return acc;
-      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Efectivo$' ? a + getPayUsd(p) : a, 0);
-    }, 0);
+        if (typeof p.montoUSD === 'number' && !isNaN(p.montoUSD) && p.montoUSD > 0) {
+          return p.montoUSD * (tasaDia || 1);
+        }
+        return (typeof p.monto === 'number' && !isNaN(p.monto) ? p.monto : 0) * (tasaDia || 1);
+      };
 
-    const pagosEfectivoBsUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) return acc;
-      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'EfectivoBs' ? a + getPayUsd(p) : a, 0);
-    }, 0);
+      // Detailed metrics calculation
+      const aperturaUsd = targetAperturaUsd;
+      const aperturaVes = targetAperturaVes;
+      const ventasEfectivoUsd = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) return acc;
+        const cashPay = (sale.pagos || []).find(p => p.metodo === 'Efectivo$');
+        return acc + (cashPay ? getPayUsd(cashPay) : 0);
+      }, 0);
+      const ventasEfectivoVes = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) return acc;
+        const cashPay = (sale.pagos || []).find(p => p.metodo === 'EfectivoBs');
+        return acc + (cashPay ? getPayVes(cashPay) : 0);
+      }, 0);
+      // Detailed abonos metrics calculation for active shift
+      const abonosEfectivoUsd = targetShiftAbonos.reduce((acc, a) => {
+        const m = String(a.metodo_pago || '');
+        if (m === 'Efectivo$' || m === 'USD') return acc + (a.monto || 0);
+        return acc;
+      }, 0);
+      const abonosEfectivoBsVes = targetShiftAbonos.reduce((acc, a) => {
+        const m = String(a.metodo_pago || '');
+        if (m === 'EfectivoBs' || m === 'VES' || m === 'Bolivares') return acc + (a.monto_ves || (a.monto || 0) * tasaDia);
+        return acc;
+      }, 0);
+      const abonosEfectivoBsUsd = targetShiftAbonos.reduce((acc, a) => {
+        const m = String(a.metodo_pago || '');
+        if (m === 'EfectivoBs' || m === 'VES' || m === 'Bolivares') return acc + (a.monto || 0);
+        return acc;
+      }, 0);
+      const abonosBiopagoVes = targetShiftAbonos.reduce((acc, a) => {
+        const m = String(a.metodo_pago || '');
+        if (m === 'Biopago') return acc + (a.monto_ves || (a.monto || 0) * tasaDia);
+        return acc;
+      }, 0);
+      const abonosBiopagoUsd = targetShiftAbonos.reduce((acc, a) => {
+        const m = String(a.metodo_pago || '');
+        if (m === 'Biopago') return acc + (a.monto || 0);
+        return acc;
+      }, 0);
+      const abonosPagoMovilVes = targetShiftAbonos.reduce((acc, a) => {
+        const m = String(a.metodo_pago || '');
+        if (m === 'PagoMovil') return acc + (a.monto_ves || (a.monto || 0) * tasaDia);
+        return acc;
+      }, 0);
+      const abonosPagoMovilUsd = targetShiftAbonos.reduce((acc, a) => {
+        const m = String(a.metodo_pago || '');
+        if (m === 'PagoMovil') return acc + (a.monto || 0);
+        return acc;
+      }, 0);
+      const abonosPuntoVes = targetShiftAbonos.reduce((acc, a) => {
+        const m = String(a.metodo_pago || '');
+        if (m === 'TarjetaBs' || m === 'Punto') return acc + (a.monto_ves || (a.monto || 0) * tasaDia);
+        return acc;
+      }, 0);
+      const abonosPuntoUsd = targetShiftAbonos.reduce((acc, a) => {
+        const m = String(a.metodo_pago || '');
+        if (m === 'TarjetaBs' || m === 'Punto') return acc + (a.monto || 0);
+        return acc;
+      }, 0);
+      const abonosTarjetaUsd = targetShiftAbonos.reduce((acc, a) => {
+        const m = String(a.metodo_pago || '');
+        if (m === 'Tarjeta$') return acc + (a.monto || 0);
+        return acc;
+      }, 0);
+      const abonosZelleUsd = targetShiftAbonos.reduce((acc, a) => {
+        const m = String(a.metodo_pago || '');
+        if (m === 'Zelle') return acc + (a.monto || 0);
+        return acc;
+      }, 0);
+      const abonosBinanceUsd = targetShiftAbonos.reduce((acc, a) => {
+        const m = String(a.metodo_pago || '');
+        if (m === 'Binance') return acc + (a.monto || 0);
+        return acc;
+      }, 0);
+      const abonosPayPalUsd = targetShiftAbonos.reduce((acc, a) => {
+        const m = String(a.metodo_pago || '');
+        if (m === 'PayPal') return acc + (a.monto || 0);
+        return acc;
+      }, 0);
+      const abonoClientesUsd = abonosEfectivoUsd + abonosEfectivoBsUsd + abonosBiopagoUsd + abonosPagoMovilUsd + abonosPuntoUsd + abonosTarjetaUsd + abonosZelleUsd + abonosBinanceUsd + abonosPayPalUsd;
 
-    const pagosEfectivoBsVes = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) return acc;
-      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'EfectivoBs' ? a + getPayVes(p) : a, 0);
-    }, 0) + abonosEfectivoBsVes;
+      const entradaEfectivoUsd = targetEntradaUsd;
+      const entradaEfectivoVes = targetEntradaVes;
+      const salidaEfectivoUsd = targetSalidaUsd;
+      const salidaEfectivoVes = targetSalidaVes;
+      const devolucionEfectivoUsd = targetDevolucionUsd;
+      const devolucionEfectivoVes = targetDevolucionVes;
+      const vueltosEntregadosUsd = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) return acc;
+        if (typeof sale.vueltoUSD === 'number' && sale.vueltoUSD > 0) return acc + sale.vueltoUSD;
+        if (typeof (sale as any).vuelto_usd === 'number' && (sale as any).vuelto_usd > 0) return acc + (sale as any).vuelto_usd;
+        return acc;
+      }, 0);
 
-    const pagosBiopagoUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) return acc;
-      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Biopago' ? a + getPayUsd(p) : a, 0);
-    }, 0);
+      const vueltosEntregadosVes = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) return acc;
+        if (typeof sale.vueltoVES === 'number' && sale.vueltoVES > 0) return acc + sale.vueltoVES;
+        if (typeof (sale as any).vuelto_ves === 'number' && (sale as any).vuelto_ves > 0) return acc + (sale as any).vuelto_ves;
 
-    const pagosBiopagoVes = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) return acc;
-      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Biopago' ? a + getPayVes(p) : a, 0);
-    }, 0) + abonosBiopagoVes + avanceBiopagoVes;
+        const cashPayUsd = (sale.pagos || []).find((p: any) => p.metodo === 'Efectivo$');
+        const cashPayVes = (sale.pagos || []).find((p: any) => p.metodo === 'EfectivoBs');
+        const cashUsdMonto = cashPayUsd ? (cashPayUsd.montoUSD || cashPayUsd.monto || 0) : 0;
+        const cashVesMonto = cashPayVes ? (cashPayVes.montoVES || cashPayVes.montoBs || (cashPayVes.monto && cashPayVes.monto > 100 ? cashPayVes.monto : 0)) : 0;
 
-    const pagosPagoMovilUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) return acc;
-      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'PagoMovil' ? a + getPayUsd(p) : a, 0);
-    }, 0);
+        if (cashUsdMonto > sale.totalUSD) {
+          const diffUsd = cashUsdMonto - sale.totalUSD;
+          return acc + parseFloat((diffUsd * tasaDia).toFixed(2));
+        } else if (cashVesMonto > (sale.totalVES || sale.totalUSD * tasaDia)) {
+          const diffVes = cashVesMonto - (sale.totalVES || sale.totalUSD * tasaDia);
+          return acc + parseFloat(diffVes.toFixed(2));
+        }
+        return acc;
+      }, 0);
 
-    const pagosPagoMovilVes = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) return acc;
-      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'PagoMovil' ? a + getPayVes(p) : a, 0);
-    }, 0) + abonosPagoMovilVes + avancePagoMovilVes;
+      const cambioDivisasTotalUsdEquiv = cambioDivisasUsd + (tasaDia > 0 ? (cambioDivisasVesSalida - (cambioDivisasUsd * tasaDia)) / tasaDia : cambioDivisasEur);
+      const rawExpectedUsd = aperturaUsd + ventasEfectivoUsd + abonosEfectivoUsd + entradaEfectivoUsd + cambioDivisasTotalUsdEquiv - salidaEfectivoUsd - devolucionEfectivoUsd - vueltosEntregadosUsd;
+      const dineroEnCajaExpected = Math.max(0, parseFloat(rawExpectedUsd.toFixed(2)));
 
-    const pagosTransferenciaUsd = 0;
-    const pagosTransferenciaVes = avanceTransferenciaVes;
+      const rawExpectedVes = aperturaVes + ventasEfectivoVes + abonosEfectivoBsVes + entradaEfectivoVes - salidaEfectivoVes - devolucionEfectivoVes - vueltosEntregadosVes;
+      const expectedVes = Math.max(0, parseFloat(rawExpectedVes.toFixed(2)));
 
-    const pagosPuntoUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) return acc;
-      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'TarjetaBs' ? a + getPayUsd(p) : a, 0);
-    }, 0);
+      const ventasTotalesUsd = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) return acc;
+        return acc + (sale.totalUSD || 0);
+      }, 0);
+      const descuentosUsd = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) return acc;
+        return acc + (sale.descuento || 0);
+      }, 0);
+      const ventaBrutaUsd = ventasTotalesUsd + descuentosUsd;
 
-    const pagosPuntoVes = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) return acc;
-      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'TarjetaBs' ? a + getPayVes(p) : a, 0);
-    }, 0) + abonosPuntoVes + avancePuntoVes;
-    
-    const pagosTarjetaUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) return acc;
-      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Tarjeta$' ? a + getPayUsd(p) : a, 0);
-    }, 0) + abonosTarjetaUsd;
-    
-    const pagosCreditoUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) return acc;
-      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'CreditoCliente' ? a + getPayUsd(p) : a, 0);
-    }, 0);
-    const pagosPuntosUsd = pagosBiopagoUsd; 
-    
-    const totalDevolucionesUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) {
-        const val = typeof sale.totalUSD === 'number' && !isNaN(sale.totalUSD) ? Math.abs(sale.totalUSD) : 0;
-        return acc + val;
-      }
-      return acc;
-    }, 0);
+      const pagosEfectivoUsd = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) return acc;
+        return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Efectivo$' ? a + getPayUsd(p) : a, 0);
+      }, 0);
 
-    const devolucionVentasUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) {
-        const isUsdDev = (sale.pagos || []).some(p => {
-          const m = String(p.metodo || '');
-          return m === 'Efectivo$' || m.endsWith('$') || m === 'Binance' || m === 'PayPal' || m === 'Zelle';
-        });
-        const isVesDev = (sale.pagos || []).some(p => {
-          const m = String(p.metodo || '');
-          return m === 'EfectivoBs' || m.endsWith('Bs') || m === 'PagoMovil' || m === 'Biopago';
-        });
+      const pagosEfectivoBsUsd = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) return acc;
+        return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'EfectivoBs' ? a + getPayUsd(p) : a, 0);
+      }, 0);
 
-        if (isUsdDev) {
+      const pagosEfectivoBsVes = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) return acc;
+        return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'EfectivoBs' ? a + getPayVes(p) : a, 0);
+      }, 0) + abonosEfectivoBsVes;
+
+      const pagosBiopagoUsd = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) return acc;
+        return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Biopago' ? a + getPayUsd(p) : a, 0);
+      }, 0);
+
+      const pagosBiopagoVes = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) return acc;
+        return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Biopago' ? a + getPayVes(p) : a, 0);
+      }, 0) + abonosBiopagoVes + avanceBiopagoVes;
+
+      const pagosPagoMovilUsd = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) return acc;
+        return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'PagoMovil' ? a + getPayUsd(p) : a, 0);
+      }, 0);
+
+      const pagosPagoMovilVes = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) return acc;
+        return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'PagoMovil' ? a + getPayVes(p) : a, 0);
+      }, 0) + abonosPagoMovilVes + avancePagoMovilVes;
+
+      const pagosTransferenciaUsd = 0;
+      const pagosTransferenciaVes = avanceTransferenciaVes;
+
+      const pagosPuntoUsd = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) return acc;
+        return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'TarjetaBs' ? a + getPayUsd(p) : a, 0);
+      }, 0);
+
+      const pagosPuntoVes = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) return acc;
+        return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'TarjetaBs' ? a + getPayVes(p) : a, 0);
+      }, 0) + abonosPuntoVes + avancePuntoVes;
+
+      const pagosTarjetaUsd = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) return acc;
+        return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Tarjeta$' ? a + getPayUsd(p) : a, 0);
+      }, 0) + abonosTarjetaUsd;
+
+      const pagosCreditoUsd = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) return acc;
+        return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'CreditoCliente' ? a + getPayUsd(p) : a, 0);
+      }, 0);
+      const pagosPuntosUsd = pagosBiopagoUsd;
+
+      const totalDevolucionesUsd = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) {
           const val = typeof sale.totalUSD === 'number' && !isNaN(sale.totalUSD) ? Math.abs(sale.totalUSD) : 0;
           return acc + val;
-        } else if (!isVesDev) {
-          const val = (sale.totalUSD && (!sale.totalVES || sale.totalVES === 0)) ? Math.abs(sale.totalUSD) : 0;
-          return acc + val;
         }
-      }
-      return acc;
-    }, 0);
-
-    const devolucionVentasVes = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) {
-        const isVesDev = (sale.pagos || []).some(p => {
-          const m = String(p.metodo || '');
-          return m === 'EfectivoBs' || m.endsWith('Bs') || m === 'PagoMovil' || m === 'Biopago';
-        });
-        const isUsdDev = (sale.pagos || []).some(p => {
-          const m = String(p.metodo || '');
-          return m === 'Efectivo$' || m.endsWith('$') || m === 'Binance' || m === 'PayPal' || m === 'Zelle';
-        });
-
-        if (isVesDev) {
-          const val = typeof sale.totalVES === 'number' && !isNaN(sale.totalVES) ? Math.abs(sale.totalVES) : 0;
-          return acc + val;
-        } else if (!isUsdDev && typeof sale.totalVES === 'number' && sale.totalVES > 0) {
-          const val = Math.abs(sale.totalVES);
-          return acc + val;
-        }
-      }
-      return acc;
-    }, 0);
-
-    const rawVentaTotal = ventasTotalesUsd - totalDevolucionesUsd;
-    const ventaTotalUsd = isNaN(rawVentaTotal) ? 0 : parseFloat(rawVentaTotal.toFixed(2));
-
-    const getItemUnitCost = (item: any) => {
-      if (!item) return 0;
-      let cost = 0;
-      if (typeof item.product?.precio_costo_usd === 'number' && item.product.precio_costo_usd > 0) {
-        cost = item.product.precio_costo_usd;
-      } else if (typeof item.precio_costo_usd === 'number' && item.precio_costo_usd > 0) {
-        cost = item.precio_costo_usd;
-      } else if (typeof item.costo_usd === 'number' && item.costo_usd > 0) {
-        cost = item.costo_usd;
-      }
-      
-      if (!cost) {
-        const code = item.product?.barcode || item.barcode || item.productCode || item.code;
-        if (code) {
-          const match = products.find(p => p.barcode === code);
-          if (match && typeof match.precio_costo_usd === 'number' && match.precio_costo_usd > 0) {
-            cost = match.precio_costo_usd;
-          }
-        }
-      }
-      return isNaN(cost) ? 0 : cost;
-    };
-
-    const safeNum = (val: any) => {
-      const n = typeof val === 'number' ? val : parseFloat(String(val || 0));
-      return isNaN(n) ? 0 : n;
-    };
-
-    const isItemExempt = (i: any) => {
-      if (i.product?.exento_impuesto === true || (i.product?.porcentaje_impuesto !== undefined && i.product?.porcentaje_impuesto === 0)) return true;
-      if (i.exento_impuesto === true || (i.porcentaje_impuesto !== undefined && i.porcentaje_impuesto === 0)) return true;
-      const desc = (i.product?.description || i.product?.descripcion || (i as any)?.descripcion || (i as any)?.description || '').toLowerCase();
-      if (desc.includes('harina pan') || desc.includes('harina p.a.n.')) return true;
-      return false;
-    };
-
-    const calculateSaleNetWithoutIVA = (sale: any) => {
-      const isDev = sale.factura_nro?.startsWith('DEV-');
-      const items = sale.items || [];
-      let netVal = 0;
-      if (!items.length) {
-        const total = Math.abs(safeNum(sale.totalUSD));
-        const iva = Math.abs(safeNum(sale.iva));
-        netVal = Math.max(0, total - iva);
-      } else {
-        const discount = safeNum(sale.descuento);
-        const rawTotalSale = items.reduce((acc: number, i: any) => {
-          const qty = safeNum(i.qty ?? (i as any).cantidad);
-          const price = safeNum(i.priceUSD ?? (i as any).precio_unitario_usd) || (qty > 0 ? Math.abs(safeNum(i.totalUSD ?? (i as any).total_fila_usd)) / qty : 0);
-          return acc + (price * qty);
-        }, 0);
-
-        const discountFactor = rawTotalSale > 0 ? (1 - (discount / rawTotalSale)) : 1;
-
-        let grossTaxable = 0;
-        let grossExempt = 0;
-
-        items.forEach((i: any) => {
-          const qty = safeNum(i.qty ?? (i as any).cantidad);
-          const price = safeNum(i.priceUSD ?? (i as any).precio_unitario_usd) || (qty > 0 ? Math.abs(safeNum(i.totalUSD ?? (i as any).total_fila_usd)) / qty : 0);
-          const itemSale = price * qty;
-          if (isItemExempt(i)) {
-            grossExempt += itemSale;
-          } else {
-            grossTaxable += itemSale;
-          }
-        });
-
-        const netTaxable = grossTaxable * discountFactor;
-        const netExempt = grossExempt * discountFactor;
-        const baseImponible = netTaxable > 0 ? (netTaxable / 1.16) : 0;
-        netVal = baseImponible + netExempt;
-      }
-
-      return isDev ? -Math.abs(netVal) : netVal;
-    };
-
-    const subtotalNetoUsd = targetShiftSales.reduce((acc, sale) => {
-      return acc + calculateSaleNetWithoutIVA(sale);
-    }, 0);
-
-    const costoTotalUsd = targetShiftSales.reduce((acc, sale) => {
-      const isDev = sale.factura_nro?.startsWith('DEV-');
-      const mult = isDev ? -1 : 1;
-      return acc + (sale.items || []).reduce((itemAcc, item) => {
-        const qty = typeof item.qty === 'number' && !isNaN(item.qty) ? item.qty : (parseFloat(String(item.qty)) || 0);
-        return itemAcc + (getItemUnitCost(item) * qty * mult);
+        return acc;
       }, 0);
-    }, 0);
 
-    const utilidadUsd = subtotalNetoUsd - costoTotalUsd;
+      const devolucionVentasUsd = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) {
+          const isUsdDev = (sale.pagos || []).some(p => {
+            const m = String(p.metodo || '');
+            return m === 'Efectivo$' || m.endsWith('$') || m === 'Binance' || m === 'PayPal' || m === 'Zelle';
+          });
+          const isVesDev = (sale.pagos || []).some(p => {
+            const m = String(p.metodo || '');
+            return m === 'EfectivoBs' || m.endsWith('Bs') || m === 'PagoMovil' || m === 'Biopago';
+          });
 
-    const pagosBinanceUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) return acc;
-      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Binance' ? a + getPayUsd(p) : a, 0);
-    }, 0);
+          if (isUsdDev) {
+            const val = typeof sale.totalUSD === 'number' && !isNaN(sale.totalUSD) ? Math.abs(sale.totalUSD) : 0;
+            return acc + val;
+          } else if (!isVesDev) {
+            const val = (sale.totalUSD && (!sale.totalVES || sale.totalVES === 0)) ? Math.abs(sale.totalUSD) : 0;
+            return acc + val;
+          }
+        }
+        return acc;
+      }, 0);
 
-    const pagosPayPalUsd = targetShiftSales.reduce((acc, sale) => {
-      if (sale.factura_nro?.startsWith('DEV-')) return acc;
-      return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'PayPal' ? a + getPayUsd(p) : a, 0);
-    }, 0);
+      const devolucionVentasVes = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) {
+          const isVesDev = (sale.pagos || []).some(p => {
+            const m = String(p.metodo || '');
+            return m === 'EfectivoBs' || m.endsWith('Bs') || m === 'PagoMovil' || m === 'Biopago';
+          });
+          const isUsdDev = (sale.pagos || []).some(p => {
+            const m = String(p.metodo || '');
+            return m === 'Efectivo$' || m.endsWith('$') || m === 'Binance' || m === 'PayPal' || m === 'Zelle';
+          });
 
-    const localCierreResult: CierreCaja = {
-      id: Date.now(),
-      fecha: new Date().toLocaleString(),
-      fechaCierre: new Date().toLocaleString(),
-      fechaApertura: localStorage.getItem('pos_apertura_fecha') || new Date().toLocaleString(),
-      usuario: currentUser?.nombre || 'SISTEMA',
-      aperturaUsd,
-      aperturaVes,
-      realUsd,
-      realVes,
-      expectedVes,
-      costoTotalUsd,
-      utilidadUsd,
-      ventasEfectivoUsd,
-      ventasEfectivoVes,
-      abonoClientesUsd,
-      abonosEfectivoUsd,
-      abonosEfectivoBsVes,
-      abonosEfectivoBsUsd,
-      abonosBiopagoVes,
-      abonosBiopagoUsd,
-      abonosPagoMovilVes,
-      abonosPagoMovilUsd,
-      abonosPuntoVes,
-      abonosPuntoUsd,
-      abonosZelleUsd,
-      abonosBinanceUsd,
-      abonosPayPalUsd,
-      entradaEfectivoUsd,
-      entradaEfectivoVes,
-      salidaEfectivoUsd,
-      salidaEfectivoVes,
-      devolucionEfectivoUsd,
-      devolucionEfectivoVes,
-      vueltosEntregadosUsd,
-      vueltosEntregadosVes,
-      dineroEnCajaExpected,
-      ventasTotalesUsd,
-      descuentosUsd,
-      ventaBrutaUsd,
-      pagosEfectivoUsd,
-      pagosEfectivoBsUsd,
-      pagosEfectivoBsVes,
-      pagosBiopagoUsd,
-      pagosBiopagoVes,
-      pagosPuntoUsd,
-      pagosPuntoVes,
-      pagosPagoMovilUsd,
-      pagosPagoMovilVes,
-      pagosTransferenciaUsd,
-      pagosTransferenciaVes,
-      pagosBinanceUsd,
-      pagosPayPalUsd,
-      pagosTarjetaUsd,
-      pagosCreditoUsd,
-      pagosPuntosUsd,
-      devolucionVentasUsd,
-      devolucionVentasVes,
-      ventaTotalUsd,
-      subtotalNetoUsd,
-      cambioDivisasCount,
-      cambioDivisasUsd,
-      cambioDivisasEur,
-      cambioDivisasVesSalida,
-      realEur,
-      diffEur: realEur - cambioDivisasEur,
-      diffVes: realVes - expectedVes,
-      diffUsd: realUsd - dineroEnCajaExpected,
-      ventaEfectivoComisionVes: avanceComisionTotalVes,
-      ventaEfectivoComisionUsd: avanceComisionTotalUsd
-    };
+          if (isVesDev) {
+            const val = typeof sale.totalVES === 'number' && !isNaN(sale.totalVES) ? Math.abs(sale.totalVES) : 0;
+            return acc + val;
+          } else if (!isUsdDev && typeof sale.totalVES === 'number' && sale.totalVES > 0) {
+            const val = Math.abs(sale.totalVES);
+            return acc + val;
+          }
+        }
+        return acc;
+      }, 0);
 
-    setCierreResult(localCierreResult);
+      const rawVentaTotal = ventasTotalesUsd - totalDevolucionesUsd;
+      const ventaTotalUsd = isNaN(rawVentaTotal) ? 0 : parseFloat(rawVentaTotal.toFixed(2));
+
+      const getItemUnitCost = (item: any) => {
+        if (!item) return 0;
+        let cost = 0;
+        if (typeof item.product?.precio_costo_usd === 'number' && item.product.precio_costo_usd > 0) {
+          cost = item.product.precio_costo_usd;
+        } else if (typeof item.precio_costo_usd === 'number' && item.precio_costo_usd > 0) {
+          cost = item.precio_costo_usd;
+        } else if (typeof item.costo_usd === 'number' && item.costo_usd > 0) {
+          cost = item.costo_usd;
+        }
+
+        if (!cost) {
+          const code = item.product?.barcode || item.barcode || item.productCode || item.code;
+          if (code) {
+            const match = products.find(p => p.barcode === code);
+            if (match && typeof match.precio_costo_usd === 'number' && match.precio_costo_usd > 0) {
+              cost = match.precio_costo_usd;
+            }
+          }
+        }
+        return isNaN(cost) ? 0 : cost;
+      };
+
+      const safeNum = (val: any) => {
+        const n = typeof val === 'number' ? val : parseFloat(String(val || 0));
+        return isNaN(n) ? 0 : n;
+      };
+
+      const isItemExempt = (i: any) => {
+        if (i.product?.exento_impuesto === true || (i.product?.porcentaje_impuesto !== undefined && i.product?.porcentaje_impuesto === 0)) return true;
+        if (i.exento_impuesto === true || (i.porcentaje_impuesto !== undefined && i.porcentaje_impuesto === 0)) return true;
+        const desc = (i.product?.description || i.product?.descripcion || (i as any)?.descripcion || (i as any)?.description || '').toLowerCase();
+        if (desc.includes('harina pan') || desc.includes('harina p.a.n.')) return true;
+        return false;
+      };
+
+      const calculateSaleNetWithoutIVA = (sale: any) => {
+        const isDev = sale.factura_nro?.startsWith('DEV-');
+        const items = sale.items || [];
+        let netVal = 0;
+        if (!items.length) {
+          const total = Math.abs(safeNum(sale.totalUSD));
+          const iva = Math.abs(safeNum(sale.iva));
+          netVal = Math.max(0, total - iva);
+        } else {
+          const discount = safeNum(sale.descuento);
+          const rawTotalSale = items.reduce((acc: number, i: any) => {
+            const qty = safeNum(i.qty ?? (i as any).cantidad);
+            const price = safeNum(i.priceUSD ?? (i as any).precio_unitario_usd) || (qty > 0 ? Math.abs(safeNum(i.totalUSD ?? (i as any).total_fila_usd)) / qty : 0);
+            return acc + (price * qty);
+          }, 0);
+
+          const discountFactor = rawTotalSale > 0 ? (1 - (discount / rawTotalSale)) : 1;
+
+          let grossTaxable = 0;
+          let grossExempt = 0;
+
+          items.forEach((i: any) => {
+            const qty = safeNum(i.qty ?? (i as any).cantidad);
+            const price = safeNum(i.priceUSD ?? (i as any).precio_unitario_usd) || (qty > 0 ? Math.abs(safeNum(i.totalUSD ?? (i as any).total_fila_usd)) / qty : 0);
+            const itemSale = price * qty;
+            if (isItemExempt(i)) {
+              grossExempt += itemSale;
+            } else {
+              grossTaxable += itemSale;
+            }
+          });
+
+          const netTaxable = grossTaxable * discountFactor;
+          const netExempt = grossExempt * discountFactor;
+          const baseImponible = netTaxable > 0 ? (netTaxable / 1.16) : 0;
+          netVal = baseImponible + netExempt;
+        }
+
+        return isDev ? -Math.abs(netVal) : netVal;
+      };
+
+      const subtotalNetoUsd = targetShiftSales.reduce((acc, sale) => {
+        return acc + calculateSaleNetWithoutIVA(sale);
+      }, 0);
+
+      const costoTotalUsd = targetShiftSales.reduce((acc, sale) => {
+        const isDev = sale.factura_nro?.startsWith('DEV-');
+        const mult = isDev ? -1 : 1;
+        return acc + (sale.items || []).reduce((itemAcc, item) => {
+          const qty = typeof item.qty === 'number' && !isNaN(item.qty) ? item.qty : (parseFloat(String(item.qty)) || 0);
+          return itemAcc + (getItemUnitCost(item) * qty * mult);
+        }, 0);
+      }, 0);
+
+      const utilidadUsd = subtotalNetoUsd - costoTotalUsd;
+
+      const pagosBinanceUsd = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) return acc;
+        return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Binance' ? a + getPayUsd(p) : a, 0);
+      }, 0);
+
+      const pagosPayPalUsd = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) return acc;
+        return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'PayPal' ? a + getPayUsd(p) : a, 0);
+      }, 0);
+
+      const localCierreResult: CierreCaja = {
+        id: Date.now(),
+        fecha: new Date().toLocaleString(),
+        fechaCierre: new Date().toLocaleString(),
+        fechaApertura: localStorage.getItem('pos_apertura_fecha') || new Date().toLocaleString(),
+        usuario: currentUser?.nombre || 'SISTEMA',
+        aperturaUsd,
+        aperturaVes,
+        realUsd,
+        realVes,
+        expectedVes,
+        costoTotalUsd,
+        utilidadUsd,
+        ventasEfectivoUsd,
+        ventasEfectivoVes,
+        abonoClientesUsd,
+        abonosEfectivoUsd,
+        abonosEfectivoBsVes,
+        abonosEfectivoBsUsd,
+        abonosBiopagoVes,
+        abonosBiopagoUsd,
+        abonosPagoMovilVes,
+        abonosPagoMovilUsd,
+        abonosPuntoVes,
+        abonosPuntoUsd,
+        abonosZelleUsd,
+        abonosBinanceUsd,
+        abonosPayPalUsd,
+        entradaEfectivoUsd,
+        entradaEfectivoVes,
+        salidaEfectivoUsd,
+        salidaEfectivoVes,
+        devolucionEfectivoUsd,
+        devolucionEfectivoVes,
+        vueltosEntregadosUsd,
+        vueltosEntregadosVes,
+        dineroEnCajaExpected,
+        ventasTotalesUsd,
+        descuentosUsd,
+        ventaBrutaUsd,
+        pagosEfectivoUsd,
+        pagosEfectivoBsUsd,
+        pagosEfectivoBsVes,
+        pagosBiopagoUsd,
+        pagosBiopagoVes,
+        pagosPuntoUsd,
+        pagosPuntoVes,
+        pagosPagoMovilUsd,
+        pagosPagoMovilVes,
+        pagosTransferenciaUsd,
+        pagosTransferenciaVes,
+        pagosBinanceUsd,
+        pagosPayPalUsd,
+        pagosTarjetaUsd,
+        pagosCreditoUsd,
+        pagosPuntosUsd,
+        devolucionVentasUsd,
+        devolucionVentasVes,
+        ventaTotalUsd,
+        subtotalNetoUsd,
+        cambioDivisasCount,
+        cambioDivisasUsd,
+        cambioDivisasEur,
+        cambioDivisasVesSalida,
+        realEur,
+        diffEur: realEur - cambioDivisasEur,
+        diffVes: realVes - expectedVes,
+        diffUsd: realUsd - dineroEnCajaExpected,
+        ventaEfectivoComisionVes: avanceComisionTotalVes,
+        ventaEfectivoComisionUsd: avanceComisionTotalUsd
+      };
+
+      setCierreResult(localCierreResult);
     } catch (err: any) {
       console.error('Error al generar arqueo y cierre:', err);
       showAlert(`Error al procesar el cierre: ${err?.message || err}`, 'Error de Cierre', 'error');
@@ -3300,7 +3327,7 @@ export default function CajaPOS({
     const diffUsd = realUsd - cierreResult.dineroEnCajaExpected;
     const diffVes = realVes - cierreResult.expectedVes;
 
-    const template = waCierreStatus.messageTemplate || 
+    const template = waCierreStatus.messageTemplate ||
       `📊 *REPORTE DE ARQUEO Y CIERRE DE CAJA*\n\n` +
       `📅 *Fecha:* {fecha}\n` +
       `👤 *Cajero:* {usuario}\n` +
@@ -3338,7 +3365,7 @@ export default function CajaPOS({
     if (waCierreStatus.enabled && sendToWhatsApp) {
       try {
         const element = document.getElementById('cierre-arqueo-card');
-        
+
         if (element) {
           // Micro-pausa de estabilización para asegurar que el DOM esté completamente pintado
           await new Promise(r => setTimeout(r, 150));
@@ -3471,11 +3498,11 @@ export default function CajaPOS({
   ];
 
   return (
-    <div 
+    <div
       onClick={handlePosContainerClick}
       className="grid grid-cols-1 xl:grid-cols-4 gap-6 font-mono text-xs text-slate-800 select-none"
     >
-      
+
       {/* WARNING BANNER: MODO CONSULTA */}
       {!cajaAbierta && (
         <div className="xl:col-span-4 bg-amber-50 border border-amber-300 rounded-xl p-3.5 flex flex-col md:flex-row items-center justify-between gap-3 shadow-sm font-sans mb-1">
@@ -3500,10 +3527,10 @@ export default function CajaPOS({
 
       {/* LEFT TERMINAL AREA: PRODUCTS SELECTION & SALE TABLE */}
       <div className="xl:col-span-3 space-y-4 flex flex-col h-[calc(100vh-180px)]">
-        
+
         {/* INPUTS HEADER STACK - Light Mode with 12-Column Responsive Proportions */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-2.5 bg-white p-2.5 sm:p-3 border border-slate-200 rounded-xl shadow-sm items-end">
-          
+
           {/* SEARCH PRODUCT SELECTOR (4 Cols - 33.3% Width) */}
           <div className="md:col-span-1 lg:col-span-4 space-y-1">
             <label className="text-[10px] text-slate-500 font-sans block font-semibold">Buscar Producto (F6)</label>
@@ -3571,7 +3598,7 @@ export default function CajaPOS({
                 }}
                 className="w-full h-[38px] bg-slate-50 border border-slate-350 rounded-lg p-2 pl-9 text-xs outline-none text-slate-800 focus:bg-white focus:border-winter-blueBtn font-sans"
               />
-              
+
               {/* Autocomplete Dropdown - Light Styled with Visual Support */}
               {searchProdTerm && searchSuggestions.length > 0 && (() => {
                 const showPhotos = companyConfig?.mostrar_fotos_en_buscador_pos !== false;
@@ -3641,14 +3668,13 @@ export default function CajaPOS({
                   : `${visibleRows * 42 + 4}px`;
 
                 return (
-                  <div 
+                  <div
                     ref={searchDropdownRef}
                     style={{ maxHeight: dynamicMaxHeight }}
-                    className={`absolute left-0 top-11 bg-white border border-slate-250 rounded-xl overflow-y-auto z-40 shadow-2xl divide-y divide-slate-100 ${
-                      showPhotos 
-                        ? 'w-full min-w-[380px] sm:min-w-[530px] md:min-w-[645px]' 
+                    className={`absolute left-0 top-11 bg-white border border-slate-250 rounded-xl overflow-y-auto z-40 shadow-2xl divide-y divide-slate-100 ${showPhotos
+                        ? 'w-full min-w-[380px] sm:min-w-[530px] md:min-w-[645px]'
                         : 'w-full'
-                    }`}
+                      }`}
                   >
                     {searchSuggestions.map((p, idx) => {
                       const hasStock = p.stock_actual > 0;
@@ -3669,21 +3695,20 @@ export default function CajaPOS({
                               setSearchSelectedIndex(-1);
                               focusSearchInput();
                             }}
-                            className={`w-full text-left font-sans flex items-center transition-all ${sizeStyles.btnPad} ${
-                              isSelected
+                            className={`w-full text-left font-sans flex items-center transition-all ${sizeStyles.btnPad} ${isSelected
                                 ? 'bg-blue-50/90 text-slate-900 border-l-4 border-winter-blueBtn font-semibold shadow-inner'
-                                : hasStock 
-                                  ? 'hover:bg-slate-50 text-slate-800 hover:text-slate-900' 
+                                : hasStock
+                                  ? 'hover:bg-slate-50 text-slate-800 hover:text-slate-900'
                                   : 'opacity-50 cursor-not-allowed text-slate-400 bg-slate-50'
-                            }`}
+                              }`}
                           >
                             {/* Miniatura de Imagen Dinámica */}
                             <div className={`${sizeStyles.imgBox} bg-white border border-slate-200 flex-shrink-0 overflow-hidden flex items-center justify-center relative shadow-2xs`}>
                               {p.imagen_url ? (
-                                <img 
+                                <img
                                   key={`pos-search-img-${p.id}-${p.imagen_url}`}
-                                  src={formatImageUrl(p.imagen_url)} 
-                                  alt={p.description} 
+                                  src={formatImageUrl(p.imagen_url)}
+                                  alt={p.description}
                                   className="w-full h-full object-contain p-0.5"
                                   onLoad={(e) => {
                                     (e.currentTarget as HTMLElement).style.display = 'block';
@@ -3770,13 +3795,12 @@ export default function CajaPOS({
                             setSearchSelectedIndex(-1);
                             focusSearchInput();
                           }}
-                          className={`w-full text-left p-2.5 text-[11px] font-sans block transition-all ${
-                            isSelected
+                          className={`w-full text-left p-2.5 text-[11px] font-sans block transition-all ${isSelected
                               ? 'bg-blue-100 text-slate-900 border-l-4 border-winter-blueBtn font-semibold shadow-inner'
-                              : hasStock 
-                                ? 'hover:bg-slate-100 text-slate-800 hover:text-slate-900' 
+                              : hasStock
+                                ? 'hover:bg-slate-100 text-slate-800 hover:text-slate-900'
                                 : 'opacity-50 cursor-not-allowed text-slate-400 bg-slate-50'
-                          }`}
+                            }`}
                         >
                           <span className="font-mono text-slate-500 font-bold mr-1.5">{p.barcode}</span>
                           <span className={`${!hasStock ? 'line-through' : ''}`}>{p.description}</span>
@@ -3856,11 +3880,10 @@ export default function CajaPOS({
                       setClientSelectedIndex(-1);
                     }
                   }}
-                  className={`w-full h-[38px] border rounded-lg p-2 pr-7 text-slate-800 text-xs font-sans font-bold outline-none focus:bg-white focus:border-winter-blueBtn transition-all ${
-                    selectedClient.aplica_precio_costo ? 'bg-amber-50 border-amber-400 text-amber-900' : 'bg-slate-50 border-slate-350'
-                  }`}
+                  className={`w-full h-[38px] border rounded-lg p-2 pr-7 text-slate-800 text-xs font-sans font-bold outline-none focus:bg-white focus:border-winter-blueBtn transition-all ${selectedClient.aplica_precio_costo ? 'bg-amber-50 border-amber-400 text-amber-900' : 'bg-slate-50 border-slate-350'
+                    }`}
                 />
-                
+
                 <button
                   type="button"
                   onClick={() => {
@@ -3877,7 +3900,7 @@ export default function CajaPOS({
 
                 {/* SEARCHABLE CLIENTS DROPDOWN LIST */}
                 {isClientDropdownOpen && (
-                  <div 
+                  <div
                     ref={clientListContainerRef}
                     className="absolute left-0 right-0 top-11 bg-white border border-slate-250 rounded-lg max-h-60 overflow-y-auto z-50 shadow-2xl divide-y divide-slate-100 animate-fade-in font-sans"
                   >
@@ -3891,13 +3914,12 @@ export default function CajaPOS({
                             type="button"
                             onMouseEnter={() => setClientSelectedIndex(idx)}
                             onClick={() => handleSelectClient(c)}
-                            className={`w-full text-left p-2.5 text-xs block transition-all ${
-                              isHighlighted
+                            className={`w-full text-left p-2.5 text-xs block transition-all ${isHighlighted
                                 ? 'bg-blue-100 text-slate-900 border-l-4 border-winter-blueBtn font-bold shadow-inner'
                                 : isSelected
                                   ? 'bg-blue-50 text-slate-900 font-semibold'
                                   : 'hover:bg-slate-100 text-slate-800 hover:text-slate-900 font-medium'
-                            }`}
+                              }`}
                           >
                             <div className="flex justify-between items-center">
                               <div>
@@ -3980,11 +4002,10 @@ export default function CajaPOS({
               <button
                 type="button"
                 onClick={() => handleSelectTipoDoc('FACTURA_FISCAL')}
-                className={`flex-1 h-full rounded-md font-bold text-[10px] font-sans transition-all flex items-center justify-center gap-1 cursor-pointer truncate px-1 ${
-                  tipoDocumento === 'FACTURA_FISCAL'
+                className={`flex-1 h-full rounded-md font-bold text-[10px] font-sans transition-all flex items-center justify-center gap-1 cursor-pointer truncate px-1 ${tipoDocumento === 'FACTURA_FISCAL'
                     ? 'bg-emerald-600 text-white shadow-xs ring-1 ring-emerald-500'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-                }`}
+                  }`}
                 title="Emite Factura Fiscal Homologada por el SENIAT"
               >
                 <ShieldCheck className="w-3 h-3 flex-shrink-0" />
@@ -3994,11 +4015,10 @@ export default function CajaPOS({
               <button
                 type="button"
                 onClick={() => handleSelectTipoDoc('NOTA_ENTREGA')}
-                className={`flex-1 h-full rounded-md font-bold text-[10px] font-sans transition-all flex items-center justify-center gap-1 cursor-pointer truncate px-1 ${
-                  tipoDocumento === 'NOTA_ENTREGA'
+                className={`flex-1 h-full rounded-md font-bold text-[10px] font-sans transition-all flex items-center justify-center gap-1 cursor-pointer truncate px-1 ${tipoDocumento === 'NOTA_ENTREGA'
                     ? 'bg-blue-600 text-white shadow-xs ring-1 ring-blue-500'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-                }`}
+                  }`}
                 title={canEmitNoFiscal ? "Emite Nota de Entrega / Comprobante de Control Interno" : "No autorizado para emitir notas de entrega"}
               >
                 <FileText className="w-3 h-3 flex-shrink-0" />
@@ -4046,12 +4066,11 @@ export default function CajaPOS({
                   saleItems.map((item, idx) => {
                     const isSelected = idx === selectedItemIndex;
                     return (
-                      <tr 
-                        key={item.product.id} 
+                      <tr
+                        key={item.product.id}
                         onClick={() => setSelectedItemIndex(idx)}
-                        className={`cursor-pointer hover:bg-slate-50/50 transition-all ${
-                          isSelected ? 'bg-blue-50/70 border-l-2 border-winter-blueBtn shadow-sm' : ''
-                        }`}
+                        className={`cursor-pointer hover:bg-slate-50/50 transition-all ${isSelected ? 'bg-blue-50/70 border-l-2 border-winter-blueBtn shadow-sm' : ''
+                          }`}
                       >
                         <td className="px-3 py-2.5 font-bold font-mono text-slate-450 truncate" title={item.product.barcode}>{item.product.barcode}</td>
                         <td className="px-3 py-2.5 font-sans select-text">
@@ -4078,15 +4097,14 @@ export default function CajaPOS({
                               e.stopPropagation();
                               handleCyclePriceLevel(item.product.id);
                             }}
-                            className={`px-2 py-0.5 rounded text-[9.5px] border font-black transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-95 ${
-                              (item.priceType as string) === 'Bulto' || (item.priceType as string) === 'BULTO'
+                            className={`px-2 py-0.5 rounded text-[9.5px] border font-black transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-95 ${(item.priceType as string) === 'Bulto' || (item.priceType as string) === 'BULTO'
                                 ? 'bg-amber-100 border-amber-300 text-amber-900 hover:bg-amber-200'
                                 : (item.priceType as string) === 'Mayor' || (item.priceType as string) === 'MAYOR'
                                   ? 'bg-purple-100 border-purple-300 text-purple-900 hover:bg-purple-200'
                                   : item.priceType === 'Costo'
                                     ? 'bg-rose-100 border-rose-300 text-rose-900'
                                     : 'bg-emerald-100 border-emerald-300 text-emerald-900 hover:bg-emerald-200'
-                            }`}
+                              }`}
                             title="Haga clic para autocompletar la cantidad y alternar nivel: Detalle (x1) ➡️ Mayor ➡️ Bulto"
                           >
                             {item.priceType}
@@ -4101,7 +4119,7 @@ export default function CajaPOS({
                             >
                               -
                             </button>
-                            <span 
+                            <span
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setQtyEditItem(item);
@@ -4155,17 +4173,17 @@ export default function CajaPOS({
 
       {/* RIGHT SIDEBAR: FINANCIALS & CONTROL BUTTONS */}
       <div className="space-y-2.5 flex flex-col xl:h-[calc(100vh-180px)] xl:overflow-y-auto pr-1 pb-1">
-        
+
         {/* PRODUCT VISUAL PREVIEW CARD (Selected or Active Item in Cart) */}
         {(() => {
-          const activeItem = (selectedItemIndex >= 0 && saleItems[selectedItemIndex]) 
-            ? saleItems[selectedItemIndex].product 
+          const activeItem = (selectedItemIndex >= 0 && saleItems[selectedItemIndex])
+            ? saleItems[selectedItemIndex].product
             : (saleItems.length > 0 ? saleItems[saleItems.length - 1].product : null);
 
           if (!activeItem) return null;
 
           return (
-            <div 
+            <div
               onClick={() => activeItem.imagen_url && setZoomedProduct(activeItem)}
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -4186,11 +4204,11 @@ export default function CajaPOS({
                 </div>
                 {activeItem.imagen_url && (
                   <>
-                    <img 
+                    <img
                       key={`pos-item-img-${activeItem.id}-${activeItem.imagen_url}`}
-                      src={formatImageUrl(activeItem.imagen_url)} 
-                      alt={activeItem.description} 
-                      className="w-full h-full object-cover absolute inset-0 bg-white group-hover:scale-105 transition-transform" 
+                      src={formatImageUrl(activeItem.imagen_url)}
+                      alt={activeItem.description}
+                      className="w-full h-full object-cover absolute inset-0 bg-white group-hover:scale-105 transition-transform"
                       onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
                       onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
                     />
@@ -4275,7 +4293,7 @@ export default function CajaPOS({
                 <span className="font-mono font-bold">${netExemptUSD.toFixed(2)}</span>
               </div>
             )}
-            
+
             <div className="flex justify-between items-center text-slate-655 text-[11px]">
               <span className="flex items-center gap-1 font-sans">
                 Descuento
@@ -4289,14 +4307,13 @@ export default function CajaPOS({
                     setDiscountPct(Math.min(100, Math.max(0, parseInt(e.target.value) || 0)));
                   }}
                   disabled={!canApplyDiscounts || (selectedClient && selectedClient.porcentaje_descuento > 0)}
-                  className={`w-12 text-center rounded p-0.5 font-bold font-mono text-[10px] transition-all ${
-                    !canApplyDiscounts || (selectedClient && selectedClient.porcentaje_descuento > 0)
+                  className={`w-12 text-center rounded p-0.5 font-bold font-mono text-[10px] transition-all ${!canApplyDiscounts || (selectedClient && selectedClient.porcentaje_descuento > 0)
                       ? 'bg-slate-200/80 border-slate-300 text-slate-500 cursor-not-allowed opacity-90 select-none'
                       : 'bg-slate-50 border-slate-300 text-emerald-700 hover:border-emerald-500 focus:border-emerald-600'
-                  }`}
+                    }`}
                   title={
-                    !canApplyDiscounts 
-                      ? "🔒 Requiere permiso de Descuentos en Caja otorgado por el Administrador" 
+                    !canApplyDiscounts
+                      ? "🔒 Requiere permiso de Descuentos en Caja otorgado por el Administrador"
                       : (selectedClient && selectedClient.porcentaje_descuento > 0)
                         ? "Descuento fijado automáticamente desde la ficha del cliente"
                         : "Porcentaje de descuento manual"
@@ -4321,7 +4338,7 @@ export default function CajaPOS({
 
         {/* CONTROLS BUTTONS GRID - 3 ROWS X 2 COLUMNS */}
         <div className="grid grid-cols-2 gap-1.5">
-          
+
           {/* FILA 1: Movimiento Caja y Cierre de Caja */}
           <button
             onClick={() => setShowMovementsModal(true)}
@@ -4419,7 +4436,7 @@ export default function CajaPOS({
               Poner en Espera
             </button>
           )}
-          
+
           {ticketsOnHold.length > 0 && (
             <button
               onClick={() => setShowOnHoldModal(true)}
@@ -4439,11 +4456,10 @@ export default function CajaPOS({
             type="button"
             onClick={handleClearSale}
             disabled={saleItems.length === 0}
-            className={`w-full py-2 rounded-xl text-xs font-sans font-black transition-all flex items-center justify-center gap-2 shadow-sm ${
-              saleItems.length > 0
+            className={`w-full py-2 rounded-xl text-xs font-sans font-black transition-all flex items-center justify-center gap-2 shadow-sm ${saleItems.length > 0
                 ? 'bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 active:scale-95 cursor-pointer'
                 : 'bg-slate-100 text-slate-400 border border-slate-200 opacity-60 cursor-not-allowed'
-            }`}
+              }`}
             title="Limpiar todos los productos de la pantalla y cancelar venta actual (Tecla End / Fin)"
           >
             <Trash2 className="w-4 h-4 text-rose-500" />
@@ -4455,7 +4471,7 @@ export default function CajaPOS({
 
       {/* MODAL: CAJA APERTURA - Ultra-Modern High Visibility Styled with Focus Trap */}
       {showAperturaModal && (
-        <div 
+        <div
           onKeyDown={(e) => {
             if (e.key === 'Tab') {
               const container = e.currentTarget;
@@ -4487,12 +4503,12 @@ export default function CajaPOS({
           className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 font-sans text-slate-800 animate-fade-in"
         >
           <div className="bg-white border border-slate-200/90 rounded-2xl overflow-hidden w-full max-w-[480px] shadow-[0_25px_50px_-12px_rgba(0,0,0,0.3)] flex flex-col">
-            
+
             {/* Top Accent Gradient Line */}
             <div className="h-1.5 w-full bg-gradient-to-r from-emerald-500 via-sky-500 to-indigo-600 flex-shrink-0" />
 
             <div className="p-5 sm:p-6 space-y-4">
-              
+
               {/* HEADER SECTION */}
               <div className="text-center space-y-2">
                 <div className="inline-flex p-3 bg-gradient-to-br from-emerald-50 to-teal-100 border border-emerald-200 rounded-2xl shadow-inner text-emerald-600">
@@ -4526,7 +4542,7 @@ export default function CajaPOS({
 
               {/* FORM CONTROLS */}
               <form onSubmit={handleSaveApertura} className="space-y-3.5">
-                
+
                 {/* 1. DÓLARES USD INPUT CARD */}
                 <div className="bg-gradient-to-br from-emerald-50/70 via-emerald-50/30 to-white border-2 border-emerald-300 hover:border-emerald-500 focus-within:border-emerald-600 focus-within:ring-4 focus-within:ring-emerald-500/25 focus-within:shadow-md rounded-xl p-3.5 transition-all shadow-sm">
                   <div className="flex items-center justify-between mb-1.5">
@@ -4678,25 +4694,24 @@ export default function CajaPOS({
       {showCheckoutModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-mono text-slate-800">
           <div ref={checkoutModalRef} className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-3xl shadow-2xl flex flex-col my-auto max-h-[92vh]">
-            
+
             <div className="bg-slate-100 border-b border-slate-250 px-6 py-3.5 flex justify-between items-center flex-shrink-0">
               <div className="flex items-center gap-3">
                 <span className="text-xs font-black text-slate-700 tracking-widest uppercase flex items-center gap-1.5">
                   <Calculator className="w-4 h-4 text-winter-blueBtn" />
                   Liquidación (Checkout)
                 </span>
-                
+
                 {/* DOCUMENT TYPE BADGE IN MODAL */}
                 <div className="flex items-center bg-white border border-slate-250 rounded-lg p-0.5 shadow-2xs">
                   <button
                     type="button"
                     tabIndex={-1}
                     onClick={() => setTipoDocumento('FACTURA_FISCAL')}
-                    className={`px-2.5 py-0.5 rounded text-[10px] font-sans font-extrabold flex items-center gap-1 transition-all ${
-                      tipoDocumento === 'FACTURA_FISCAL'
+                    className={`px-2.5 py-0.5 rounded text-[10px] font-sans font-extrabold flex items-center gap-1 transition-all ${tipoDocumento === 'FACTURA_FISCAL'
                         ? 'bg-emerald-600 text-white shadow-xs'
                         : 'text-slate-500 hover:text-slate-800'
-                    }`}
+                      }`}
                   >
                     <ShieldCheck className="w-3 h-3" />
                     Fiscal SENIAT
@@ -4711,21 +4726,20 @@ export default function CajaPOS({
                       }
                       setTipoDocumento('NOTA_ENTREGA');
                     }}
-                    className={`px-2.5 py-0.5 rounded text-[10px] font-sans font-extrabold flex items-center gap-1 transition-all ${
-                      tipoDocumento === 'NOTA_ENTREGA'
+                    className={`px-2.5 py-0.5 rounded text-[10px] font-sans font-extrabold flex items-center gap-1 transition-all ${tipoDocumento === 'NOTA_ENTREGA'
                         ? 'bg-blue-600 text-white shadow-xs'
                         : 'text-slate-500 hover:text-slate-800'
-                    }`}
+                      }`}
                   >
                     <FileText className="w-3 h-3" />
                     Nota Entrega
                   </button>
                 </div>
               </div>
-              <button 
+              <button
                 type="button"
                 tabIndex={-1}
-                onClick={() => setShowCheckoutModal(false)} 
+                onClick={() => setShowCheckoutModal(false)}
                 className="text-slate-400 hover:text-slate-700 focus:outline-none p-1 rounded"
               >
                 ✕
@@ -4733,7 +4747,7 @@ export default function CajaPOS({
             </div>
 
             <div className="overflow-y-auto p-5 grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
-              
+
               {/* Payments Form */}
               <div className="space-y-3.5">
                 <div className="flex justify-between items-center border-b border-slate-200 pb-1.5 mb-1 font-sans">
@@ -4775,11 +4789,10 @@ export default function CajaPOS({
                           }
                         }}
                         onKeyDown={(e) => handlePaymentKeyDown(e, 'cashUSD')}
-                        className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
-                          cashUSDVal > 0 
-                            ? 'bg-emerald-50 border-emerald-500 text-emerald-950 ring-2 ring-emerald-400/40 shadow-sm' 
+                        className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${cashUSDVal > 0
+                            ? 'bg-emerald-50 border-emerald-500 text-emerald-950 ring-2 ring-emerald-400/40 shadow-sm'
                             : 'bg-slate-50 border-slate-300 font-bold text-slate-800'
-                        }`}
+                          }`}
                       />
                     </div>
                   )}
@@ -4806,11 +4819,10 @@ export default function CajaPOS({
                           }
                         }}
                         onKeyDown={(e) => handlePaymentKeyDown(e, 'cashVES')}
-                        className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
-                          cashVESVal > 0 
-                            ? 'bg-emerald-50 border-emerald-500 text-purple-950 ring-2 ring-emerald-400/40 shadow-sm' 
+                        className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${cashVESVal > 0
+                            ? 'bg-emerald-50 border-emerald-500 text-purple-950 ring-2 ring-emerald-400/40 shadow-sm'
                             : 'bg-slate-50 border-slate-300 font-bold text-slate-800'
-                        }`}
+                          }`}
                       />
                     </div>
                   )}
@@ -4840,11 +4852,10 @@ export default function CajaPOS({
                           }
                         }}
                         onKeyDown={(e) => handlePaymentKeyDown(e, 'pagoMovilVES')}
-                        className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
-                          pagoMovilVESVal > 0 
-                            ? 'bg-emerald-50 border-emerald-500 text-slate-950 ring-2 ring-emerald-400/40 shadow-sm' 
+                        className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${pagoMovilVESVal > 0
+                            ? 'bg-emerald-50 border-emerald-500 text-slate-950 ring-2 ring-emerald-400/40 shadow-sm'
                             : 'bg-slate-50 border-slate-300 font-bold text-slate-800'
-                        }`}
+                          }`}
                       />
                     </div>
                   )}
@@ -4871,11 +4882,10 @@ export default function CajaPOS({
                           }
                         }}
                         onKeyDown={(e) => handlePaymentKeyDown(e, 'biopagoVES')}
-                        className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
-                          biopagoVESVal > 0 
-                            ? 'bg-emerald-50 border-emerald-500 text-slate-950 ring-2 ring-emerald-400/40 shadow-sm' 
+                        className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${biopagoVESVal > 0
+                            ? 'bg-emerald-50 border-emerald-500 text-slate-950 ring-2 ring-emerald-400/40 shadow-sm'
                             : 'bg-slate-50 border-slate-300 font-bold text-slate-800'
-                        }`}
+                          }`}
                       />
                     </div>
                   )}
@@ -4934,11 +4944,10 @@ export default function CajaPOS({
                           }
                         }}
                         onKeyDown={(e) => handlePaymentKeyDown(e, 'cardVES')}
-                        className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
-                          cardVESVal > 0 
-                            ? 'bg-emerald-50 border-emerald-500 text-slate-950 ring-2 ring-emerald-400/40 shadow-sm' 
+                        className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${cardVESVal > 0
+                            ? 'bg-emerald-50 border-emerald-500 text-slate-950 ring-2 ring-emerald-400/40 shadow-sm'
                             : 'bg-slate-50 border-slate-300 font-bold text-slate-800'
-                        }`}
+                          }`}
                       />
                     </div>
                   )}
@@ -4965,11 +4974,10 @@ export default function CajaPOS({
                           }
                         }}
                         onKeyDown={(e) => handlePaymentKeyDown(e, 'cardUSD')}
-                        className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
-                          cardUSDVal > 0 
-                            ? 'bg-emerald-50 border-emerald-500 text-blue-950 ring-2 ring-emerald-400/40 shadow-sm' 
+                        className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${cardUSDVal > 0
+                            ? 'bg-emerald-50 border-emerald-500 text-blue-950 ring-2 ring-emerald-400/40 shadow-sm'
                             : 'bg-slate-50 border-slate-300 font-bold text-slate-800'
-                        }`}
+                          }`}
                       />
                     </div>
                   )}
@@ -5000,11 +5008,10 @@ export default function CajaPOS({
                             }
                           }}
                           onKeyDown={(e) => handlePaymentKeyDown(e, 'binanceUSD')}
-                          className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
-                            binanceUSDVal > 0 
-                              ? 'bg-emerald-50 border-emerald-500 text-yellow-950 ring-2 ring-emerald-400/40 shadow-sm' 
+                          className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${binanceUSDVal > 0
+                              ? 'bg-emerald-50 border-emerald-500 text-yellow-950 ring-2 ring-emerald-400/40 shadow-sm'
                               : 'bg-slate-50 border-slate-300 font-bold text-slate-800'
-                          }`}
+                            }`}
                         />
                       </div>
                     )}
@@ -5031,11 +5038,10 @@ export default function CajaPOS({
                             }
                           }}
                           onKeyDown={(e) => handlePaymentKeyDown(e, 'paypalUSD')}
-                          className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${
-                            paypalUSDVal > 0 
-                              ? 'bg-emerald-50 border-emerald-500 text-indigo-950 ring-2 ring-emerald-400/40 shadow-sm' 
+                          className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-sm placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none disabled:opacity-40 disabled:bg-slate-100 disabled:border-slate-200 disabled:cursor-not-allowed transition-all ${paypalUSDVal > 0
+                              ? 'bg-emerald-50 border-emerald-500 text-indigo-950 ring-2 ring-emerald-400/40 shadow-sm'
                               : 'bg-slate-50 border-slate-300 font-bold text-slate-800'
-                          }`}
+                            }`}
                         />
                       </div>
                     )}
@@ -5070,7 +5076,7 @@ export default function CajaPOS({
                               ((parseFloat(payPagoMovilVES) || 0) / tasaDia) +
                               ((parseFloat(payBiopagoVES) || 0) / tasaDia);
                             const remainingToPay = Math.max(0, totalUSD - totalPaidExcludingCreditUSD);
-                            
+
                             if (!isNaN(numVal) && numVal > remainingToPay) {
                               setPayCreditUSD(remainingToPay.toFixed(2));
                             } else {
@@ -5079,11 +5085,10 @@ export default function CajaPOS({
                           }
                         }}
                         onKeyDown={(e) => handlePaymentKeyDown(e, 'creditUSD')}
-                        className={`flex-grow border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-xs placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none transition-all ${
-                          creditUSDVal > 0 
-                            ? 'bg-emerald-50 border-emerald-500 text-red-950 ring-2 ring-emerald-400/40 shadow-sm' 
+                        className={`flex-grow border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-xs placeholder:text-slate-400 focus:bg-amber-50 focus:border-sky-600 focus:ring-4 focus:ring-sky-500/40 focus:shadow-md focus:outline-none transition-all ${creditUSDVal > 0
+                            ? 'bg-emerald-50 border-emerald-500 text-red-950 ring-2 ring-emerald-400/40 shadow-sm'
                             : 'bg-slate-50 border-slate-300 font-bold text-slate-800'
-                        }`}
+                          }`}
                       />
                       <button
                         type="button"
@@ -5116,18 +5121,17 @@ export default function CajaPOS({
 
                 {/* BOTONERÍA DE COBRAR: UBICADA JUSTO DEBAJO DEL ÚLTIMO INPUT DE MÉTODO DE PAGO */}
                 <div className="space-y-2.5 pt-3 border-t-2 border-slate-200">
-                  <div className={`p-3 rounded-lg border text-center font-bold tracking-wider font-sans text-xs ${
-                    canConfirmCheckout
+                  <div className={`p-3 rounded-lg border text-center font-bold tracking-wider font-sans text-xs ${canConfirmCheckout
                       ? 'bg-emerald-50 border-emerald-300 text-emerald-800 font-black text-sm'
                       : 'bg-red-50 border-red-200 text-red-700 font-black'
-                  }`}>
-                    {canConfirmCheckout 
-                      ? '✓ PAGO COMPLETO Y VALIDADO' 
-                      : (totalPaidUSD < totalUSD 
-                          ? 'INGRESE LOS MEDIOS DE PAGO' 
-                          : (!isPagoMovilValid || !isBiopagoValid 
-                              ? 'VERIFIQUE BANCO Y REFERENCIA' 
-                              : 'CRÉDITO EXCEDIDO'))}
+                    }`}>
+                    {canConfirmCheckout
+                      ? '✓ PAGO COMPLETO Y VALIDADO'
+                      : (totalPaidUSD < totalUSD
+                        ? 'INGRESE LOS MEDIOS DE PAGO'
+                        : (!isPagoMovilValid || !isBiopagoValid
+                          ? 'VERIFIQUE BANCO Y REFERENCIA'
+                          : 'CRÉDITO EXCEDIDO'))}
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -5136,11 +5140,10 @@ export default function CajaPOS({
                       tabIndex={canConfirmCheckout ? 0 : -1}
                       onClick={() => handleConfirmCheckout(true)}
                       disabled={!canConfirmCheckout || isSubmittingSale}
-                      className={`py-3.5 px-3 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 font-sans focus:outline-none cursor-pointer disabled:cursor-not-allowed active:scale-[0.98] ${
-                        canConfirmCheckout
+                      className={`py-3.5 px-3 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 font-sans focus:outline-none cursor-pointer disabled:cursor-not-allowed active:scale-[0.98] ${canConfirmCheckout
                           ? 'bg-sky-600 hover:bg-sky-500 text-white shadow-sm focus:ring-4 focus:ring-sky-300 focus:bg-sky-700'
                           : 'bg-slate-300 text-slate-500'
-                      }`}
+                        }`}
                     >
                       {isSubmittingSale ? (
                         <>
@@ -5154,18 +5157,17 @@ export default function CajaPOS({
                         </>
                       )}
                     </button>
-                    
+
                     <button
                       ref={confirmCheckoutBtnRef}
                       type="button"
                       tabIndex={canConfirmCheckout ? 0 : -1}
                       onClick={() => handleConfirmCheckout(false)}
                       disabled={!canConfirmCheckout || isSubmittingSale}
-                      className={`py-3.5 px-3 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 font-sans focus:outline-none cursor-pointer disabled:cursor-not-allowed active:scale-[0.98] ${
-                        canConfirmCheckout
+                      className={`py-3.5 px-3 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 font-sans focus:outline-none cursor-pointer disabled:cursor-not-allowed active:scale-[0.98] ${canConfirmCheckout
                           ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg ring-4 ring-emerald-400/50 focus:ring-4 focus:ring-emerald-300 focus:bg-emerald-700'
                           : 'bg-slate-300 text-slate-500'
-                      }`}
+                        }`}
                       title="Presione Enter para confirmar y cobrar sin imprimir"
                     >
                       {isSubmittingSale ? (
@@ -5187,9 +5189,9 @@ export default function CajaPOS({
 
               {/* Receipt Summary Card (Right Column) */}
               <div className="flex flex-col space-y-3.5">
-                
+
                 <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3 shadow-xs">
-                  
+
                   {/* CLIENT INFO BANNER FOR OPERATOR CHECK */}
                   <div className="bg-sky-50 border border-sky-100 py-1.5 px-3 rounded-lg flex flex-col font-sans text-xs leading-tight">
                     <span className="text-[9px] text-sky-800 font-bold uppercase tracking-wider mb-0.5">Cliente Facturación</span>
@@ -5200,7 +5202,7 @@ export default function CajaPOS({
                   <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest border-b border-slate-200 pb-1.5 font-sans">
                     Resumen de Liquidación
                   </h3>
-                  
+
                   <div className="space-y-1.5">
                     <div className="flex justify-between text-xs">
                       <span className="text-slate-550 font-sans">Subtotal USD:</span>
@@ -5242,18 +5244,17 @@ export default function CajaPOS({
                         <span className="font-mono text-xl font-black text-slate-900">{formatBs(totalVES)}</span>
                       </div>
                     </div>
-                    
+
                     <div className="border-t border-slate-200 pt-1.5 flex justify-between text-emerald-700 font-bold text-xs">
                       <span className="font-sans">Total Pagado USD:</span>
                       <span className="font-mono font-black text-sm">${totalPaidUSD.toFixed(2)}</span>
                     </div>
 
                     {/* MONTO POR LIQUIDAR */}
-                    <div className={`p-2.5 rounded-xl transition-all ${
-                      remainingUSD > 0 
-                        ? 'bg-amber-200/90 border-2 border-amber-400 shadow-sm animate-pulse' 
+                    <div className={`p-2.5 rounded-xl transition-all ${remainingUSD > 0
+                        ? 'bg-amber-200/90 border-2 border-amber-400 shadow-sm animate-pulse'
                         : 'bg-emerald-50 border border-emerald-200'
-                    }`}>
+                      }`}>
                       <div className="flex justify-between items-center text-xs">
                         <span className={`font-sans font-black ${remainingUSD > 0 ? 'text-amber-950 uppercase tracking-wide text-xs' : 'text-emerald-800'}`}>
                           {remainingUSD > 0 ? '⚠️ Monto por Liquidar:' : '✅ Total Cancelado:'}
@@ -5347,7 +5348,7 @@ export default function CajaPOS({
       {showQtyEditModal && qtyEditItem && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-mono text-slate-800">
           <div ref={qtyEditModalRef} className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-sm shadow-2xl flex flex-col">
-            
+
             <div className="bg-slate-100 border-b border-slate-250 px-5 py-3.5 flex justify-between items-center">
               <span className="text-xs font-black text-slate-700 tracking-widest uppercase flex items-center gap-1.5 font-sans">
                 <Calculator className="w-4 h-4 text-sky-500" />
@@ -5413,7 +5414,7 @@ export default function CajaPOS({
       {showBulkModal && bulkProduct && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-mono text-slate-800">
           <div ref={bulkModalRef} className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-sm shadow-2xl flex flex-col">
-            
+
             <div className="bg-slate-100 border-b border-slate-250 px-5 py-3.5 flex justify-between items-center">
               <span className="text-xs font-black text-slate-700 tracking-widest uppercase flex items-center gap-1.5 font-sans">
                 <Calculator className="w-4 h-4 text-amber-500" />
@@ -5478,7 +5479,7 @@ export default function CajaPOS({
       {showHoldModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-mono text-slate-800">
           <div ref={holdModalRef} className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-md shadow-2xl flex flex-col">
-            
+
             <div className="bg-slate-100 border-b border-slate-250 px-5 py-3.5 flex justify-between items-center">
               <span className="text-xs font-black text-slate-700 tracking-widest uppercase flex items-center gap-1.5 font-sans">
                 <Clock className="w-4 h-4 text-winter-blueBtn" />
@@ -5534,7 +5535,7 @@ export default function CajaPOS({
           if (c.cedula_rif === 'V-00000000') return false;
           if ((c.saldo_pendiente || 0) <= 0.001) return false; // Mostrar únicamente clientes con deuda activa
           return c.nombre.toLowerCase().includes(abonoSearchTerm.toLowerCase()) ||
-                 c.cedula_rif.toLowerCase().includes(abonoSearchTerm.toLowerCase());
+            c.cedula_rif.toLowerCase().includes(abonoSearchTerm.toLowerCase());
         }).sort((a, b) => {
           const debtA = a.saldo_pendiente || 0;
           const debtB = b.saldo_pendiente || 0;
@@ -5558,7 +5559,7 @@ export default function CajaPOS({
             showAlert('Ingrese un monto válido para esta forma de pago.', 'Monto Inválido', 'warning');
             return;
           }
-          
+
           let usd = 0;
           let ves = 0;
           if (isUsdMethod(abonoMethod)) {
@@ -5623,7 +5624,7 @@ export default function CajaPOS({
         return (
           <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 z-50 animate-fade-in font-mono text-slate-800">
             <div ref={abonoModalRef} className="bg-white border border-slate-200 rounded-2xl overflow-hidden w-full max-w-md shadow-2xl flex flex-col font-sans">
-              
+
               {/* Header */}
               <div className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex justify-between items-center text-white">
                 <div className="flex items-center gap-3">
@@ -5639,8 +5640,8 @@ export default function CajaPOS({
                     </p>
                   </div>
                 </div>
-                <button 
-                  onClick={() => setShowCajaAbonoModal(false)} 
+                <button
+                  onClick={() => setShowCajaAbonoModal(false)}
                   className="text-white/70 hover:text-white text-lg font-bold transition-colors cursor-pointer"
                 >
                   ✕
@@ -5648,7 +5649,7 @@ export default function CajaPOS({
               </div>
 
               <div className="p-5 sm:p-6 space-y-4 bg-slate-50/40">
-                
+
                 {/* BÚSQUEDA DE CLIENTE DE CRÉDITO */}
                 {!abonoClient ? (
                   <div className="space-y-2.5">
@@ -5666,7 +5667,7 @@ export default function CajaPOS({
                         autoFocus
                       />
                     </div>
-                    
+
                     <div className="border border-slate-200 rounded-xl max-h-48 overflow-y-auto divide-y divide-slate-100 text-xs bg-white shadow-2xs">
                       {filteredAbonoClients.length === 0 ? (
                         <div className="p-6 text-center text-slate-400 italic text-xs flex flex-col items-center gap-1.5">
@@ -5675,7 +5676,7 @@ export default function CajaPOS({
                         </div>
                       ) : (
                         filteredAbonoClients.map(c => (
-                          <div 
+                          <div
                             key={c.id}
                             onClick={() => {
                               setAbonoClient(c);
@@ -5699,10 +5700,10 @@ export default function CajaPOS({
                     </div>
                   </div>
                 ) : (
-                  
+
                   /* FORMULARIO DE ABONO DE CRÉDITO */
                   <div className="space-y-3.5">
-                    
+
                     {/* TARJETA DE DEUDA DEL CLIENTE */}
                     <div className="bg-white border border-slate-200 p-3.5 rounded-xl text-xs font-sans leading-tight shadow-2xs space-y-2">
                       <div className="flex justify-between items-start">
@@ -5822,7 +5823,7 @@ export default function CajaPOS({
                     {/* VISTA 2: PAGO MIXTO / COMBINADO (MÚLTIPLES LÍNEAS DE PAGO) */}
                     {abonoMode === 'mixto' && (
                       <div className="space-y-3 bg-white border border-slate-200 p-3.5 rounded-xl shadow-2xs">
-                        
+
                         {/* RESUMEN DE SALDO RESTANTE EN TIEMPO REAL */}
                         <div className={`p-2.5 rounded-xl border text-xs font-sans flex justify-between items-center ${restanteUsd <= 0.01 ? 'bg-emerald-50 border-emerald-200 text-emerald-800 font-bold' : 'bg-amber-50 border-amber-200 text-amber-900 font-bold'}`}>
                           <span>Falta por Cubrir:</span>
@@ -5950,7 +5951,7 @@ export default function CajaPOS({
       {showTicketModal && printedTicketData && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-mono text-slate-800">
           <div className="bg-slate-900 border border-slate-750 rounded-2xl overflow-hidden w-full max-w-md shadow-2xl p-5 space-y-4">
-            
+
             {/* Currency Selector Toggle */}
             <div className="bg-slate-950 p-2 rounded-xl border border-slate-800 flex items-center justify-between">
               <span className="text-[10px] font-sans font-bold uppercase tracking-wider text-slate-400">
@@ -5960,22 +5961,20 @@ export default function CajaPOS({
                 <button
                   type="button"
                   onClick={() => setTicketCurrency('USD')}
-                  className={`px-3 py-1 text-[11px] font-extrabold font-sans rounded-md transition-all ${
-                    ticketCurrency === 'USD'
+                  className={`px-3 py-1 text-[11px] font-extrabold font-sans rounded-md transition-all ${ticketCurrency === 'USD'
                       ? 'bg-emerald-600 text-white shadow'
                       : 'text-slate-400 hover:text-white'
-                  }`}
+                    }`}
                 >
                   💵 $ (USD)
                 </button>
                 <button
                   type="button"
                   onClick={() => setTicketCurrency('VES')}
-                  className={`px-3 py-1 text-[11px] font-extrabold font-sans rounded-md transition-all ${
-                    ticketCurrency === 'VES'
+                  className={`px-3 py-1 text-[11px] font-extrabold font-sans rounded-md transition-all ${ticketCurrency === 'VES'
                       ? 'bg-blue-600 text-white shadow'
                       : 'text-slate-400 hover:text-white'
-                  }`}
+                    }`}
                 >
                   🇻🇪 Bs (VES)
                 </button>
@@ -5991,7 +5990,7 @@ export default function CajaPOS({
 
               return (
                 <div className="max-h-[65vh] overflow-y-auto bg-white p-5 rounded-xl font-mono text-[10px] space-y-3 shadow-inner">
-                  
+
                   {/* Commerce info */}
                   <div className="text-center">
                     <h4 className="font-extrabold text-sm uppercase">{companyConfig.nombre_comercio}</h4>
@@ -6035,11 +6034,11 @@ export default function CajaPOS({
                       const priceNumUSD = item.priceUSD ? item.priceUSD : (item.precioUSD ? item.precioUSD : 0);
                       const totalNumUSD = item.totalUSD ? item.totalUSD : (priceNumUSD * rawQty);
 
-                      const priceDisplay = isVES 
-                        ? formatBs(priceNumUSD * tasaVenta) 
+                      const priceDisplay = isVES
+                        ? formatBs(priceNumUSD * tasaVenta)
                         : `$${priceNumUSD.toFixed(2)}`;
-                      const totalDisplay = isVES 
-                        ? formatBs(totalNumUSD * tasaVenta) 
+                      const totalDisplay = isVES
+                        ? formatBs(totalNumUSD * tasaVenta)
                         : `$${totalNumUSD.toFixed(2)}`;
 
                       return (
@@ -6139,7 +6138,7 @@ export default function CajaPOS({
                         <span>{p.metodo.endsWith('$') || p.metodo.includes('Credito') ? `$${p.monto.toFixed(2)}` : formatBs(p.montoVES || p.monto)}</span>
                       </div>
                     ))}
-                    
+
                     {printedTicketData.vueltoVES > 0 && (
                       <div className="flex justify-between font-bold border-t border-slate-300 pt-1 text-[11px]">
                         <span>CAMBIO ENTREGADO VES:</span>
@@ -6184,7 +6183,7 @@ export default function CajaPOS({
 
       {/* MODAL: CIERRE DE CAJA - Ultra-Modern High Visibility Styled with Focus Trap */}
       {showCierreModal && (
-        <div 
+        <div
           onKeyDown={(e) => {
             if (e.key === 'Tab') {
               const container = e.currentTarget;
@@ -6217,13 +6216,13 @@ export default function CajaPOS({
           className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 font-sans text-slate-800 animate-fade-in"
         >
           <div className={`bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-[0_25px_50px_-12px_rgba(0,0,0,0.3)] transition-all max-h-[96vh] flex flex-col ${cierreResult ? 'max-w-4xl w-full' : 'max-w-[480px] w-full'}`}>
-            
+
             {/* Top Accent Gradient Line */}
             <div className="h-1.5 w-full bg-gradient-to-r from-rose-500 via-red-500 to-amber-500 flex-shrink-0" />
 
             {!cierreResult ? (
               <div className="p-5 sm:p-6 space-y-4">
-                
+
                 {/* HEADER SECTION */}
                 <div className="text-center space-y-2">
                   <div className="inline-flex p-3 bg-gradient-to-br from-rose-50 to-red-100 border border-rose-200 rounded-2xl shadow-inner text-rose-600">
@@ -6257,7 +6256,7 @@ export default function CajaPOS({
 
                 {/* FORM CONTROLS */}
                 <form onSubmit={handleSaveCierre} className="space-y-3.5">
-                  
+
                   {/* 1. DÓLARES USD INPUT CARD */}
                   <div className="bg-gradient-to-br from-emerald-50/70 via-emerald-50/30 to-white border-2 border-emerald-300 hover:border-emerald-500 focus-within:border-emerald-600 focus-within:ring-4 focus-within:ring-emerald-500/25 focus-within:shadow-md rounded-xl p-3.5 transition-all shadow-sm">
                     <div className="flex items-center justify-between mb-1.5">
@@ -6476,8 +6475,8 @@ export default function CajaPOS({
                       <Printer className="w-4 h-4 text-slate-700" />
                       <span>Imprimir Ticket Cierre</span>
                     </button>
-                    <button 
-                      onClick={() => { setShowCierreModal(false); setCierreResult(null); }} 
+                    <button
+                      onClick={() => { setShowCierreModal(false); setCierreResult(null); }}
                       className="text-slate-400 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg font-sans text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
                     >
                       <X className="w-4 h-4" />
@@ -6489,7 +6488,7 @@ export default function CajaPOS({
                 {/* SCROLLABLE BODY CONTAINING ARQUEO CARD */}
                 <div className="overflow-y-auto flex-1 p-4 sm:p-5 space-y-4 scrollbar-thin max-h-[calc(94vh-160px)]">
                   <div id="cierre-arqueo-card" className="space-y-4 w-full bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm">
-                  
+
                     {/* BLUE HEADER TICKET STYLE */}
                     <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white px-5 py-3 flex items-center justify-between rounded-xl shadow-sm">
                       <div className="flex items-center gap-2.5">
@@ -6511,7 +6510,7 @@ export default function CajaPOS({
                     </div>
 
                     <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-2 gap-5 shadow-inner">
-                      
+
                       {/* Left Column: Cash Drawer Arqueo */}
                       <div className="space-y-3.5">
                         <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-lg flex justify-between items-center">
@@ -6533,7 +6532,7 @@ export default function CajaPOS({
                               $ {cierreResult.aperturaUsd.toFixed(2)} <span className="text-slate-400 font-normal">/</span> {formatBs(cierreResult.aperturaVes)}
                             </span>
                           </div>
-                          
+
                           {/* Ventas en Efectivo ($) */}
                           <div className="flex justify-between items-center py-0.5">
                             <span className="text-slate-600 font-semibold font-sans">Ventas en Efectivo ($) :</span>
@@ -6710,7 +6709,7 @@ export default function CajaPOS({
                               <span className="font-black text-emerald-700 text-sm sm:text-base">$ {(cierreResult.pagosEfectivoUsd && !isNaN(cierreResult.pagosEfectivoUsd) ? cierreResult.pagosEfectivoUsd : 0).toFixed(2)}</span>
                             </div>
                           )}
-                          
+
                           {(cierreResult.pagosEfectivoBsVes > 0 || !hideZeroLines) && (
                             <div className="flex justify-between items-center py-0.5">
                               <span className="font-sans font-semibold text-slate-600">Efectivo Bs :</span>
@@ -6842,10 +6841,10 @@ export default function CajaPOS({
 
                       const hasLoss = diffUsd < -0.01 || diffVes < -0.01 || (showEur && diffEur < -0.01);
                       const hasGain = diffUsd > 0.01 || diffVes > 0.01 || (showEur && diffEur > 0.01);
-                      
+
                       let boxBgClass = 'bg-slate-50 border-slate-200';
                       let titleClass = 'text-slate-900 border-slate-200';
-                      
+
                       if (hasLoss) {
                         boxBgClass = 'bg-rose-50/70 border-rose-300 ring-2 ring-rose-500/10';
                         titleClass = 'text-rose-950 border-rose-200';
@@ -6859,7 +6858,7 @@ export default function CajaPOS({
                           <div className={`font-black text-center border-b pb-2 uppercase text-xs sm:text-sm tracking-wider ${titleClass}`}>
                             RECONCILIACIÓN DE EFECTIVO ENTREGADO (ARQUEO FÍSICO)
                           </div>
-                          
+
                           <div className="grid grid-cols-3 gap-3 text-slate-500 font-extrabold text-[11px] uppercase tracking-wide border-b border-slate-200/80 pb-1">
                             <span>Efectivo</span>
                             <span className="text-right">Gaveta Esperado</span>
@@ -7009,7 +7008,7 @@ export default function CajaPOS({
       {showMovementsModal && (
         <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 z-50 font-mono text-slate-800 animate-fade-in">
           <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden w-full max-w-md shadow-2xl flex flex-col font-sans">
-            
+
             {/* Header */}
             <div className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex justify-between items-center text-white">
               <div className="flex items-center gap-3">
@@ -7025,8 +7024,8 @@ export default function CajaPOS({
                   </p>
                 </div>
               </div>
-              <button 
-                onClick={() => setShowMovementsModal(false)} 
+              <button
+                onClick={() => setShowMovementsModal(false)}
                 className="text-white/70 hover:text-white text-lg font-bold transition-colors cursor-pointer"
               >
                 ✕
@@ -7183,7 +7182,7 @@ export default function CajaPOS({
       {showEntradaRapidaModal && (
         <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 z-50 font-mono text-slate-800 animate-fade-in">
           <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden w-full max-w-md shadow-2xl flex flex-col font-sans">
-            
+
             {/* Header */}
             <div className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex justify-between items-center text-white">
               <div className="flex items-center gap-3">
@@ -7199,8 +7198,8 @@ export default function CajaPOS({
                   </p>
                 </div>
               </div>
-              <button 
-                onClick={() => setShowEntradaRapidaModal(false)} 
+              <button
+                onClick={() => setShowEntradaRapidaModal(false)}
                 className="text-white/70 hover:text-white text-lg font-bold transition-colors cursor-pointer"
               >
                 ✕
@@ -7333,18 +7332,18 @@ export default function CajaPOS({
       {showDevolucionModal && (
         <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 z-50 font-mono text-slate-800 animate-fade-in">
           <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden w-full max-w-6xl shadow-2xl flex flex-col max-h-[92vh]">
-            
+
             <div className="bg-gradient-to-r from-rose-50 via-pink-50 to-slate-50 border-b border-rose-100 px-6 py-4 flex justify-between items-center">
               <span className="text-xs font-black text-rose-700 tracking-widest uppercase flex items-center gap-2">
                 <RotateCcw className="w-4 h-4 text-rose-600" />
                 MÓDULO DE DEVOLUCIONES DE INVENTARIO Y CAJA
               </span>
-              <button 
+              <button
                 onClick={() => {
                   setShowDevolucionModal(false);
                   setDevSelectedSale(null);
                   setDevSearchTerm('');
-                }} 
+                }}
                 className="text-slate-400 hover:text-slate-700 font-sans text-xs font-bold transition-colors cursor-pointer"
               >
                 ✕ Cerrar [ESC]
@@ -7352,7 +7351,7 @@ export default function CajaPOS({
             </div>
 
             <div className="flex-grow overflow-hidden flex flex-col md:flex-row min-h-[520px]">
-              
+
               {/* Left Column: Search & Find Ticket */}
               <div className="w-full md:w-[320px] lg:w-[360px] flex-shrink-0 border-r border-slate-200 p-5 flex flex-col space-y-4 bg-white">
                 <div>
@@ -7411,8 +7410,8 @@ export default function CajaPOS({
                       const salesList = allSalesList.length > 0 ? allSalesList : shiftSales;
                       const returnInfo = getSaleReturnInfo(sale, salesList);
                       const isSelected = devSelectedSale?.factura_nro === sale.factura_nro;
-                      const isClosedCaja = sale.caja_estatus 
-                        ? sale.caja_estatus === 'Cerrada' 
+                      const isClosedCaja = sale.caja_estatus
+                        ? sale.caja_estatus === 'Cerrada'
                         : !shiftSales.some(s => s.id === sale.id || s.factura_nro === sale.factura_nro);
 
                       let bgBorderClass = 'bg-white border-slate-200 hover:bg-slate-50 text-slate-800';
@@ -7477,10 +7476,10 @@ export default function CajaPOS({
                 {devSelectedSale ? (() => {
                   const salesList = allSalesList.length > 0 ? allSalesList : shiftSales;
                   const selectedReturnInfo = getSaleReturnInfo(devSelectedSale, salesList);
-                  const isSelectedSaleClosedCaja = devSelectedSale.caja_estatus 
-                    ? devSelectedSale.caja_estatus === 'Cerrada' 
+                  const isSelectedSaleClosedCaja = devSelectedSale.caja_estatus
+                    ? devSelectedSale.caja_estatus === 'Cerrada'
                     : !shiftSales.some(s => s.id === devSelectedSale.id || s.factura_nro === devSelectedSale.factura_nro);
-                  
+
                   return (
                     <div className="space-y-4 flex-grow flex flex-col justify-between">
                       <div className="space-y-4">
@@ -7544,10 +7543,10 @@ export default function CajaPOS({
                               else if (p.metodo === 'PagoMovil') label = 'Pago Móvil Bs';
                               else if (p.metodo === 'Biopago') label = 'Biopago Bs';
                               else if (p.metodo === 'CreditoCliente') label = 'Crédito';
-                              
+
                               const currency = p.metodo.includes('$') || p.metodo === 'CreditoCliente' ? '$' : 'Bs';
                               const formattedMonto = currency === '$' ? `$${p.monto.toFixed(2)}` : `Bs ${p.monto.toFixed(2)}`;
-                              
+
                               return (
                                 <div key={pIdx} className="bg-white border border-slate-200 px-2.5 py-1 rounded-lg shadow-2xs text-[9.5px] flex items-center gap-1.5">
                                   <span className="text-[8.5px] text-sky-700 font-bold uppercase">{label}:</span>
@@ -7584,7 +7583,7 @@ export default function CajaPOS({
                         <div className="space-y-2.5 max-h-[260px] overflow-y-auto pr-1">
                           {devItems.map((item, idx) => {
                             const isItemFullyReturned = item.remainingQty <= 0;
-                            
+
                             if (isItemFullyReturned) {
                               return (
                                 <div key={idx} className="bg-slate-100 border border-slate-200 p-3 rounded-xl flex items-center justify-between text-xs gap-4 opacity-75">
@@ -7616,7 +7615,7 @@ export default function CajaPOS({
                                     </span>
                                   </div>
                                 </div>
-                                
+
                                 <div className="flex items-center gap-3 flex-shrink-0 self-end sm:self-center">
                                   <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 shadow-2xs">
                                     <span className="text-[8.5px] font-bold text-slate-400 uppercase font-sans">Destino:</span>
@@ -7862,11 +7861,10 @@ export default function CajaPOS({
                                           setDevPhysicalUsdToReturn(0);
                                           setDevRefundCurrency('VES');
                                         }}
-                                        className={`text-[9px] font-bold px-2 py-0.5 rounded cursor-pointer transition-all ${
-                                          effectivePhysicalUsd === 0 
-                                            ? 'bg-slate-800 text-white shadow-xs' 
+                                        className={`text-[9px] font-bold px-2 py-0.5 rounded cursor-pointer transition-all ${effectivePhysicalUsd === 0
+                                            ? 'bg-slate-800 text-white shadow-xs'
                                             : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                                        }`}
+                                          }`}
                                       >
                                         $0 (Todo en Bs)
                                       </button>
@@ -7879,11 +7877,10 @@ export default function CajaPOS({
                                             setDevPhysicalUsdToReturn(roundedFloorUsd);
                                             setDevRefundCurrency('MIXTO');
                                           }}
-                                          className={`text-[9px] font-bold px-2 py-0.5 rounded cursor-pointer transition-all ${
-                                            effectivePhysicalUsd === roundedFloorUsd
+                                          className={`text-[9px] font-bold px-2 py-0.5 rounded cursor-pointer transition-all ${effectivePhysicalUsd === roundedFloorUsd
                                               ? 'bg-emerald-700 text-white shadow-xs'
                                               : 'bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200'
-                                          }`}
+                                            }`}
                                         >
                                           ${roundedFloorUsd} Físico
                                         </button>
@@ -7899,11 +7896,10 @@ export default function CajaPOS({
                                               setDevPhysicalUsdToReturn(bill);
                                               setDevRefundCurrency('MIXTO');
                                             }}
-                                            className={`text-[9px] font-bold px-2 py-0.5 rounded cursor-pointer transition-all ${
-                                              effectivePhysicalUsd === bill
+                                            className={`text-[9px] font-bold px-2 py-0.5 rounded cursor-pointer transition-all ${effectivePhysicalUsd === bill
                                                 ? 'bg-emerald-700 text-white shadow-xs'
                                                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                                            }`}
+                                              }`}
                                           >
                                             ${bill}
                                           </button>
@@ -7915,11 +7911,10 @@ export default function CajaPOS({
                                           setDevPhysicalUsdToReturn(devNetBalance);
                                           setDevRefundCurrency('USD');
                                         }}
-                                        className={`text-[9px] font-bold px-2 py-0.5 rounded cursor-pointer transition-all ${
-                                          effectivePhysicalUsd >= devNetBalance
+                                        className={`text-[9px] font-bold px-2 py-0.5 rounded cursor-pointer transition-all ${effectivePhysicalUsd >= devNetBalance
                                             ? 'bg-slate-800 text-white shadow-xs'
                                             : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                                        }`}
+                                          }`}
                                       >
                                         Todo en $ (${devNetBalance.toFixed(2)})
                                       </button>
@@ -8034,8 +8029,8 @@ export default function CajaPOS({
                             className="w-full bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 disabled:text-slate-500 text-white py-3.5 rounded-lg font-bold font-sans text-xs tracking-wider transition-all shadow-md flex items-center justify-center gap-1.5"
                           >
                             <CheckCircle2 className="w-4 h-4" />
-                            {selectedReturnInfo.isFullyReturned 
-                              ? 'FACTURA TOTALMENTE DEVUELTA' 
+                            {selectedReturnInfo.isFullyReturned
+                              ? 'FACTURA TOTALMENTE DEVUELTA'
                               : devExchangeItems.length > 0
                                 ? 'PROCESAR CANJE Y ACTUALIZAR INVENTARIO / CAJA'
                                 : 'PROCESAR DEVOLUCIÓN Y REEMBOLSAR EFECTIVO'}
@@ -8065,20 +8060,20 @@ export default function CajaPOS({
               <RotateCcw className="w-5 h-5 text-rose-600 animate-spin-reverse" />
               <span className="text-xs font-bold text-rose-800 tracking-wider uppercase font-sans">Confirmar Reembolso</span>
             </div>
-            
+
             <div className="p-5 space-y-4">
               <p className="text-xs text-slate-700 leading-relaxed font-sans">
                 ¿Está seguro de procesar la devolución de{' '}
                 <strong className="text-rose-700 font-mono font-black">
-                  {devRefundCurrency === 'USD' 
-                    ? `$${devNetBalance.toFixed(2)} USD` 
-                    : devRefundCurrency === 'VES' 
+                  {devRefundCurrency === 'USD'
+                    ? `$${devNetBalance.toFixed(2)} USD`
+                    : devRefundCurrency === 'VES'
                       ? `Bs ${(devNetBalance * tasaDia).toFixed(2)} VES`
                       : `$${Math.min(devNetBalance, devPhysicalUsdToReturn).toFixed(2)} USD (Físico) + Bs ${((devNetBalance - Math.min(devNetBalance, devPhysicalUsdToReturn)) * tasaDia).toFixed(2)} VES`}
                 </strong>{' '}
                 y reintegrar el dinero al cliente?
               </p>
-              
+
               <div className="bg-slate-55 border border-slate-200 rounded-lg p-3 text-[10px] space-y-1 text-slate-600">
                 <div className="flex justify-between">
                   <span>Factura de origen:</span>
@@ -8091,16 +8086,16 @@ export default function CajaPOS({
                 <div className="flex justify-between">
                   <span>Reembolso en:</span>
                   <strong className="text-slate-850 uppercase font-sans">
-                    {devRefundCurrency === 'USD' 
-                      ? 'Dólares ($)' 
-                      : devRefundCurrency === 'VES' 
-                        ? 'Bolívares (Bs)' 
+                    {devRefundCurrency === 'USD'
+                      ? 'Dólares ($)'
+                      : devRefundCurrency === 'VES'
+                        ? 'Bolívares (Bs)'
                         : `Mixto ($${Math.min(devNetBalance, devPhysicalUsdToReturn).toFixed(2)} + Bs)`}
                   </strong>
                 </div>
               </div>
             </div>
-            
+
             <div className="bg-slate-50 px-5 py-3.5 border-t border-slate-150 flex gap-2 justify-end">
               <button
                 type="button"
@@ -8135,10 +8130,9 @@ export default function CajaPOS({
           </div>
         ) : (
           <div className="fixed bottom-6 right-6 z-[100] animate-fade-in font-mono">
-            <div className={`flex items-center gap-3 px-5 py-4 rounded-xl border shadow-2xl text-xs font-bold font-sans ${
-              toast.type === 'success' ? 'bg-emerald-50 border-emerald-250 text-emerald-800 ring-4 ring-emerald-500/10' :
-              'bg-sky-50 border-sky-250 text-sky-850 ring-4 ring-sky-500/10'
-            }`}>
+            <div className={`flex items-center gap-3 px-5 py-4 rounded-xl border shadow-2xl text-xs font-bold font-sans ${toast.type === 'success' ? 'bg-emerald-50 border-emerald-250 text-emerald-800 ring-4 ring-emerald-500/10' :
+                'bg-sky-50 border-sky-250 text-sky-850 ring-4 ring-sky-500/10'
+              }`}>
               <CheckCircle2 className="w-5 h-5 text-emerald-600 animate-bounce" />
               <span>{toast.text}</span>
             </div>
@@ -8155,9 +8149,9 @@ export default function CajaPOS({
                 <Plus className="w-4 h-4 text-emerald-600 bg-emerald-50 rounded-full p-0.5" />
                 REGISTRAR NUEVO CLIENTE
               </h3>
-              <button 
+              <button
                 type="button"
-                onClick={() => setShowQuickClientModal(false)} 
+                onClick={() => setShowQuickClientModal(false)}
                 className="text-slate-400 hover:text-slate-700 font-sans font-bold text-sm"
               >
                 ✕
@@ -8302,11 +8296,11 @@ export default function CajaPOS({
 
       {/* MODAL: ZOOM / VISTA PREVIA EN GRANDE DEL PRODUCTO */}
       {zoomedProduct && (
-        <div 
+        <div
           onClick={() => setZoomedProduct(null)}
           className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-fade-in cursor-zoom-out"
         >
-          <div 
+          <div
             onClick={(e) => e.stopPropagation()}
             className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-2xl max-w-lg w-full flex flex-col cursor-default transform transition-all animate-scale-in"
           >
@@ -8316,7 +8310,7 @@ export default function CajaPOS({
                 <span className="text-[10px] text-blue-300 font-mono font-bold block">{zoomedProduct.barcode || 'SIN CÓDIGO'}</span>
                 <h3 className="text-sm font-black uppercase truncate text-white">{zoomedProduct.description}</h3>
               </div>
-              <button 
+              <button
                 onClick={() => setZoomedProduct(null)}
                 className="w-8 h-8 rounded-full bg-slate-800 hover:bg-rose-600 text-white flex items-center justify-center transition-colors text-sm font-bold flex-shrink-0"
                 title="Cerrar vista previa (Esc)"
@@ -8328,9 +8322,9 @@ export default function CajaPOS({
             {/* Large Image Canvas */}
             <div className="p-6 bg-slate-100/70 flex items-center justify-center min-h-[320px] max-h-[60vh] overflow-hidden relative">
               {zoomedProduct.imagen_url ? (
-                <img 
-                  src={zoomedProduct.imagen_url} 
-                  alt={zoomedProduct.description} 
+                <img
+                  src={zoomedProduct.imagen_url}
+                  alt={zoomedProduct.description}
                   className="max-h-[50vh] max-w-full object-contain rounded-xl shadow-lg bg-white p-2 border border-slate-200"
                 />
               ) : (
@@ -8408,11 +8402,10 @@ export default function CajaPOS({
                 <div className="bg-white border border-slate-200 rounded-xl p-2.5 shadow-2xs flex flex-col justify-between">
                   <span className="text-[9.5px] text-slate-500 uppercase font-bold">Stock Disponible</span>
                   <div className="mt-1">
-                    <span className={`text-sm font-mono font-black px-2 py-0.5 rounded-lg border inline-block ${
-                      zoomedProduct.stock_actual <= zoomedProduct.stock_minimo 
-                        ? 'bg-rose-50 border-rose-200 text-rose-700 animate-pulse' 
+                    <span className={`text-sm font-mono font-black px-2 py-0.5 rounded-lg border inline-block ${zoomedProduct.stock_actual <= zoomedProduct.stock_minimo
+                        ? 'bg-rose-50 border-rose-200 text-rose-700 animate-pulse'
                         : 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                    }`}>
+                      }`}>
                       {formatStockVal(zoomedProduct.stock_actual, zoomedProduct.a_granel)}{!zoomedProduct.a_granel ? ' uds' : ''}
                     </span>
                   </div>
@@ -8425,7 +8418,7 @@ export default function CajaPOS({
 
       {/* FLOATING CONTEXT MENU (RIGHT-CLICK ON PRODUCT PREVIEW OR IMAGE) */}
       {contextMenu && (
-        <div 
+        <div
           className="fixed z-50 bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden w-64 text-slate-800 text-xs font-sans animate-in fade-in zoom-in duration-100"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(e) => e.stopPropagation()}
@@ -8507,11 +8500,10 @@ export default function CajaPOS({
                   showAlert('🗑️ Producto eliminado del sistema.', 'Producto Eliminado', 'info');
                 }
               }}
-              className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 transition-colors ${
-                contextMenu.product.stock_actual > 0 
-                  ? 'opacity-40 cursor-not-allowed text-slate-400' 
+              className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 transition-colors ${contextMenu.product.stock_actual > 0
+                  ? 'opacity-40 cursor-not-allowed text-slate-400'
                   : 'hover:bg-rose-50 text-rose-600 hover:text-rose-700'
-              }`}
+                }`}
               title={contextMenu.product.stock_actual > 0 ? "Solo se puede eliminar con existencia 0" : "Eliminar producto"}
             >
               <Minus className="w-3.5 h-3.5 text-rose-600 flex-shrink-0" />
@@ -8619,7 +8611,7 @@ export default function CajaPOS({
       {editingProduct && (
         <div className="fixed inset-0 bg-slate-955/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50 animate-fade-in font-sans text-slate-800">
           <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden w-full max-w-[1380px] shadow-2xl transition-all duration-300 max-h-[94vh] flex flex-col">
-            
+
             {/* Header */}
             <div className="flex justify-between items-center border-b border-slate-200 px-6 py-3.5 bg-slate-50 flex-shrink-0">
               <div className="flex items-center gap-2.5">
@@ -8639,9 +8631,9 @@ export default function CajaPOS({
 
               {/* Botón Cerrar */}
               <div className="flex items-center gap-1.5">
-                <button 
-                  type="button" 
-                  onClick={() => setEditingProduct(null)} 
+                <button
+                  type="button"
+                  onClick={() => setEditingProduct(null)}
                   className="text-slate-400 hover:text-red-600 p-1.5 hover:bg-red-50 rounded-lg transition-all"
                   title="Cerrar ventana (Esc)"
                 >
@@ -8653,10 +8645,10 @@ export default function CajaPOS({
             {/* Form Body - 2 Columns Grid (4 Cols Izq / 8 Cols Der para máxima prioridad al Auxiliar) */}
             <form onSubmit={handleUpdateProductSubmit} className="p-4 overflow-y-auto space-y-3 flex-1">
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-                
+
                 {/* === COLUMNA IZQUIERDA: CÓDIGO, DATOS GENERALES, IMAGEN Y CONTROL DE STOCK (4 Cols) === */}
                 <div className="lg:col-span-4 space-y-2.5">
-                  
+
                   {/* Bloque Identificación & Código de Barras */}
                   <div className="bg-slate-50/70 border border-slate-200 rounded-xl p-2.5 space-y-2">
                     <div>
@@ -8815,11 +8807,11 @@ export default function CajaPOS({
                           <span className="text-[6.5px] text-slate-400 font-bold block">Sin Foto</span>
                         </div>
                         {editImageUrl && (
-                          <img 
+                          <img
                             key={`edit-prod-img-${editImageUrl}`}
-                            src={editImageUrl} 
-                            alt="Preview" 
-                            className="w-full h-full object-cover absolute inset-0 bg-white" 
+                            src={editImageUrl}
+                            alt="Preview"
+                            className="w-full h-full object-cover absolute inset-0 bg-white"
                             onLoad={(e) => { (e.currentTarget as HTMLElement).style.display = 'block'; }}
                             onError={(e) => { (e.currentTarget as HTMLElement).style.display = 'none'; }}
                           />
@@ -8941,7 +8933,7 @@ export default function CajaPOS({
 
                 {/* === COLUMNA DERECHA: PRECIOS Y AUXILIAR (8 Cols - Prioridad Máxima 66.7%) === */}
                 <div className="lg:col-span-8 space-y-2.5 flex flex-col">
-                  
+
                   {/* AUXILIAR DE CÁLCULO DE PRECIOS */}
                   <div className="flex-shrink-0">
                     <AuxiliarCalculoPrecios
@@ -8999,8 +8991,8 @@ export default function CajaPOS({
                           className="w-full bg-slate-50 border border-emerald-300 rounded px-1.5 py-1 text-xs text-emerald-700 font-mono font-black focus:bg-white focus:outline-none"
                         />
                         <span className="text-[8px] text-slate-500 block mt-0.5 font-mono truncate font-semibold">
-                          {editTaxActive 
-                            ? `Base: $${((parseFloat(editDetail) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA` 
+                          {editTaxActive
+                            ? `Base: $${((parseFloat(editDetail) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA`
                             : 'Exento de IVA'}
                         </span>
                       </div>
@@ -9018,8 +9010,8 @@ export default function CajaPOS({
                           className="w-full bg-slate-50 border border-purple-300 rounded px-1.5 py-1 text-xs text-purple-800 font-mono font-bold focus:bg-white focus:outline-none"
                         />
                         <span className="text-[8px] text-slate-500 block mt-0.5 font-mono truncate font-semibold">
-                          {editTaxActive 
-                            ? `Base: $${((parseFloat(editMayor) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA` 
+                          {editTaxActive
+                            ? `Base: $${((parseFloat(editMayor) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA`
                             : 'Exento de IVA'}
                         </span>
                       </div>
@@ -9038,7 +9030,7 @@ export default function CajaPOS({
                         />
                         <span className="text-[8px] text-slate-500 block mt-0.5 font-mono truncate font-semibold">
                           {editTaxActive && (parseFloat(editBulto) || 0) > 0
-                            ? `Base: $${((parseFloat(editBulto) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA` 
+                            ? `Base: $${((parseFloat(editBulto) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA`
                             : 'Opcional'}
                         </span>
                       </div>

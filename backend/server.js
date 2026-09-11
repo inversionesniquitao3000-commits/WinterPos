@@ -24,7 +24,7 @@ import {
   getDocumentosEmpresa, saveDocumentoEmpresa, updateDocumentoEmpresa, deleteDocumentoEmpresa
 } from './db-store.js';
 
-import { 
+import {
   initWhatsAppClient, getWhatsAppStatus, saveWhatsAppConfig, sendCierreReport,
   sendDirectWhatsAppMessage, unlockWhatsAppSession, resetWhatsAppSession, logoutWhatsAppSession,
   sendDocumentVencimientoWhatsAppReport
@@ -72,7 +72,7 @@ function extractDatesFromPdfBuffer(buf) {
           }
           const decomp = zlib.inflateRawSync(chunkBuf).toString('latin1');
           fullText += ' ' + decomp;
-        } catch (_) {}
+        } catch (_) { }
       }
     }
 
@@ -116,7 +116,7 @@ function extractDatesFromPdfBuffer(buf) {
 export function getLocalIpAddress() {
   const interfaces = os.networkInterfaces();
   const virtualKeywords = ['vmware', 'vmnet', 'virtual', 'vbox', 'vethernet', 'tap', 'tun', 'docker', 'wsl', 'loopback', 'bluetooth', 'npcap'];
-  
+
   let candidates = [];
   for (const name of Object.keys(interfaces)) {
     const isVirtual = virtualKeywords.some(k => name.toLowerCase().includes(k));
@@ -131,7 +131,7 @@ export function getLocalIpAddress() {
       }
     }
   }
-  
+
   candidates.sort((a, b) => a.priority - b.priority);
   return candidates.length > 0 ? candidates[0].address : '127.0.0.1';
 }
@@ -239,7 +239,7 @@ const candidateImageDirs = typeof getAllCandidateImageDirectories === 'function'
 for (const cDir of candidateImageDirs) {
   try {
     if (!fs.existsSync(cDir)) fs.mkdirSync(cDir, { recursive: true });
-  } catch (_) {}
+  } catch (_) { }
   app.use('/api/ai/images', express.static(cDir));
 }
 
@@ -320,8 +320,8 @@ if (fs.existsSync(distPath)) {
 
 // Endpoints
 app.get('/api/status', (req, res) => {
-  res.json({ 
-    status: 'ok', 
+  res.json({
+    status: 'ok',
     serverTime: new Date().toISOString(),
     localIp: getLocalIpAddress()
   });
@@ -434,8 +434,13 @@ app.get('/api/clientes', async (req, res) => {
 });
 
 app.post('/api/clientes', async (req, res) => {
-  const saved = await saveClient(req.body);
-  res.json(saved);
+  try {
+    const saved = await saveClient(req.body);
+    res.json(saved);
+  } catch (err) {
+    console.error('Error al guardar cliente:', err.message);
+    res.status(400).json({ error: err.message });
+  }
 });
 
 app.post('/api/clientes/bulk', async (req, res) => {
@@ -670,33 +675,33 @@ app.get('/api/sync/poll', async (req, res) => {
 
       // 2. Tasas sync: compare aggregate metrics
       if (summary.tasasCount !== clientTasasCount ||
-          Math.abs(summary.lastTasaCobro - clientTasaCobro) > 0.0001 ||
-          Math.abs(summary.lastTasaVuelto - clientTasaVuelto) > 0.0001) {
+        Math.abs(summary.lastTasaCobro - clientTasaCobro) > 0.0001 ||
+        Math.abs(summary.lastTasaVuelto - clientTasaVuelto) > 0.0001) {
         result.tasas = await getTasaHistory();
       }
 
       // 3. Cierres sync: compare aggregate metrics
       if (summary.cierresCount !== clientCierreCount ||
-          summary.lastCierreId !== clientLastCierreId ||
-          Math.abs(summary.cierresSig - roundedClientCierresSig) > 0.01) {
+        summary.lastCierreId !== clientLastCierreId ||
+        Math.abs(summary.cierresSig - roundedClientCierresSig) > 0.01) {
         result.cierres = await getCierres();
       }
 
       // 4. Clients sync: compare count and checksum
       if (summary.clientsCount !== clientClientsCount ||
-          Math.abs(summary.clientsSig - roundedClientClientsSig) > 0.01) {
+        Math.abs(summary.clientsSig - roundedClientClientsSig) > 0.01) {
         result.clients = await getClients();
       }
 
       // 5. Products sync: compare count and checksum
       if (summary.productsCount !== clientProductsCount ||
-          Math.abs(summary.productsSig - roundedClientProductsSig) > 0.01) {
+        Math.abs(summary.productsSig - roundedClientProductsSig) > 0.01) {
         result.products = await getProducts();
       }
 
       // 6. Abonos sync: compare count and checksum
       if (summary.abonosCount !== clientAbonosCount ||
-          Math.abs(summary.abonosSig - roundedClientAbonosSig) > 0.01) {
+        Math.abs(summary.abonosSig - roundedClientAbonosSig) > 0.01) {
         result.abonos = await getAbonos();
       }
     } else {
@@ -909,8 +914,8 @@ async function fetchBcvRates() {
 
     if (usdData && (usdData.promedio || usdData.precio || usdData.monto)) {
       const usdVal = parseFloat(usdData.promedio || usdData.precio || usdData.monto);
-      let eurVal = eurData && (eurData.promedio || eurData.precio || eurData.monto) 
-        ? parseFloat(eurData.promedio || eurData.precio || eurData.monto) 
+      let eurVal = eurData && (eurData.promedio || eurData.precio || eurData.monto)
+        ? parseFloat(eurData.promedio || eurData.precio || eurData.monto)
         : (usdVal * 1.08);
 
       if (usdVal > 0) {
@@ -957,9 +962,9 @@ async function fetchBcvRates() {
 }
 
 // Background query on startup and every 5 minutes
-fetchBcvRates().catch(() => {});
+fetchBcvRates().catch(() => { });
 setInterval(() => {
-  fetchBcvRates().catch(() => {});
+  fetchBcvRates().catch(() => { });
 }, 5 * 60 * 1000);
 
 app.get('/api/bcv', async (req, res) => {
@@ -1123,7 +1128,7 @@ app.post('/api/documentos-empresa', async (req, res) => {
 
       const safeFileName = `${Date.now()}_${nombre_archivo.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
       const fullFilePath = path.join(DOCUMENTS_DIR, safeFileName);
-      
+
       fs.writeFileSync(fullFilePath, buffer);
       rutaRelativa = safeFileName;
     }
@@ -1269,7 +1274,7 @@ app.delete('/api/documentos-empresa/:id', async (req, res) => {
     if (docDeleted && docDeleted.ruta_archivo) {
       const fullPath = path.join(DOCUMENTS_DIR, docDeleted.ruta_archivo);
       if (fs.existsSync(fullPath)) {
-        try { fs.unlinkSync(fullPath); } catch (e) {}
+        try { fs.unlinkSync(fullPath); } catch (e) { }
       }
     }
     res.json({ success: true, message: 'Documento eliminado correctamente.' });
@@ -1539,7 +1544,7 @@ app.post('/api/users/heartbeat', async (req, res) => {
 
     try {
       const allUsers = await getUsers();
-      userObj = allUsers.find(u => 
+      userObj = allUsers.find(u =>
         (userId && String(u.id) === String(userId)) ||
         (username && u.usuario && u.usuario.toLowerCase().trim() === String(username).toLowerCase().trim())
       );
@@ -1552,7 +1557,7 @@ app.post('/api/users/heartbeat', async (req, res) => {
           return res.json({ success: false, sessionClosed: true, message: 'Shift closed' });
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   let found = false;
@@ -1612,7 +1617,7 @@ app.delete('/api/users/active-sessions/:target', (req, res) => {
 app.post('/api/users/force-logout/:target', (req, res) => {
   const target = String(req.params.target).toLowerCase().trim();
   cleanExpiredSessions();
-  
+
   for (const [key, sess] of activeSessions.entries()) {
     const matchId = String(sess.userId).toLowerCase() === target;
     const matchName = String(sess.username).toLowerCase() === target;
@@ -1797,11 +1802,11 @@ app.post('/api/db/sync-sales-from-json', async (req, res) => {
 app.get('/api/db/backup/schedule', async (req, res) => {
   try {
     const defaultDir = path.resolve('./data/backups');
-    const sched = readJsonFile('backup_schedule.json', { 
-      schedule: 'Diario', 
+    const sched = readJsonFile('backup_schedule.json', {
+      schedule: 'Diario',
       hour: '02:00',
-      backupDir: defaultDir, 
-      lastBackup: '' 
+      backupDir: defaultDir,
+      lastBackup: ''
     });
     if (!sched.backupDir) sched.backupDir = defaultDir;
     res.json({ ...sched, defaultBackupDir: defaultDir });
@@ -1815,17 +1820,17 @@ app.post('/api/db/backup/schedule', async (req, res) => {
     const { schedule, hour, specificDate, backupDir } = req.body;
     const defaultDir = path.resolve('./data/backups');
     const sched = readJsonFile('backup_schedule.json', { schedule: 'Diario', lastBackup: '' });
-    
+
     if (schedule !== undefined) sched.schedule = schedule;
     if (hour !== undefined) sched.hour = hour;
     if (specificDate !== undefined) sched.specificDate = specificDate;
     if (backupDir !== undefined) sched.backupDir = backupDir.trim() || defaultDir;
-    
+
     const targetDir = sched.backupDir || defaultDir;
     if (!fs.existsSync(targetDir)) {
       fs.mkdirSync(targetDir, { recursive: true });
     }
-    
+
     writeJsonFile('backup_schedule.json', sched);
     setTimeout(runBackupTask, 500);
     res.json({ success: true, config: sched });
@@ -1846,20 +1851,20 @@ async function runBackupTask() {
   if (isBackupRunning) return;
   try {
     const defaultDir = path.resolve('./data/backups');
-    const sched = readJsonFile('backup_schedule.json', { 
-      schedule: 'Diario', 
+    const sched = readJsonFile('backup_schedule.json', {
+      schedule: 'Diario',
       hour: '02:00',
       lastBackup: '',
       backupDir: defaultDir
     });
-    
+
     if (!sched || sched.schedule === 'Desactivado') return;
 
     const now = new Date();
     const currentHour = String(now.getHours()).padStart(2, '0');
     const currentMinute = String(now.getMinutes()).padStart(2, '0');
     const currentTimeStr = `${currentHour}:${currentMinute}`;
-    
+
     // Fecha local YYYY-MM-DD
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -1909,14 +1914,14 @@ async function runBackupTask() {
       if (!fs.existsSync(saveDir)) {
         fs.mkdirSync(saveDir, { recursive: true });
       }
-      
+
       console.log(`⏱️ [Backups] Iniciando copia de seguridad programada (${sched.schedule} a las ${targetHourStr}) en "${saveDir}"...`);
       const backupData = await backupDatabase();
       const timeHMS = `${currentHour}-${currentMinute}-${String(now.getSeconds()).padStart(2, '0')}`;
       const fileName = `backup_auto_${todayStr}_${timeHMS}.json`;
       const fullPath = path.join(saveDir, fileName);
       fs.writeFileSync(fullPath, JSON.stringify(backupData, null, 2), 'utf8');
-      
+
       sched.lastBackup = now.toISOString();
       if (sched.schedule === 'Especifico') {
         sched.schedule = 'Desactivado'; // Auto-desactivar respaldo único completado
@@ -2032,7 +2037,7 @@ app.post('/api/whatsapp/install-chromium', async (req, res) => {
           const detailMsg = currentStatus.lastError || (error ? error.message : stderr) || 'Error desconocido';
           return res.status(400).json({
             success: false,
-            error: currentStatus.detectedChromePath 
+            error: currentStatus.detectedChromePath
               ? `Chrome detectado en (${currentStatus.detectedChromePath}), pero falló al iniciar: ${detailMsg}`
               : 'No se encontró Google Chrome en la ruta predeterminada (C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe).',
             details: detailMsg,
@@ -2577,7 +2582,7 @@ function freePortIfOccupied(port) {
               try {
                 execSync(`taskkill /F /PID ${pid}`);
                 console.log(`✅ Proceso anterior (${pid}) liberado del puerto ${port}.`);
-              } catch (_) {}
+              } catch (_) { }
             }
           }
         } catch (e) {
@@ -2598,7 +2603,7 @@ freePortIfOccupied(PORT).then(() => {
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Servidor API de WinterPosAL corriendo en http://localhost:${PORT}`);
     console.log(`Expuesto en red LAN para recibir conexiones de otras terminales.`);
-    
+
     // Initialize WhatsApp connection in background after startup (non-blocking for UI)
     setTimeout(() => {
       initWhatsAppClient();
