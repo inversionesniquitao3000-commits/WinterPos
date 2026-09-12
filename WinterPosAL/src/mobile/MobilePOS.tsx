@@ -1,8 +1,8 @@
 import { useState, useMemo, useCallback } from 'react';
 import { 
   Search, ShoppingCart, Plus, Minus, Trash2, Camera, User, 
-  X, Check, AlertCircle, Sparkles, Store, Lock, DollarSign,
-  Package, ChevronRight, UserPlus, ArrowRight, Layers,
+  X, Check, Sparkles, Store, Lock, DollarSign,
+  Package, ChevronRight, UserPlus, ArrowRight,
   PauseCircle, Play, RotateCcw, CreditCard
 } from 'lucide-react';
 import { Product, Client, User as UserType, CompanyConfig, SaleItem, Payment, Sale } from '../types';
@@ -76,7 +76,12 @@ export default function MobilePOS({
       cedula_rif: 'V-00000000',
       nombre: 'Consumidor Final',
       telefono: '',
-      direccion: 'Ciudad'
+      direccion: 'Ciudad',
+      limite_credito: 0,
+      credito_disponible: 0,
+      porcentaje_descuento: 0,
+      estado: 'Activo',
+      saldo_pendiente: 0
     };
   }, [clients]);
 
@@ -392,7 +397,8 @@ export default function MobilePOS({
         fecha: new Date().toLocaleString(),
         tipo_documento: 'FACTURA_FISCAL',
         caja_id: 1,
-        terminal: 'MOVIL'
+        terminal: 'MOVIL',
+        usuario: currentUser?.usuario || 'Operador Móvil'
       };
 
       setConfirmedSale(savedSale);
@@ -419,7 +425,12 @@ export default function MobilePOS({
       cedula_rif: newClientDoc.trim().toUpperCase(),
       nombre: newClientName.trim(),
       telefono: newClientPhone.trim(),
-      direccion: 'Ciudad'
+      direccion: 'Ciudad',
+      limite_credito: 0,
+      credito_disponible: 0,
+      porcentaje_descuento: 0,
+      estado: 'Activo',
+      saldo_pendiente: 0
     };
 
     if (onAddClient) {

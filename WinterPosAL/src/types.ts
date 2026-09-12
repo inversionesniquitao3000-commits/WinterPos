@@ -1,14 +1,18 @@
 export interface Product {
   id: number;
   barcode: string;
+  codigo_barras_clave?: string;
   description: string;
+  descripcion?: string;
   category: string;
+  categoria?: string;
   stock_actual: number;
   stock_minimo: number;
   precio_costo_usd: number;
   precio_detalle_usd: number;
   precio_mayor_usd: number;
   precio_bulto_usd?: number;
+  priceUSD?: number;
   cantidad_mayorista: number;
   cant_bulto?: number;
   ganancia_detalle?: number;
@@ -107,11 +111,18 @@ export interface TasaHistoryItem {
 }
 
 export interface SaleItem {
-  product: Product;
+  product: Product | any;
+  productId?: number;
+  product_id?: number;
   qty: number;
-  priceType: 'Detalle' | 'Mayor' | 'Bulto' | 'Costo';
+  cantidad?: number;
+  priceType?: 'Detalle' | 'Mayor' | 'Bulto' | 'Costo' | string;
+  tipo_precio?: string;
   priceUSD: number;
+  precio_unitario_usd?: number;
   totalUSD: number;
+  total_fila_usd?: number;
+  description?: string;
   isManualPriceType?: boolean;
 }
 
@@ -131,7 +142,7 @@ export interface InventoryMovement {
   date: string;
   productCode: string;
   productDescription: string;
-  type: 'Entrada' | 'Salida' | 'Merma' | 'Venta' | 'Devolucion' | 'Devolución' | 'Entrada Rápida';
+  type: 'Entrada' | 'Salida' | 'Merma' | 'Venta' | 'Devolucion' | 'Devolución' | 'Entrada Rápida' | 'Ajuste';
   qty: number;
   stock_anterior: number;
   stock_posterior: number;
@@ -154,6 +165,7 @@ export interface PriceAdjustmentHistory {
 export interface CompanyConfig {
   rif: string;
   nombre_comercio: string;
+  nombre?: string;
   direccion: string;
   telefono: string;
   correo: string;
@@ -209,7 +221,9 @@ export interface Sale {
   fecha: string;
   usuario: string;
   usuario_id?: number;
+  caja_id?: number;
   caja_estatus?: 'Abierta' | 'Cerrada' | string;
+  tasa_cambio?: number;
   estatus?: string;
   iva?: number;
   terminal?: string;

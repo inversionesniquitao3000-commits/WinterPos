@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { RotateCcw, X, Search, CheckCircle2, AlertCircle, ArrowLeft, Package, User, DollarSign, Banknote, Calendar, ChevronRight, AlertTriangle } from 'lucide-react';
+import { RotateCcw, X, Search, CheckCircle2, AlertCircle, ArrowLeft, User, DollarSign, Banknote, ChevronRight } from 'lucide-react';
 import { getApiBaseUrl } from '../utils';
 
 interface SaleItem {

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { 
   CheckCircle2, Share2, Printer, PlusCircle, X, 
-  Receipt, DollarSign, Calendar, User, Phone, Send
+  Phone, Send
 } from 'lucide-react';
 import { Sale, CompanyConfig } from '../types';
 import { printTicketReceipt } from '../utils';
@@ -45,7 +45,7 @@ export default function MobileTicketModal({
     
     // Construct digital ticket receipt text
     let text = `🧾 *COMPROBANTE DE COMPRA*\n`;
-    text += `🏢 *${companyConfig?.nombre || 'WinterPos'}*\n`;
+    text += `🏢 *${companyConfig?.nombre_comercio || companyConfig?.nombre || 'WinterPos'}*\n`;
     if (companyConfig?.rif) text += `RIF: ${companyConfig.rif}\n`;
     text += `--------------------------------\n`;
     text += `📄 Nro: *#${sale.factura_nro || sale.id}*\n`;
@@ -124,7 +124,7 @@ export default function MobileTicketModal({
             {/* Header info */}
             <div className="text-center pb-2 border-b border-dashed border-slate-300">
               <h4 className="font-black text-sm tracking-tight text-slate-950">
-                {companyConfig?.nombre || 'WINTERPOS'}
+                {companyConfig?.nombre_comercio || companyConfig?.nombre || 'WINTERPOS'}
               </h4>
               {companyConfig?.rif && <p className="text-[10px] text-slate-600">RIF: {companyConfig.rif}</p>}
               <p className="text-[10px] text-slate-500">{sale.fecha || new Date().toLocaleString()}</p>

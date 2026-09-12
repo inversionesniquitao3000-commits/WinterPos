@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { 
-  X, Check, RefreshCw, AlertTriangle, Sparkles, Upload, 
+  X, Check, RefreshCw, AlertTriangle, Sparkles, 
   Trash2, Image as ImageIcon, Camera, DollarSign,
-  Package, Tag, Percent, Calendar, ShieldAlert,
+  Package, Tag, Calendar, ShieldAlert,
   History, ChevronDown, ChevronUp, ArrowDownRight, ArrowUpRight
 } from 'lucide-react';
 import { getApiBaseUrl, formatImageUrl } from '../utils';
@@ -871,7 +871,6 @@ export default function MobileProductModal({
                       ) : (
                         movements.map((m, idx) => {
                           const isEntrada = (m.type || '').toLowerCase().includes('entrada') || (m.type || '').toLowerCase().includes('compra');
-                          const isVenta = (m.type || '').toLowerCase().includes('venta');
                           const isMerma = (m.type || '').toLowerCase().includes('merma');
                           const qty = parseFloat(String(m.qty ?? m.cantidad ?? 0));
 

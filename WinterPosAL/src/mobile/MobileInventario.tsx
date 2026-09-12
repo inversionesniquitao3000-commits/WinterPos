@@ -5,8 +5,8 @@ import {
   SlidersHorizontal, ChevronDown, Layers, FileText
 } from 'lucide-react';
 import { getApiBaseUrl, formatImageUrl } from '../utils';
-import MobileStockModal, { MobileProductStockItem } from './MobileStockModal';
-import MobileProductModal, { MobileProductFormData } from './MobileProductModal';
+import MobileStockModal from './MobileStockModal';
+import MobileProductModal from './MobileProductModal';
 import MobileCargaFacturaModal from './MobileCargaFacturaModal';
 
 interface ProductItem {

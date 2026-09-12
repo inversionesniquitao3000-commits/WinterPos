@@ -21,7 +21,6 @@ export default function MobileMovimientoCajaModal({
   cajero = 'Operador',
   usuarioNombre,
   usuarioId,
-  tasaDia = 1,
   initialTipo = 'Salida',
   onSuccess
 }: MobileMovimientoCajaModalProps) {

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Briefcase, RefreshCw, Phone, MessageSquare, DollarSign, PlusCircle, AlertCircle } from 'lucide-react';
+import { Briefcase, RefreshCw, Phone, MessageSquare, DollarSign, PlusCircle } from 'lucide-react';
 import { getApiBaseUrl } from '../utils';
 import MobileAbonoModal from './MobileAbonoModal';
 import MobileGastoModal from './MobileGastoModal';

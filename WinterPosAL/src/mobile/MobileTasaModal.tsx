@@ -221,7 +221,6 @@ export default function MobileTasaModal({
     }
   };
 
-  const currencySymbol = moneda === 'eur' ? '€' : '$';
   const currencyLabel = moneda === 'eur' ? 'Euro (EUR)' : 'Dólar (USD)';
   const currencyUnit = moneda === 'eur' ? 'Bs/€' : 'Bs/$';
 

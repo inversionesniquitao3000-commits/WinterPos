@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { DollarSign, Banknote, X, CheckCircle2, AlertCircle, User, CreditCard, Smartphone, Search, ArrowLeft, ChevronRight } from 'lucide-react';
+import { DollarSign, Banknote, X, CheckCircle2, AlertCircle, CreditCard, Smartphone, Search, ArrowLeft, ChevronRight } from 'lucide-react';
 import { getApiBaseUrl } from '../utils';
 
 export interface MobileAbonoClient {
@@ -16,6 +16,7 @@ interface MobileAbonoModalProps {
   onClose: () => void;
   client?: MobileAbonoClient | null;
   terminal?: string;
+  cajero?: string;
   usuarioNombre?: string;
   usuarioId?: number;
   tasaDia?: number;

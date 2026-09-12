@@ -1,9 +1,9 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   FileText, Search, Plus, X, Check, RefreshCw, AlertTriangle, 
-  Trash2, Edit2, DollarSign, Calculator, Percent, Layers, 
-  Calendar, Building2, Package, PauseCircle, PlayCircle, ArrowRight,
-  Sparkles, CheckCircle2, ChevronDown
+  Trash2, DollarSign, Calculator, 
+  Building2, Package, PauseCircle,
+  Sparkles, CheckCircle2
 } from 'lucide-react';
 import { getApiBaseUrl } from '../utils';
 
@@ -76,7 +76,6 @@ export default function MobileCargaFacturaModal({
 
   // Invoice Header states
   const [proveedores, setProveedores] = useState<ProveedorItem[]>([]);
-  const [loadingProveedores, setLoadingProveedores] = useState(false);
   const [selectedProveedorId, setSelectedProveedorId] = useState<number | ''>('');
   const [numeroFactura, setNumeroFactura] = useState('');
   const [condicionPago, setCondicionPago] = useState<'Contado' | 'Credito'>('Contado');
@@ -101,7 +100,6 @@ export default function MobileCargaFacturaModal({
 
   // Quick Product Search state
   const [searchQuery, setSearchQuery] = useState('');
-  const [isSearching, setIsSearching] = useState(false);
 
   // Assistant / Item Builder state (Step to configure product before adding)
   const [activeBuilderProduct, setActiveBuilderProduct] = useState<{
@@ -197,7 +195,6 @@ export default function MobileCargaFacturaModal({
   };
 
   const fetchProveedores = async () => {
-    setLoadingProveedores(true);
     try {
       const res = await fetch(`${getApiBaseUrl()}/proveedores`);
       if (res.ok) {
@@ -209,8 +206,6 @@ export default function MobileCargaFacturaModal({
       }
     } catch (err) {
       console.error('Error fetching proveedores:', err);
-    } finally {
-      setLoadingProveedores(false);
     }
   };
 

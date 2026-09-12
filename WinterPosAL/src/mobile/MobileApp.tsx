@@ -133,7 +133,8 @@ export default function MobileApp({
   // Handle sale register with fallback
   const handleRegisterSaleFallback = async (saleData: any): Promise<Sale | undefined> => {
     if (onRegisterSale) {
-      return await onRegisterSale(saleData);
+      const res = await onRegisterSale(saleData);
+      return (res as Sale) || undefined;
     }
 
     // Direct fetch fallback

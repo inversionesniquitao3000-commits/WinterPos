@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { Lock, X, DollarSign, Banknote, CheckCircle2, AlertTriangle, AlertCircle, FileText } from 'lucide-react';
+import { useState } from 'react';
+import { Lock, X, CheckCircle2, AlertTriangle, AlertCircle } from 'lucide-react';
 import { getApiBaseUrl } from '../utils';
 
 interface MobileCierreCajaModalProps {

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Store, RefreshCw, Clock, User, DollarSign, Wallet, ArrowDownRight, ArrowUpRight, ArrowDownUp, Lock, CreditCard, RotateCcw } from 'lucide-react';
+import { Store, RefreshCw, Clock, User, Wallet, ArrowDownUp, Lock, CreditCard, RotateCcw } from 'lucide-react';
 import { getApiBaseUrl } from '../utils';
 import MobileMovimientoCajaModal from './MobileMovimientoCajaModal';
 import MobileCierreCajaModal from './MobileCierreCajaModal';

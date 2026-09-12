@@ -2494,9 +2494,6 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                     </tr>
                   ) : (
                     finalFilteredCierres.map(c => {
-                      const dineroEnCajaExpected = c.dineroEnCajaExpected ?? (c as any).expectedUsd ?? 0;
-                      const realUsd = c.realUsd ?? 0;
-                      const realVes = c.realVes ?? 0;
                       const isOpen = c.status === 'Abierta' || !c.fechaCierre;
                       const aperturaUsd = c.aperturaUsd ?? 0;
                       const aperturaVes = c.aperturaVes ?? 0;

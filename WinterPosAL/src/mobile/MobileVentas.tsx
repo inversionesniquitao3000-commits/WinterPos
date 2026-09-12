@@ -1,10 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { 
   Receipt, FileText, Search, X, RefreshCw, Clock, User, 
-  Calendar, CheckCircle2, AlertTriangle, ChevronRight, DollarSign,
-  Store, Filter, ShoppingBag, Eye, ArrowUpDown, ChevronDown, Lock, RotateCcw
+  Calendar, ChevronRight, Store, ChevronDown, Lock, RotateCcw
 } from 'lucide-react';
-import { getApiBaseUrl, formatImageUrl } from '../utils';
+import { getApiBaseUrl } from '../utils';
 import MobileCierreCajaModal from './MobileCierreCajaModal';
 import MobileDevolucionModal from './MobileDevolucionModal';
 
@@ -1104,7 +1103,7 @@ export default function MobileVentas() {
         onClose={() => setIsCierreModalOpen(false)}
         caja={activeCajaToClose}
         onSuccess={() => {
-          fetchSalesAndCierres();
+          fetchData();
         }}
       />
 
