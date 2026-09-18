@@ -81,6 +81,7 @@ try {
     password: String(process.env.DB_PASSWORD || 'postgres'),
     host: process.env.DB_HOST || 'localhost',
     port: parseInt(process.env.DB_PORT || '5432'),
+    database: process.env.DB_DATABASE || 'Winter',
     max: 25,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
@@ -3547,7 +3548,7 @@ export async function getCierres() {
   if (usePostgres) {
     try {
       const res = await pool.query(`
-        SELECT c.id, c.fecha_apertura, c.fecha_cierre, c.monto_apertura_usd, c.monto_apertura_ves,
+        SELECT c.id, c.usuario_id, c.fecha_apertura, c.fecha_cierre, c.monto_apertura_usd, c.monto_apertura_ves,
                c.monto_cierre_real_usd, c.monto_cierre_real_ves, c.monto_cierre_esperado_usd, c.monto_cierre_esperado_ves,
                c.venta_total_usd, c.utilidad_usd, c.detalles_json,
                c.vuelto_entregado_usd, c.vuelto_entregado_ves,
