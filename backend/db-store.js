@@ -81,16 +81,13 @@ try {
     password: String(process.env.DB_PASSWORD || 'postgres'),
     host: process.env.DB_HOST || 'localhost',
     port: parseInt(process.env.DB_PORT || '5432'),
-    database: process.env.DB_DATABASE || 'Winter',
-    max: 30,
+    max: 25,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 5000
+    connectionTimeoutMillis: 10000,
+    statement_timeout: 30000
   });
 
-  // Try to connect to test if Postgres is accessible with configured user/pass
-  pool.on('connect', (client) => {
-    client.query(`SET TIME ZONE '${sysTimeZone}'`).catch(() => { });
-  });
+  process.env.PGTZ = sysTimeZone;
 
   const client = await pool.connect();
   await client.query(`SET TIME ZONE '${sysTimeZone}'`).catch(() => { });
@@ -3779,11 +3776,44 @@ export async function getCierres() {
         const ventaTotalUsdVal = isOpenShift ? (live.ventaTotalUsd ?? 0) : (r.venta_total_usd ? parseFloat(r.venta_total_usd) : (parsedDetails.ventaTotalUsd ?? 0));
         const utilidadUsdVal = isOpenShift ? (live.utilidadUsd ?? 0) : (r.utilidad_usd ? parseFloat(r.utilidad_usd) : (parsedDetails.utilidadUsd ?? 0));
 
-        const expectedUsdVal = isOpenShift ? (live.expectedUsd ?? aperturaUsdVal) : (r.monto_cierre_esperado_usd ? parseFloat(r.monto_cierre_esperado_usd) : 0);
-        const expectedVesVal = isOpenShift ? (live.expectedVes ?? aperturaVesVal) : (r.monto_cierre_esperado_ves ? parseFloat(r.monto_cierre_esperado_ves) : 0);
+        const calcClosedExpectedUsd = Math.max(0, aperturaUsdVal + finalVentasEfectivoUsd + finalAbonosUsd + finalEntradasUsd - finalSalidasUsd - finalDevUsd - finalVueltosUsd);
+        const calcClosedExpectedVes = Math.max(0, aperturaVesVal + finalVentasEfectivoVes + finalAbonosVes + finalEntradasVes - finalSalidasVes - finalDevVes - finalVueltosVes);
 
-        const realUsdVal = isOpenShift ? expectedUsdVal : (r.monto_cierre_real_usd ? parseFloat(r.monto_cierre_real_usd) : 0);
-        const realVesVal = isOpenShift ? expectedVesVal : (r.monto_cierre_real_ves ? parseFloat(r.monto_cierre_real_ves) : 0);
+        const expectedUsdVal = isOpenShift 
+          ? (live.expectedUsd ?? aperturaUsdVal) 
+          : (r.monto_cierre_esperado_usd && parseFloat(r.monto_cierre_esperado_usd) > 0 
+              ? parseFloat(r.monto_cierre_esperado_usd) 
+              : (parsedDetails.dineroEnCajaExpected && parsedDetails.dineroEnCajaExpected > 0 
+                  ? parsedDetails.dineroEnCajaExpected 
+                  : calcClosedExpectedUsd));
+
+        const expectedVesVal = isOpenShift 
+          ? (live.expectedVes ?? aperturaVesVal) 
+          : (r.monto_cierre_esperado_ves && parseFloat(r.monto_cierre_esperado_ves) > 0 
+              ? parseFloat(r.monto_cierre_esperado_ves) 
+              : (parsedDetails.expectedVes && parsedDetails.expectedVes > 0 
+                  ? parsedDetails.expectedVes 
+                  : calcClosedExpectedVes));
+
+        const realUsdVal = isOpenShift 
+          ? expectedUsdVal 
+          : (r.monto_cierre_real_usd && parseFloat(r.monto_cierre_real_usd) > 0 
+              ? parseFloat(r.monto_cierre_real_usd) 
+              : (parsedDetails.realUsd && parsedDetails.realUsd > 0 
+                  ? parsedDetails.realUsd 
+                  : (r.monto_cierre_real_usd !== null && r.monto_cierre_real_usd !== undefined && r.monto_cierre_esperado_usd && parseFloat(r.monto_cierre_esperado_usd) > 0 
+                      ? parseFloat(r.monto_cierre_real_usd) 
+                      : expectedUsdVal)));
+
+        const realVesVal = isOpenShift 
+          ? expectedVesVal 
+          : (r.monto_cierre_real_ves && parseFloat(r.monto_cierre_real_ves) > 0 
+              ? parseFloat(r.monto_cierre_real_ves) 
+              : (parsedDetails.realVes && parsedDetails.realVes > 0 
+                  ? parsedDetails.realVes 
+                  : (r.monto_cierre_real_ves !== null && r.monto_cierre_real_ves !== undefined && r.monto_cierre_esperado_ves && parseFloat(r.monto_cierre_esperado_ves) > 0 
+                      ? parseFloat(r.monto_cierre_real_ves) 
+                      : expectedVesVal)));
 
         return {
           ...parsedDetails,
@@ -3808,6 +3838,19 @@ export async function getCierres() {
           vueltosEntregadosVes: finalVueltosVes,
           ventasEfectivoUsd: finalVentasEfectivoUsd,
           ventasEfectivoVes: finalVentasEfectivoVes,
+          pagosEfectivoUsd: parsedDetails.pagosEfectivoUsd ?? (live.pagosEfectivoUsd ?? finalVentasEfectivoUsd),
+          pagosEfectivoBsVes: parsedDetails.pagosEfectivoBsVes ?? (live.pagosEfectivoBsVes ?? finalVentasEfectivoVes),
+          pagosPuntoVes: parsedDetails.pagosPuntoVes ?? (live.pagosPuntoVes ?? 0),
+          pagosPagoMovilVes: parsedDetails.pagosPagoMovilVes ?? (live.pagosPagoMovilVes ?? 0),
+          pagosBiopagoVes: parsedDetails.pagosBiopagoVes ?? (live.pagosBiopagoVes ?? 0),
+          pagosTransferenciaVes: parsedDetails.pagosTransferenciaVes ?? (live.pagosTransferenciaVes ?? 0),
+          pagosTarjetaUsd: parsedDetails.pagosTarjetaUsd ?? (live.pagosTarjetaUsd ?? 0),
+          pagosZelleUsd: parsedDetails.pagosZelleUsd ?? (live.pagosZelleUsd ?? 0),
+          pagosBinanceUsd: parsedDetails.pagosBinanceUsd ?? (live.pagosBinanceUsd ?? 0),
+          pagosPayPalUsd: parsedDetails.pagosPayPalUsd ?? (live.pagosPayPalUsd ?? 0),
+          pagosCreditoUsd: parsedDetails.pagosCreditoUsd ?? (live.pagosCreditoUsd ?? 0),
+          ventaBrutaUsd: parsedDetails.ventaBrutaUsd ?? (ventaTotalUsdVal + (parsedDetails.descuentosUsd || 0)),
+          descuentosUsd: parsedDetails.descuentosUsd ?? 0,
           abonoClientesUsd: finalAbonosUsd,
           abonoClientesVes: finalAbonosVes,
           entradaEfectivoUsd: finalEntradasUsd,

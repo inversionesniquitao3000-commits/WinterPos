@@ -2941,17 +2941,41 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
           livePagosEfectivoUsd = liveVentasTotalesUsd;
         }
 
-        const ventasEfectivoUsd = (isOpen && livePagosEfectivoUsd > 0) ? livePagosEfectivoUsd : (selectedCierre.ventasEfectivoUsd ?? 0);
-        const pagosEfectivoUsd = ventasEfectivoUsd;
-        const pagosEfectivoBsVes = (isOpen && livePagosEfectivoBsVes > 0) ? livePagosEfectivoBsVes : ((selectedCierre as any).pagosEfectivoBsVes ?? selectedCierre.ventasEfectivoVes ?? 0);
-        const pagosPagoMovilVes = (isOpen && livePagosPagoMovilVes > 0) ? livePagosPagoMovilVes : ((selectedCierre as any).pagosPagoMovilVes ?? 0);
-        const pagosBiopagoVes = (isOpen && livePagosBiopagoVes > 0) ? livePagosBiopagoVes : ((selectedCierre as any).pagosBiopagoVes ?? 0);
-        const pagosPuntoVes = (isOpen && livePagosPuntoVes > 0) ? livePagosPuntoVes : ((selectedCierre as any).pagosPuntoVes ?? 0);
-        const pagosTransferenciaVes = (isOpen && livePagosTransferenciaVes > 0) ? livePagosTransferenciaVes : ((selectedCierre as any).pagosTransferenciaVes ?? 0);
-        const pagosTarjetaUsd = (isOpen && livePagosTarjetaUsd > 0) ? livePagosTarjetaUsd : (selectedCierre.pagosTarjetaUsd ?? 0);
-        const pagosBinanceUsd = (isOpen && livePagosBinanceUsd > 0) ? livePagosBinanceUsd : (selectedCierre.pagosBinanceUsd ?? 0);
-        const pagosPayPalUsd = (isOpen && livePagosPayPalUsd > 0) ? livePagosPayPalUsd : (selectedCierre.pagosPayPalUsd ?? 0);
-        const pagosCreditoUsd = (isOpen && livePagosCreditoUsd > 0) ? livePagosCreditoUsd : (selectedCierre.pagosCreditoUsd ?? 0);
+        const ventasEfectivoUsd = (selectedCierre.ventasEfectivoUsd && selectedCierre.ventasEfectivoUsd > 0)
+          ? selectedCierre.ventasEfectivoUsd
+          : (livePagosEfectivoUsd > 0 ? livePagosEfectivoUsd : 0);
+        const pagosEfectivoUsd = (selectedCierre.pagosEfectivoUsd && selectedCierre.pagosEfectivoUsd > 0)
+          ? selectedCierre.pagosEfectivoUsd
+          : ventasEfectivoUsd;
+        const pagosEfectivoBsVes = ((selectedCierre as any).pagosEfectivoBsVes && (selectedCierre as any).pagosEfectivoBsVes > 0)
+          ? (selectedCierre as any).pagosEfectivoBsVes
+          : ((selectedCierre.ventasEfectivoVes && selectedCierre.ventasEfectivoVes > 0)
+              ? selectedCierre.ventasEfectivoVes
+              : (livePagosEfectivoBsVes > 0 ? livePagosEfectivoBsVes : 0));
+        const pagosPagoMovilVes = ((selectedCierre as any).pagosPagoMovilVes && (selectedCierre as any).pagosPagoMovilVes > 0)
+          ? (selectedCierre as any).pagosPagoMovilVes
+          : (livePagosPagoMovilVes > 0 ? livePagosPagoMovilVes : 0);
+        const pagosBiopagoVes = ((selectedCierre as any).pagosBiopagoVes && (selectedCierre as any).pagosBiopagoVes > 0)
+          ? (selectedCierre as any).pagosBiopagoVes
+          : (livePagosBiopagoVes > 0 ? livePagosBiopagoVes : 0);
+        const pagosPuntoVes = ((selectedCierre as any).pagosPuntoVes && (selectedCierre as any).pagosPuntoVes > 0)
+          ? (selectedCierre as any).pagosPuntoVes
+          : (livePagosPuntoVes > 0 ? livePagosPuntoVes : 0);
+        const pagosTransferenciaVes = ((selectedCierre as any).pagosTransferenciaVes && (selectedCierre as any).pagosTransferenciaVes > 0)
+          ? (selectedCierre as any).pagosTransferenciaVes
+          : (livePagosTransferenciaVes > 0 ? livePagosTransferenciaVes : 0);
+        const pagosTarjetaUsd = (selectedCierre.pagosTarjetaUsd && selectedCierre.pagosTarjetaUsd > 0)
+          ? selectedCierre.pagosTarjetaUsd
+          : (livePagosTarjetaUsd > 0 ? livePagosTarjetaUsd : 0);
+        const pagosBinanceUsd = (selectedCierre.pagosBinanceUsd && selectedCierre.pagosBinanceUsd > 0)
+          ? selectedCierre.pagosBinanceUsd
+          : (livePagosBinanceUsd > 0 ? livePagosBinanceUsd : 0);
+        const pagosPayPalUsd = (selectedCierre.pagosPayPalUsd && selectedCierre.pagosPayPalUsd > 0)
+          ? selectedCierre.pagosPayPalUsd
+          : (livePagosPayPalUsd > 0 ? livePagosPayPalUsd : 0);
+        const pagosCreditoUsd = (selectedCierre.pagosCreditoUsd && selectedCierre.pagosCreditoUsd > 0)
+          ? selectedCierre.pagosCreditoUsd
+          : (livePagosCreditoUsd > 0 ? livePagosCreditoUsd : 0);
 
         const abonoClientesUsd = selectedCierre.abonoClientesUsd ?? (selectedCierre as any).abonosUsd ?? 0;
         const abonoClientesVes = selectedCierre.abonoClientesVes ?? (selectedCierre as any).abonosVes ?? 0;
@@ -2972,17 +2996,36 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         const devolucionVentasUsd = selectedCierre.devolucionVentasUsd ?? 0;
         const devolucionVentasVes = selectedCierre.devolucionVentasVes ?? 0;
 
+        const calcExpectedUsd = Math.max(0, aperturaUsd + ventasEfectivoUsd + abonosEfectivoUsd + entradaEfectivoUsd - salidaEfectivoUsd - devolucionEfectivoUsd);
+        const calcExpectedVes = Math.max(0, aperturaVes + pagosEfectivoBsVes + abonoClientesVes + entradaEfectivoVes - salidaEfectivoVes - devolucionEfectivoVes);
+
         const dineroEnCajaExpected = isOpen
-          ? Math.max(0, aperturaUsd + ventasEfectivoUsd + abonosEfectivoUsd + entradaEfectivoUsd - salidaEfectivoUsd - devolucionEfectivoUsd)
-          : (selectedCierre.dineroEnCajaExpected ?? (selectedCierre as any).expectedUsd ?? 0);
+          ? calcExpectedUsd
+          : ((selectedCierre.dineroEnCajaExpected && selectedCierre.dineroEnCajaExpected > 0)
+              ? selectedCierre.dineroEnCajaExpected
+              : (((selectedCierre as any).expectedUsd && (selectedCierre as any).expectedUsd > 0)
+                  ? (selectedCierre as any).expectedUsd
+                  : calcExpectedUsd));
 
         let expectedVes = isOpen
-          ? Math.max(0, aperturaVes + pagosEfectivoBsVes + abonoClientesVes + entradaEfectivoVes - salidaEfectivoVes - devolucionEfectivoVes)
-          : Math.max(0, selectedCierre.expectedVes ?? (aperturaVes + pagosEfectivoBsVes + abonoClientesVes + entradaEfectivoVes - salidaEfectivoVes - devolucionEfectivoVes));
+          ? calcExpectedVes
+          : ((selectedCierre.expectedVes && selectedCierre.expectedVes > 0)
+              ? selectedCierre.expectedVes
+              : (((selectedCierre as any).monto_cierre_esperado_ves && (selectedCierre as any).monto_cierre_esperado_ves > 0)
+                  ? (selectedCierre as any).monto_cierre_esperado_ves
+                  : calcExpectedVes));
 
-        const realUsd = isOpen ? dineroEnCajaExpected : (selectedCierre.realUsd ?? 0);
-        const realVes = isOpen ? expectedVes : Math.max(0, selectedCierre.realVes ?? 0);
-        const diffUsd = isOpen ? 0 : (realUsd - dineroEnCajaExpected);
+        const realUsd = isOpen 
+          ? null 
+          : ((selectedCierre.realUsd === 0 && (!selectedCierre.dineroEnCajaExpected || selectedCierre.dineroEnCajaExpected === 0))
+              ? dineroEnCajaExpected
+              : (selectedCierre.realUsd ?? 0));
+        const realVes = isOpen 
+          ? null 
+          : ((selectedCierre.realVes === 0 && (!selectedCierre.expectedVes || selectedCierre.expectedVes === 0))
+              ? expectedVes
+              : (selectedCierre.realVes ?? 0));
+        const diffUsd = isOpen ? 0 : ((realUsd ?? 0) - dineroEnCajaExpected);
 
         const rawCosto = selectedCierre.costoTotalUsd;
         let costoTotalUsd = typeof rawCosto === 'number' && rawCosto > 0 ? rawCosto : 0;
@@ -3462,7 +3505,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                               En Curso (Arqueo al cierre)
                             </span>
                           ) : (
-                            <span className="text-emerald-700 font-bold">${realUsd.toFixed(2)}</span>
+                            <span className="text-emerald-700 font-bold">${(realUsd ?? 0).toFixed(2)}</span>
                           )}
                         </div>
                         <div className="flex justify-between border-t border-dashed border-slate-300 pt-1.5 font-bold text-slate-800">
@@ -3506,7 +3549,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                   })()}
 
                   {(() => {
-                    const diffVes = realVes - expectedVes;
+                    const diffVes = isOpen ? 0 : ((realVes ?? 0) - expectedVes);
                     const boxBgClass = diffVes < -0.01 
                       ? 'bg-rose-50 border-rose-200 ring-2 ring-rose-500/10' 
                       : diffVes > 0.01 
@@ -3523,7 +3566,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                               En Curso (Arqueo al cierre)
                             </span>
                           ) : (
-                            <span className="text-purple-755 font-bold">Bs {realVes.toFixed(2)}</span>
+                            <span className="text-purple-755 font-bold">Bs {(realVes ?? 0).toFixed(2)}</span>
                           )}
                         </div>
                         <div className="flex justify-between border-t border-dashed border-slate-300 pt-1.5 font-bold text-slate-800">
@@ -3561,7 +3604,30 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                     onClick={() => {
                       if (!selectedCierre) return;
                       const shiftSales = getShiftSalesForCierre(selectedCierre);
-                      printCierreTicketReport(selectedCierre, shiftSales, companyConfig, currentUser);
+                      const enriched = {
+                        ...selectedCierre,
+                        ventasEfectivoUsd,
+                        pagosEfectivoUsd,
+                        pagosEfectivoBsVes,
+                        pagosPuntoVes,
+                        pagosPagoMovilVes,
+                        pagosBiopagoVes,
+                        pagosTransferenciaVes,
+                        pagosTarjetaUsd,
+                        pagosBinanceUsd,
+                        pagosPayPalUsd,
+                        pagosCreditoUsd,
+                        ventasTotalesUsd,
+                        ventaTotalUsd,
+                        ventaBrutaUsd,
+                        descuentosUsd,
+                        dineroEnCajaExpected,
+                        expectedUsd: dineroEnCajaExpected,
+                        expectedVes,
+                        realUsd,
+                        realVes,
+                      };
+                      printCierreTicketReport(enriched, shiftSales, companyConfig, currentUser, hideZeroLines);
                     }}
                     className="w-full sm:w-auto bg-slate-900 hover:bg-black active:scale-[0.98] text-white font-black py-2.5 px-4 rounded-xl font-sans text-xs uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
                     title="Imprimir comprobante físico de cierre en ticketera térmica (58mm/80mm) o impresora normal"

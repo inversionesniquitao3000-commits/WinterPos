@@ -406,7 +406,8 @@ export function printCierreTicketReport(
   cierreData: any,
   shiftSales: any[] = [],
   companyConfig: any,
-  currentUser: any
+  currentUser: any,
+  hideZeroLines: boolean = false
 ) {
   if (!cierreData) return;
   const printWindow = window.open('', '_blank', 'width=450,height=700');
@@ -438,18 +439,158 @@ export function printCierreTicketReport(
 
   const terminal = cierreData.terminal || localStorage.getItem('pos_terminal_name') || 'CAJA_01';
   const cajero = (cierreData.usuario || currentUser?.nombre || currentUser?.usuario || 'OPERADOR').toUpperCase();
-  const fechaCierre = cierreData.fechaCierre || cierreData.fecha || new Date().toLocaleString('es-VE');
+  const isOpenShift = cierreData.status === 'Abierta' || cierreData.estatus === 'Abierta' || !cierreData.fechaCierre;
+  const fechaOperacion = isOpenShift ? new Date().toLocaleString('es-VE') : (cierreData.fechaCierre || cierreData.fecha || new Date().toLocaleString('es-VE'));
   const fechaApertura = cierreData.fechaApertura || localStorage.getItem('pos_apertura_fecha') || '';
 
-  const realUsd = typeof cierreData.realUsd === 'number' ? cierreData.realUsd : (parseFloat(cierreData.realUsd) || 0);
-  const realVes = typeof cierreData.realVes === 'number' ? cierreData.realVes : (parseFloat(cierreData.realVes) || 0);
-  const expectedUsd = cierreData.dineroEnCajaExpected ?? 0;
-  const expectedVes = cierreData.expectedVes ?? 0;
-  const diffUsd = realUsd - expectedUsd;
-  const diffVes = realVes - expectedVes;
-
+  const hideZeros = hideZeroLines || !!cierreData?.hideZeroLines;
   // Filtrar facturas del turno
   const validSales = (shiftSales || []).filter((s: any) => s && s.factura_nro);
+
+  // Calcular desglose de pagos y ventas agregadas directamente desde las facturas del turno
+  let shiftPagosEfectivoUsd = 0;
+  let shiftPagosEfectivoBsVes = 0;
+  let shiftPagosPuntoVes = 0;
+  let shiftPagosPagoMovilVes = 0;
+  let shiftPagosBiopagoVes = 0;
+  let shiftPagosTransferenciaVes = 0;
+  let shiftPagosTarjetaUsd = 0;
+  let shiftPagosZelleUsd = 0;
+  let shiftPagosBinanceUsd = 0;
+  let shiftPagosPayPalUsd = 0;
+  let shiftPagosCreditoUsd = 0;
+  let shiftDescuentosUsd = 0;
+  let shiftVentasTotalesUsd = 0;
+
+  validSales.forEach((s: any) => {
+    const isDev = (s.factura_nro || '').startsWith('DEV-');
+    const mult = isDev ? -1 : 1;
+    shiftVentasTotalesUsd += (s.totalUSD || 0) * mult;
+    if (!isDev) {
+      shiftDescuentosUsd += (s.descuento || 0);
+    }
+    if (!s.pagos || s.pagos.length === 0) {
+      shiftPagosEfectivoUsd += (s.totalUSD || 0) * mult;
+    } else {
+      s.pagos.forEach((p: any) => {
+        const m = (p.metodo || '').toLowerCase().trim();
+        const valUsd = parseFloat(p.montoUSD || p.monto || 0);
+        const valVes = parseFloat(p.montoVES || 0);
+        if (m === 'efectivo$' || m.includes('efectivo$') || m.includes('efectivousd') || m.includes('efectivo_usd') || m.includes('dolares') || (m.includes('efectivo') && !m.includes('bs'))) {
+          shiftPagosEfectivoUsd += valUsd * mult;
+        } else if (m === 'efectivobs' || m.includes('efectivobs') || m.includes('efectivo_ves') || m.includes('bolivares') || (m.includes('efectivo') && m.includes('bs'))) {
+          shiftPagosEfectivoBsVes += (valVes || (valUsd * (s.tasa_cambio || 1))) * mult;
+        } else if (m.includes('pagomovil')) {
+          shiftPagosPagoMovilVes += (valVes || (valUsd * (s.tasa_cambio || 1))) * mult;
+        } else if (m.includes('punto') || m.includes('tarjetabs') || m.includes('tarjeta')) {
+          shiftPagosPuntoVes += (valVes || (valUsd * (s.tasa_cambio || 1))) * mult;
+        } else if (m.includes('biopago')) {
+          shiftPagosBiopagoVes += (valVes || (valUsd * (s.tasa_cambio || 1))) * mult;
+        } else if (m.includes('transferencia')) {
+          shiftPagosTransferenciaVes += (valVes || (valUsd * (s.tasa_cambio || 1))) * mult;
+        } else if (m.includes('zelle')) {
+          shiftPagosZelleUsd += valUsd * mult;
+        } else if (m.includes('binance')) {
+          shiftPagosBinanceUsd += valUsd * mult;
+        } else if (m.includes('paypal')) {
+          shiftPagosPayPalUsd += valUsd * mult;
+        } else if (m.includes('credito')) {
+          shiftPagosCreditoUsd += valUsd * mult;
+        }
+      });
+    }
+  });
+
+  const shiftNonCash = shiftPagosTarjetaUsd + shiftPagosZelleUsd + shiftPagosBinanceUsd + shiftPagosPayPalUsd + shiftPagosCreditoUsd + shiftPagosPagoMovilVes + shiftPagosPuntoVes + shiftPagosBiopagoVes + shiftPagosTransferenciaVes + shiftPagosEfectivoBsVes;
+  if (shiftPagosEfectivoUsd === 0 && shiftVentasTotalesUsd > 0 && shiftNonCash === 0) {
+    shiftPagosEfectivoUsd = shiftVentasTotalesUsd;
+  }
+
+  // Consolidar valores dando prioridad a datos de cierre ya calculados, o con respaldo en las facturas
+  const pagosEfectivoUsd = (cierreData.pagosEfectivoUsd && cierreData.pagosEfectivoUsd > 0)
+    ? cierreData.pagosEfectivoUsd
+    : ((cierreData.ventasEfectivoUsd && cierreData.ventasEfectivoUsd > 0)
+        ? cierreData.ventasEfectivoUsd
+        : (shiftPagosEfectivoUsd > 0 ? shiftPagosEfectivoUsd : 0));
+
+  const pagosEfectivoBsVes = (cierreData.pagosEfectivoBsVes && cierreData.pagosEfectivoBsVes > 0)
+    ? cierreData.pagosEfectivoBsVes
+    : ((cierreData.ventasEfectivoVes && cierreData.ventasEfectivoVes > 0)
+        ? cierreData.ventasEfectivoVes
+        : (shiftPagosEfectivoBsVes > 0 ? shiftPagosEfectivoBsVes : 0));
+
+  const pagosPuntoVes = (cierreData.pagosPuntoVes && cierreData.pagosPuntoVes > 0)
+    ? cierreData.pagosPuntoVes
+    : (shiftPagosPuntoVes > 0 ? shiftPagosPuntoVes : 0);
+
+  const pagosPagoMovilVes = (cierreData.pagosPagoMovilVes && cierreData.pagosPagoMovilVes > 0)
+    ? cierreData.pagosPagoMovilVes
+    : (shiftPagosPagoMovilVes > 0 ? shiftPagosPagoMovilVes : 0);
+
+  const pagosBiopagoVes = (cierreData.pagosBiopagoVes && cierreData.pagosBiopagoVes > 0)
+    ? cierreData.pagosBiopagoVes
+    : (shiftPagosBiopagoVes > 0 ? shiftPagosBiopagoVes : 0);
+
+  const pagosTransferenciaVes = (cierreData.pagosTransferenciaVes && cierreData.pagosTransferenciaVes > 0)
+    ? cierreData.pagosTransferenciaVes
+    : (shiftPagosTransferenciaVes > 0 ? shiftPagosTransferenciaVes : 0);
+
+  const pagosTarjetaUsd = (cierreData.pagosTarjetaUsd && cierreData.pagosTarjetaUsd > 0)
+    ? cierreData.pagosTarjetaUsd
+    : (shiftPagosTarjetaUsd > 0 ? shiftPagosTarjetaUsd : 0);
+
+  const pagosZelleUsd = (cierreData.pagosZelleUsd && cierreData.pagosZelleUsd > 0)
+    ? cierreData.pagosZelleUsd
+    : (shiftPagosZelleUsd > 0 ? shiftPagosZelleUsd : 0);
+
+  const pagosBinanceUsd = (cierreData.pagosBinanceUsd && cierreData.pagosBinanceUsd > 0)
+    ? cierreData.pagosBinanceUsd
+    : (shiftPagosBinanceUsd > 0 ? shiftPagosBinanceUsd : 0);
+
+  const pagosPayPalUsd = (cierreData.pagosPayPalUsd && cierreData.pagosPayPalUsd > 0)
+    ? cierreData.pagosPayPalUsd
+    : (shiftPagosPayPalUsd > 0 ? shiftPagosPayPalUsd : 0);
+
+  const pagosCreditoUsd = (cierreData.pagosCreditoUsd && cierreData.pagosCreditoUsd > 0)
+    ? cierreData.pagosCreditoUsd
+    : (shiftPagosCreditoUsd > 0 ? shiftPagosCreditoUsd : 0);
+
+  const ventaTotalUsd = cierreData.ventaTotalUsd || cierreData.ventasTotalesUsd || shiftVentasTotalesUsd || 0;
+  const descuentosUsd = (cierreData.descuentosUsd && cierreData.descuentosUsd > 0) ? cierreData.descuentosUsd : shiftDescuentosUsd;
+  const ventaBrutaUsd = cierreData.ventaBrutaUsd || (ventaTotalUsd + descuentosUsd);
+
+  // Cálculos matemáticos de Movimientos de Efectivo y Gaveta Esperada
+  const aperturaUsd = cierreData.aperturaUsd || 0;
+  const aperturaVes = cierreData.aperturaVes || 0;
+  const entradaUsd = cierreData.entradaEfectivoUsd || 0;
+  const entradaVes = cierreData.entradaEfectivoVes || 0;
+  const salidaUsd = cierreData.salidaEfectivoUsd || 0;
+  const salidaVes = cierreData.salidaEfectivoVes || 0;
+  const vueltosUsd = cierreData.vueltosEntregadosUsd || cierreData.vueltosUsd || 0;
+  const vueltosVes = cierreData.vueltosEntregadosVes || cierreData.vueltosVes || 0;
+  const devUsd = cierreData.devolucionEfectivoUsd || 0;
+  const devVes = cierreData.devolucionEfectivoVes || 0;
+  const abonosUsd = cierreData.abonosEfectivoUsd || 0;
+  const abonosVes = cierreData.abonosEfectivoBsVes || 0;
+
+  const calcExpectedUsd = Math.max(0, aperturaUsd + pagosEfectivoUsd + abonosUsd + entradaUsd - salidaUsd - devUsd - vueltosUsd);
+  const calcExpectedVes = Math.max(0, aperturaVes + pagosEfectivoBsVes + abonosVes + entradaVes - salidaVes - devVes - vueltosVes);
+
+  const expectedUsd = (cierreData.dineroEnCajaExpected && cierreData.dineroEnCajaExpected > 0)
+    ? cierreData.dineroEnCajaExpected
+    : ((cierreData.expectedUsd && cierreData.expectedUsd > 0) ? cierreData.expectedUsd : calcExpectedUsd);
+
+  const expectedVes = (cierreData.expectedVes && cierreData.expectedVes > 0)
+    ? cierreData.expectedVes
+    : ((cierreData.monto_cierre_esperado_ves && cierreData.monto_cierre_esperado_ves > 0) ? cierreData.monto_cierre_esperado_ves : calcExpectedVes);
+
+  const rawRealUsd = typeof cierreData.realUsd === 'number' ? cierreData.realUsd : (parseFloat(cierreData.realUsd) || 0);
+  const rawRealVes = typeof cierreData.realVes === 'number' ? cierreData.realVes : (parseFloat(cierreData.realVes) || 0);
+
+  const realUsd = rawRealUsd;
+  const realVes = rawRealVes;
+  const diffUsd = realUsd - expectedUsd;
+  const diffVes = realVes - expectedVes;
 
   const salesTableHtml = validSales.length === 0 
     ? '<tr><td colspan="4" style="text-align:center; padding: 4px; color: #666;">Sin transacciones en este turno</td></tr>'
@@ -539,66 +680,96 @@ export function printCierreTicketReport(
 
         <div class="divider-double"></div>
         <div class="text-center bold" style="font-size: 11px; text-transform: uppercase;">
-          COMPROBANTE DE CIERRE DE CAJA
+          ${isOpenShift ? 'COMPROBANTE DE ARQUEO EN CURSO' : 'COMPROBANTE DE CIERRE DE CAJA'}
         </div>
-        <div class="text-center" style="font-size: 8.5px;">(CORTE OFICIAL DE TURNO / POS)</div>
+        <div class="text-center" style="font-size: 8.5px;">
+          ${isOpenShift ? '(TURNO EN VIVO / CAJA ABIERTA)' : '(CORTE OFICIAL DE TURNO / POS)'}
+        </div>
         <div class="divider"></div>
 
         <div class="row-flex"><span>TERMINAL / CAJA:</span><span class="bold">${terminal}</span></div>
         <div class="row-flex"><span>CAJERO / OPERADOR:</span><span class="bold">${cajero}</span></div>
-        <div class="row-flex"><span>FECHA CIERRE:</span><span class="bold">${fechaCierre}</span></div>
         ${fechaApertura ? `<div class="row-flex"><span>FECHA APERTURA:</span><span>${fechaApertura}</span></div>` : ''}
+        <div class="row-flex"><span>${isOpenShift ? 'FECHA CONSULTA:' : 'FECHA CIERRE:'}</span><span class="bold">${fechaOperacion}</span></div>
 
         <div class="divider"></div>
         <div class="bold">FONDO DE APERTURA:</div>
         <div class="row-flex"><span>Apertura USD:</span><span class="bold">$${(cierreData.aperturaUsd || 0).toFixed(2)}</span></div>
-        <div class="row-flex"><span>Apertura VES:</span><span class="bold">Bs ${formatBs(cierreData.aperturaVes || 0)}</span></div>
+        <div class="row-flex"><span>Apertura VES:</span><span class="bold">${formatBs(cierreData.aperturaVes || 0)}</span></div>
 
         <div class="divider"></div>
         <div class="bold">RESUMEN DE VENTAS:</div>
         <div class="row-flex"><span>Total Facturas:</span><span class="bold">${validSales.length}</span></div>
-        <div class="row-flex"><span>Venta Bruta ($):</span><span>$${(cierreData.ventaBrutaUsd || 0).toFixed(2)}</span></div>
-        ${(cierreData.descuentosUsd || 0) > 0 ? `<div class="row-flex"><span>Descuentos ($):</span><span>-$${(cierreData.descuentosUsd || 0).toFixed(2)}</span></div>` : ''}
+        <div class="row-flex"><span>Venta Bruta ($):</span><span>$${ventaBrutaUsd.toFixed(2)}</span></div>
+        ${descuentosUsd > 0 ? `<div class="row-flex"><span>Descuentos ($):</span><span>-$${descuentosUsd.toFixed(2)}</span></div>` : ''}
         ${(cierreData.devolucionVentasUsd || 0) > 0 ? `<div class="row-flex"><span>Devoluciones ($):</span><span>-$${(cierreData.devolucionVentasUsd || 0).toFixed(2)}</span></div>` : ''}
-        ${(cierreData.devolucionVentasVes || 0) > 0 ? `<div class="row-flex"><span>Devoluciones (Bs):</span><span>-Bs ${formatBs(cierreData.devolucionVentasVes || 0)}</span></div>` : ''}
+        ${(cierreData.devolucionVentasVes || 0) > 0 ? `<div class="row-flex"><span>Devoluciones (Bs):</span><span>-${formatBs(cierreData.devolucionVentasVes || 0)}</span></div>` : ''}
         <div class="row-flex bold" style="font-size: 11px; margin-top: 2px;">
           <span>VENTA NETA USD:</span>
-          <span>$${(cierreData.ventaTotalUsd || 0).toFixed(2)}</span>
+          <span>$${ventaTotalUsd.toFixed(2)}</span>
         </div>
 
         <div class="divider"></div>
         <div class="bold">DESGLOSE POR FORMA DE PAGO:</div>
-        <div class="row-flex"><span>Efectivo USD:</span><span>$${(cierreData.pagosEfectivoUsd || 0).toFixed(2)}</span></div>
-        <div class="row-flex"><span>Efectivo Bs:</span><span>Bs ${formatBs(cierreData.pagosEfectivoBsVes || 0)}</span></div>
-        <div class="row-flex"><span>Punto / Débito Bs:</span><span>Bs ${formatBs(cierreData.pagosPuntoVes || 0)}</span></div>
-        <div class="row-flex"><span>Pago Móvil Bs:</span><span>Bs ${formatBs(cierreData.pagosPagoMovilVes || 0)}</span></div>
-        <div class="row-flex"><span>Biopago Bs:</span><span>Bs ${formatBs(cierreData.pagosBiopagoVes || 0)}</span></div>
-        ${(cierreData.pagosTarjetaUsd || 0) > 0 ? `<div class="row-flex"><span>Tarjeta USD:</span><span>$${(cierreData.pagosTarjetaUsd || 0).toFixed(2)}</span></div>` : ''}
-        ${(cierreData.pagosCreditoUsd || 0) > 0 ? `<div class="row-flex"><span>A Crédito:</span><span>$${(cierreData.pagosCreditoUsd || 0).toFixed(2)}</span></div>` : ''}
+        ${(!hideZeros || pagosEfectivoUsd > 0) ? `<div class="row-flex"><span>Efectivo USD:</span><span>$${pagosEfectivoUsd.toFixed(2)}</span></div>` : ''}
+        ${(!hideZeros || pagosEfectivoBsVes > 0) ? `<div class="row-flex"><span>Efectivo Bs:</span><span>${formatBs(pagosEfectivoBsVes)}</span></div>` : ''}
+        ${(!hideZeros || pagosPuntoVes > 0) ? `<div class="row-flex"><span>Punto / Débito Bs:</span><span>${formatBs(pagosPuntoVes)}</span></div>` : ''}
+        ${(!hideZeros || pagosPagoMovilVes > 0) ? `<div class="row-flex"><span>Pago Móvil Bs:</span><span>${formatBs(pagosPagoMovilVes)}</span></div>` : ''}
+        ${(!hideZeros || pagosBiopagoVes > 0) ? `<div class="row-flex"><span>Biopago Bs:</span><span>${formatBs(pagosBiopagoVes)}</span></div>` : ''}
+        ${pagosTransferenciaVes > 0 ? `<div class="row-flex"><span>Transferencia Bs:</span><span>${formatBs(pagosTransferenciaVes)}</span></div>` : ''}
+        ${pagosTarjetaUsd > 0 ? `<div class="row-flex"><span>Tarjeta USD:</span><span>$${pagosTarjetaUsd.toFixed(2)}</span></div>` : ''}
+        ${pagosZelleUsd > 0 ? `<div class="row-flex"><span>Zelle USD:</span><span>$${pagosZelleUsd.toFixed(2)}</span></div>` : ''}
+        ${pagosBinanceUsd > 0 ? `<div class="row-flex"><span>Binance USD:</span><span>$${pagosBinanceUsd.toFixed(2)}</span></div>` : ''}
+        ${pagosPayPalUsd > 0 ? `<div class="row-flex"><span>PayPal USD:</span><span>$${pagosPayPalUsd.toFixed(2)}</span></div>` : ''}
+        ${pagosCreditoUsd > 0 ? `<div class="row-flex"><span>A Crédito:</span><span>$${pagosCreditoUsd.toFixed(2)}</span></div>` : ''}
 
         <div class="divider"></div>
         <div class="bold">MOVIMIENTOS DE EFECTIVO:</div>
-        ${(cierreData.entradaEfectivoUsd || 0) > 0 ? `<div class="row-flex"><span>+ Entradas ($):</span><span>+$${(cierreData.entradaEfectivoUsd || 0).toFixed(2)}</span></div>` : ''}
-        ${(cierreData.entradaEfectivoVes || 0) > 0 ? `<div class="row-flex"><span>+ Entradas (Bs):</span><span>+Bs ${formatBs(cierreData.entradaEfectivoVes || 0)}</span></div>` : ''}
-        ${(cierreData.salidaEfectivoUsd || 0) > 0 ? `<div class="row-flex"><span>- Salidas ($):</span><span>-$${(cierreData.salidaEfectivoUsd || 0).toFixed(2)}</span></div>` : ''}
-        ${(cierreData.salidaEfectivoVes || 0) > 0 ? `<div class="row-flex"><span>- Salidas (Bs):</span><span>-Bs ${formatBs(cierreData.salidaEfectivoVes || 0)}</span></div>` : ''}
-        ${(cierreData.vueltosEntregadosUsd || 0) > 0 ? `<div class="row-flex"><span>- Vueltos ($):</span><span>-$${(cierreData.vueltosEntregadosUsd || 0).toFixed(2)}</span></div>` : ''}
-        ${(cierreData.vueltosEntregadosVes || 0) > 0 ? `<div class="row-flex"><span>- Vueltos (Bs):</span><span>-Bs ${formatBs(cierreData.vueltosEntregadosVes || 0)}</span></div>` : ''}
+        <div class="row-flex"><span>Fondo Apertura ($):</span><span>$${aperturaUsd.toFixed(2)}</span></div>
+        ${(!hideZeros || pagosEfectivoUsd > 0) ? `<div class="row-flex"><span>(+) Ventas Efectivo ($):</span><span>+$${pagosEfectivoUsd.toFixed(2)}</span></div>` : ''}
+        ${entradaUsd > 0 ? `<div class="row-flex"><span>(+) Entradas ($):</span><span>+$${entradaUsd.toFixed(2)}</span></div>` : ''}
+        ${abonosUsd > 0 ? `<div class="row-flex"><span>(+) Abonos ($):</span><span>+$${abonosUsd.toFixed(2)}</span></div>` : ''}
+        ${salidaUsd > 0 ? `<div class="row-flex"><span>(-) Salidas ($):</span><span>-$${salidaUsd.toFixed(2)}</span></div>` : ''}
+        ${vueltosUsd > 0 ? `<div class="row-flex"><span>(-) Vueltos ($):</span><span>-$${vueltosUsd.toFixed(2)}</span></div>` : ''}
+        ${devUsd > 0 ? `<div class="row-flex"><span>(-) Devoluciones ($):</span><span>-$${devUsd.toFixed(2)}</span></div>` : ''}
+        <div class="row-flex bold" style="border-top: 1px dashed #000; margin-top: 2px; padding-top: 1px;">
+          <span>= Gaveta Esperada ($):</span>
+          <span>$${expectedUsd.toFixed(2)}</span>
+        </div>
+
+        <div style="margin-top: 4px;"></div>
+        <div class="row-flex"><span>Fondo Apertura (Bs):</span><span>${formatBs(aperturaVes)}</span></div>
+        ${(!hideZeros || pagosEfectivoBsVes > 0) ? `<div class="row-flex"><span>(+) Ventas Efectivo (Bs):</span><span>+${formatBs(pagosEfectivoBsVes)}</span></div>` : ''}
+        ${entradaVes > 0 ? `<div class="row-flex"><span>(+) Entradas (Bs):</span><span>+${formatBs(entradaVes)}</span></div>` : ''}
+        ${abonosVes > 0 ? `<div class="row-flex"><span>(+) Abonos (Bs):</span><span>+${formatBs(abonosVes)}</span></div>` : ''}
+        ${salidaVes > 0 ? `<div class="row-flex"><span>(-) Salidas (Bs):</span><span>-${formatBs(salidaVes)}</span></div>` : ''}
+        ${vueltosVes > 0 ? `<div class="row-flex"><span>(-) Vueltos (Bs):</span><span>-${formatBs(vueltosVes)}</span></div>` : ''}
+        ${devVes > 0 ? `<div class="row-flex"><span>(-) Devoluciones (Bs):</span><span>-${formatBs(devVes)}</span></div>` : ''}
+        <div class="row-flex bold" style="border-top: 1px dashed #000; margin-top: 2px; padding-top: 1px;">
+          <span>= Gaveta Esperada (Bs):</span>
+          <span>${formatBs(expectedVes)}</span>
+        </div>
 
         <div class="divider"></div>
         <div class="bold">ARQUEO FÍSICO Y AUDITORÍA:</div>
-        <div class="row-flex"><span>Gaveta Esperada ($):</span><span>$${expectedUsd.toFixed(2)}</span></div>
-        <div class="row-flex"><span>Físico Recibido ($):</span><span class="bold">$${realUsd.toFixed(2)}</span></div>
+        <div class="row-flex"><span>Gaveta Esperada ($):</span><span class="bold">$${expectedUsd.toFixed(2)}</span></div>
+        <div class="row-flex">
+          <span>Físico Recibido ($):</span>
+          <span class="bold">${isOpenShift ? 'EN CURSO (POR ARQUEAR)' : `$${realUsd.toFixed(2)}`}</span>
+        </div>
         <div class="row-flex bold">
           <span>Diferencia USD:</span>
-          <span>${diffUsd >= 0 ? '+' : ''}$${diffUsd.toFixed(2)} (${diffUsd === 0 ? 'CUADRADA' : diffUsd > 0 ? 'SOBRANTE' : 'FALTANTE'})</span>
+          <span>${isOpenShift ? 'PENDIENTE DE CIERRE' : `${diffUsd >= 0 ? '+' : ''}$${diffUsd.toFixed(2)} (${Math.abs(diffUsd) < 0.001 ? 'CUADRADA' : diffUsd > 0 ? 'SOBRANTE' : 'FALTANTE'})`}</span>
         </div>
 
-        <div class="row-flex" style="margin-top: 3px;"><span>Gaveta Esperada (Bs):</span><span>Bs ${formatBs(expectedVes)}</span></div>
-        <div class="row-flex"><span>Físico Recibido (Bs):</span><span class="bold">Bs ${formatBs(realVes)}</span></div>
+        <div class="row-flex" style="margin-top: 3px;"><span>Gaveta Esperada (Bs):</span><span class="bold">${formatBs(expectedVes)}</span></div>
+        <div class="row-flex">
+          <span>Físico Recibido (Bs):</span>
+          <span class="bold">${isOpenShift ? 'EN CURSO (POR ARQUEAR)' : formatBs(realVes)}</span>
+        </div>
         <div class="row-flex bold">
           <span>Diferencia Bs:</span>
-          <span>${diffVes >= 0 ? '+' : ''}Bs ${formatBs(diffVes)} (${diffVes === 0 ? 'CUADRADA' : diffVes > 0 ? 'SOBRANTE' : 'FALTANTE'})</span>
+          <span>${isOpenShift ? 'PENDIENTE DE CIERRE' : `${diffVes >= 0 ? '+' : ''}${formatBs(diffVes)} (${Math.abs(diffVes) < 0.01 ? 'CUADRADA' : diffVes > 0 ? 'SOBRANTE' : 'FALTANTE'})`}</span>
         </div>
 
         <div class="divider"></div>
@@ -640,7 +811,7 @@ export function printCierreTicketReport(
         </div>
 
         <div class="text-center" style="font-size: 7.5px; margin-top: 12px; color: #444;">
-          WINTERPOS CLOUD - CONTROL INMUTABLE DE CIERRE
+          ${isOpenShift ? 'WINTERPOS CLOUD - AUDITORÍA DE TURNO EN CURSO' : 'WINTERPOS CLOUD - CONTROL INMUTABLE DE CIERRE'}
         </div>
 
         <script>

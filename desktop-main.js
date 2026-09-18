@@ -35,7 +35,7 @@ if (isDebug) {
 function checkPortInUse(port, host = '127.0.0.1') {
   return new Promise((resolve) => {
     const socket = new net.Socket();
-    socket.setTimeout(400);
+    socket.setTimeout(1500);
     socket.on('connect', () => {
       socket.destroy();
       resolve(true);
@@ -157,8 +157,6 @@ async function start() {
   const targetUrl = 'http://localhost:5000?mode=desktop';
   const isAlreadyRunning = await checkPortInUse(5000);
 
-  let serverProcess = null;
-
   if (!isAlreadyRunning) {
     // Ensure .env exists before starting server
     const envPath = path.join(backendDir, '.env');
@@ -167,43 +165,24 @@ async function start() {
       try { fs.writeFileSync(envPath, defaultEnv, 'utf8'); } catch (_) {}
     }
 
-    serverProcess = spawn(process.execPath, ['server.js'], {
+    const serverProcess = spawn(process.execPath, ['server.js'], {
       cwd: backendDir,
-      stdio: isDebug ? 'inherit' : 'ignore',
-      windowsHide: !isDebug
+      stdio: 'ignore',
+      detached: true,
+      windowsHide: true
     });
+    serverProcess.unref();
 
-    serverProcess.on('close', (code) => {
-      if (isDebug) {
-        console.log(`\n[WinterPos] Servidor detenido con código ${code}`);
-      }
-      process.exit(code || 0);
-    });
-
-    serverProcess.on('error', (err) => {
-      console.error('[WinterPos Error en Servidor]', err);
-    });
-
-    process.on('SIGINT', () => {
-      if (serverProcess) serverProcess.kill();
-      process.exit();
-    });
-
-    process.on('SIGTERM', () => {
-      if (serverProcess) serverProcess.kill();
-      process.exit();
-    });
+    // Esperar a que el nuevo backend arranque
+    await waitForServerReady('http://localhost:5000');
   }
 
-  // Esperar a que el backend esté listo y abrir estrictamente 1 sola ventana
-  await waitForServerReady('http://localhost:5000');
+  // Abrir la ventana de la aplicación y cerrar este launcher de inmediato
   launchAppWindow(targetUrl);
 
-  if (isAlreadyRunning) {
-    setTimeout(() => {
-      process.exit(0);
-    }, 1000);
-  }
+  setTimeout(() => {
+    process.exit(0);
+  }, 1000);
 }
 
 start();

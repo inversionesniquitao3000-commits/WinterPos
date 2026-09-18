@@ -26,6 +26,11 @@ if not exist "%~dp0WinterPosAL\node_modules" (
     exit /b
 )
 
+REM --- Cerrar instancias huérfanas previas de Node para evitar saturación de RAM y BD ---
+echo Limpiando procesos previos de Node.js...
+taskkill /F /IM node.exe >nul 2>nul
+timeout /t 1 /nobreak >nul
+
 echo [1/2] Iniciando Backend (Express + API + WhatsApp) en puerto 5000...
 start "WinterPos - BACKEND :5000" cmd /k "title WinterPos BACKEND ^& cd /d %~dp0backend ^& echo. ^& echo  === BACKEND WINTERPOS === ^& echo  API: http://localhost:5000/api/status ^& echo  WhatsApp se inicializa automaticamente ^& echo. ^& node --watch server.js"
 
