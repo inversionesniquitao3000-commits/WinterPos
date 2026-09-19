@@ -1488,7 +1488,7 @@ export default function Inventario({
 
   // Sorting states
   interface SortRule {
-    field: 'descripcion' | 'categoria' | 'stock_minimo' | 'existencia' | 'precio_costo' | 'precio_detalle' | 'precio_mayor' | 'precio_bulto';
+    field: 'codigo' | 'descripcion' | 'categoria' | 'stock_minimo' | 'existencia' | 'precio_costo' | 'precio_detalle' | 'precio_mayor' | 'precio_bulto';
     direction: 'asc' | 'desc';
   }
 
@@ -3874,6 +3874,10 @@ export default function Inventario({
         let bVal: any = '';
 
         switch (rule.field) {
+          case 'codigo':
+            aVal = (a.barcode || (a as any).clave || '').toLowerCase();
+            bVal = (b.barcode || (b as any).clave || '').toLowerCase();
+            break;
           case 'descripcion':
             aVal = (a.description || '').toLowerCase();
             bVal = (b.description || '').toLowerCase();
@@ -3913,8 +3917,8 @@ export default function Inventario({
         if (aVal !== bVal) {
           if (typeof aVal === 'string' && typeof bVal === 'string') {
             return rule.direction === 'asc'
-              ? aVal.localeCompare(bVal)
-              : bVal.localeCompare(aVal);
+              ? aVal.localeCompare(bVal, undefined, { numeric: true, sensitivity: 'base' })
+              : bVal.localeCompare(aVal, undefined, { numeric: true, sensitivity: 'base' });
           } else {
             return rule.direction === 'asc'
               ? (aVal > bVal ? 1 : -1)
@@ -5097,6 +5101,7 @@ export default function Inventario({
                   <div className="flex flex-wrap items-center gap-2">
                     {sortRules.map((rule, idx) => {
                       const fieldNames: Record<string, string> = {
+                        codigo: 'Código',
                         descripcion: 'Descripción',
                         categoria: 'Categoría',
                         stock_minimo: 'Stock Mínimo',
@@ -5104,6 +5109,7 @@ export default function Inventario({
                         precio_costo: 'P. Costo',
                         precio_detalle: 'P. Detalle',
                         precio_mayor: 'P. Mayor',
+                        precio_bulto: 'P. Bulto',
                       };
 
                       const fieldName = fieldNames[rule.field] || rule.field;
@@ -5230,7 +5236,9 @@ export default function Inventario({
                   </colgroup>
                   <thead className="bg-slate-100 sticky top-0 z-20 border-b border-slate-300 shadow-2xs">
                     <tr className="text-slate-550 border-b border-slate-200">
-                      <th className="px-2 py-1.5 font-sans uppercase truncate">Código</th>
+                      <th className="px-2 py-1.5 font-sans uppercase truncate">
+                        {renderSortHeader('Código', 'codigo')}
+                      </th>
                       <th className="px-2 py-1.5 font-sans uppercase">
                         {renderSortHeader('Descripción', 'descripcion')}
                       </th>
@@ -7292,11 +7300,15 @@ export default function Inventario({
                         type="text"
                         required
                         maxLength={15}
-                        value={newClave.toUpperCase()}
+                        value={newClave}
                         onChange={(e) => {
-                          const val = e.target.value.toUpperCase().slice(0, 15);
+                          const val = e.target.value.slice(0, 15);
                           setNewClave(val);
                           setNewBarcode(val);
+                        }}
+                        onBlur={() => {
+                          setNewClave(prev => prev.toUpperCase());
+                          setNewBarcode(prev => prev.toUpperCase());
                         }}
                         className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs text-slate-900 focus:border-winter-inventarioStart focus:outline-none uppercase font-bold shadow-2xs font-mono tracking-wider"
                       />
@@ -7325,8 +7337,9 @@ export default function Inventario({
                       <input
                         type="text"
                         required
-                        value={newDesc.toUpperCase()}
-                        onChange={(e) => setNewDesc(e.target.value.toUpperCase())}
+                        value={newDesc}
+                        onChange={(e) => setNewDesc(e.target.value)}
+                        onBlur={() => setNewDesc(prev => prev.toUpperCase())}
                         className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs text-slate-900 focus:border-winter-inventarioStart focus:outline-none font-bold uppercase shadow-2xs"
                       />
                     </div>
@@ -7391,7 +7404,8 @@ export default function Inventario({
                             placeholder="IVA"
                             disabled={!newTaxActive}
                             value={newTaxName}
-                            onChange={(e) => setNewTaxName(e.target.value.toUpperCase())}
+                            onChange={(e) => setNewTaxName(e.target.value)}
+                            onBlur={() => setNewTaxName(prev => prev.toUpperCase())}
                             className="w-8 text-center bg-slate-50 border border-slate-200 rounded px-0.5 py-0.5 text-[10px] font-bold text-slate-800 uppercase disabled:opacity-40"
                           />
                           <span className="font-bold text-slate-400 text-[10px] shrink-0">%</span>
@@ -7678,8 +7692,8 @@ export default function Inventario({
 
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                       {/* Costo */}
-                      <div className="bg-white border border-yellow-200 rounded-lg p-1.5 shadow-2xs">
-                        <label className="text-[9.5px] font-bold text-amber-800 block mb-0.5 whitespace-nowrap">Precio Costo ($)</label>
+                      <div className="bg-white border border-yellow-200 rounded-lg p-2 shadow-2xs">
+                        <label className="text-[10.5px] font-extrabold text-amber-900 block mb-0.5 whitespace-nowrap">Precio Costo ($)</label>
                         <input
                           type="number"
                           step="0.01"
@@ -7687,19 +7701,19 @@ export default function Inventario({
                           placeholder="0.00"
                           value={newCost}
                           onChange={(e) => handleNewCostChange(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-xs text-yellow-700 font-mono font-bold focus:bg-white focus:outline-none"
+                          className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1 text-sm text-yellow-800 font-mono font-bold focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-slate-400 block mt-0.5 font-mono truncate font-medium">
+                        <span className="text-[11px] text-slate-600 block mt-1 font-mono truncate font-bold">
                           Costo base del producto
                         </span>
                       </div>
 
                       {/* Detalle */}
-                      <div className="bg-white border border-emerald-200 rounded-lg p-1.5 shadow-2xs space-y-1">
+                      <div className="bg-white border border-emerald-200 rounded-lg p-2 shadow-2xs space-y-1">
                         <div className="flex items-center justify-between gap-1">
-                          <label className="text-[9.5px] font-bold text-emerald-800 whitespace-nowrap truncate">Venta Detalle ($)</label>
-                          <div className="flex items-center gap-0.5" title="Margen de ganancia sobre costo para Detalle (%)">
-                            <span className="text-[8px] font-extrabold text-emerald-700">%</span>
+                          <label className="text-[10.5px] font-extrabold text-emerald-900 whitespace-nowrap truncate">Venta Detalle ($)</label>
+                          <div className="flex items-center gap-1 bg-emerald-50 border border-emerald-300 rounded-md px-1.5 py-0.5 shadow-2xs" title="Margen de ganancia sobre costo para Detalle (%)">
+                            <span className="text-[10.5px] font-black text-emerald-700">%</span>
                             <input
                               type="number"
                               step="0.1"
@@ -7707,7 +7721,7 @@ export default function Inventario({
                               placeholder="30"
                               value={newGananciaDetalle}
                               onChange={(e) => handleNewMarginChange('detalle', e.target.value)}
-                              className="w-11 bg-emerald-50/80 border border-emerald-300 rounded px-1 py-0.5 text-[9.5px] text-emerald-900 font-mono font-bold text-right focus:bg-white focus:outline-none"
+                              className="w-14 sm:w-16 bg-white border border-emerald-300 rounded px-1.5 py-0.5 text-xs text-emerald-950 font-mono font-black text-center focus:ring-1 focus:ring-emerald-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none shadow-inner"
                             />
                           </div>
                         </div>
@@ -7718,9 +7732,9 @@ export default function Inventario({
                           placeholder="0.00"
                           value={newDetail}
                           onChange={(e) => handleNewPriceChange('detalle', e.target.value)}
-                          className="w-full bg-slate-50 border border-emerald-300 rounded px-1.5 py-1 text-xs text-emerald-700 font-mono font-black focus:bg-white focus:outline-none"
+                          className="w-full bg-slate-50 border border-emerald-300 rounded px-2 py-1 text-sm text-emerald-700 font-mono font-black focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-slate-500 block font-mono truncate font-semibold">
+                        <span className="text-[11px] text-emerald-800 block mt-1 font-mono truncate font-bold">
                           {newTaxActive
                             ? `Base: $${((parseFloat(newDetail) || 0) / (1 + (parseFloat(newTaxPct) || 16) / 100)).toFixed(2)} + IVA`
                             : 'Exento de IVA'}
@@ -7728,11 +7742,11 @@ export default function Inventario({
                       </div>
 
                       {/* Mayor */}
-                      <div className="bg-white border border-purple-200 rounded-lg p-1.5 shadow-2xs space-y-1">
+                      <div className="bg-white border border-purple-200 rounded-lg p-2 shadow-2xs space-y-1">
                         <div className="flex items-center justify-between gap-1">
-                          <label className="text-[9.5px] font-bold text-purple-800 whitespace-nowrap truncate">Precio Mayor ($)</label>
-                          <div className="flex items-center gap-0.5" title="Margen de ganancia sobre costo para Mayor (%)">
-                            <span className="text-[8px] font-extrabold text-purple-700">%</span>
+                          <label className="text-[10.5px] font-extrabold text-purple-900 whitespace-nowrap truncate">Precio Mayor ($)</label>
+                          <div className="flex items-center gap-1 bg-purple-50 border border-purple-300 rounded-md px-1.5 py-0.5 shadow-2xs" title="Margen de ganancia sobre costo para Mayor (%)">
+                            <span className="text-[10.5px] font-black text-purple-700">%</span>
                             <input
                               type="number"
                               step="0.1"
@@ -7740,7 +7754,7 @@ export default function Inventario({
                               placeholder="15"
                               value={newGananciaMayor}
                               onChange={(e) => handleNewMarginChange('mayor', e.target.value)}
-                              className="w-11 bg-purple-50/80 border border-purple-300 rounded px-1 py-0.5 text-[9.5px] text-purple-900 font-mono font-bold text-right focus:bg-white focus:outline-none"
+                              className="w-14 sm:w-16 bg-white border border-purple-300 rounded px-1.5 py-0.5 text-xs text-purple-950 font-mono font-black text-center focus:ring-1 focus:ring-purple-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none shadow-inner"
                             />
                           </div>
                         </div>
@@ -7751,9 +7765,9 @@ export default function Inventario({
                           placeholder="0.00"
                           value={newMayor}
                           onChange={(e) => handleNewPriceChange('mayor', e.target.value)}
-                          className="w-full bg-slate-50 border border-purple-300 rounded px-1.5 py-1 text-xs text-purple-800 font-mono font-bold focus:bg-white focus:outline-none"
+                          className="w-full bg-slate-50 border border-purple-300 rounded px-2 py-1 text-sm text-purple-800 font-mono font-bold focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-slate-500 block font-mono truncate font-semibold">
+                        <span className="text-[11px] text-purple-800 block mt-1 font-mono truncate font-bold">
                           {newTaxActive
                             ? `Base: $${((parseFloat(newMayor) || 0) / (1 + (parseFloat(newTaxPct) || 16) / 100)).toFixed(2)} + IVA`
                             : 'Exento de IVA'}
@@ -7761,11 +7775,11 @@ export default function Inventario({
                       </div>
 
                       {/* Bulto */}
-                      <div className="bg-white border border-amber-200 rounded-lg p-1.5 shadow-2xs space-y-1">
+                      <div className="bg-white border border-amber-200 rounded-lg p-2 shadow-2xs space-y-1">
                         <div className="flex items-center justify-between gap-1">
-                          <label className="text-[9.5px] font-bold text-amber-900 whitespace-nowrap truncate">Bulto / Caja ($)</label>
-                          <div className="flex items-center gap-0.5" title="Margen de ganancia sobre costo para Bulto (%)">
-                            <span className="text-[8px] font-extrabold text-amber-800">%</span>
+                          <label className="text-[10.5px] font-extrabold text-amber-950 whitespace-nowrap truncate">Bulto / Caja ($)</label>
+                          <div className="flex items-center gap-1 bg-amber-50 border border-amber-300 rounded-md px-1.5 py-0.5 shadow-2xs" title="Margen de ganancia sobre costo para Bulto (%)">
+                            <span className="text-[10.5px] font-black text-amber-800">%</span>
                             <input
                               type="number"
                               step="0.1"
@@ -7773,7 +7787,7 @@ export default function Inventario({
                               placeholder="8"
                               value={newGananciaBulto}
                               onChange={(e) => handleNewMarginChange('bulto', e.target.value)}
-                              className="w-11 bg-amber-50/80 border border-amber-300 rounded px-1 py-0.5 text-[9.5px] text-amber-950 font-mono font-bold text-right focus:bg-white focus:outline-none"
+                              className="w-14 sm:w-16 bg-white border border-amber-300 rounded px-1.5 py-0.5 text-xs text-amber-950 font-mono font-black text-center focus:ring-1 focus:ring-amber-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none shadow-inner"
                             />
                           </div>
                         </div>
@@ -7784,9 +7798,9 @@ export default function Inventario({
                           placeholder="0.00"
                           value={newBulto}
                           onChange={(e) => handleNewPriceChange('bulto', e.target.value)}
-                          className="w-full bg-slate-50 border border-amber-300 rounded px-1.5 py-1 text-xs text-amber-950 font-mono font-black focus:bg-white focus:outline-none"
+                          className="w-full bg-slate-50 border border-amber-300 rounded px-2 py-1 text-sm text-amber-950 font-mono font-black focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-slate-500 block font-mono truncate font-semibold">
+                        <span className="text-[11px] text-amber-900 block mt-1 font-mono truncate font-bold">
                           {newTaxActive && (parseFloat(newBulto) || 0) > 0
                             ? `Base: $${((parseFloat(newBulto) || 0) / (1 + (parseFloat(newTaxPct) || 16) / 100)).toFixed(2)} + IVA`
                             : 'Opcional'}
@@ -7897,11 +7911,15 @@ export default function Inventario({
                         type="text"
                         required
                         maxLength={15}
-                        value={editClave.toUpperCase()}
+                        value={editClave}
                         onChange={(e) => {
-                          const val = e.target.value.toUpperCase().slice(0, 15);
+                          const val = e.target.value.slice(0, 15);
                           setEditClave(val);
                           setEditBarcode(val);
+                        }}
+                        onBlur={() => {
+                          setEditClave(prev => prev.toUpperCase());
+                          setEditBarcode(prev => prev.toUpperCase());
                         }}
                         className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs text-slate-900 focus:border-winter-inventarioStart focus:outline-none uppercase font-bold shadow-2xs font-mono tracking-wider"
                       />
@@ -7930,8 +7948,9 @@ export default function Inventario({
                       <input
                         type="text"
                         required
-                        value={editDesc.toUpperCase()}
-                        onChange={(e) => setEditDesc(e.target.value.toUpperCase())}
+                        value={editDesc}
+                        onChange={(e) => setEditDesc(e.target.value)}
+                        onBlur={() => setEditDesc(prev => prev.toUpperCase())}
                         className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs text-slate-900 focus:border-winter-inventarioStart focus:outline-none font-bold uppercase shadow-2xs"
                       />
                     </div>
@@ -7996,7 +8015,8 @@ export default function Inventario({
                             placeholder="IVA"
                             disabled={!editTaxActive}
                             value={editTaxName}
-                            onChange={(e) => setEditTaxName(e.target.value.toUpperCase())}
+                            onChange={(e) => setEditTaxName(e.target.value)}
+                            onBlur={() => setEditTaxName(prev => prev.toUpperCase())}
                             className="w-8 text-center bg-slate-50 border border-slate-200 rounded px-0.5 py-0.5 text-[10px] font-bold text-slate-800 uppercase disabled:opacity-40"
                           />
                           <span className="font-bold text-slate-400 text-[10px] shrink-0">%</span>
@@ -8289,8 +8309,8 @@ export default function Inventario({
 
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                       {/* Costo */}
-                      <div className="bg-white border border-yellow-200 rounded-lg p-1.5 shadow-2xs">
-                        <label className="text-[9.5px] font-bold text-amber-800 block mb-0.5 whitespace-nowrap">Precio Costo ($)</label>
+                      <div className="bg-white border border-yellow-200 rounded-lg p-2 shadow-2xs">
+                        <label className="text-[10.5px] font-extrabold text-amber-900 block mb-0.5 whitespace-nowrap">Precio Costo ($)</label>
                         <input
                           type="number"
                           step="0.01"
@@ -8298,19 +8318,19 @@ export default function Inventario({
                           placeholder="0.00"
                           value={editCost}
                           onChange={(e) => handleEditCostChange(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-xs text-yellow-700 font-mono font-bold focus:bg-white focus:outline-none"
+                          className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1 text-sm text-yellow-800 font-mono font-bold focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-slate-400 block mt-0.5 font-mono truncate font-medium">
+                        <span className="text-[11px] text-slate-600 block mt-1 font-mono truncate font-bold">
                           Costo base del producto
                         </span>
                       </div>
 
                       {/* Detalle */}
-                      <div className="bg-white border border-emerald-200 rounded-lg p-1.5 shadow-2xs space-y-1">
+                      <div className="bg-white border border-emerald-200 rounded-lg p-2 shadow-2xs space-y-1">
                         <div className="flex items-center justify-between gap-1">
-                          <label className="text-[9.5px] font-bold text-emerald-800 whitespace-nowrap truncate">Venta Detalle ($)</label>
-                          <div className="flex items-center gap-0.5" title="Margen de ganancia sobre costo para Detalle (%)">
-                            <span className="text-[8px] font-extrabold text-emerald-700">%</span>
+                          <label className="text-[10.5px] font-extrabold text-emerald-900 whitespace-nowrap truncate">Venta Detalle ($)</label>
+                          <div className="flex items-center gap-1 bg-emerald-50 border border-emerald-300 rounded-md px-1.5 py-0.5 shadow-2xs" title="Margen de ganancia sobre costo para Detalle (%)">
+                            <span className="text-[10.5px] font-black text-emerald-700">%</span>
                             <input
                               type="number"
                               step="0.1"
@@ -8318,7 +8338,7 @@ export default function Inventario({
                               placeholder="30"
                               value={editGananciaDetalle}
                               onChange={(e) => handleEditMarginChange('detalle', e.target.value)}
-                              className="w-11 bg-emerald-50/80 border border-emerald-300 rounded px-1 py-0.5 text-[9.5px] text-emerald-900 font-mono font-bold text-right focus:bg-white focus:outline-none"
+                              className="w-14 sm:w-16 bg-white border border-emerald-300 rounded px-1.5 py-0.5 text-xs text-emerald-950 font-mono font-black text-center focus:ring-1 focus:ring-emerald-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none shadow-inner"
                             />
                           </div>
                         </div>
@@ -8329,9 +8349,9 @@ export default function Inventario({
                           placeholder="0.00"
                           value={editDetail}
                           onChange={(e) => handleEditPriceChange('detalle', e.target.value)}
-                          className="w-full bg-slate-50 border border-emerald-300 rounded px-1.5 py-1 text-xs text-emerald-700 font-mono font-black focus:bg-white focus:outline-none"
+                          className="w-full bg-slate-50 border border-emerald-300 rounded px-2 py-1 text-sm text-emerald-700 font-mono font-black focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-slate-500 block font-mono truncate font-semibold">
+                        <span className="text-[11px] text-emerald-800 block mt-1 font-mono truncate font-bold">
                           {editTaxActive
                             ? `Base: $${((parseFloat(editDetail) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA`
                             : 'Exento de IVA'}
@@ -8339,11 +8359,11 @@ export default function Inventario({
                       </div>
 
                       {/* Mayor */}
-                      <div className="bg-white border border-purple-200 rounded-lg p-1.5 shadow-2xs space-y-1">
+                      <div className="bg-white border border-purple-200 rounded-lg p-2 shadow-2xs space-y-1">
                         <div className="flex items-center justify-between gap-1">
-                          <label className="text-[9.5px] font-bold text-purple-800 whitespace-nowrap truncate">Precio Mayor ($)</label>
-                          <div className="flex items-center gap-0.5" title="Margen de ganancia sobre costo para Mayor (%)">
-                            <span className="text-[8px] font-extrabold text-purple-700">%</span>
+                          <label className="text-[10.5px] font-extrabold text-purple-900 whitespace-nowrap truncate">Precio Mayor ($)</label>
+                          <div className="flex items-center gap-1 bg-purple-50 border border-purple-300 rounded-md px-1.5 py-0.5 shadow-2xs" title="Margen de ganancia sobre costo para Mayor (%)">
+                            <span className="text-[10.5px] font-black text-purple-700">%</span>
                             <input
                               type="number"
                               step="0.1"
@@ -8351,7 +8371,7 @@ export default function Inventario({
                               placeholder="15"
                               value={editGananciaMayor}
                               onChange={(e) => handleEditMarginChange('mayor', e.target.value)}
-                              className="w-11 bg-purple-50/80 border border-purple-300 rounded px-1 py-0.5 text-[9.5px] text-purple-900 font-mono font-bold text-right focus:bg-white focus:outline-none"
+                              className="w-14 sm:w-16 bg-white border border-purple-300 rounded px-1.5 py-0.5 text-xs text-purple-950 font-mono font-black text-center focus:ring-1 focus:ring-purple-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none shadow-inner"
                             />
                           </div>
                         </div>
@@ -8362,9 +8382,9 @@ export default function Inventario({
                           placeholder="0.00"
                           value={editMayor}
                           onChange={(e) => handleEditPriceChange('mayor', e.target.value)}
-                          className="w-full bg-slate-50 border border-purple-300 rounded px-1.5 py-1 text-xs text-purple-800 font-mono font-bold focus:bg-white focus:outline-none"
+                          className="w-full bg-slate-50 border border-purple-300 rounded px-2 py-1 text-sm text-purple-800 font-mono font-bold focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-slate-500 block font-mono truncate font-semibold">
+                        <span className="text-[11px] text-purple-800 block mt-1 font-mono truncate font-bold">
                           {editTaxActive
                             ? `Base: $${((parseFloat(editMayor) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA`
                             : 'Exento de IVA'}
@@ -8372,11 +8392,11 @@ export default function Inventario({
                       </div>
 
                       {/* Bulto */}
-                      <div className="bg-white border border-amber-200 rounded-lg p-1.5 shadow-2xs space-y-1">
+                      <div className="bg-white border border-amber-200 rounded-lg p-2 shadow-2xs space-y-1">
                         <div className="flex items-center justify-between gap-1">
-                          <label className="text-[9.5px] font-bold text-amber-900 whitespace-nowrap truncate">Bulto / Caja ($)</label>
-                          <div className="flex items-center gap-0.5" title="Margen de ganancia sobre costo para Bulto (%)">
-                            <span className="text-[8px] font-extrabold text-amber-800">%</span>
+                          <label className="text-[10.5px] font-extrabold text-amber-950 whitespace-nowrap truncate">Bulto / Caja ($)</label>
+                          <div className="flex items-center gap-1 bg-amber-50 border border-amber-300 rounded-md px-1.5 py-0.5 shadow-2xs" title="Margen de ganancia sobre costo para Bulto (%)">
+                            <span className="text-[10.5px] font-black text-amber-800">%</span>
                             <input
                               type="number"
                               step="0.1"
@@ -8384,7 +8404,7 @@ export default function Inventario({
                               placeholder="8"
                               value={editGananciaBulto}
                               onChange={(e) => handleEditMarginChange('bulto', e.target.value)}
-                              className="w-11 bg-amber-50/80 border border-amber-300 rounded px-1 py-0.5 text-[9.5px] text-amber-950 font-mono font-bold text-right focus:bg-white focus:outline-none"
+                              className="w-14 sm:w-16 bg-white border border-amber-300 rounded px-1.5 py-0.5 text-xs text-amber-950 font-mono font-black text-center focus:ring-1 focus:ring-amber-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none shadow-inner"
                             />
                           </div>
                         </div>
@@ -8395,9 +8415,9 @@ export default function Inventario({
                           placeholder="0.00"
                           value={editBulto}
                           onChange={(e) => handleEditPriceChange('bulto', e.target.value)}
-                          className="w-full bg-slate-50 border border-amber-300 rounded px-1.5 py-1 text-xs text-amber-950 font-mono font-black focus:bg-white focus:outline-none"
+                          className="w-full bg-slate-50 border border-amber-300 rounded px-2 py-1 text-sm text-amber-950 font-mono font-black focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-slate-500 block font-mono truncate font-semibold">
+                        <span className="text-[11px] text-amber-900 block mt-1 font-mono truncate font-bold">
                           {editTaxActive && (parseFloat(editBulto) || 0) > 0
                             ? `Base: $${((parseFloat(editBulto) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA`
                             : 'Opcional'}

@@ -466,6 +466,9 @@ export default function ConfiguracionEmpresa({
   const [backupHour, setBackupHour] = useState(() => {
     return localStorage.getItem('pos_backup_hour') || '02:00';
   });
+  const [backupHour2, setBackupHour2] = useState(() => {
+    return localStorage.getItem('pos_backup_hour2') || '14:00';
+  });
   const [backupSpecificDate, setBackupSpecificDate] = useState(() => {
     return localStorage.getItem('pos_backup_specific_date') || '';
   });
@@ -506,6 +509,7 @@ export default function ConfiguracionEmpresa({
           if (data) {
             if (data.schedule) setDbBackupSchedule(data.schedule);
             if (data.hour) setBackupHour(data.hour);
+            if (data.hour2) setBackupHour2(data.hour2);
             if (data.specificDate) setBackupSpecificDate(data.specificDate);
             if (data.backupDir) {
               setBackupDir(data.backupDir);
@@ -1534,6 +1538,7 @@ export default function ConfiguracionEmpresa({
     }
     localStorage.setItem('pos_backup_schedule', dbBackupSchedule);
     localStorage.setItem('pos_backup_hour', backupHour);
+    localStorage.setItem('pos_backup_hour2', backupHour2);
     localStorage.setItem('pos_backup_specific_date', backupSpecificDate);
     if (backupDir) localStorage.setItem('pos_backup_dir', backupDir);
 
@@ -1544,6 +1549,7 @@ export default function ConfiguracionEmpresa({
         body: JSON.stringify({ 
           schedule: dbBackupSchedule, 
           hour: backupHour, 
+          hour2: backupHour2,
           specificDate: backupSpecificDate,
           backupDir: backupDir 
         })
@@ -1551,6 +1557,8 @@ export default function ConfiguracionEmpresa({
       if (res.ok) {
         const scheduleLabel = dbBackupSchedule === 'Especifico'
           ? `fecha ${backupSpecificDate} a las ${backupHour}`
+          : dbBackupSchedule === '2VecesAlDia'
+          ? `2 veces al día (${backupHour} y ${backupHour2})`
           : `${dbBackupSchedule} a las ${backupHour}`;
         showToast(`✅ Respaldo automático programado: ${scheduleLabel}`);
       } else {
@@ -3670,6 +3678,7 @@ export default function ConfiguracionEmpresa({
                     className="bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 focus:bg-white focus:border-amber-500 focus:outline-none font-sans w-full"
                   >
                     <option value="Diario">🔁 Cada 24 horas (Recomendado)</option>
+                    <option value="2VecesAlDia">🔄 2 veces al día (Personalizar 2 horarios)</option>
                     <option value="Semanal">📅 Semanalmente (Cada Domingo)</option>
                     <option value="Mensual">🗓️ Mensualmente (Fin de Mes)</option>
                     <option value="Especifico">📌 Fecha específica (único respaldo)</option>
@@ -3679,19 +3688,56 @@ export default function ConfiguracionEmpresa({
 
                 {/* Hora del respaldo */}
                 {dbBackupSchedule !== 'Desactivado' && (
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold font-sans uppercase text-slate-500 tracking-wide">Hora del Respaldo</label>
-                    <div className="relative">
-                      <input
-                        type="time"
-                        value={backupHour}
-                        onChange={(e) => setBackupHour(e.target.value)}
-                        className="bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 focus:bg-white focus:border-amber-500 focus:outline-none font-mono w-full"
-                      />
-                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] font-sans pointer-events-none">24h</span>
+                  dbBackupSchedule === '2VecesAlDia' ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      {/* Horario 1 */}
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold font-sans uppercase text-slate-500 tracking-wide flex items-center gap-1">
+                          <span>☀️</span> 1er Respaldo
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="time"
+                            value={backupHour}
+                            onChange={(e) => setBackupHour(e.target.value)}
+                            className="bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 focus:bg-white focus:border-amber-500 focus:outline-none font-mono w-full"
+                          />
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] font-sans pointer-events-none">24h</span>
+                        </div>
+                        <p className="text-[9px] text-slate-400 font-sans">1ra ejecución diaria</p>
+                      </div>
+                      {/* Horario 2 */}
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-bold font-sans uppercase text-slate-500 tracking-wide flex items-center gap-1">
+                          <span>🌙</span> 2do Respaldo
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="time"
+                            value={backupHour2}
+                            onChange={(e) => setBackupHour2(e.target.value)}
+                            className="bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 focus:bg-white focus:border-amber-500 focus:outline-none font-mono w-full"
+                          />
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] font-sans pointer-events-none">24h</span>
+                        </div>
+                        <p className="text-[9px] text-slate-400 font-sans">2da ejecución diaria</p>
+                      </div>
                     </div>
-                    <p className="text-[10px] text-slate-400 font-sans">El servidor ejecutará el respaldo a esta hora local.</p>
-                  </div>
+                  ) : (
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-bold font-sans uppercase text-slate-500 tracking-wide">Hora del Respaldo</label>
+                      <div className="relative">
+                        <input
+                          type="time"
+                          value={backupHour}
+                          onChange={(e) => setBackupHour(e.target.value)}
+                          className="bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 focus:bg-white focus:border-amber-500 focus:outline-none font-mono w-full"
+                        />
+                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] font-sans pointer-events-none">24h</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 font-sans">El servidor ejecutará el respaldo a esta hora local.</p>
+                    </div>
+                  )
                 )}
               </div>
 
@@ -3766,11 +3812,23 @@ export default function ConfiguracionEmpresa({
                   <span className="text-slate-400 text-xs">🕐</span>
                   <span className="text-[11px] font-sans text-slate-600">
                     Configuración activa:
-                    <span className="font-bold text-slate-800 ml-1">
-                      {dbBackupSchedule === 'Diario' ? 'Cada día' : dbBackupSchedule === 'Semanal' ? 'Cada domingo' : 'Fin de cada mes'}
-                    </span>
-                    <span className="text-slate-500 ml-1">a las</span>
-                    <span className="font-black font-mono text-amber-600 ml-1">{backupHour} hrs</span>
+                    {dbBackupSchedule === '2VecesAlDia' ? (
+                      <>
+                        <span className="font-bold text-slate-800 ml-1">2 veces al día</span>
+                        <span className="text-slate-500 ml-1">a las</span>
+                        <span className="font-black font-mono text-amber-600 ml-1">{backupHour} hrs</span>
+                        <span className="text-slate-500 ml-1">y a las</span>
+                        <span className="font-black font-mono text-amber-600 ml-1">{backupHour2} hrs</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-bold text-slate-800 ml-1">
+                          {dbBackupSchedule === 'Diario' ? 'Cada día' : dbBackupSchedule === 'Semanal' ? 'Cada domingo' : 'Fin de cada mes'}
+                        </span>
+                        <span className="text-slate-500 ml-1">a las</span>
+                        <span className="font-black font-mono text-amber-600 ml-1">{backupHour} hrs</span>
+                      </>
+                    )}
                   </span>
                 </div>
               )}

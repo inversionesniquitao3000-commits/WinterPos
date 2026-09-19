@@ -1744,7 +1744,8 @@ export default function Proveedores({
                     required
                     placeholder="J-12345678-9 / V-..."
                     value={formRif}
-                    onChange={e => setFormRif(e.target.value.toUpperCase())}
+                    onChange={e => setFormRif(e.target.value)}
+                    onBlur={() => setFormRif(prev => prev.toUpperCase())}
                     className="w-full bg-slate-50 border border-slate-300 text-slate-800 px-3 py-2 rounded-lg text-xs font-mono uppercase focus:bg-white focus:border-indigo-500 focus:outline-none"
                   />
                 </div>

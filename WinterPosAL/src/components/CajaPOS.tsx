@@ -8659,11 +8659,15 @@ export default function CajaPOS({
                         type="text"
                         required
                         maxLength={15}
-                        value={editClave.toUpperCase()}
+                        value={editClave}
                         onChange={(e) => {
-                          const val = e.target.value.toUpperCase().slice(0, 15);
+                          const val = e.target.value.slice(0, 15);
                           setEditClave(val);
                           setEditBarcode(val);
+                        }}
+                        onBlur={() => {
+                          setEditClave(prev => prev.toUpperCase());
+                          setEditBarcode(prev => prev.toUpperCase());
                         }}
                         className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs text-slate-900 focus:border-blue-600 focus:outline-none uppercase font-bold shadow-2xs font-mono tracking-wider"
                       />
@@ -8692,8 +8696,9 @@ export default function CajaPOS({
                       <input
                         type="text"
                         required
-                        value={editDesc.toUpperCase()}
-                        onChange={(e) => setEditDesc(e.target.value.toUpperCase())}
+                        value={editDesc}
+                        onChange={(e) => setEditDesc(e.target.value)}
+                        onBlur={() => setEditDesc(prev => prev.toUpperCase())}
                         className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs text-slate-900 focus:border-blue-600 focus:outline-none font-bold uppercase shadow-2xs"
                       />
                     </div>
@@ -8739,7 +8744,8 @@ export default function CajaPOS({
                             placeholder="IVA"
                             disabled={!editTaxActive}
                             value={editTaxName}
-                            onChange={(e) => setEditTaxName(e.target.value.toUpperCase())}
+                            onChange={(e) => setEditTaxName(e.target.value)}
+                            onBlur={() => setEditTaxName(prev => prev.toUpperCase())}
                             className="w-8 text-center bg-slate-50 border border-slate-200 rounded px-0.5 py-0.5 text-[10px] font-bold text-slate-800 uppercase disabled:opacity-40"
                           />
                           <span className="font-bold text-slate-400 text-[10px] shrink-0">%</span>
@@ -8965,8 +8971,8 @@ export default function CajaPOS({
 
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                       {/* Costo */}
-                      <div className="bg-white border border-yellow-200 rounded-lg p-1.5 shadow-2xs">
-                        <label className="text-[9.5px] font-bold text-amber-800 block mb-0.5 whitespace-nowrap">Precio Costo ($)</label>
+                      <div className="bg-white border border-yellow-200 rounded-lg p-2 shadow-2xs">
+                        <label className="text-[10.5px] font-extrabold text-amber-900 block mb-0.5 whitespace-nowrap">Precio Costo ($)</label>
                         <input
                           type="number"
                           step="0.01"
@@ -8974,13 +8980,16 @@ export default function CajaPOS({
                           placeholder="0.00"
                           value={editCost}
                           onChange={(e) => setEditCost(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-xs text-yellow-700 font-mono font-bold focus:bg-white focus:outline-none"
+                          className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1 text-sm text-yellow-800 font-mono font-bold focus:bg-white focus:outline-none"
                         />
+                        <span className="text-[11px] text-slate-600 block mt-1 font-mono truncate font-bold">
+                          Costo base del producto
+                        </span>
                       </div>
 
                       {/* Detalle */}
-                      <div className="bg-white border border-emerald-200 rounded-lg p-1.5 shadow-2xs">
-                        <label className="text-[9.5px] font-bold text-emerald-800 block mb-0.5 whitespace-nowrap">Venta Detalle ($)</label>
+                      <div className="bg-white border border-emerald-200 rounded-lg p-2 shadow-2xs space-y-1">
+                        <label className="text-[10.5px] font-extrabold text-emerald-900 block mb-0.5 whitespace-nowrap truncate">Venta Detalle ($)</label>
                         <input
                           type="number"
                           step="0.01"
@@ -8988,9 +8997,9 @@ export default function CajaPOS({
                           placeholder="0.00"
                           value={editDetail}
                           onChange={(e) => setEditDetail(e.target.value)}
-                          className="w-full bg-slate-50 border border-emerald-300 rounded px-1.5 py-1 text-xs text-emerald-700 font-mono font-black focus:bg-white focus:outline-none"
+                          className="w-full bg-slate-50 border border-emerald-300 rounded px-2 py-1 text-sm text-emerald-700 font-mono font-black focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-slate-500 block mt-0.5 font-mono truncate font-semibold">
+                        <span className="text-[11px] text-emerald-800 block mt-1 font-mono truncate font-bold">
                           {editTaxActive
                             ? `Base: $${((parseFloat(editDetail) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA`
                             : 'Exento de IVA'}
@@ -8998,8 +9007,8 @@ export default function CajaPOS({
                       </div>
 
                       {/* Mayor */}
-                      <div className="bg-white border border-purple-200 rounded-lg p-1.5 shadow-2xs">
-                        <label className="text-[9.5px] font-bold text-purple-800 block mb-0.5 whitespace-nowrap">Precio Mayor ($)</label>
+                      <div className="bg-white border border-purple-200 rounded-lg p-2 shadow-2xs space-y-1">
+                        <label className="text-[10.5px] font-extrabold text-purple-900 block mb-0.5 whitespace-nowrap truncate">Precio Mayor ($)</label>
                         <input
                           type="number"
                           step="0.01"
@@ -9007,9 +9016,9 @@ export default function CajaPOS({
                           placeholder="0.00"
                           value={editMayor}
                           onChange={(e) => setEditMayor(e.target.value)}
-                          className="w-full bg-slate-50 border border-purple-300 rounded px-1.5 py-1 text-xs text-purple-800 font-mono font-bold focus:bg-white focus:outline-none"
+                          className="w-full bg-slate-50 border border-purple-300 rounded px-2 py-1 text-sm text-purple-800 font-mono font-bold focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-slate-500 block mt-0.5 font-mono truncate font-semibold">
+                        <span className="text-[11px] text-purple-800 block mt-1 font-mono truncate font-bold">
                           {editTaxActive
                             ? `Base: $${((parseFloat(editMayor) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA`
                             : 'Exento de IVA'}
@@ -9017,8 +9026,8 @@ export default function CajaPOS({
                       </div>
 
                       {/* Bulto */}
-                      <div className="bg-white border border-amber-200 rounded-lg p-1.5 shadow-2xs">
-                        <label className="text-[9.5px] font-bold text-amber-900 block mb-0.5 whitespace-nowrap">Bulto / Caja ($)</label>
+                      <div className="bg-white border border-amber-200 rounded-lg p-2 shadow-2xs space-y-1">
+                        <label className="text-[10.5px] font-extrabold text-amber-950 block mb-0.5 whitespace-nowrap truncate">Bulto / Caja ($)</label>
                         <input
                           type="number"
                           step="0.01"
@@ -9026,9 +9035,9 @@ export default function CajaPOS({
                           placeholder="0.00"
                           value={editBulto}
                           onChange={(e) => setEditBulto(e.target.value)}
-                          className="w-full bg-slate-50 border border-amber-300 rounded px-1.5 py-1 text-xs text-amber-950 font-mono font-black focus:bg-white focus:outline-none"
+                          className="w-full bg-slate-50 border border-amber-300 rounded px-2 py-1 text-sm text-amber-950 font-mono font-black focus:bg-white focus:outline-none"
                         />
-                        <span className="text-[8px] text-slate-500 block mt-0.5 font-mono truncate font-semibold">
+                        <span className="text-[11px] text-amber-900 block mt-1 font-mono truncate font-bold">
                           {editTaxActive && (parseFloat(editBulto) || 0) > 0
                             ? `Base: $${((parseFloat(editBulto) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA`
                             : 'Opcional'}
@@ -9077,7 +9086,8 @@ export default function CajaPOS({
               type="text"
               placeholder="Nombre de la Categoría..."
               value={newCatInputName}
-              onChange={(e) => setNewCatInputName(e.target.value.toUpperCase())}
+              onChange={(e) => setNewCatInputName(e.target.value)}
+              onBlur={() => setNewCatInputName(prev => prev.toUpperCase())}
               className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-bold uppercase"
             />
             <div className="flex justify-end gap-2 pt-2">

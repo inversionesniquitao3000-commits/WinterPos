@@ -732,11 +732,11 @@ export default function AuxiliarCalculoPrecios({
                     </span>
                   </div>
                   {taxActive && taxPct > 0 ? (
-                    <span className="text-[8.5px] font-bold text-blue-700 block font-mono">
+                    <span className="text-[10.5px] font-extrabold text-blue-700 block font-mono">
                       (Base: ${calculatedDetailUSD.toFixed(2)} + IVA)
                     </span>
                   ) : (
-                    <span className="text-[8.5px] font-bold text-slate-500 block font-mono">
+                    <span className="text-[10.5px] font-bold text-slate-500 block font-mono">
                       Exento de IVA
                     </span>
                   )}
@@ -755,11 +755,11 @@ export default function AuxiliarCalculoPrecios({
                     </span>
                   </div>
                   {taxActive && taxPct > 0 ? (
-                    <span className="text-[8.5px] font-bold text-blue-700 block font-mono">
+                    <span className="text-[10.5px] font-extrabold text-blue-700 block font-mono">
                       (Base: ${calculatedMayorUSD.toFixed(2)} + IVA)
                     </span>
                   ) : (
-                    <span className="text-[8.5px] font-bold text-slate-500 block font-mono">
+                    <span className="text-[10.5px] font-bold text-slate-500 block font-mono">
                       Exento de IVA
                     </span>
                   )}
@@ -778,11 +778,11 @@ export default function AuxiliarCalculoPrecios({
                     </span>
                   </div>
                   {taxActive && taxPct > 0 ? (
-                    <span className="text-[8.5px] font-bold text-blue-700 block font-mono">
+                    <span className="text-[10.5px] font-extrabold text-blue-700 block font-mono">
                       (Base: ${calculatedBultoUSD.toFixed(2)} + IVA)
                     </span>
                   ) : (
-                    <span className="text-[8.5px] font-bold text-slate-500 block font-mono">
+                    <span className="text-[10.5px] font-bold text-slate-500 block font-mono">
                       Exento de IVA
                     </span>
                   )}

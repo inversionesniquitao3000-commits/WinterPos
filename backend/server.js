@@ -1821,10 +1821,13 @@ app.get('/api/db/backup/schedule', async (req, res) => {
     const sched = readJsonFile('backup_schedule.json', {
       schedule: 'Diario',
       hour: '02:00',
+      hour2: '14:00',
       backupDir: defaultDir,
       lastBackup: ''
     });
     if (!sched.backupDir) sched.backupDir = defaultDir;
+    if (!sched.hour) sched.hour = '02:00';
+    if (!sched.hour2) sched.hour2 = '14:00';
     res.json({ ...sched, defaultBackupDir: defaultDir });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1833,12 +1836,13 @@ app.get('/api/db/backup/schedule', async (req, res) => {
 
 app.post('/api/db/backup/schedule', async (req, res) => {
   try {
-    const { schedule, hour, specificDate, backupDir } = req.body;
+    const { schedule, hour, hour2, specificDate, backupDir } = req.body;
     const defaultDir = path.resolve('./data/backups');
-    const sched = readJsonFile('backup_schedule.json', { schedule: 'Diario', lastBackup: '' });
+    const sched = readJsonFile('backup_schedule.json', { schedule: 'Diario', hour: '02:00', hour2: '14:00', lastBackup: '' });
 
     if (schedule !== undefined) sched.schedule = schedule;
     if (hour !== undefined) sched.hour = hour;
+    if (hour2 !== undefined) sched.hour2 = hour2;
     if (specificDate !== undefined) sched.specificDate = specificDate;
     if (backupDir !== undefined) sched.backupDir = backupDir.trim() || defaultDir;
 
@@ -1870,6 +1874,7 @@ async function runBackupTask() {
     const sched = readJsonFile('backup_schedule.json', {
       schedule: 'Diario',
       hour: '02:00',
+      hour2: '14:00',
       lastBackup: '',
       backupDir: defaultDir
     });
@@ -1894,10 +1899,40 @@ async function runBackupTask() {
 
     const lastBackupTime = sched.lastBackup ? new Date(sched.lastBackup) : null;
     const hasRunSinceTarget = lastBackupTime && !isNaN(lastBackupTime.getTime()) && lastBackupTime.getTime() >= targetTimeToday.getTime();
+    const diffHours = lastBackupTime && !isNaN(lastBackupTime.getTime()) ? (now.getTime() - lastBackupTime.getTime()) / (1000 * 60 * 60) : 999999;
 
     let shouldBackup = false;
+    let executedHourTarget = targetHourStr;
 
-    if (sched.schedule === 'Diario') {
+    if (sched.schedule === '2VecesAlDia' || sched.schedule === 'DosVecesAlDia') {
+      const h1Str = (sched.hour && sched.hour.includes(':')) ? sched.hour.trim() : '02:00';
+      const h2Str = (sched.hour2 && sched.hour2.includes(':')) ? sched.hour2.trim() : '14:00';
+
+      const [h1H, h1M] = h1Str.split(':').map(val => parseInt(val, 10) || 0);
+      const [h2H, h2M] = h2Str.split(':').map(val => parseInt(val, 10) || 0);
+
+      const t1 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h1H, h1M, 0, 0);
+      const t2 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h2H, h2M, 0, 0);
+
+      const [tEarly, tLate] = t1.getTime() <= t2.getTime() ? [t1, t2] : [t2, t1];
+      const earlyStr = t1.getTime() <= t2.getTime() ? h1Str : h2Str;
+      const lateStr = t1.getTime() <= t2.getTime() ? h2Str : h1Str;
+
+      const hasRunSinceEarly = lastBackupTime && !isNaN(lastBackupTime.getTime()) && lastBackupTime.getTime() >= tEarly.getTime();
+      const hasRunSinceLate = lastBackupTime && !isNaN(lastBackupTime.getTime()) && lastBackupTime.getTime() >= tLate.getTime();
+
+      if (now.getTime() >= tLate.getTime()) {
+        if (!hasRunSinceLate) {
+          shouldBackup = true;
+          executedHourTarget = lateStr;
+        }
+      } else if (now.getTime() >= tEarly.getTime()) {
+        if (!hasRunSinceEarly) {
+          shouldBackup = true;
+          executedHourTarget = earlyStr;
+        }
+      }
+    } else if (sched.schedule === 'Diario') {
       // Si ya es o pasó la hora programada hoy y todavía NO se ha ejecutado el respaldo correspondiente a hoy
       if (now.getTime() >= targetTimeToday.getTime() && !hasRunSinceTarget) {
         shouldBackup = true;
@@ -1931,7 +1966,7 @@ async function runBackupTask() {
         fs.mkdirSync(saveDir, { recursive: true });
       }
 
-      console.log(`⏱️ [Backups] Iniciando copia de seguridad programada (${sched.schedule} a las ${targetHourStr}) en "${saveDir}"...`);
+      console.log(`⏱️ [Backups] Iniciando copia de seguridad programada (${sched.schedule} - hora ${executedHourTarget}) en "${saveDir}"...`);
       const backupData = await backupDatabase();
       const timeHMS = `${currentHour}-${currentMinute}-${String(now.getSeconds()).padStart(2, '0')}`;
       const fileName = `backup_auto_${todayStr}_${timeHMS}.json`;

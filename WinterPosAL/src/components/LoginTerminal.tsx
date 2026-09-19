@@ -529,7 +529,8 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
                     <input
                       type="text"
                       value={terminalNameState}
-                      onChange={(e) => setTerminalNameState(e.target.value.toUpperCase())}
+                      onChange={(e) => setTerminalNameState(e.target.value)}
+                      onBlur={() => setTerminalNameState(prev => prev.toUpperCase())}
                       placeholder="Ej: CAJA_01, CAJA_02, MOSTRADOR"
                       className="w-full bg-[#08284c] border border-slate-700 rounded p-1.5 text-yellow-400 font-bold uppercase outline-none"
                     />
@@ -816,7 +817,8 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
                   <input
                     type="text"
                     value={terminalNameState}
-                    onChange={(e) => setTerminalNameState(e.target.value.toUpperCase())}
+                    onChange={(e) => setTerminalNameState(e.target.value)}
+                    onBlur={() => setTerminalNameState(prev => prev.toUpperCase())}
                     placeholder="Ej: CAJA_01, CAJA_02, MOSTRADOR"
                     className="w-full bg-[#08284c] border border-slate-600 rounded p-1 text-yellow-400 font-bold uppercase outline-none"
                   />
