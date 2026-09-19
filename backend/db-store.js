@@ -3890,10 +3890,10 @@ export async function abrirCaja(usd, ves, usuarioId, terminal, usuarioNombre) {
       const termName = terminal || 'CAJA_PRINCIPAL';
       const nowStr = getLocalISODateString();
 
-      // Cerrar cualquier apertura anterior huérfana
+      // Cerrar cualquier apertura anterior huérfana exclusivamente de ESTE MISMO usuario
       await pool.query(
-        "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = $2 WHERE (usuario_id = $1 OR estacion_nombre = $3) AND estatus = 'Abierta'",
-        [userId, nowStr, termName]
+        "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = $2 WHERE usuario_id = $1 AND estatus = 'Abierta'",
+        [userId, nowStr]
       ).catch(() => { });
 
       const res = await pool.query(
@@ -3937,32 +3937,29 @@ export async function cerrarCaja(cierre) {
 
       let activeCaja;
       if (!isNaN(userId) && userId > 0) {
+        // 1. Buscar si tiene caja abierta en esta terminal específica
         activeCaja = await pool.query(
           "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 AND usuario_id = $2 ORDER BY id DESC LIMIT 1",
           [termName, userId]
         );
+        // 2. Si no tiene en esta terminal (caja compartida en red), buscar cualquier caja abierta de ESTE MISMO usuario
         if (activeCaja.rowCount === 0) {
           activeCaja = await pool.query(
             "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY id DESC LIMIT 1",
             [userId]
           );
         }
-        if (activeCaja.rowCount === 0) {
-          activeCaja = await pool.query(
-            "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",
-            [termName]
-          );
-        }
       } else {
+        // Si no se proporcionó usuario, buscar por terminal
         activeCaja = await pool.query(
           "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",
           [termName]
         );
-      }
-      if (activeCaja.rowCount === 0) {
-        activeCaja = await pool.query(
-          "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1"
-        );
+        if (activeCaja.rowCount === 0) {
+          activeCaja = await pool.query(
+            "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1"
+          );
+        }
       }
       if (activeCaja.rowCount > 0) {
         const cajaId = activeCaja.rows[0].id;
