@@ -10,31 +10,41 @@ const __dirname = path.dirname(__filename);
  * Resolves all candidate writable image directories, prioritizing Windows user-writable folders (%LOCALAPPDATA%, %APPDATA%, User Profile)
  */
 function getAllCandidateImageDirectories() {
-  const dirs = [];
+  const rawDirs = [];
 
   if (process.env.LOCALAPPDATA) {
-    dirs.push(path.join(process.env.LOCALAPPDATA, 'WinterPos', 'data', 'product_images'));
+    rawDirs.push(path.join(process.env.LOCALAPPDATA, 'WinterPos', 'data', 'product_images'));
   }
   if (process.env.APPDATA) {
-    dirs.push(path.join(process.env.APPDATA, 'WinterPos', 'data', 'product_images'));
+    rawDirs.push(path.join(process.env.APPDATA, 'WinterPos', 'data', 'product_images'));
   }
   try {
     if (os.homedir()) {
-      dirs.push(path.join(os.homedir(), '.winterpos', 'data', 'product_images'));
-      dirs.push(path.join(os.homedir(), 'WinterPos', 'data', 'product_images'));
+      rawDirs.push(path.join(os.homedir(), '.winterpos', 'data', 'product_images'));
+      rawDirs.push(path.join(os.homedir(), 'WinterPos', 'data', 'product_images'));
     }
   } catch (_) {}
 
-  dirs.push(path.join(__dirname, 'data', 'product_images'));
-  dirs.push(path.resolve(process.cwd(), 'backend', 'data', 'product_images'));
-  dirs.push(path.resolve(process.cwd(), 'data', 'product_images'));
-  dirs.push(path.resolve(__dirname, '..', 'data', 'product_images'));
+  rawDirs.push(path.join(__dirname, 'data', 'product_images'));
+  rawDirs.push(path.resolve(process.cwd(), 'backend', 'data', 'product_images'));
+  rawDirs.push(path.resolve(process.cwd(), 'data', 'product_images'));
+  rawDirs.push(path.resolve(__dirname, '..', 'data', 'product_images'));
 
   try {
-    dirs.push(path.join(os.tmpdir(), 'winterpos_product_images'));
+    rawDirs.push(path.join(os.tmpdir(), 'winterpos_product_images'));
   } catch (_) {}
 
-  return dirs;
+  const uniqueDirs = [];
+  const seen = new Set();
+  for (const dir of rawDirs) {
+    const norm = path.normalize(dir).toLowerCase();
+    if (!seen.has(norm)) {
+      seen.add(norm);
+      uniqueDirs.push(dir);
+    }
+  }
+
+  return uniqueDirs;
 }
 
 export function getWritableImagesDirectory() {
@@ -472,26 +482,29 @@ export function saveUploadedImageBase64(base64Data, originalName = 'upload.jpg')
 }
 
 /**
- * Automatically synchronizes all existing image files across all candidate directories
+ * Automatically synchronizes any missing image files to the primary images directory
+ * Executes asynchronously in the background so it never blocks system startup.
  */
-export function syncAllImageDirectories() {
+export async function syncAllImageDirectories() {
   try {
     const dirs = getAllCandidateImageDirectories();
     const primary = IMAGES_DIR;
+    if (!fs.existsSync(primary)) {
+      try { fs.mkdirSync(primary, { recursive: true }); } catch (_) {}
+    }
+    const primaryFiles = new Set(fs.readdirSync(primary));
+
     for (const srcDir of dirs) {
-      if (!fs.existsSync(srcDir)) continue;
-      const files = fs.readdirSync(srcDir);
+      if (srcDir === primary || !fs.existsSync(srcDir)) continue;
+      const files = await fs.promises.readdir(srcDir);
       for (const file of files) {
-        if (!file.match(/\.(jpg|jpeg|png|webp|gif|svg)$/i)) continue;
-        const srcPath = path.join(srcDir, file);
-        for (const targetDir of dirs) {
-          if (!fs.existsSync(targetDir)) {
-            try { fs.mkdirSync(targetDir, { recursive: true }); } catch (_) {}
-          }
-          const targetPath = path.join(targetDir, file);
-          if (!fs.existsSync(targetPath)) {
-            try { fs.copyFileSync(srcPath, targetPath); } catch (_) {}
-          }
+        if (!primaryFiles.has(file) && file.match(/\.(jpg|jpeg|png|webp|gif|svg)$/i)) {
+          const srcPath = path.join(srcDir, file);
+          const targetPath = path.join(primary, file);
+          try {
+            await fs.promises.copyFile(srcPath, targetPath);
+            primaryFiles.add(file);
+          } catch (_) {}
         }
       }
     }
@@ -500,8 +513,10 @@ export function syncAllImageDirectories() {
   }
 }
 
-// Run initial sync on load
-syncAllImageDirectories();
+// Run non-blocking background sync safely after server has booted
+setTimeout(() => {
+  syncAllImageDirectories().catch(() => {});
+}, 3000);
 
 /**
  * Intelligent Multi-Source Real Product Image Engine:
