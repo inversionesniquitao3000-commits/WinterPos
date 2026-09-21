@@ -156,9 +156,7 @@ CREATE TABLE Ventas_Detalle (
 CREATE TABLE Pagos_Venta (
     id BIGSERIAL PRIMARY KEY,
     venta_id BIGINT NOT NULL,
-    metodo_pago VARCHAR(25) NOT NULL CHECK (
-        metodo_pago IN ('Efectivo$', 'EfectivoBs', 'Tarjeta$', 'TarjetaBs', 'PagoMovil', 'Biopago', 'CreditoCliente')
-    ),
+    metodo_pago VARCHAR(50) NOT NULL,
     monto_entregado_usd NUMERIC(12, 2) DEFAULT 0.00,
     monto_entregado_ves NUMERIC(12, 2) DEFAULT 0.00,
     monto_vuelto_usd NUMERIC(12, 2) DEFAULT 0.00,
@@ -347,3 +345,25 @@ CREATE TABLE IF NOT EXISTS Documentos_Empresa (
 
 CREATE INDEX IF NOT EXISTS idx_documentos_categoria ON Documentos_Empresa(categoria);
 CREATE INDEX IF NOT EXISTS idx_documentos_vencimiento ON Documentos_Empresa(fecha_vencimiento);
+
+-- ==========================================
+-- 20. MOVIMIENTOS BANCARIOS BDV (CONCILIACIÓN PAGO MÓVIL)
+-- ==========================================
+CREATE TABLE IF NOT EXISTS Movimientos_Bancarios_BDV (
+    id BIGSERIAL PRIMARY KEY,
+    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    referencia VARCHAR(50) NOT NULL,
+    monto_ves NUMERIC(12, 2) NOT NULL,
+    telefono_origen VARCHAR(30),
+    titular_origen VARCHAR(150),
+    banco_origen VARCHAR(100) DEFAULT 'Banco de Venezuela',
+    descripcion TEXT,
+    conciliado BOOLEAN DEFAULT FALSE,
+    venta_id BIGINT REFERENCES Ventas(id) ON DELETE SET NULL,
+    caja_id BIGINT REFERENCES Cajas_Apertura_Cierre(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_mov_bancarios_ref ON Movimientos_Bancarios_BDV(referencia);
+CREATE INDEX IF NOT EXISTS idx_mov_bancarios_fecha ON Movimientos_Bancarios_BDV(fecha);
+CREATE INDEX IF NOT EXISTS idx_mov_bancarios_conciliado ON Movimientos_Bancarios_BDV(conciliado);

@@ -793,6 +793,60 @@ export async function saveWhatsConfigDb(config) {
   return merged;
 }
 
+export const defaultPagoMovilConfig = {
+  tunnelProvider: 'localtunnel', // 'localtunnel' | 'cloudflare' | 'ngrok'
+  autoStartTunnel: false,
+  localtunnelSubdomain: 'winterpos-niquitao-caja',
+  tunnelToken: '',
+  cloudflareTunnelToken: '',
+  customDomain: '',
+  ngrokAuthtoken: '',
+  ngrokDomain: '',
+  activeWebhookUrl: '',
+  bankName: 'Banco de Venezuela (BDV)',
+  bancosHabilitados: ['BDV'],
+  notifyCajaOnPayment: true
+};
+
+export async function getPagoMovilConfigDb() {
+  if (usePostgres) {
+    try {
+      const res = await pool.query('SELECT pago_movil_config FROM Configuracion_Empresa ORDER BY id DESC LIMIT 1');
+      if (res.rowCount > 0 && res.rows[0].pago_movil_config) {
+        try {
+          const parsed = typeof res.rows[0].pago_movil_config === 'string'
+            ? JSON.parse(res.rows[0].pago_movil_config)
+            : res.rows[0].pago_movil_config;
+          return { ...defaultPagoMovilConfig, ...parsed };
+        } catch (_) { }
+      }
+    } catch (err) {
+      console.error('Error en getPagoMovilConfigDb (Postgres):', err.message);
+    }
+  }
+  return readJsonFile('pago_movil_config.json', defaultPagoMovilConfig);
+}
+
+export async function savePagoMovilConfigDb(config) {
+  const current = await getPagoMovilConfigDb();
+  const merged = { ...defaultPagoMovilConfig, ...current, ...config };
+  if (usePostgres) {
+    try {
+      const existing = await pool.query('SELECT id FROM Configuracion_Empresa ORDER BY id DESC LIMIT 1');
+      if (existing.rowCount > 0) {
+        await pool.query(
+          'UPDATE Configuracion_Empresa SET pago_movil_config = $1 WHERE id = $2',
+          [JSON.stringify(merged), existing.rows[0].id]
+        );
+      }
+    } catch (err) {
+      console.error('Error en savePagoMovilConfigDb (Postgres):', err.message);
+    }
+  }
+  writeJsonFile('pago_movil_config.json', merged);
+  return merged;
+}
+
 // Ultra-fast check for invoice sequence reference without loading all sales history
 export async function getLastInvoiceNumber() {
   if (usePostgres) {
@@ -3609,6 +3663,7 @@ export async function getCierres() {
           let livePagosBinanceUsd = 0;
           let livePagosPayPalUsd = 0;
           let livePagosCreditoUsd = 0;
+          let livePagosCasheaUsd = 0;
 
           for (const p of livePaymentsRes.rows) {
             const m = (p.metodo || '').toLowerCase().trim();
@@ -3634,11 +3689,13 @@ export async function getCierres() {
               livePagosPayPalUsd += valUsd;
             } else if (m.includes('credito')) {
               livePagosCreditoUsd += valUsd;
+            } else if (m.includes('cashea')) {
+              livePagosCasheaUsd += valUsd;
             }
           }
 
           // Fallback: if liveVentaTotal > 0 and no electronic payments were recorded, all non-BS is cash USD
-          if (liveVentasEfectivoUsd === 0 && liveVentaTotal > 0 && livePagosZelleUsd === 0 && livePagosBinanceUsd === 0 && livePagosPayPalUsd === 0 && livePagosCreditoUsd === 0 && livePagosPagoMovilVes === 0 && livePagosPuntoVes === 0 && livePagosBiopagoVes === 0 && liveVentasEfectivoVes === 0) {
+          if (liveVentasEfectivoUsd === 0 && liveVentaTotal > 0 && livePagosZelleUsd === 0 && livePagosBinanceUsd === 0 && livePagosPayPalUsd === 0 && livePagosCreditoUsd === 0 && livePagosCasheaUsd === 0 && livePagosPagoMovilVes === 0 && livePagosPuntoVes === 0 && livePagosBiopagoVes === 0 && liveVentasEfectivoVes === 0) {
             liveVentasEfectivoUsd = liveVentaTotal;
           }
 
@@ -3717,6 +3774,7 @@ export async function getCierres() {
             pagosBinanceUsd: livePagosBinanceUsd,
             pagosPayPalUsd: livePagosPayPalUsd,
             pagosCreditoUsd: livePagosCreditoUsd,
+            pagosCasheaUsd: livePagosCasheaUsd,
           };
         } catch (liveErr) {
           console.error('Error calculando live data para caja abierta', openR.id, liveErr.message);
@@ -3850,6 +3908,7 @@ export async function getCierres() {
           pagosBinanceUsd: parsedDetails.pagosBinanceUsd ?? (live.pagosBinanceUsd ?? 0),
           pagosPayPalUsd: parsedDetails.pagosPayPalUsd ?? (live.pagosPayPalUsd ?? 0),
           pagosCreditoUsd: parsedDetails.pagosCreditoUsd ?? (live.pagosCreditoUsd ?? 0),
+          pagosCasheaUsd: parsedDetails.pagosCasheaUsd ?? (live.pagosCasheaUsd ?? 0),
           ventaBrutaUsd: parsedDetails.ventaBrutaUsd ?? (ventaTotalUsdVal + (parsedDetails.descuentosUsd || 0)),
           descuentosUsd: parsedDetails.descuentosUsd ?? 0,
           abonoClientesUsd: finalAbonosUsd,
@@ -6318,6 +6377,271 @@ export async function deleteDocumentoEmpresa(id) {
   docs = docs.filter(d => String(d.id) !== String(id));
   writeJsonFile('documentos_empresa.json', docs);
   return docToDelete || null;
+}
+
+// ============================================================
+// CONCILIACIÓN DE PAGO MÓVIL Y MOVIMIENTOS BANCARIOS BDV
+// ============================================================
+
+function parseDateSafeBdv(dateStr) {
+  if (!dateStr) return new Date();
+  if (dateStr instanceof Date) return isNaN(dateStr.getTime()) ? new Date() : dateStr;
+  const s = String(dateStr).trim();
+  const m = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+  if (m) {
+    const d = m[1].padStart(2, '0');
+    const mo = m[2].padStart(2, '0');
+    const y = m[3].length === 2 ? `20${m[3]}` : m[3];
+    return new Date(`${y}-${mo}-${d}T12:00:00`);
+  }
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? new Date() : d;
+}
+
+export async function saveBdvMovements(movements = []) {
+  if (!Array.isArray(movements) || movements.length === 0) {
+    return { success: true, inserted: 0, total: 0 };
+  }
+
+  let insertedCount = 0;
+  if (usePostgres) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const m of movements) {
+        const ref = String(m.referencia || '').trim();
+        const amt = parseFloat(m.monto_ves || m.monto || 0);
+        if (!ref || amt <= 0) continue;
+
+        // Check if movement already exists
+        const exists = await client.query(
+          `SELECT id FROM Movimientos_Bancarios_BDV 
+           WHERE referencia = $1 AND ABS(monto_ves - $2) <= 0.05 LIMIT 1`,
+          [ref, amt]
+        );
+
+        if (exists.rowCount === 0) {
+          await client.query(
+            `INSERT INTO Movimientos_Bancarios_BDV 
+             (fecha, referencia, monto_ves, telefono_origen, titular_origen, banco_origen, descripcion, caja_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [
+              parseDateSafeBdv(m.fecha),
+              ref,
+              amt,
+              m.telefono_origen || '',
+              m.titular_origen || '',
+              m.banco_origen || 'Banco de Venezuela',
+              m.descripcion || 'PAGO MOVIL BDV',
+              m.caja_id || null
+            ]
+          );
+          insertedCount++;
+        }
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('Error guardando movimientos BDV:', err.message);
+      throw err;
+    } finally {
+      client.release();
+    }
+  } else {
+    const current = readJsonFile('movimientos_bancarios_bdv.json', []);
+    for (const m of movements) {
+      const ref = String(m.referencia || '').trim();
+      const amt = parseFloat(m.monto_ves || m.monto || 0);
+      if (!ref || amt <= 0) continue;
+
+      const dup = current.find(x => x.referencia === ref && Math.abs(x.monto_ves - amt) <= 0.05);
+      if (!dup) {
+        current.push({
+          id: Date.now() + Math.floor(Math.random() * 1000),
+          fecha: m.fecha || new Date().toISOString(),
+          referencia: ref,
+          monto_ves: amt,
+          telefono_origen: m.telefono_origen || '',
+          titular_origen: m.titular_origen || '',
+          banco_origen: m.banco_origen || 'Banco de Venezuela',
+          descripcion: m.descripcion || 'PAGO MOVIL BDV',
+          conciliado: false,
+          created_at: new Date().toISOString()
+        });
+        insertedCount++;
+      }
+    }
+    writeJsonFile('movimientos_bancarios_bdv.json', current);
+  }
+
+  return { success: true, inserted: insertedCount, total: movements.length };
+}
+
+export async function getBdvMovements(limit = 100) {
+  if (usePostgres) {
+    try {
+      const res = await pool.query(
+        `SELECT m.*, v.factura_nro 
+         FROM Movimientos_Bancarios_BDV m
+         LEFT JOIN Ventas v ON v.id = m.venta_id
+         ORDER BY m.fecha DESC LIMIT $1`,
+        [limit]
+      );
+      return res.rows;
+    } catch (err) {
+      console.error('Error obteniendo movimientos BDV:', err.message);
+      return [];
+    }
+  }
+  const movs = readJsonFile('movimientos_bancarios_bdv.json', []);
+  return movs.slice(0, limit);
+}
+
+export async function validateBdvPayment(reference, amountVES) {
+  const cleanRef = String(reference || '').trim().replace(/[^a-zA-Z0-9]/g, '');
+  const amt = parseFloat(amountVES || 0);
+
+  if (!cleanRef || amt <= 0) {
+    return { verified: false, message: 'Referencia o monto inválido' };
+  }
+
+  if (usePostgres) {
+    try {
+      // Find matching bank movement by exact reference or suffix match (e.g. 4 digits)
+      const res = await pool.query(
+        `SELECT m.*, v.factura_nro 
+         FROM Movimientos_Bancarios_BDV m
+         LEFT JOIN Ventas v ON v.id = m.venta_id
+         WHERE ABS(m.monto_ves - $1) <= 0.05
+           AND (m.referencia = $2 OR m.referencia LIKE $3 OR $2 LIKE ('%' || m.referencia))
+         ORDER BY m.fecha DESC LIMIT 1`,
+        [amt, cleanRef, `%${cleanRef}`]
+      );
+
+      if (res.rowCount > 0) {
+        const mov = res.rows[0];
+        return {
+          verified: true,
+          movement: mov,
+          alreadyUsed: !!mov.conciliado,
+          usedInFactura: mov.factura_nro || null,
+          message: mov.conciliado 
+            ? `⚠️ Pago encontrado pero ya fue conciliado con la Factura: ${mov.factura_nro || mov.venta_id}` 
+            : '✅ Pago verificado y acreditado en Banco de Venezuela'
+        };
+      }
+    } catch (err) {
+      console.error('Error validando pago BDV:', err.message);
+    }
+  } else {
+    const current = readJsonFile('movimientos_bancarios_bdv.json', []);
+    const mov = current.find(x => 
+      Math.abs(x.monto_ves - amt) <= 0.05 && 
+      (x.referencia === cleanRef || x.referencia.endsWith(cleanRef) || cleanRef.endsWith(x.referencia))
+    );
+    if (mov) {
+      return {
+        verified: true,
+        movement: mov,
+        alreadyUsed: !!mov.conciliado,
+        message: '✅ Pago verificado en Banco de Venezuela'
+      };
+    }
+  }
+
+  return {
+    verified: false,
+    message: '❌ Pago no encontrado en los movimientos de Banco de Venezuela registrados'
+  };
+}
+
+export async function reconcileShiftPagoMovilDb(cajaId) {
+  if (!usePostgres) return { success: false, error: 'Requiere base de datos PostgreSQL' };
+
+  try {
+    // 1. Get all Pago Movil payments in this shift or today
+    let query = `
+      SELECT pv.id as pago_id, pv.venta_id, pv.monto_entregado_ves, pv.numero_referencia, pv.banco_emisor,
+             v.factura_nro, v.fecha, v.total_usd, v.total_ves, c.nombre as cliente_nombre
+      FROM Pagos_Venta pv
+      JOIN Ventas v ON v.id = pv.venta_id
+      LEFT JOIN Clientes c ON c.id = v.cliente_id
+      WHERE LOWER(pv.metodo_pago) = 'pagomovil'
+    `;
+    const params = [];
+    if (cajaId && Number(cajaId) > 0) {
+      params.push(Number(cajaId));
+      query += ` AND v.caja_id = $1`;
+    } else {
+      query += ` AND v.fecha >= CURRENT_DATE`;
+    }
+    query += ` ORDER BY v.fecha DESC`;
+
+    const salesRes = await pool.query(query, params);
+    const payments = salesRes.rows;
+
+    // 2. Cross with Movimientos_Bancarios_BDV
+    const results = [];
+    let conciliadasQty = 0;
+    let conciliadasMontoVES = 0;
+    let pendientesQty = 0;
+    let pendientesMontoVES = 0;
+
+    for (const p of payments) {
+      const ref = String(p.numero_referencia || '').trim();
+      const amt = parseFloat(p.monto_entregado_ves || 0);
+
+      const matchRes = await pool.query(
+        `SELECT id, fecha, referencia, monto_ves, descripcion, conciliado
+         FROM Movimientos_Bancarios_BDV
+         WHERE ABS(monto_ves - $1) <= 0.05
+           AND (referencia = $2 OR referencia LIKE $3 OR $2 LIKE ('%' || referencia))
+         LIMIT 1`,
+        [amt, ref, `%${ref}`]
+      );
+
+      const isMatch = matchRes.rowCount > 0;
+      if (isMatch) {
+        conciliadasQty++;
+        conciliadasMontoVES += amt;
+        const mov = matchRes.rows[0];
+
+        // Link movement to sale
+        await pool.query(
+          `UPDATE Movimientos_Bancarios_BDV SET conciliado = TRUE, venta_id = $1 WHERE id = $2`,
+          [p.venta_id, mov.id]
+        );
+
+        results.push({
+          ...p,
+          status: 'CONCILIADA',
+          banco_movimiento: mov
+        });
+      } else {
+        pendientesQty++;
+        pendientesMontoVES += amt;
+        results.push({
+          ...p,
+          status: 'PENDIENTE',
+          banco_movimiento: null
+        });
+      }
+    }
+
+    return {
+      success: true,
+      totalPagos: payments.length,
+      totalVES: conciliadasMontoVES + pendientesMontoVES,
+      conciliadasQty,
+      conciliadasMontoVES,
+      pendientesQty,
+      pendientesMontoVES,
+      items: results
+    };
+  } catch (err) {
+    console.error('Error conciliando turno BDV:', err.message);
+    return { success: false, error: err.message };
+  }
 }
 
 

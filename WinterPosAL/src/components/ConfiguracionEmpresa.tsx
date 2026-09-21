@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { CompanyConfig, User, Role, PrinterConfig, ScaleConfig } from '../types';
 import { 
   Save, CheckCircle2, Users, HardDrive, Cpu, 
   Trash2, Edit, Plus, Download, Upload, ShieldAlert,
   Settings, CheckSquare, Square, Globe, ShieldCheck, Printer, FileText,
   LogOut, Unplug, KeyRound, Lock, Eye, EyeOff, DollarSign,
-  RefreshCw, Unlock, RotateCcw, AlertTriangle, Cloud, Tag, Layers, Percent, Calendar
+  RefreshCw, Unlock, RotateCcw, AlertTriangle, Cloud, Tag, Layers, Percent, Calendar,
+  Smartphone, Copy, Play, Terminal, QrCode, Check, Send, Sparkles, HelpCircle, ExternalLink
 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr, formatBs } from '../utils';
@@ -180,7 +181,7 @@ export default function ConfiguracionEmpresa({
 }: ConfiguracionEmpresaProps) {
   const { showAlert, showConfirm } = useDialog();
   // Navigation tabs
-  const [activeTab, setActiveTab] = useState<'empresa' | 'usuarios' | 'perifericos' | 'db' | 'whatsapp'>('empresa');
+  const [activeTab, setActiveTab] = useState<'empresa' | 'usuarios' | 'perifericos' | 'db' | 'whatsapp' | 'pagomovil'>('empresa');
   const [subTabUsers, setSubTabUsers] = useState<'users' | 'roles' | 'sesiones' | 'politicas' | 'masterpass'>('users');
   const [showMasterPassModal, setShowMasterPassModal] = useState(false);
   const [dbUnlocked, setDbUnlocked] = useState(false);
@@ -324,6 +325,250 @@ export default function ConfiguracionEmpresa({
   // Success states
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Pago Móvil Tunnel Integration States
+  const [pmTunnelStatus, setPmTunnelStatus] = useState<any>({
+    status: 'stopped',
+    publicUrl: '',
+    webhookUrl: '',
+    autoStart: false,
+    token: '',
+    customDomain: '',
+    logs: [],
+    hasActiveProcess: false
+  });
+  const [pmStarting, setPmStarting] = useState(false);
+  const [pmStopping, setPmStopping] = useState(false);
+  const [pmSaving, setPmSaving] = useState(false);
+  const [pmCopiedUrl, setPmCopiedUrl] = useState(false);
+  const [pmAutoStart, setPmAutoStart] = useState(false);
+  const pmConfigLoadedRef = useRef(false);
+  const [pmToken, setPmToken] = useState(() => localStorage.getItem('pos_pago_movil_token') || '');
+  const [pmCustomDomain, setPmCustomDomain] = useState(() => localStorage.getItem('pos_pago_movil_domain') || '');
+  const [tunnelProvider, setTunnelProvider] = useState<'localtunnel' | 'cloudflare' | 'ngrok'>(() => {
+    return (localStorage.getItem('pos_tunnel_provider') as 'localtunnel' | 'cloudflare' | 'ngrok') || 'localtunnel';
+  });
+  const [ltSubdomain, setLtSubdomain] = useState(() => localStorage.getItem('pos_lt_subdomain') || 'winterpos-niquitao-caja');
+  const [ngrokAuthtoken, setNgrokAuthtoken] = useState(() => localStorage.getItem('pos_ngrok_authtoken') || '');
+  const [ngrokDomain, setNgrokDomain] = useState(() => localStorage.getItem('pos_ngrok_domain') || '');
+  const [showNgrokTokenText, setShowNgrokTokenText] = useState(false);
+  const [showNgrokGuide, setShowNgrokGuide] = useState(false);
+  const [pmTestPhone, setPmTestPhone] = useState('04121234567');
+  const [pmTestRef, setPmTestRef] = useState('987654321');
+  const [pmTestMonto, setPmTestMonto] = useState('150.00');
+  const [pmTestingSms, setPmTestingSms] = useState(false);
+  const [pmTestResult, setPmTestResult] = useState<any>(null);
+  const [showPmTokenGuide, setShowPmTokenGuide] = useState(false);
+  const [showTokenText, setShowTokenText] = useState(false);
+
+  const fetchPmTunnelStatus = async (forceLoadInputs = false) => {
+    try {
+      const res = await fetch(getApiUrl('/conciliacion/tunnel/status'));
+      if (res.ok) {
+        const data = await res.json();
+        setPmTunnelStatus(data);
+        if (typeof data.autoStart === 'boolean') {
+          setPmAutoStart(data.autoStart);
+        }
+        // Únicamente actualizar los campos de texto al entrar por primera vez o si se fuerza, NUNCA durante el sondeo
+        if (forceLoadInputs || !pmConfigLoadedRef.current) {
+          pmConfigLoadedRef.current = true;
+          if (data.tunnelProvider) {
+            setTunnelProvider(data.tunnelProvider);
+            localStorage.setItem('pos_tunnel_provider', data.tunnelProvider);
+          }
+          const serverLtSub = (data.localtunnelSubdomain || 'winterpos-niquitao-caja').trim();
+          setLtSubdomain(serverLtSub);
+          if (serverLtSub) {
+            localStorage.setItem('pos_lt_subdomain', serverLtSub);
+          }
+          const serverToken = (data.token || data.tunnelToken || data.cloudflareTunnelToken || '').trim();
+          setPmToken(serverToken);
+          if (serverToken) {
+            localStorage.setItem('pos_pago_movil_token', serverToken);
+          } else {
+            localStorage.removeItem('pos_pago_movil_token');
+          }
+          const serverDomain = (data.customDomain || '').trim();
+          setPmCustomDomain(serverDomain);
+          if (serverDomain) {
+            localStorage.setItem('pos_pago_movil_domain', serverDomain);
+          } else {
+            localStorage.removeItem('pos_pago_movil_domain');
+          }
+          const serverNgrokToken = (data.ngrokAuthtoken || '').trim();
+          setNgrokAuthtoken(serverNgrokToken);
+          if (serverNgrokToken) {
+            localStorage.setItem('pos_ngrok_authtoken', serverNgrokToken);
+          } else {
+            localStorage.removeItem('pos_ngrok_authtoken');
+          }
+          const serverNgrokDom = (data.ngrokDomain || '').trim();
+          setNgrokDomain(serverNgrokDom);
+          if (serverNgrokDom) {
+            localStorage.setItem('pos_ngrok_domain', serverNgrokDom);
+          } else {
+            localStorage.removeItem('pos_ngrok_domain');
+          }
+        }
+      }
+    } catch (_) {}
+  };
+
+  useEffect(() => {
+    if (activeTab === 'pagomovil') {
+      fetchPmTunnelStatus(false);
+      const interval = setInterval(() => {
+        fetchPmTunnelStatus(false);
+      }, 3500);
+      return () => clearInterval(interval);
+    }
+  }, [activeTab]);
+
+  const handleStartPmTunnel = async () => {
+    setPmStarting(true);
+    try {
+      const res = await fetch(getApiUrl('/conciliacion/tunnel/start'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: pmToken.trim() })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSuccessMsg('Iniciando servicio de túnel seguro en segundo plano...');
+        setTimeout(() => setSuccessMsg(''), 4000);
+        setTimeout(() => fetchPmTunnelStatus(false), 1500);
+        setTimeout(() => fetchPmTunnelStatus(false), 3500);
+        setTimeout(() => fetchPmTunnelStatus(false), 6000);
+      } else {
+        showAlert(data.message || 'Error al iniciar túnel', 'Error', 'error');
+      }
+    } catch (err: any) {
+      showAlert('Error de conexión: ' + err.message, 'Error', 'error');
+    } finally {
+      setPmStarting(false);
+    }
+  };
+
+  const handleStopPmTunnel = async () => {
+    setPmStopping(true);
+    try {
+      const res = await fetch(getApiUrl('/conciliacion/tunnel/stop'), { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setSuccessMsg('Túnel detenido en segundo plano.');
+        setTimeout(() => setSuccessMsg(''), 4000);
+        fetchPmTunnelStatus(false);
+      }
+    } catch (err: any) {
+      showAlert('Error al detener túnel: ' + err.message, 'Error', 'error');
+    } finally {
+      setPmStopping(false);
+    }
+  };
+
+  const handleSavePmConfig = async (newAutoStart?: boolean) => {
+    setPmSaving(true);
+    const autoVal = typeof newAutoStart === 'boolean' ? newAutoStart : pmAutoStart;
+    const cleanToken = pmToken.trim();
+    const cleanDomain = pmCustomDomain.trim();
+    const cleanNgrokToken = ngrokAuthtoken.trim();
+    const cleanNgrokDomain = ngrokDomain.trim();
+
+    const cleanLtSub = ltSubdomain.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    localStorage.setItem('pos_lt_subdomain', cleanLtSub);
+
+    localStorage.setItem('pos_tunnel_provider', tunnelProvider);
+
+    if (cleanToken) {
+      localStorage.setItem('pos_pago_movil_token', cleanToken);
+    } else {
+      localStorage.removeItem('pos_pago_movil_token');
+    }
+
+    if (cleanDomain) {
+      localStorage.setItem('pos_pago_movil_domain', cleanDomain);
+    } else {
+      localStorage.removeItem('pos_pago_movil_domain');
+    }
+
+    if (cleanNgrokToken) {
+      localStorage.setItem('pos_ngrok_authtoken', cleanNgrokToken);
+    } else {
+      localStorage.removeItem('pos_ngrok_authtoken');
+    }
+
+    if (cleanNgrokDomain) {
+      localStorage.setItem('pos_ngrok_domain', cleanNgrokDomain);
+    } else {
+      localStorage.removeItem('pos_ngrok_domain');
+    }
+
+    try {
+      const res = await fetch(getApiUrl('/conciliacion/tunnel/config'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tunnelProvider,
+          autoStartTunnel: autoVal,
+          localtunnelSubdomain: cleanLtSub,
+          tunnelToken: cleanToken,
+          cloudflareTunnelToken: cleanToken,
+          token: cleanToken,
+          customDomain: cleanDomain,
+          ngrokAuthtoken: cleanNgrokToken,
+          ngrokDomain: cleanNgrokDomain,
+          restartTunnel: pmTunnelStatus.hasActiveProcess
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSuccessMsg('Configuración de Pago Móvil guardada exitosamente.');
+        setTimeout(() => setSuccessMsg(''), 4000);
+        fetchPmTunnelStatus(false);
+      } else {
+        showAlert(data.message || 'Error al guardar configuración', 'Error', 'error');
+      }
+    } catch (err: any) {
+      showAlert('Error al conectar con el servidor: ' + err.message, 'Error', 'error');
+    } finally {
+      setPmSaving(false);
+    }
+  };
+
+  const handleTestSmsWebhook = async () => {
+    setPmTestingSms(true);
+    setPmTestResult(null);
+    try {
+      const testMsg = `PagoMovil BDV: Recibiste Bs ${pmTestMonto} de ${pmTestPhone} Ref: ${pmTestRef} el ${new Date().toLocaleDateString('es-VE')} ${new Date().toLocaleTimeString('es-VE')}`;
+      const targetUrl = pmTunnelStatus.webhookUrl || getApiUrl('/conciliacion/sms-webhook');
+      const res = await fetch(targetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ smsText: testMsg })
+      });
+      const data = await res.json();
+      setPmTestResult(data);
+      if (data.success && data.saved) {
+        setSuccessMsg(`¡SMS de prueba validado con éxito! Ref: ${pmTestRef}`);
+        setTimeout(() => setSuccessMsg(''), 5000);
+      } else {
+        showAlert('El webhook respondió pero no guardó el movimiento: ' + JSON.stringify(data), 'Atención', 'warning');
+      }
+    } catch (err: any) {
+      setPmTestResult({ error: err.message });
+      showAlert('Error al enviar webhook de prueba: ' + err.message, 'Error de Envío', 'error');
+    } finally {
+      setPmTestingSms(false);
+    }
+  };
+
+  const handleCopyPmWebhook = () => {
+    const url = pmTunnelStatus.webhookUrl || `${window.location.protocol}//${window.location.hostname}:5000/api/conciliacion/sms-webhook`;
+    navigator.clipboard.writeText(url);
+    setPmCopiedUrl(true);
+    setTimeout(() => setPmCopiedUrl(false), 2500);
+  };
 
   // 1. Tab Empresa - States
   const [formData, setFormData] = useState<CompanyConfig>(() => ({
@@ -1584,6 +1829,7 @@ export default function ConfiguracionEmpresa({
     { id: 'tarjeta_usd', label: 'Tarjeta $ (USD)' },
     { id: 'pago_movil', label: 'Pago Móvil Bs' },
     { id: 'biopago', label: 'Biopago Bs' },
+    { id: 'cashea', label: 'Cashea (BNPL Cuotas)' },
     { id: 'binance', label: 'Binance $' },
     { id: 'paypal', label: 'PayPal $' },
     { id: 'credito', label: 'Crédito Cliente $' }
@@ -1712,6 +1958,19 @@ export default function ConfiguracionEmpresa({
             }`}
           >
             Base de Datos
+          </button>
+        )}
+        {isAdmin && (
+          <button
+            onClick={() => setActiveTab('pagomovil')}
+            className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all flex items-center gap-1.5 ${
+              activeTab === 'pagomovil'
+                ? 'bg-white border-slate-200 text-emerald-700 font-sans shadow-xs'
+                : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
+            }`}
+          >
+            <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
+            Integración Pago Móvil
           </button>
         )}
       </div>
@@ -4555,6 +4814,864 @@ export default function ConfiguracionEmpresa({
               </form>
 
             </div>
+          </div>
+        )}
+
+        {/* TAB 6: INTEGRACIÓN PAGO MÓVIL (TÚNEL SEGURO BDV) */}
+        {activeTab === 'pagomovil' && (
+          <div className="space-y-6 w-full px-2 lg:px-4 mx-auto animate-fade-in font-sans">
+            
+            {/* HERO HEADER */}
+            <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white rounded-2xl p-6 shadow-md border border-emerald-700/40 relative overflow-hidden">
+              <div className="relative z-10 space-y-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-emerald-500/20 rounded-xl border border-emerald-400/30">
+                    <Smartphone className="w-5 h-5 text-emerald-400" />
+                  </div>
+                  <h2 className="text-base font-extrabold tracking-wide uppercase">
+                    Integración y Conciliación de Pago Móvil BDV en Segundo Plano
+                  </h2>
+                </div>
+                <p className="text-xs text-emerald-100/80 max-w-3xl leading-relaxed">
+                  Conecte el reenvío de SMS de su Banco de Venezuela a WinterPos. Al activar el modo automático, el servidor levantará silenciosamente el túnel de internet en segundo plano <strong>sin ventanas de CMD</strong> y <strong>sin que el cajero tenga que ejecutar nada</strong>.
+                </p>
+              </div>
+            </div>
+
+            {/* MAIN 2-COLUMN GRID */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              
+              {/* LEFT COLUMN: ESTADO, AUTOMATIZACIÓN Y SERVICIO */}
+              <div className="lg:col-span-6 space-y-6">
+                
+                {/* CARD 1: AUTOMATIZACIÓN & CONTROL DEL TÚNEL */}
+                <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-5">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <h3 className="text-xs font-bold text-slate-800 uppercase flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-emerald-600" />
+                      Automatización y Estado del Servicio
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => fetchPmTunnelStatus(false)}
+                      className="text-[10.5px] text-emerald-700 hover:text-emerald-900 font-bold flex items-center gap-1 bg-emerald-50 px-2 py-1 rounded-lg transition-all cursor-pointer"
+                      title="Actualizar estado en vivo"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      <span>Actualizar</span>
+                    </button>
+                  </div>
+
+                  {/* MASTER TOGGLE: AUTO-START ON BOOT */}
+                  <div className="bg-emerald-50/60 border border-emerald-200 rounded-xl p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <span className="text-xs font-black text-emerald-950 uppercase tracking-wide block">
+                          🚀 Inicio Automático al Encender la PC / Servidor
+                        </span>
+                        <p className="text-[11px] text-emerald-800/90 leading-snug">
+                          El túnel se activará solo en segundo plano al arrancar WinterPos. <strong>El cajero no tendrá que intervenir nunca.</strong>
+                        </p>
+                      </div>
+
+                      {/* Switch Button */}
+                      <button
+                        type="button"
+                        disabled={pmSaving}
+                        onClick={() => {
+                          const nextVal = !pmAutoStart;
+                          setPmAutoStart(nextVal);
+                          handleSavePmConfig(nextVal);
+                        }}
+                        className={`relative inline-flex h-6 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          pmAutoStart ? 'bg-emerald-600' : 'bg-slate-300'
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                            pmAutoStart ? 'translate-x-6' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    <div className="pt-1 flex items-center gap-1.5 text-[10.5px] text-emerald-700 font-bold">
+                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>{pmAutoStart ? 'Modo 100% Autónomo Habilitado (Recomendado)' : 'Modo Manual (Requiere iniciar túnel a mano)'}</span>
+                    </div>
+                  </div>
+
+                  {/* SILENT BACKGROUND RUNTIME ANSWER CARD */}
+                  <div className="bg-slate-900 text-slate-100 rounded-xl p-4 space-y-2 text-xs">
+                    <div className="flex items-center gap-2 text-emerald-400 font-bold text-[11.5px]">
+                      <Terminal className="w-4 h-4 text-emerald-400" />
+                      <span>¿La ventana CMD tiene que permanecer abierta?</span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 leading-relaxed font-sans">
+                      <strong>NO.</strong> Este servicio se ejecuta con <code className="bg-black/40 text-emerald-300 px-1 py-0.5 rounded font-mono">windowsHide: true</code> dentro del motor Node.js. <strong>No aparece ninguna ventana CMD en pantalla ni en la barra de tareas</strong>, permitiendo que la computadora del cajero trabaje 100% limpia sin riesgo de que cierren la consola por error.
+                    </p>
+                  </div>
+
+                  {/* LIVE STATUS BANNER */}
+                  <div className="p-4 rounded-xl border space-y-3 bg-slate-50 border-slate-200">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-slate-600 uppercase">Estado en Vivo:</span>
+                      
+                      {pmTunnelStatus.status === 'running' ? (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-100 border border-emerald-300 text-emerald-800 rounded-full font-black text-xs shadow-xs">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
+                          <span>EN LÍNEA (SEGUNDO PLANO)</span>
+                        </span>
+                      ) : pmTunnelStatus.status === 'starting' ? (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-100 border border-amber-300 text-amber-800 rounded-full font-black text-xs animate-pulse">
+                          <RefreshCw className="w-3 h-3 animate-spin text-amber-700" />
+                          <span>INICIANDO TÚNEL...</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-200 border border-slate-300 text-slate-700 rounded-full font-bold text-xs">
+                          <span className="w-2.5 h-2.5 rounded-full bg-slate-400" />
+                          <span>DETENIDO / REPOSO</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Metadata indicators */}
+                    <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-slate-200 text-slate-600">
+                      <div>
+                        <span className="text-slate-400 block text-[10px] uppercase">Puerto Local:</span>
+                        <strong className="font-mono text-slate-800">http://localhost:5000</strong>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[10px] uppercase">Proceso en Memoria:</span>
+                        <strong className="font-mono text-slate-800">
+                          {pmTunnelStatus.hasActiveProcess ? 'Activo (Daemon)' : 'Inactivo'}
+                        </strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ACTION BUTTONS */}
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                    {pmTunnelStatus.status === 'running' || pmTunnelStatus.hasActiveProcess ? (
+                      <button
+                        type="button"
+                        disabled={pmStopping}
+                        onClick={handleStopPmTunnel}
+                        className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      >
+                        <Square className="w-3.5 h-3.5 text-white" />
+                        <span>{pmStopping ? 'Deteniendo...' : 'Detener Túnel'}</span>
+                      </button>
+                    ) : pmTunnelStatus.status === 'starting' ? (
+                      <button
+                        type="button"
+                        disabled
+                        className="px-5 py-2.5 bg-amber-600 text-white rounded-lg text-xs font-black uppercase transition-all shadow-sm flex items-center gap-2 opacity-80 cursor-wait"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-white" />
+                        <span>Iniciando Túnel...</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={pmStarting}
+                        onClick={handleStartPmTunnel}
+                        className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-black uppercase transition-all shadow-sm flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                      >
+                        <Play className="w-3.5 h-3.5 fill-current" />
+                        <span>{pmStarting ? 'Iniciando Túnel...' : 'Iniciar Túnel en Segundo Plano'}</span>
+                      </button>
+                    )}
+                  </div>
+
+                </div>
+
+                {/* CARD 2: DOMINIO PERMANENTE (CLOUDFLARE O NGROK) */}
+                <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4">
+                  {/* SELECTOR DE PROVEEDOR */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-2">
+                      <Globe className="w-4 h-4 text-sky-600" />
+                      <h3 className="text-xs font-bold text-slate-800 uppercase">
+                        Proveedor de Túnel de Internet
+                      </h3>
+                    </div>
+
+                    <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
+                      <button
+                        type="button"
+                        onClick={() => setTunnelProvider('localtunnel')}
+                        className={`px-3 py-1.5 rounded-md text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                          tunnelProvider === 'localtunnel'
+                            ? 'bg-white text-teal-700 shadow-2xs font-extrabold'
+                            : 'text-slate-500 hover:text-slate-800'
+                        }`}
+                      >
+                        <span>Localtunnel</span>
+                        <span className="bg-teal-100 text-teal-800 text-[9px] px-1.5 py-0.2 rounded-full font-black">
+                          Recomendado VE
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setTunnelProvider('cloudflare')}
+                        className={`px-3 py-1.5 rounded-md text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                          tunnelProvider === 'cloudflare'
+                            ? 'bg-white text-sky-700 shadow-2xs'
+                            : 'text-slate-500 hover:text-slate-800'
+                        }`}
+                      >
+                        <span>Cloudflare</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setTunnelProvider('ngrok')}
+                        className={`px-3 py-1.5 rounded-md text-[11px] font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                          tunnelProvider === 'ngrok'
+                            ? 'bg-white text-emerald-700 shadow-2xs'
+                            : 'text-slate-500 hover:text-slate-800'
+                        }`}
+                      >
+                        <span>Ngrok</span>
+                        <span className="bg-amber-100 text-amber-800 text-[9px] px-1.5 py-0.2 rounded-full font-black">
+                          Requiere VPN
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* CASO 1: PROVEEDOR LOCALTUNNEL (100% PERMANENTE, SIN REGISTRO, SIN BLOQUEOS EN VENEZUELA) */}
+                  {tunnelProvider === 'localtunnel' ? (
+                    <div className="space-y-4 animate-fadeIn">
+                      <div className="bg-teal-50/90 border border-teal-200 rounded-xl p-3.5 text-xs text-teal-950 space-y-1">
+                        <strong className="flex items-center gap-1.5 text-teal-950 font-black">
+                          🌟 Solución Permanente Recomendada para Venezuela: Sin Registro, Sin Tarjetas ni Bloqueos
+                        </strong>
+                        <p className="text-[11px] text-teal-800 leading-relaxed">
+                          Localtunnel <strong>no requiere crear cuentas</strong>, ni contraseñas, ni VPNs, y funciona 100% libre desde Venezuela sin bloqueos de IP. Tú decides tu subdominio permanente (ej: <code className="bg-teal-100 px-1 py-0.2 rounded font-mono">winterpos-niquitao-caja</code>). Lo configuras <strong>una sola vez en el teléfono</strong> y no lo tocas nunca más.
+                        </p>
+                      </div>
+
+                      {/* SUBDOMINIO PERSONALIZADO */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">
+                          Nombre / Subdominio Fijo Personalizado:
+                        </label>
+                        <div className="flex items-center rounded-lg border border-slate-300 bg-slate-50 overflow-hidden focus-within:bg-white focus-within:border-teal-600">
+                          <span className="px-3 py-2 text-xs font-mono text-slate-400 bg-slate-100 border-r border-slate-200 select-none">
+                            https://
+                          </span>
+                          <input
+                            type="text"
+                            value={ltSubdomain}
+                            onChange={(e) => {
+                              const val = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+                              setLtSubdomain(val);
+                            }}
+                            placeholder="ej: winterpos-niquitao-caja"
+                            className="flex-1 bg-transparent p-2.5 text-xs font-mono font-bold text-slate-800 focus:outline-none"
+                          />
+                          <span className="px-3 py-2 text-xs font-mono text-slate-400 bg-slate-100 border-l border-slate-200 select-none">
+                            .loca.lt
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-slate-500 block">
+                          Enlace Webhook que quedará en tu teléfono: <strong className="text-teal-700 font-mono">https://{ltSubdomain || 'tu-nombre'}.loca.lt/api/conciliacion/sms-webhook</strong>
+                        </span>
+                      </div>
+
+                      <div className="flex justify-end pt-1">
+                        <button
+                          type="button"
+                          disabled={pmSaving}
+                          onClick={() => handleSavePmConfig()}
+                          className="px-5 py-2 bg-teal-700 hover:bg-teal-800 text-white rounded-lg text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                          <span>{pmSaving ? 'Guardando...' : 'Guardar Preferencias'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : tunnelProvider === 'ngrok' ? (
+                    <div className="space-y-4 animate-fadeIn">
+                      <div className="bg-emerald-50/80 border border-emerald-200 rounded-xl p-3.5 text-xs text-emerald-900 space-y-1">
+                        <strong className="flex items-center gap-1.5 text-emerald-950 font-black">
+                          🌟 Opción 100% Permanente: 1 Dominio Fijo Gratuito de por vida
+                        </strong>
+                        <p className="text-[11px] text-emerald-800 leading-relaxed">
+                          Ngrok regala a cada cuenta gratuita <strong>1 dominio estático permanente</strong> (ej: <code className="bg-emerald-100 px-1 py-0.2 rounded font-mono">winterpos-caja.ngrok-free.app</code>) sin pedir tarjetas ni comprar dominios. Lo configuras en el teléfono <strong>una sola vez</strong> y no lo tocas nunca más.
+                        </p>
+                      </div>
+
+                      {/* AUTHTOKEN NGROK */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                            Authtoken de Ngrok:
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setShowNgrokTokenText(!showNgrokTokenText)}
+                            className="text-[10px] text-emerald-600 hover:text-emerald-800 font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            {showNgrokTokenText ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                            <span>{showNgrokTokenText ? 'Ocultar código' : 'Ver código'}</span>
+                          </button>
+                        </div>
+
+                        <div className="relative">
+                          <input
+                            type={showNgrokTokenText ? "text" : "password"}
+                            value={ngrokAuthtoken}
+                            onChange={(e) => {
+                              setNgrokAuthtoken(e.target.value.trim());
+                            }}
+                            placeholder="Pegue aquí su Authtoken de Ngrok (ej: 2tABC123...)"
+                            className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-mono text-slate-800 focus:bg-white focus:border-emerald-500 focus:outline-none pr-8"
+                          />
+                          {ngrokAuthtoken && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNgrokAuthtoken('');
+                              }}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
+                              title="Borrar token"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* DOMINIO ESTÁTICO NGROK */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">
+                          Dominio Fijo Asignado de Ngrok:
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={ngrokDomain}
+                            onChange={(e) => {
+                              setNgrokDomain(e.target.value.trim().toLowerCase());
+                            }}
+                            placeholder="Ejemplo: winterpos-caja.ngrok-free.app"
+                            className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-mono text-slate-800 focus:bg-white focus:border-emerald-500 focus:outline-none pr-8"
+                          />
+                          {ngrokDomain && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNgrokDomain('');
+                              }}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
+                              title="Borrar dominio"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                        <span className="text-[9.5px] text-slate-400 block">
+                          El dominio que reclamaste gratis en el panel de Ngrok (Cloud Edge &gt; Domains).
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setShowNgrokGuide(!showNgrokGuide)}
+                          className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                        >
+                          <HelpCircle className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>{showNgrokGuide ? 'Ocultar Guía' : '¿Cómo obtener este Dominio Gratis? (Paso a Paso)'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={pmSaving}
+                          onClick={() => handleSavePmConfig()}
+                          className="px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50 ml-auto"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                          <span>{pmSaving ? 'Guardando...' : 'Guardar Preferencias'}</span>
+                        </button>
+                      </div>
+
+                      {/* GUÍA PASO A PASO NGROK */}
+                      {showNgrokGuide && (
+                        <div className="mt-3 bg-emerald-50/70 border border-emerald-200 rounded-xl p-4 text-xs space-y-3 animate-fadeIn text-slate-700">
+                          <div className="flex items-center justify-between border-b border-emerald-200/80 pb-2">
+                            <span className="font-extrabold text-emerald-950 uppercase text-[11.5px] flex items-center gap-1.5 font-sans">
+                              📘 Guía: Cómo Activar tu Dominio Fijo Gratuito en Ngrok (2 Minutos)
+                            </span>
+                            <a 
+                              href="https://dashboard.ngrok.com/signup" 
+                              target="_blank" 
+                              rel="noreferrer"
+                              className="text-[10.5px] text-emerald-700 hover:text-emerald-900 font-bold flex items-center gap-1 underline"
+                            >
+                              <span>Ir a Ngrok</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </div>
+
+                          <div className="space-y-2.5 text-[11px] leading-relaxed">
+                            <div className="flex items-start gap-2">
+                              <span className="w-5 h-5 rounded-full bg-emerald-200 text-emerald-800 font-black flex items-center justify-center text-[10px] flex-shrink-0 mt-0.5">1</span>
+                              <div>
+                                <strong className="text-slate-800">Registrarse con Google:</strong>
+                                <p className="text-slate-600 mt-0.5">
+                                  Entra en <a href="https://dashboard.ngrok.com/signup" target="_blank" rel="noreferrer" className="text-emerald-700 font-mono underline font-bold">dashboard.ngrok.com/signup</a> y haz clic en <strong>"Sign up with Google"</strong> (100% gratis de por vida, sin pedir tarjeta).
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-start gap-2">
+                              <span className="w-5 h-5 rounded-full bg-emerald-200 text-emerald-800 font-black flex items-center justify-center text-[10px] flex-shrink-0 mt-0.5">2</span>
+                              <div>
+                                <strong className="text-slate-800">Copiar tu Authtoken:</strong>
+                                <p className="text-slate-600 mt-0.5">
+                                  En el panel de Ngrok, haz clic en el menú izquierdo en <strong>"Your Authtoken"</strong> y haz clic en <strong>Copy</strong>. Pégalo en la casilla de Authtoken de arriba.
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-start gap-2">
+                              <span className="w-5 h-5 rounded-full bg-emerald-200 text-emerald-800 font-black flex items-center justify-center text-[10px] flex-shrink-0 mt-0.5">3</span>
+                              <div>
+                                <strong className="text-slate-800">Reclamar tu Dominio Fijo Gratuito:</strong>
+                                <p className="text-slate-600 mt-0.5">
+                                  En el menú lateral de Ngrok, ve a <strong>Cloud Edge</strong> &gt; <strong>Domains</strong> &gt; Haz clic en <strong>"Create Domain"</strong> o <strong>"New Domain"</strong>. Ngrok te asignará gratis tu dominio permanente (ej: <code className="bg-emerald-100 px-1 py-0.2 rounded font-mono">winterpos-caja.ngrok-free.app</code>).
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-start gap-2">
+                              <span className="w-5 h-5 rounded-full bg-emerald-300 text-emerald-950 font-black flex items-center justify-center text-[10px] flex-shrink-0 mt-0.5">4</span>
+                              <div>
+                                <strong className="text-slate-800">Pegar y Guardar en WinterPos:</strong>
+                                <p className="text-slate-600 mt-0.5">
+                                  Copia ese dominio, pégalo en la casilla de arriba y presiona <strong>"Guardar Preferencias"</strong>. Tu webhook quedará fijo para siempre y nunca más tendrás que tocar el teléfono.
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* CASO 2: PROVEEDOR CLOUDFLARE (EXISTENTE INTACTO) */
+                    <div className="space-y-4 animate-fadeIn">
+                      <p className="text-[11px] text-slate-600 leading-relaxed">
+                        Si usa el enlace automático rápido (trycloudflare.com), el sistema generará una dirección válida. Sin embargo, para que el enlace en el teléfono <strong>NUNCA CAMBIE aunque reinicie el equipo mil veces</strong>, puede ingresar un Token de Túnel Gratuito de Cloudflare:
+                      </p>
+
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                            Token de Cloudflare Tunnel (Opcional):
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setShowTokenText(!showTokenText)}
+                            className="text-[10px] text-sky-600 hover:text-sky-800 font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            {showTokenText ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                            <span>{showTokenText ? 'Ocultar código' : 'Ver código'}</span>
+                          </button>
+                        </div>
+
+                        <div className="relative">
+                          <input
+                            type={showTokenText ? "text" : "password"}
+                            value={pmToken}
+                            onChange={(e) => {
+                              let val = e.target.value.trim();
+                              // Auto-limpieza si pegó el comando entero de Cloudflare:
+                              if (val.includes('install ')) {
+                                const parts = val.split('install ');
+                                val = parts[parts.length - 1].trim();
+                              }
+                              setPmToken(val);
+                            }}
+                            placeholder="Pegue aquí el token eyJhIjoiYmQ4..."
+                            className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs font-mono text-slate-800 focus:bg-white focus:border-sky-500 focus:outline-none pr-8"
+                          />
+                          {pmToken && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPmToken('');
+                                localStorage.removeItem('pos_pago_movil_token');
+                              }}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
+                              title="Borrar token"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                        <span className="text-[9.5px] text-slate-400 block">
+                          {pmToken ? '✓ Token detectado listo para guardar.' : 'Deje en blanco para usar túneles rápidos automáticos gratuitos sin cuenta.'}
+                        </span>
+                      </div>
+
+                      {/* DOMINIO / HOSTNAME ASIGNADO EN CLOUDFLARE */}
+                      <div className="space-y-1 pt-1 border-t border-slate-100">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">
+                          Dominio / Hostname configurado en Cloudflare (Opcional):
+                        </label>
+                        <input
+                          type="text"
+                          value={pmCustomDomain}
+                          onChange={(e) => {
+                            setPmCustomDomain(e.target.value.trim().toLowerCase());
+                          }}
+                          placeholder="Ejemplo: pagos.midominio.com"
+                          className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs font-mono text-slate-800 focus:bg-white focus:border-sky-500 focus:outline-none"
+                        />
+                        <span className="text-[9.5px] text-slate-400 block">
+                          Solo si creaste un Public Hostname en Cloudflare. Si no tienes dominio propio, puedes usar la pestaña Ngrok de arriba.
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setShowPmTokenGuide(!showPmTokenGuide)}
+                          className="px-3 py-2 bg-sky-50 hover:bg-sky-100 text-sky-700 hover:text-sky-900 border border-sky-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                        >
+                          <HelpCircle className="w-3.5 h-3.5 text-sky-600" />
+                          <span>{showPmTokenGuide ? 'Ocultar Guía de Ayuda' : '¿Cómo obtener este Token Gratis? (Paso a Paso)'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={pmSaving}
+                          onClick={() => handleSavePmConfig()}
+                          className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50 ml-auto"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                          <span>{pmSaving ? 'Guardando...' : 'Guardar Preferencias'}</span>
+                        </button>
+                      </div>
+
+                      {/* GUÍA PASO A PASO DESPLEGABLE */}
+                      {showPmTokenGuide && (
+                        <div className="mt-3 bg-sky-50/70 border border-sky-200 rounded-xl p-4 text-xs space-y-3 animate-fadeIn text-slate-700">
+                          <div className="flex items-center justify-between border-b border-sky-200/80 pb-2">
+                            <span className="font-extrabold text-sky-950 uppercase text-[11.5px] flex items-center gap-1.5 font-sans">
+                              📘 Guía Rápida: Cómo Crear tu Token Gratuito de Cloudflare (3 Minutos)
+                            </span>
+                            <a 
+                              href="https://dash.cloudflare.com/sign-up" 
+                              target="_blank" 
+                              rel="noreferrer"
+                              className="text-[10.5px] text-sky-700 hover:text-sky-900 font-bold flex items-center gap-1 underline"
+                            >
+                              <span>Ir a Cloudflare</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </div>
+
+                          <div className="space-y-2.5 text-[11px] leading-relaxed">
+                            <div className="flex items-start gap-2">
+                              <span className="w-5 h-5 rounded-full bg-sky-200 text-sky-800 font-black flex items-center justify-center text-[10px] flex-shrink-0 mt-0.5">1</span>
+                              <div>
+                                <strong className="text-slate-800">Crear cuenta gratuita:</strong>
+                                <p className="text-slate-600 mt-0.5">
+                                  Entra en <a href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noreferrer" className="text-sky-700 font-mono underline font-bold">dash.cloudflare.com/sign-up</a> y regístrate con tu correo (el plan Free es 100% gratuito de por vida).
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-start gap-2">
+                              <span className="w-5 h-5 rounded-full bg-sky-200 text-sky-800 font-black flex items-center justify-center text-[10px] flex-shrink-0 mt-0.5">2</span>
+                              <div>
+                                <strong className="text-slate-800">Acceder a Zero Trust:</strong>
+                                <p className="text-slate-600 mt-0.5">
+                                  En el menú lateral izquierdo de Cloudflare, haz clic en <strong>Zero Trust</strong>. Elige un nombre para tu equipo (ej. <code className="bg-sky-100 px-1 rounded">mitienda-pos</code>) y confirma el plan <strong>Free ($0)</strong>.
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-start gap-2">
+                              <span className="w-5 h-5 rounded-full bg-sky-200 text-sky-800 font-black flex items-center justify-center text-[10px] flex-shrink-0 mt-0.5">3</span>
+                              <div>
+                                <strong className="text-slate-800">Crear el Túnel:</strong>
+                                <p className="text-slate-600 mt-0.5">
+                                  En el menú de Zero Trust, ve a <strong>Networks</strong> &gt; <strong>Tunnels</strong> &gt; Haz clic en <strong>"Add a Tunnel"</strong> &gt; Selecciona <strong>Cloudflared</strong> &gt; Ponle de nombre <code className="bg-sky-100 px-1 rounded">WinterPos-Caja</code> y presiona Guardar.
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-start gap-2">
+                              <span className="w-5 h-5 rounded-full bg-sky-200 text-sky-800 font-black flex items-center justify-center text-[10px] flex-shrink-0 mt-0.5">4</span>
+                              <div>
+                                <strong className="text-slate-800">Copiar el Token:</strong>
+                                <p className="text-slate-600 mt-0.5">
+                                  En el comando que Cloudflare muestra para Windows, verás un texto largo que empieza por <code className="bg-black/70 text-emerald-300 font-mono px-1.5 py-0.5 rounded text-[10px]">eyJhIjoi...</code>. <strong>Copia únicamente ese código del token.</strong>
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-start gap-2">
+                              <span className="w-5 h-5 rounded-full bg-sky-200 text-sky-800 font-black flex items-center justify-center text-[10px] flex-shrink-0 mt-0.5">5</span>
+                              <div>
+                                <strong className="text-slate-800">Configurar Hostname Público:</strong>
+                                <p className="text-slate-600 mt-0.5">
+                                  En la pestaña <em>Public Hostname</em>, indica tu subdominio deseado (ej. <code className="bg-sky-100 px-1 rounded">pagos.tunegocio.com</code>) apuntando a Servicio: <strong>HTTP</strong> y URL: <strong>localhost:5000</strong>.
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-start gap-2">
+                              <span className="w-5 h-5 rounded-full bg-emerald-200 text-emerald-900 font-black flex items-center justify-center text-[10px] flex-shrink-0 mt-0.5">6</span>
+                              <div>
+                                <strong className="text-slate-800">Pegar en WinterPos:</strong>
+                                <p className="text-slate-600 mt-0.5">
+                                  Pega el token copiado en la casilla de arriba y haz clic en <strong>"Guardar Preferencias"</strong>. A partir de ese momento, la URL será fija y permanente sin importar cuántas veces reinicies el equipo.
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="bg-sky-100/70 border border-sky-200 rounded-lg p-2.5 text-[10px] text-sky-900 leading-snug">
+                            💡 <strong>Nota:</strong> Si no deseas crear la cuenta o no dispones de un dominio propio, puedes dejar ambas casillas vacías para usar túneles rápidos, o usar la pestaña Ngrok para dominio fijo gratis.
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+              </div>
+
+              {/* RIGHT COLUMN: WEBHOOK URL, QR & SIMULATOR */}
+              <div className="lg:col-span-6 space-y-6">
+                
+                {/* CARD 3: ENLACE WEBHOOK & QR PARA EL TELÉFONO */}
+                <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4">
+                  <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
+                    <QrCode className="w-4 h-4 text-emerald-600" />
+                    <h3 className="text-xs font-bold text-slate-800 uppercase">
+                      Enlace Webhook para el Teléfono del Dueño
+                    </h3>
+                  </div>
+
+                  <p className="text-[11px] text-slate-600 leading-relaxed">
+                    Copie este enlace en la aplicación de reenvío de SMS instalada en el teléfono Android que recibe los mensajes del BDV (2661 / 2662):
+                  </p>
+
+                  {/* URL BOX */}
+                  <div className="bg-slate-900 text-slate-100 p-3.5 rounded-xl space-y-2">
+                    <span className="text-[10px] uppercase font-mono font-bold text-emerald-400 block">
+                      URL del Webhook de Pagos BDV:
+                    </span>
+                    {pmTunnelStatus.webhookUrl ? (
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 font-mono text-xs text-emerald-300 bg-black/40 px-3 py-2 rounded-lg select-all overflow-x-auto break-all">
+                          {pmTunnelStatus.webhookUrl}
+                        </code>
+                        <button
+                          type="button"
+                          onClick={handleCopyPmWebhook}
+                          className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold text-xs rounded-lg transition-all flex items-center gap-1.5 flex-shrink-0 cursor-pointer shadow-xs"
+                        >
+                          {pmCopiedUrl ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                          <span>{pmCopiedUrl ? '¡Copiado!' : 'Copiar'}</span>
+                        </button>
+                      </div>
+                    ) : pmTunnelStatus.status === 'starting' ? (
+                      <div className="flex items-center gap-2 text-amber-400 text-xs font-mono bg-black/40 p-2.5 rounded-lg">
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                        <span>Generando enlace seguro en vivo con Cloudflare...</span>
+                      </div>
+                    ) : pmToken ? (
+                      <div className="bg-sky-950/90 border border-sky-600/50 p-3 rounded-lg text-[11px] text-sky-200 space-y-2">
+                        <div className="flex items-center gap-2 text-emerald-400 font-bold">
+                          <Check className="w-4 h-4 text-emerald-400" />
+                          <span>¡Túnel con Token Conectado a Cloudflare!</span>
+                        </div>
+                        <p className="text-slate-300 leading-relaxed">
+                          Cloudflare Zero Trust requiere un <strong>Public Hostname</strong> (ej: <code className="bg-black/40 px-1 py-0.5 rounded text-sky-300 font-mono">pagos.tunegocio.com</code>) en su panel web para enrutar el tráfico de internet a este equipo. Escríbelo en la casilla <strong>Dominio</strong> de la izquierda y presiona <strong>Guardar Preferencias</strong>.
+                        </p>
+                        <div className="p-2 bg-black/40 rounded border border-sky-500/30 text-[10px] text-sky-300">
+                          💡 <strong>¿No posees un dominio propio en Cloudflare?</strong> Simplemente <strong>borra el token</strong> (deja la casilla vacía) y haz clic en <strong>Guardar Preferencias</strong>. WinterPos activará el túnel automático rápido gratuito (<code>trycloudflare.com</code>) y te dará tu enlace listo al instante sin requerir ningún dominio.
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 font-mono text-xs text-slate-400 bg-black/40 px-3 py-2 rounded-lg select-all overflow-x-auto break-all">
+                          {`${window.location.protocol}//${window.location.hostname}:5000/api/conciliacion/sms-webhook`}
+                        </code>
+                        <button
+                          type="button"
+                          onClick={handleCopyPmWebhook}
+                          className="px-3 py-2 bg-slate-700 hover:bg-slate-600 active:scale-95 text-white font-bold text-xs rounded-lg transition-all flex items-center gap-1.5 flex-shrink-0 cursor-pointer shadow-xs"
+                        >
+                          {pmCopiedUrl ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                          <span>{pmCopiedUrl ? '¡Copiado!' : 'Copiar'}</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* QR CODE DISPLAY */}
+                  {pmTunnelStatus.webhookUrl && (
+                    <div className="flex flex-col sm:flex-row items-center gap-4 p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                      <div className="bg-white p-2 border border-slate-300 rounded-xl shadow-xs">
+                        <img 
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(pmTunnelStatus.webhookUrl)}&color=0f172a&bgcolor=ffffff&qzone=2`}
+                          alt="Código QR del Webhook"
+                          className="w-28 h-28 object-contain"
+                        />
+                      </div>
+                      <div className="space-y-1.5 text-center sm:text-left">
+                        <span className="text-xs font-black text-slate-800 uppercase block">
+                          Escanee con la cámara del teléfono
+                        </span>
+                        <p className="text-[11px] text-slate-500 leading-snug">
+                          Puede escanear este código QR directamente en la app del teléfono para no tener que escribir la URL manualmente.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ANDROID APPS GUIDES */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 text-[11px]">
+                    <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-1">
+                      <span className="font-bold text-slate-800 block text-xs">📱 App "SMS Forwarder"</span>
+                      <ul className="list-disc pl-4 space-y-0.5 text-slate-600 text-[10.5px]">
+                        <li>Filtro remitente: <strong>2661 o 2662</strong></li>
+                        <li>Destino: <strong>Webhook / HTTP POST</strong></li>
+                        <li>Formato: <strong>JSON</strong></li>
+                        <li>Cuerpo: <code className="font-mono text-[10px] bg-slate-100 px-1">{`{"smsText":"[sms_body]"}`}</code></li>
+                      </ul>
+                    </div>
+
+                    <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-1">
+                      <span className="font-bold text-slate-800 block text-xs">⚙️ App "MacroDroid"</span>
+                      <ul className="list-disc pl-4 space-y-0.5 text-slate-600 text-[10.5px]">
+                        <li>Disparador: <strong>SMS Recibido (2661/2662)</strong></li>
+                        <li>Acción: <strong>Solicitud HTTP POST</strong></li>
+                        <li>Tipo de contenido: <strong>application/json</strong></li>
+                        <li>Cuerpo: <code className="font-mono text-[10px] bg-slate-100 px-1">{`{"smsText":"{sms_body}"}`}</code></li>
+                      </ul>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* CARD 4: SIMULADOR DE SMS EN VIVO */}
+                <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                    <div className="flex items-center gap-2">
+                      <Send className="w-4 h-4 text-indigo-600" />
+                      <h3 className="text-xs font-bold text-slate-800 uppercase">
+                        Simulador y Diagnóstico de SMS BDV
+                      </h3>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-mono">TEST INTERNO</span>
+                  </div>
+
+                  <p className="text-[11px] text-slate-600">
+                    Pruebe el procesamiento automático simulando un SMS del Banco de Venezuela para verificar que el sistema lo registre en la base de datos:
+                  </p>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Teléfono Origen</label>
+                      <input 
+                        type="text" 
+                        value={pmTestPhone} 
+                        onChange={(e) => setPmTestPhone(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs font-mono text-slate-800"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Referencia BDV</label>
+                      <input 
+                        type="text" 
+                        value={pmTestRef} 
+                        onChange={(e) => setPmTestRef(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs font-mono text-slate-800"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Monto Bs.</label>
+                      <input 
+                        type="text" 
+                        value={pmTestMonto} 
+                        onChange={(e) => setPmTestMonto(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs font-mono text-slate-800 font-bold"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-[10px] text-slate-400">
+                      Ej: Recibiste Bs {pmTestMonto} de {pmTestPhone} Ref: {pmTestRef}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={pmTestingSms}
+                      onClick={handleTestSmsWebhook}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>{pmTestingSms ? 'Enviando...' : 'Simular Notificación'}</span>
+                    </button>
+                  </div>
+
+                  {pmTestResult && (
+                    <div className={`p-3 rounded-xl text-xs font-mono border ${
+                      pmTestResult.success ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'
+                    }`}>
+                      {pmTestResult.success ? (
+                        <div className="space-y-1">
+                          <strong className="text-emerald-900 block font-sans">✓ Notificación Procesada con Éxito:</strong>
+                          <div>Referencia guardada: <span className="font-bold">{pmTestResult.parsed?.referencia}</span></div>
+                          <div>Monto registrado: <span className="font-bold">Bs. {pmTestResult.parsed?.monto_ves}</span></div>
+                        </div>
+                      ) : (
+                        <div>Error: {JSON.stringify(pmTestResult)}</div>
+                      )}
+                    </div>
+                  )}
+
+                </div>
+
+                {/* CARD 5: CONSOLA DE AUDITORÍA (LOGS EN VIVO) */}
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 shadow-sm space-y-2">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <span className="text-[10.5px] font-mono font-bold text-slate-400 flex items-center gap-1.5">
+                      <Terminal className="w-3.5 h-3.5 text-emerald-400" />
+                      Registro de Eventos del Túnel (Logs Silenciosos)
+                    </span>
+                    <span className="text-[9.5px] font-mono text-emerald-400">Daemon en Vivo</span>
+                  </div>
+
+                  <div className="h-28 overflow-y-auto font-mono text-[10px] text-slate-300 space-y-1 bg-black/50 p-2.5 rounded-lg">
+                    {pmTunnelStatus.logs && pmTunnelStatus.logs.length > 0 ? (
+                      pmTunnelStatus.logs.map((log: string, idx: number) => (
+                        <div key={idx} className="whitespace-pre-wrap leading-tight text-slate-400">
+                          {log}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-slate-600 italic">No hay registros recientes. Inicie el túnel para ver la actividad.</div>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+
           </div>
         )}
 

@@ -127,7 +127,7 @@ export interface SaleItem {
 }
 
 export interface Payment {
-  metodo: 'Efectivo$' | 'EfectivoBs' | 'Tarjeta$' | 'TarjetaBs' | 'PagoMovil' | 'Biopago' | 'Binance' | 'PayPal' | 'CreditoCliente';
+  metodo: 'Efectivo$' | 'EfectivoBs' | 'Tarjeta$' | 'TarjetaBs' | 'PagoMovil' | 'Biopago' | 'Binance' | 'PayPal' | 'CreditoCliente' | 'Cashea';
   monto: number; // in the currency of the payment (VES for Bs, USD for $)
   montoUSD: number; // calculated in USD
   montoVES?: number;
@@ -285,6 +285,7 @@ export interface CierreDetails {
   pagosPayPalUsd?: number;
   pagosTarjetaUsd?: number;
   pagosCreditoUsd?: number;
+  pagosCasheaUsd?: number;
   pagosPuntosUsd?: number;
   devolucionVentasUsd?: number;
   devolucionVentasVes?: number;
@@ -391,6 +392,7 @@ export interface CierreCaja {
   pagosPayPalUsd?: number;       // PayPal $
   pagosTarjetaUsd: number;
   pagosCreditoUsd: number;
+  pagosCasheaUsd?: number;
   pagosPuntosUsd: number;
   devolucionVentasUsd: number;
   devolucionVentasVes?: number;

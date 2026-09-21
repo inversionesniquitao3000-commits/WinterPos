@@ -8,13 +8,16 @@ import {
   Calendar, Lock, Coins, RefreshCw, ShieldCheck, FileText,
   Banknote, Eye, LogOut, X, Image as ImageIcon, ZoomIn,
   Edit, Minus, Sparkles, Package, QrCode, UploadCloud, Link as LinkIcon, Save,
-  CreditCard, Smartphone, Fingerprint, Wallet, Globe, CalendarClock
+  CreditCard, Smartphone, Fingerprint, Wallet, Globe, CalendarClock,
+  Landmark
 } from 'lucide-react';
 import { formatNumberToWordsUSD, printTicketReceipt, printCierreTicketReport, formatBs, formatImageUrl } from '../utils';
 import { useDialog } from '../hooks/useDialog';
 import CambioDivisasModal from './CambioDivisasModal';
 import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
 import { BarcodeVisualizer } from './BarcodeVisualizer';
+import { ModalCobroCashea, CasheaSaleData } from './ModalCobroCashea';
+import { ModalConciliacionPagoMovil } from './ModalConciliacionPagoMovil';
 
 interface CajaPOSProps {
   products: Product[];
@@ -1520,9 +1523,15 @@ export default function CajaPOS({
   const [payBinanceUSD, setPayBinanceUSD] = useState('');  // Binance $
   const [payPaypalUSD, setPayPaypalUSD] = useState('');    // PayPal $
   const [payCreditUSD, setPayCreditUSD] = useState('');
+  const [payCasheaUSD, setPayCasheaUSD] = useState('');
 
   const [refPagoMovil, setRefPagoMovil] = useState('');
   const [bankPagoMovil, setBankPagoMovil] = useState('');
+  const [refCashea, setRefCashea] = useState('');
+
+  // Modales Cashea & Conciliación Pago Móvil BDV
+  const [showCasheaModal, setShowCasheaModal] = useState(false);
+  const [showConciliacionModal, setShowConciliacionModal] = useState(false);
 
   // Generated Ticket Modal state
   const [showTicketModal, setShowTicketModal] = useState(false);
@@ -2154,8 +2163,10 @@ export default function CajaPOS({
     setPayBinanceUSD('');
     setPayPaypalUSD('');
     setPayCreditUSD('');
+    setPayCasheaUSD('');
     setRefPagoMovil('');
     setBankPagoMovil('');
+    setRefCashea('');
     setMixedChangeUSDVal('');
   }, []);
 
@@ -2176,6 +2187,7 @@ export default function CajaPOS({
   const binanceUSDVal = parseFloat(payBinanceUSD) || 0;  // Binance $
   const paypalUSDVal = parseFloat(payPaypalUSD) || 0;    // PayPal $
   const creditUSDVal = parseFloat(payCreditUSD) || 0;
+  const casheaUSDVal = parseFloat(payCasheaUSD) || 0;    // Cashea $
 
   // Round paid USD calculation to 2 decimals to avoid floating-point issues
   const totalPaidUSD = Math.round((
@@ -2187,7 +2199,8 @@ export default function CajaPOS({
     (biopagoVESVal / tasaDia) +
     binanceUSDVal +
     paypalUSDVal +
-    creditUSDVal
+    creditUSDVal +
+    casheaUSDVal
   ) * 100) / 100;
 
   const remainingUSD = Math.max(0, Math.round((totalUSD - totalPaidUSD) * 100) / 100);
@@ -2197,8 +2210,9 @@ export default function CajaPOS({
   const isPagoMovilValid = pagoMovilVESVal === 0 || (refPagoMovil.trim().length >= 4 && bankPagoMovil !== '');
   const isBiopagoValid = true;
   const isCreditValid = creditUSDVal === 0 || creditUSDVal <= selectedClient.credito_disponible;
+  const isCasheaValid = casheaUSDVal === 0 || refCashea.trim().length >= 3;
 
-  const canConfirmCheckout = totalPaidUSD >= totalUSD && isPagoMovilValid && isBiopagoValid && isCreditValid;
+  const canConfirmCheckout = totalPaidUSD >= totalUSD && isPagoMovilValid && isBiopagoValid && isCreditValid && isCasheaValid;
   const isPaymentSettled = totalPaidUSD >= totalUSD;
 
   const getRemainingUSDForMethod = (method: string): number => {
@@ -2211,10 +2225,11 @@ export default function CajaPOS({
     const binanceUSD = method === 'binanceUSD' ? 0 : (parseFloat(payBinanceUSD) || 0);
     const paypalUSD = method === 'paypalUSD' ? 0 : (parseFloat(payPaypalUSD) || 0);
     const creditUSD = method === 'creditUSD' ? 0 : (parseFloat(payCreditUSD) || 0);
+    const casheaUSD = method === 'casheaUSD' ? 0 : (parseFloat(payCasheaUSD) || 0);
 
     const paidOtherUSD = cashUSD + cashVESInUSD + cardVESInUSD + cardUSD +
       pagoMovilVESInUSD + biopagoVESInUSD + binanceUSD +
-      paypalUSD + creditUSD;
+      paypalUSD + creditUSD + casheaUSD;
 
     return Math.max(0, Math.round((totalUSD - paidOtherUSD) * 100) / 100);
   };
@@ -2245,7 +2260,7 @@ export default function CajaPOS({
     let targetValStr = '0.00';
     let targetValNum = 0;
 
-    if (['cashUSD', 'cardUSD', 'binanceUSD', 'paypalUSD'].includes(method)) {
+    if (['cashUSD', 'cardUSD', 'binanceUSD', 'paypalUSD', 'casheaUSD'].includes(method)) {
       targetValNum = remUSD;
       targetValStr = remUSD > 0 ? remUSD.toFixed(2) : '0.00';
     } else if (['cashVES', 'cardVES', 'pagoMovilVES', 'biopagoVES'].includes(method)) {
@@ -2271,6 +2286,7 @@ export default function CajaPOS({
         case 'binanceUSD': setPayBinanceUSD(targetValStr); break;
         case 'paypalUSD': setPayPaypalUSD(targetValStr); break;
         case 'creditUSD': setPayCreditUSD(targetValStr); break;
+        case 'casheaUSD': setPayCasheaUSD(targetValStr); break;
       }
       setTimeout(() => {
         confirmCheckoutBtnRef.current?.focus();
@@ -2358,7 +2374,7 @@ export default function CajaPOS({
     }
   };
 
-  const handleConfirmCheckout = async (shouldPrint: boolean = false) => {
+  const handleConfirmCheckout = async (shouldPrint: boolean = false, customPagos?: Payment[]) => {
     // Atomic Anti-Double-Click Lock: reject any concurrent or rapid secondary click
     if (isSubmittingRef.current || isSubmittingSale) {
       console.warn('⚠️ [Seguridad POS] Intento de cobro concurrente/doble clic bloqueado.');
@@ -2368,13 +2384,13 @@ export default function CajaPOS({
     setIsSubmittingSale(true);
 
     try {
-      if (!canConfirmCheckout) {
+      if (!customPagos && !canConfirmCheckout) {
         showAlert('Información de cobro incompleta o inválida. Verifique los montos ingresados.', 'Pago Incompleto', 'warning');
         return;
       }
 
       // Reference validations (Pago Móvil)
-      if (pagoMovilVESVal > 0) {
+      if (!customPagos && pagoMovilVESVal > 0) {
         if (!refPagoMovil.trim() || refPagoMovil.trim().length < 4) {
           showAlert('La referencia bancaria es obligatoria y debe tener mínimo 4 caracteres para pagos por Pago Móvil.', 'Referencia Requerida', 'warning');
           return;
@@ -2386,7 +2402,7 @@ export default function CajaPOS({
       }
 
       // Limit credit validations
-      if (creditUSDVal > 0) {
+      if (!customPagos && creditUSDVal > 0) {
         if (creditUSDVal > selectedClient.credito_disponible) {
           showAlert(`Crédito insuficiente. Límite disponible del cliente: $${selectedClient.credito_disponible.toFixed(2)} USD.`, 'Crédito Insuficiente', 'warning');
           return;
@@ -2395,47 +2411,62 @@ export default function CajaPOS({
 
       // Build payment array with precise USD and VES values
       const rate = tasaDia || 1;
-      const pagos: Payment[] = [];
-      if (cashUSDVal > 0) {
-        pagos.push({ metodo: 'Efectivo$', monto: cashUSDVal, montoUSD: cashUSDVal, montoVES: cashUSDVal * rate });
-      }
-      if (cashVESVal > 0) {
-        pagos.push({ metodo: 'EfectivoBs', monto: cashVESVal, montoUSD: cashVESVal / rate, montoVES: cashVESVal });
-      }
-      if (cardVESVal > 0) {
-        pagos.push({ metodo: 'TarjetaBs', monto: cardVESVal, montoUSD: cardVESVal / rate, montoVES: cardVESVal });
-      }
-      if (cardUSDVal > 0) {
-        pagos.push({ metodo: 'Tarjeta$', monto: cardUSDVal, montoUSD: cardUSDVal, montoVES: cardUSDVal * rate });
-      }
-      if (pagoMovilVESVal > 0) {
-        pagos.push({
-          metodo: 'PagoMovil',
-          monto: pagoMovilVESVal,
-          montoUSD: pagoMovilVESVal / rate,
-          montoVES: pagoMovilVESVal,
-          reference: refPagoMovil,
-          bancoEmisor: bankPagoMovil
-        });
-      }
-      if (biopagoVESVal > 0) {
-        pagos.push({
-          metodo: 'Biopago',
-          monto: biopagoVESVal,
-          montoUSD: biopagoVESVal / rate,
-          montoVES: biopagoVESVal,
-          reference: '',
-          bancoEmisor: ''
-        });
-      }
-      if (binanceUSDVal > 0) {
-        pagos.push({ metodo: 'Binance', monto: binanceUSDVal, montoUSD: binanceUSDVal, montoVES: binanceUSDVal * rate });
-      }
-      if (paypalUSDVal > 0) {
-        pagos.push({ metodo: 'PayPal', monto: paypalUSDVal, montoUSD: paypalUSDVal, montoVES: paypalUSDVal * rate });
-      }
-      if (creditUSDVal > 0) {
-        pagos.push({ metodo: 'CreditoCliente', monto: creditUSDVal, montoUSD: creditUSDVal, montoVES: creditUSDVal * rate });
+      let pagos: Payment[] = [];
+
+      if (customPagos && customPagos.length > 0) {
+        pagos = customPagos;
+      } else {
+        if (cashUSDVal > 0) {
+          pagos.push({ metodo: 'Efectivo$', monto: cashUSDVal, montoUSD: cashUSDVal, montoVES: cashUSDVal * rate });
+        }
+        if (cashVESVal > 0) {
+          pagos.push({ metodo: 'EfectivoBs', monto: cashVESVal, montoUSD: cashVESVal / rate, montoVES: cashVESVal });
+        }
+        if (cardVESVal > 0) {
+          pagos.push({ metodo: 'TarjetaBs', monto: cardVESVal, montoUSD: cardVESVal / rate, montoVES: cardVESVal });
+        }
+        if (cardUSDVal > 0) {
+          pagos.push({ metodo: 'Tarjeta$', monto: cardUSDVal, montoUSD: cardUSDVal, montoVES: cardUSDVal * rate });
+        }
+        if (pagoMovilVESVal > 0) {
+          pagos.push({
+            metodo: 'PagoMovil',
+            monto: pagoMovilVESVal,
+            montoUSD: pagoMovilVESVal / rate,
+            montoVES: pagoMovilVESVal,
+            reference: refPagoMovil,
+            bancoEmisor: bankPagoMovil
+          });
+        }
+        if (biopagoVESVal > 0) {
+          pagos.push({
+            metodo: 'Biopago',
+            monto: biopagoVESVal,
+            montoUSD: biopagoVESVal / rate,
+            montoVES: biopagoVESVal,
+            reference: '',
+            bancoEmisor: ''
+          });
+        }
+        if (binanceUSDVal > 0) {
+          pagos.push({ metodo: 'Binance', monto: binanceUSDVal, montoUSD: binanceUSDVal, montoVES: binanceUSDVal * rate });
+        }
+        if (paypalUSDVal > 0) {
+          pagos.push({ metodo: 'PayPal', monto: paypalUSDVal, montoUSD: paypalUSDVal, montoVES: paypalUSDVal * rate });
+        }
+        if (creditUSDVal > 0) {
+          pagos.push({ metodo: 'CreditoCliente', monto: creditUSDVal, montoUSD: creditUSDVal, montoVES: creditUSDVal * rate });
+        }
+        if (casheaUSDVal > 0) {
+          pagos.push({
+            metodo: 'Cashea',
+            monto: casheaUSDVal,
+            montoUSD: casheaUSDVal,
+            montoVES: casheaUSDVal * rate,
+            reference: refCashea || 'CASHEA-APROBADO',
+            bancoEmisor: 'Cashea BNPL'
+          });
+        }
       }
 
       let finalVueltoUSD = 0;
@@ -2589,6 +2620,50 @@ export default function CajaPOS({
         setIsSubmittingSale(false);
       }, 500);
     }
+  };
+
+  const handleConfirmCasheaSale = async (data: CasheaSaleData) => {
+    if (saleItems.length === 0 || !cajaAbierta || isSubmittingRef.current || isSubmittingSale) return;
+
+    const rate = tasaDia > 0 ? tasaDia : 1;
+    const pagos: Payment[] = [];
+
+    // 1. Inicial en tienda (si aplica)
+    if (data.inicialUSD > 0) {
+      if (data.metodoInicial === 'Efectivo$') {
+        pagos.push({ metodo: 'Efectivo$', monto: data.inicialUSD, montoUSD: data.inicialUSD, montoVES: data.inicialUSD * rate });
+      } else if (data.metodoInicial === 'EfectivoBs') {
+        pagos.push({ metodo: 'EfectivoBs', monto: data.inicialVES, montoUSD: data.inicialUSD, montoVES: data.inicialVES });
+      } else if (data.metodoInicial === 'TarjetaBs') {
+        pagos.push({ metodo: 'TarjetaBs', monto: data.inicialVES, montoUSD: data.inicialUSD, montoVES: data.inicialVES, reference: data.refInicial || '' });
+      } else if (data.metodoInicial === 'PagoMovil') {
+        pagos.push({ metodo: 'PagoMovil', monto: data.inicialVES, montoUSD: data.inicialUSD, montoVES: data.inicialVES, reference: data.refInicial || '', bancoEmisor: 'Pago Móvil Inicial' });
+      } else if (data.metodoInicial === 'AppCashea') {
+        pagos.push({ metodo: 'Cashea', monto: data.inicialUSD, montoUSD: data.inicialUSD, montoVES: data.inicialVES, reference: `${data.codigoCashea} (Inicial App)`, bancoEmisor: 'Cashea App' });
+      }
+    }
+
+    // 2. Monto Financiado por Cashea
+    if (data.financiadoUSD > 0) {
+      pagos.push({
+        metodo: 'Cashea',
+        monto: data.financiadoUSD,
+        montoUSD: data.financiadoUSD,
+        montoVES: data.financiadoVES,
+        reference: data.codigoCashea,
+        bancoEmisor: `Cashea (${data.nivelNombre})`
+      });
+    }
+
+    // Si el cliente en Cashea fue ingresado, intentar asociarlo
+    if (data.cedulaCliente && selectedClient.cedula_rif === 'V-00000000') {
+      const matchCli = clients.find(c => c.cedula_rif.toLowerCase() === data.cedulaCliente?.toLowerCase());
+      if (matchCli) {
+        setSelectedClient(matchCli);
+      }
+    }
+
+    await handleConfirmCheckout(false, pagos);
   };
 
   // Focus Trap & Enter key listener for Checkout Modal
@@ -3077,6 +3152,11 @@ export default function CajaPOS({
         if (sale.factura_nro?.startsWith('DEV-')) return acc;
         return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'CreditoCliente' ? a + getPayUsd(p) : a, 0);
       }, 0);
+
+      const pagosCasheaUsd = targetShiftSales.reduce((acc, sale) => {
+        if (sale.factura_nro?.startsWith('DEV-')) return acc;
+        return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'Cashea' ? a + getPayUsd(p) : a, 0);
+      }, 0);
       const pagosPuntosUsd = pagosBiopagoUsd;
 
       const totalDevolucionesUsd = targetShiftSales.reduce((acc, sale) => {
@@ -3291,6 +3371,7 @@ export default function CajaPOS({
         pagosPayPalUsd,
         pagosTarjetaUsd,
         pagosCreditoUsd,
+        pagosCasheaUsd,
         pagosPuntosUsd,
         devolucionVentasUsd,
         devolucionVentasVes,
@@ -4412,6 +4493,39 @@ export default function CajaPOS({
             Cambio / Venta Efectivo
           </button>
 
+          {/* FILA 4: Cobro Cashea y Conciliación Pago Móvil */}
+          <button
+            onClick={() => {
+              if (saleItems.length === 0) {
+                showAlert('Agregue al menos un producto a la venta para calcular y cobrar con Cashea.', 'Venta Vacía', 'warning');
+                return;
+              }
+              setShowCasheaModal(true);
+            }}
+            disabled={!cajaAbierta || saleItems.length === 0}
+            className="flex flex-col items-center justify-center py-2 px-2 bg-gradient-to-b from-indigo-50/90 to-violet-50/70 border border-indigo-200 rounded-lg hover:border-indigo-400 hover:from-indigo-100 hover:to-violet-100 transition-all gap-1 text-center text-[11px] font-sans font-bold text-indigo-900 shadow-sm disabled:opacity-40"
+            title="Cobro a cuotas sin interés mediante Cashea (BNPL)"
+          >
+            <div className="flex items-center gap-1">
+              <Sparkles className="w-3.5 h-3.5 text-yellow-500 animate-pulse" />
+              <CreditCard className="w-3.5 h-3.5 text-indigo-600" />
+            </div>
+            Cobro Cashea
+          </button>
+
+          <button
+            onClick={() => setShowConciliacionModal(true)}
+            disabled={!cajaAbierta}
+            className="flex flex-col items-center justify-center py-2 px-2 bg-gradient-to-b from-rose-50/90 to-red-50/70 border border-rose-200 rounded-lg hover:border-rose-400 hover:from-rose-100 hover:to-red-100 transition-all gap-1 text-center text-[11px] font-sans font-bold text-rose-900 shadow-sm disabled:opacity-40"
+            title="Validar acreditación de Pago Móvil en Banco de Venezuela"
+          >
+            <div className="flex items-center gap-1">
+              <Landmark className="w-3.5 h-3.5 text-rose-600" />
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+            </div>
+            Conciliación Pago Móvil
+          </button>
+
         </div>
 
         {/* BIG COBRAR ACTION BUTTON - WinterPOS Blue */}
@@ -5116,6 +5230,47 @@ export default function CajaPOS({
                     <span className="text-[9px] text-slate-500 block font-sans">
                       * El saldo pendiente del cliente se incrementará al confirmar la venta.
                     </span>
+                  </div>
+                )}
+
+                {/* CASHEA BNPL PAYMENT METHOD */}
+                {companyConfig.metodos_pago_activos.includes('cashea') && (
+                  <div className={`border-t border-slate-200 pt-2 space-y-1.5 ${isPaymentSettled && casheaUSDVal <= 0 ? 'opacity-50' : ''}`}>
+                    <label className={`text-[11.5px] font-sans flex items-center justify-between gap-1 leading-none ${casheaUSDVal > 0 ? 'text-indigo-950 font-black' : 'text-indigo-800 font-bold'}`}>
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        <Sparkles className="w-3.5 h-3.5 text-yellow-500 flex-shrink-0" />
+                        <span className="truncate">Cashea - Financiado ($ USD)</span>
+                      </span>
+                      {casheaUSDVal > 0 && <span className="text-[8px] bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded font-sans uppercase font-black tracking-tight whitespace-nowrap flex-shrink-0">✓ EN USO</span>}
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="Monto Cashea ($)"
+                        value={payCasheaUSD}
+                        disabled={isPaymentSettled && casheaUSDVal <= 0}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(',', '.');
+                          if (/^[0-9]*\.?[0-9]*$/.test(val) || val === '') {
+                            setPayCasheaUSD(val);
+                          }
+                        }}
+                        onKeyDown={(e) => handlePaymentKeyDown(e, 'casheaUSD')}
+                        className={`w-full border-2 rounded-lg py-1.5 px-3 pos-payment-input font-mono font-black tracking-tight placeholder:font-normal placeholder:text-xs placeholder:text-slate-400 focus:bg-amber-50 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-500/40 focus:shadow-md focus:outline-none transition-all ${casheaUSDVal > 0
+                            ? 'bg-indigo-50 border-indigo-500 text-indigo-950 ring-2 ring-indigo-400/40 shadow-sm'
+                            : 'bg-slate-50 border-slate-300 font-bold text-slate-800'
+                          }`}
+                      />
+                      <input
+                        type="text"
+                        placeholder="Código Orden Cashea..."
+                        value={refCashea}
+                        onChange={(e) => setRefCashea(e.target.value.toUpperCase())}
+                        disabled={casheaUSDVal <= 0}
+                        className="w-full border-2 border-slate-300 rounded-lg py-1.5 px-2.5 font-mono font-bold text-xs uppercase bg-white text-indigo-900 outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-500/30 disabled:bg-slate-100 disabled:cursor-not-allowed"
+                      />
+                    </div>
                   </div>
                 )}
 
@@ -6756,6 +6911,16 @@ export default function CajaPOS({
                             <div className="flex justify-between items-center py-0.5">
                               <span className="font-sans font-semibold text-slate-600">A Crédito :</span>
                               <span className="font-black text-slate-800 text-sm sm:text-base">$ {(cierreResult.pagosCreditoUsd && !isNaN(cierreResult.pagosCreditoUsd) ? cierreResult.pagosCreditoUsd : 0).toFixed(2)}</span>
+                            </div>
+                          )}
+
+                          {((cierreResult.pagosCasheaUsd || 0) > 0 || !hideZeroLines) && (
+                            <div className="flex justify-between items-center py-0.5">
+                              <span className="font-sans font-bold text-amber-800 flex items-center gap-1">
+                                <span className="w-2 h-2 rounded-full bg-amber-500 inline-block"></span>
+                                Cashea Financiado ($) :
+                              </span>
+                              <span className="font-black text-amber-700 text-sm sm:text-base">$ {(cierreResult.pagosCasheaUsd && !isNaN(cierreResult.pagosCasheaUsd) ? cierreResult.pagosCasheaUsd : 0).toFixed(2)}</span>
                             </div>
                           )}
 
@@ -9117,6 +9282,30 @@ export default function CajaPOS({
           </div>
         </div>
       )}
+
+      {/* MODAL ASISTENTE DE COBRO CASHEA */}
+      <ModalCobroCashea
+        isOpen={showCasheaModal}
+        onClose={() => setShowCasheaModal(false)}
+        totalUSD={totalUSD}
+        tasaBCV={tasaDia}
+        clienteActual={selectedClient}
+        onConfirmCasheaSale={handleConfirmCasheaSale}
+      />
+
+      {/* MODAL CONCILIACIÓN PAGO MÓVIL BANCO DE VENEZUELA */}
+      <ModalConciliacionPagoMovil
+        isOpen={showConciliacionModal}
+        onClose={() => setShowConciliacionModal(false)}
+        defaultMontoVES={pagoMovilVESVal > 0 ? pagoMovilVESVal : undefined}
+        defaultReferencia={refPagoMovil || undefined}
+        onReferenceVerified={(ref, amtVES) => {
+          setRefPagoMovil(ref);
+          setPayPagoMovilVES(amtVES.toFixed(2));
+          if (!bankPagoMovil) setBankPagoMovil('Banco de Venezuela');
+          showToast('✅ Pago Móvil verificado en BDV y aplicado al cobro.', 'success');
+        }}
+      />
 
     </div>
   );

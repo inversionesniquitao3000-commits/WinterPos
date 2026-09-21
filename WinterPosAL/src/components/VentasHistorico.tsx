@@ -2892,6 +2892,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         let livePagosBinanceUsd = 0;
         let livePagosPayPalUsd = 0;
         let livePagosCreditoUsd = 0;
+        let livePagosCasheaUsd = 0;
 
         shiftSales.forEach(s => {
           const isDev = s.factura_nro?.startsWith('DEV-');
@@ -2923,6 +2924,8 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                 livePagosPayPalUsd += valUsd * mult;
               } else if (m.includes('credito')) {
                 livePagosCreditoUsd += valUsd * mult;
+              } else if (m.includes('cashea')) {
+                livePagosCasheaUsd += valUsd * mult;
               }
             });
           }
@@ -2936,7 +2939,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         const descuentosUsd = (isOpen && liveDescuentosUsd > 0) ? liveDescuentosUsd : (selectedCierre.descuentosUsd ?? 0);
         const ventaBrutaUsd = ventasTotalesUsd + descuentosUsd;
 
-        const liveNonCashUsd = livePagosTarjetaUsd + livePagosZelleUsd + livePagosBinanceUsd + livePagosPayPalUsd + livePagosCreditoUsd + (livePagosPagoMovilVes + livePagosPuntoVes + livePagosBiopagoVes + livePagosTransferenciaVes) / (tasaDia > 0 ? tasaDia : 1);
+        const liveNonCashUsd = livePagosTarjetaUsd + livePagosZelleUsd + livePagosBinanceUsd + livePagosPayPalUsd + livePagosCreditoUsd + livePagosCasheaUsd + (livePagosPagoMovilVes + livePagosPuntoVes + livePagosBiopagoVes + livePagosTransferenciaVes) / (tasaDia > 0 ? tasaDia : 1);
         if (livePagosEfectivoUsd === 0 && liveVentasTotalesUsd > 0 && liveNonCashUsd === 0 && livePagosEfectivoBsVes === 0) {
           livePagosEfectivoUsd = liveVentasTotalesUsd;
         }
@@ -2976,6 +2979,9 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
         const pagosCreditoUsd = (selectedCierre.pagosCreditoUsd && selectedCierre.pagosCreditoUsd > 0)
           ? selectedCierre.pagosCreditoUsd
           : (livePagosCreditoUsd > 0 ? livePagosCreditoUsd : 0);
+        const pagosCasheaUsd = ((selectedCierre as any).pagosCasheaUsd && (selectedCierre as any).pagosCasheaUsd > 0)
+          ? (selectedCierre as any).pagosCasheaUsd
+          : (livePagosCasheaUsd > 0 ? livePagosCasheaUsd : 0);
 
         const abonoClientesUsd = selectedCierre.abonoClientesUsd ?? (selectedCierre as any).abonosUsd ?? 0;
         const abonoClientesVes = selectedCierre.abonoClientesVes ?? (selectedCierre as any).abonosVes ?? 0;
@@ -3406,6 +3412,13 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                         </div>
                       )}
 
+                      {(pagosCasheaUsd > 0 || !hideZeroLines) && (
+                        <div className="flex justify-between text-amber-700">
+                          <span>Cashea Financiado ($) :</span>
+                          <span className="font-bold text-amber-700">$ {pagosCasheaUsd.toFixed(2)}</span>
+                        </div>
+                      )}
+
                       {(devolucionVentasUsd > 0 || !hideZeroLines) && (
                         <div className="flex justify-between text-red-550 font-bold">
                           <span>Devolución Ventas ($) :</span>
@@ -3617,6 +3630,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                         pagosBinanceUsd,
                         pagosPayPalUsd,
                         pagosCreditoUsd,
+                        pagosCasheaUsd,
                         ventasTotalesUsd,
                         ventaTotalUsd,
                         ventaBrutaUsd,

@@ -142,59 +142,99 @@ export async function initDatabase() {
       console.log('✅ Esquema de tablas e índices creado exitosamente en PostgreSQL.');
     } else {
       console.log('✅ Base de datos PostgreSQL verificada. Tablas operativas.');
-      // Auto-migración para asegurar que Documentos_Empresa exista en instalaciones existentes
-      await clientTarget.query(`
-        CREATE TABLE IF NOT EXISTS Documentos_Empresa (
-            id BIGSERIAL PRIMARY KEY,
-            categoria VARCHAR(50) NOT NULL CHECK (categoria IN ('SENIAT', 'MERCANTIL', 'MUNICIPAL', 'PARAFISCAL', 'OTROS')),
-            titulo VARCHAR(150) NOT NULL,
-            descripcion TEXT,
-            nombre_archivo VARCHAR(255) NOT NULL,
-            ruta_archivo TEXT NOT NULL,
-            mime_type VARCHAR(100),
-            tamano_bytes BIGINT DEFAULT 0,
-            fecha_emision DATE,
-            fecha_vencimiento DATE,
-            estatus VARCHAR(20) DEFAULT 'Vigente',
-            es_historico BOOLEAN DEFAULT FALSE,
-            requisito_key VARCHAR(100),
-            created_by VARCHAR(100),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        ALTER TABLE Documentos_Empresa ADD COLUMN IF NOT EXISTS es_historico BOOLEAN DEFAULT FALSE;
-        ALTER TABLE Documentos_Empresa ADD COLUMN IF NOT EXISTS requisito_key VARCHAR(100);
-        CREATE INDEX IF NOT EXISTS idx_documentos_categoria ON Documentos_Empresa(categoria);
-        CREATE INDEX IF NOT EXISTS idx_documentos_vencimiento ON Documentos_Empresa(fecha_vencimiento);
-
-        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS precio_bulto_usd NUMERIC(12, 2) DEFAULT 0;
-        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS cant_bulto INT DEFAULT 0;
-        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS ganancia_detalle NUMERIC(8, 2) DEFAULT 0;
-        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS ganancia_mayor NUMERIC(8, 2) DEFAULT 0;
-        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS ganancia_bulto NUMERIC(8, 2) DEFAULT 0;
-        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS fijar_margen BOOLEAN DEFAULT FALSE;
-        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS porcentaje_impuesto NUMERIC(5, 2) DEFAULT 0;
-        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS a_granel BOOLEAN DEFAULT FALSE;
-        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(50);
-        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS estado VARCHAR(10) DEFAULT 'Activo';
-        ALTER TABLE Productos ALTER COLUMN imagen_url TYPE TEXT;
-
-        -- Migración estándar para Tasas_Cambio y Cajas
-        ALTER TABLE Tasas_Cambio ADD COLUMN IF NOT EXISTS fecha_actualizacion VARCHAR(50);
-        ALTER TABLE Tasas_Cambio ADD COLUMN IF NOT EXISTS tasa_vuelto NUMERIC(12, 4) DEFAULT 0;
-        ALTER TABLE Tasas_Cambio ADD COLUMN IF NOT EXISTS tasa_oficial NUMERIC(12, 4) DEFAULT 0;
-        ALTER TABLE Tasas_Cambio ALTER COLUMN tasa_oficial DROP NOT NULL;
-        ALTER TABLE Tasas_Cambio ALTER COLUMN tasa_oficial SET DEFAULT 0;
-        ALTER TABLE Tasas_Cambio ADD COLUMN IF NOT EXISTS diferencial_porcentaje NUMERIC(5, 2) DEFAULT 0;
-        ALTER TABLE Tasas_Cambio ALTER COLUMN diferencial_porcentaje DROP NOT NULL;
-        ALTER TABLE Tasas_Cambio ALTER COLUMN diferencial_porcentaje SET DEFAULT 0;
-        ALTER TABLE Tasas_Cambio ALTER COLUMN usuario_id DROP NOT NULL;
-        ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_apertura_usd NUMERIC(12, 2) DEFAULT 0;
-        ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_apertura_ves NUMERIC(12, 2) DEFAULT 0;
-        ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_cierre_real_ves NUMERIC(12, 2) DEFAULT 0;
-        ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_cierre_esperado_ves NUMERIC(12, 2) DEFAULT 0;
-        ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS con_ticket BOOLEAN DEFAULT TRUE;
-      `).catch(err => console.warn('[Migration Documentos_Empresa / Productos / Tasas / Cajas]', err.message));
     }
+
+    // Auto-migración incremental universal (ejecutada en instalaciones existentes y nuevas)
+    await clientTarget.query(`
+      CREATE TABLE IF NOT EXISTS Documentos_Empresa (
+          id BIGSERIAL PRIMARY KEY,
+          categoria VARCHAR(50) NOT NULL CHECK (categoria IN ('SENIAT', 'MERCANTIL', 'MUNICIPAL', 'PARAFISCAL', 'OTROS')),
+          titulo VARCHAR(150) NOT NULL,
+          descripcion TEXT,
+          nombre_archivo VARCHAR(255) NOT NULL,
+          ruta_archivo TEXT NOT NULL,
+          mime_type VARCHAR(100),
+          tamano_bytes BIGINT DEFAULT 0,
+          fecha_emision DATE,
+          fecha_vencimiento DATE,
+          estatus VARCHAR(20) DEFAULT 'Vigente',
+          es_historico BOOLEAN DEFAULT FALSE,
+          requisito_key VARCHAR(100),
+          created_by VARCHAR(100),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      ALTER TABLE Documentos_Empresa ADD COLUMN IF NOT EXISTS es_historico BOOLEAN DEFAULT FALSE;
+      ALTER TABLE Documentos_Empresa ADD COLUMN IF NOT EXISTS requisito_key VARCHAR(100);
+      CREATE INDEX IF NOT EXISTS idx_documentos_categoria ON Documentos_Empresa(categoria);
+      CREATE INDEX IF NOT EXISTS idx_documentos_vencimiento ON Documentos_Empresa(fecha_vencimiento);
+
+      ALTER TABLE Productos ADD COLUMN IF NOT EXISTS precio_bulto_usd NUMERIC(12, 2) DEFAULT 0;
+      ALTER TABLE Productos ADD COLUMN IF NOT EXISTS cant_bulto INT DEFAULT 0;
+      ALTER TABLE Productos ADD COLUMN IF NOT EXISTS ganancia_detalle NUMERIC(8, 2) DEFAULT 0;
+      ALTER TABLE Productos ADD COLUMN IF NOT EXISTS ganancia_mayor NUMERIC(8, 2) DEFAULT 0;
+      ALTER TABLE Productos ADD COLUMN IF NOT EXISTS ganancia_bulto NUMERIC(8, 2) DEFAULT 0;
+      ALTER TABLE Productos ADD COLUMN IF NOT EXISTS fijar_margen BOOLEAN DEFAULT FALSE;
+      ALTER TABLE Productos ADD COLUMN IF NOT EXISTS porcentaje_impuesto NUMERIC(5, 2) DEFAULT 0;
+      ALTER TABLE Productos ADD COLUMN IF NOT EXISTS a_granel BOOLEAN DEFAULT FALSE;
+      ALTER TABLE Productos ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(50);
+      ALTER TABLE Productos ADD COLUMN IF NOT EXISTS estado VARCHAR(10) DEFAULT 'Activo';
+      ALTER TABLE Productos ALTER COLUMN imagen_url TYPE TEXT;
+
+      -- Migración estándar para Tasas_Cambio y Cajas
+      ALTER TABLE Tasas_Cambio ADD COLUMN IF NOT EXISTS fecha_actualizacion VARCHAR(50);
+      ALTER TABLE Tasas_Cambio ADD COLUMN IF NOT EXISTS tasa_vuelto NUMERIC(12, 4) DEFAULT 0;
+      ALTER TABLE Tasas_Cambio ADD COLUMN IF NOT EXISTS tasa_oficial NUMERIC(12, 4) DEFAULT 0;
+      ALTER TABLE Tasas_Cambio ALTER COLUMN tasa_oficial DROP NOT NULL;
+      ALTER TABLE Tasas_Cambio ALTER COLUMN tasa_oficial SET DEFAULT 0;
+      ALTER TABLE Tasas_Cambio ADD COLUMN IF NOT EXISTS diferencial_porcentaje NUMERIC(5, 2) DEFAULT 0;
+      ALTER TABLE Tasas_Cambio ALTER COLUMN diferencial_porcentaje DROP NOT NULL;
+      ALTER TABLE Tasas_Cambio ALTER COLUMN diferencial_porcentaje SET DEFAULT 0;
+      ALTER TABLE Tasas_Cambio ALTER COLUMN usuario_id DROP NOT NULL;
+
+      ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_apertura_usd NUMERIC(12, 2) DEFAULT 0;
+      ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_apertura_ves NUMERIC(12, 2) DEFAULT 0;
+      ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_cierre_real_ves NUMERIC(12, 2) DEFAULT 0;
+      ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_cierre_esperado_ves NUMERIC(12, 2) DEFAULT 0;
+      ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS pagos_cashea_usd NUMERIC(12, 2) DEFAULT 0;
+      ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS con_ticket BOOLEAN DEFAULT TRUE;
+      ALTER TABLE Configuracion_Empresa ADD COLUMN IF NOT EXISTS pago_movil_config TEXT;
+
+      -- Liberar restricción check de métodos de pago para admitir Cashea, PayPal, Binance, etc.
+      ALTER TABLE Pagos_Venta DROP CONSTRAINT IF EXISTS pagos_venta_metodo_pago_check;
+
+      -- Tabla de Movimientos Bancarios BDV para Conciliación de Pago Móvil
+      CREATE TABLE IF NOT EXISTS Movimientos_Bancarios_BDV (
+          id BIGSERIAL PRIMARY KEY,
+          fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          referencia VARCHAR(50) NOT NULL,
+          monto_ves NUMERIC(12, 2) NOT NULL,
+          telefono_origen VARCHAR(30),
+          titular_origen VARCHAR(150),
+          banco_origen VARCHAR(100) DEFAULT 'Banco de Venezuela',
+          descripcion TEXT,
+          conciliado BOOLEAN DEFAULT FALSE,
+          venta_id BIGINT REFERENCES Ventas(id) ON DELETE SET NULL,
+          caja_id BIGINT REFERENCES Cajas_Apertura_Cierre(id) ON DELETE SET NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- ALTER TABLE para asegurar columnas individuales si la tabla ya existía en clientes previos
+      ALTER TABLE Movimientos_Bancarios_BDV ADD COLUMN IF NOT EXISTS fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+      ALTER TABLE Movimientos_Bancarios_BDV ADD COLUMN IF NOT EXISTS referencia VARCHAR(50);
+      ALTER TABLE Movimientos_Bancarios_BDV ADD COLUMN IF NOT EXISTS monto_ves NUMERIC(12, 2) DEFAULT 0;
+      ALTER TABLE Movimientos_Bancarios_BDV ADD COLUMN IF NOT EXISTS telefono_origen VARCHAR(30);
+      ALTER TABLE Movimientos_Bancarios_BDV ADD COLUMN IF NOT EXISTS titular_origen VARCHAR(150);
+      ALTER TABLE Movimientos_Bancarios_BDV ADD COLUMN IF NOT EXISTS banco_origen VARCHAR(100) DEFAULT 'Banco de Venezuela';
+      ALTER TABLE Movimientos_Bancarios_BDV ADD COLUMN IF NOT EXISTS descripcion TEXT;
+      ALTER TABLE Movimientos_Bancarios_BDV ADD COLUMN IF NOT EXISTS conciliado BOOLEAN DEFAULT FALSE;
+      ALTER TABLE Movimientos_Bancarios_BDV ADD COLUMN IF NOT EXISTS venta_id BIGINT;
+      ALTER TABLE Movimientos_Bancarios_BDV ADD COLUMN IF NOT EXISTS caja_id BIGINT;
+      ALTER TABLE Movimientos_Bancarios_BDV ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+      CREATE INDEX IF NOT EXISTS idx_mov_bancarios_ref ON Movimientos_Bancarios_BDV(referencia);
+      CREATE INDEX IF NOT EXISTS idx_mov_bancarios_fecha ON Movimientos_Bancarios_BDV(fecha);
+      CREATE INDEX IF NOT EXISTS idx_mov_bancarios_conciliado ON Movimientos_Bancarios_BDV(conciliado);
+    `).catch(err => console.warn('[Migration Documentos_Empresa / Productos / Tasas / Cajas / BDV]', err.message));
     return true;
 
   } catch (err) {

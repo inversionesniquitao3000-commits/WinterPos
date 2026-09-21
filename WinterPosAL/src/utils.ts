@@ -459,6 +459,7 @@ export function printCierreTicketReport(
   let shiftPagosBinanceUsd = 0;
   let shiftPagosPayPalUsd = 0;
   let shiftPagosCreditoUsd = 0;
+  let shiftPagosCasheaUsd = 0;
   let shiftDescuentosUsd = 0;
   let shiftVentasTotalesUsd = 0;
 
@@ -496,12 +497,14 @@ export function printCierreTicketReport(
           shiftPagosPayPalUsd += valUsd * mult;
         } else if (m.includes('credito')) {
           shiftPagosCreditoUsd += valUsd * mult;
+        } else if (m.includes('cashea')) {
+          shiftPagosCasheaUsd += valUsd * mult;
         }
       });
     }
   });
 
-  const shiftNonCash = shiftPagosTarjetaUsd + shiftPagosZelleUsd + shiftPagosBinanceUsd + shiftPagosPayPalUsd + shiftPagosCreditoUsd + shiftPagosPagoMovilVes + shiftPagosPuntoVes + shiftPagosBiopagoVes + shiftPagosTransferenciaVes + shiftPagosEfectivoBsVes;
+  const shiftNonCash = shiftPagosTarjetaUsd + shiftPagosZelleUsd + shiftPagosBinanceUsd + shiftPagosPayPalUsd + shiftPagosCreditoUsd + shiftPagosCasheaUsd + shiftPagosPagoMovilVes + shiftPagosPuntoVes + shiftPagosBiopagoVes + shiftPagosTransferenciaVes + shiftPagosEfectivoBsVes;
   if (shiftPagosEfectivoUsd === 0 && shiftVentasTotalesUsd > 0 && shiftNonCash === 0) {
     shiftPagosEfectivoUsd = shiftVentasTotalesUsd;
   }
@@ -554,6 +557,10 @@ export function printCierreTicketReport(
   const pagosCreditoUsd = (cierreData.pagosCreditoUsd && cierreData.pagosCreditoUsd > 0)
     ? cierreData.pagosCreditoUsd
     : (shiftPagosCreditoUsd > 0 ? shiftPagosCreditoUsd : 0);
+
+  const pagosCasheaUsd = (cierreData.pagosCasheaUsd && cierreData.pagosCasheaUsd > 0)
+    ? cierreData.pagosCasheaUsd
+    : (shiftPagosCasheaUsd > 0 ? shiftPagosCasheaUsd : 0);
 
   const ventaTotalUsd = cierreData.ventaTotalUsd || cierreData.ventasTotalesUsd || shiftVentasTotalesUsd || 0;
   const descuentosUsd = (cierreData.descuentosUsd && cierreData.descuentosUsd > 0) ? cierreData.descuentosUsd : shiftDescuentosUsd;
@@ -722,6 +729,7 @@ export function printCierreTicketReport(
         ${pagosBinanceUsd > 0 ? `<div class="row-flex"><span>Binance USD:</span><span>$${pagosBinanceUsd.toFixed(2)}</span></div>` : ''}
         ${pagosPayPalUsd > 0 ? `<div class="row-flex"><span>PayPal USD:</span><span>$${pagosPayPalUsd.toFixed(2)}</span></div>` : ''}
         ${pagosCreditoUsd > 0 ? `<div class="row-flex"><span>A Crédito:</span><span>$${pagosCreditoUsd.toFixed(2)}</span></div>` : ''}
+        ${pagosCasheaUsd > 0 ? `<div class="row-flex"><span>Cashea Financiado:</span><span>$${pagosCasheaUsd.toFixed(2)}</span></div>` : ''}
 
         <div class="divider"></div>
         <div class="bold">MOVIMIENTOS DE EFECTIVO:</div>

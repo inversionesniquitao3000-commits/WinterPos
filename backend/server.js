@@ -21,8 +21,20 @@ import {
   getCotizacionesProveedores, saveCotizacionProveedor, deleteCotizacionProveedor,
   saveSalidaInventario, getSalidasPausadas, saveSalidasPausadas,
   getLastInvoiceNumber, getSyncSummary,
-  getDocumentosEmpresa, saveDocumentoEmpresa, updateDocumentoEmpresa, deleteDocumentoEmpresa
+  getDocumentosEmpresa, saveDocumentoEmpresa, updateDocumentoEmpresa, deleteDocumentoEmpresa,
+  saveBdvMovements, getBdvMovements, validateBdvPayment, reconcileShiftPagoMovilDb,
+  getPagoMovilConfigDb, savePagoMovilConfigDb
 } from './db-store.js';
+
+import { calculateCasheaBreakdown, CASHEA_LEVELS } from './cashea-service.js';
+import { parseBdvStatementText, parseBdvSmsNotification, matchPaymentWithMovements } from './bdv-conciliacion-service.js';
+import {
+  startPagoMovilTunnel,
+  stopPagoMovilTunnel,
+  getPagoMovilTunnelStatus,
+  autoStartPagoMovilTunnelIfEnabled,
+  syncPagoMovilTunnelConfigInMemory
+} from './pago-movil-tunnel-service.js';
 
 import {
   initWhatsAppClient, getWhatsAppStatus, saveWhatsAppConfig, sendCierreReport,
@@ -227,6 +239,174 @@ app.post('/api/ai/upload-manual-image', async (req, res) => {
   }
 });
 
+// -------------------------------------------------------------
+// CASHEA FINANCING & BNPL ENDPOINTS
+// -------------------------------------------------------------
+app.get('/api/cashea/levels', (req, res) => {
+  res.json({ success: true, levels: CASHEA_LEVELS });
+});
+
+app.post('/api/cashea/calcular', (req, res) => {
+  try {
+    const { totalUSD, tasaBCV, levelId, customPct } = req.body || {};
+    const breakdown = calculateCasheaBreakdown(totalUSD, tasaBCV, levelId, customPct);
+    res.json({ success: true, ...breakdown });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// CONCILIACIÓN PAGO MÓVIL (BANCO DE VENEZUELA) ENDPOINTS
+// -------------------------------------------------------------
+app.post('/api/conciliacion/validar-referencia', async (req, res) => {
+  try {
+    const { referencia, monto_ves } = req.body || {};
+    const result = await validateBdvPayment(referencia, monto_ves);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/conciliacion/importar-extracto-bdv', async (req, res) => {
+  try {
+    const { rawText, movements: providedMovs, cajaId } = req.body || {};
+    let movsToSave = [];
+    if (Array.isArray(providedMovs) && providedMovs.length > 0) {
+      movsToSave = providedMovs;
+    } else if (rawText) {
+      movsToSave = parseBdvStatementText(rawText);
+    }
+    if (cajaId) {
+      movsToSave = movsToSave.map(m => ({ ...m, caja_id: cajaId }));
+    }
+    if (movsToSave.length === 0) {
+      return res.json({ success: false, message: 'No se encontraron movimientos válidos en el extracto proporcionado. Verifique el formato.' });
+    }
+    const saveRes = await saveBdvMovements(movsToSave);
+    res.json({ success: true, count: movsToSave.length, inserted: saveRes.inserted, movements: movsToSave });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/conciliacion/movimientos-bdv', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit || '100');
+    const movements = await getBdvMovements(limit);
+    res.json({ success: true, movements });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/conciliacion/conciliar-turno', async (req, res) => {
+  try {
+    const { cajaId } = req.body || {};
+    const summary = await reconcileShiftPagoMovilDb(cajaId);
+    res.json(summary);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/conciliacion/webhook-info', (req, res) => {
+  try {
+    const ip = getLocalIpAddress();
+    res.json({
+      success: true,
+      localIp: ip,
+      webhookUrl: `http://${ip}:5000/api/conciliacion/sms-webhook`,
+      port: 5000
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/conciliacion/sms-webhook', async (req, res) => {
+  try {
+    const { smsText, message, text, body, content, sms } = req.body || {};
+    const rawContent = smsText || message || text || body || content || sms || (typeof req.body === 'string' ? req.body : '');
+    const parsed = parseBdvSmsNotification(rawContent);
+    if (parsed) {
+      await saveBdvMovements([parsed]);
+      return res.json({ success: true, parsed, saved: true });
+    }
+    res.json({ success: false, message: 'Texto no reconocido como notificación de Pago Móvil BDV' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PAGO MÓVIL BACKGROUND TUNNEL ENDPOINTS (100% Silencioso sin ventana CMD)
+app.get('/api/conciliacion/tunnel/status', async (req, res) => {
+  try {
+    const status = await getPagoMovilTunnelStatus();
+    res.json({ success: true, ...status });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/conciliacion/tunnel/start', async (req, res) => {
+  try {
+    const result = await startPagoMovilTunnel();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/conciliacion/tunnel/stop', async (req, res) => {
+  try {
+    const result = await stopPagoMovilTunnel();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/conciliacion/tunnel/config', async (req, res) => {
+  try {
+    const rawToken = (req.body.tunnelToken || req.body.cloudflareTunnelToken || req.body.token || '').trim();
+    const configData = {
+      ...req.body,
+      tunnelToken: rawToken,
+      cloudflareTunnelToken: rawToken,
+      token: rawToken
+    };
+    if (req.body.tunnelProvider !== undefined) {
+      configData.tunnelProvider = req.body.tunnelProvider;
+    }
+    if (req.body.localtunnelSubdomain !== undefined) {
+      configData.localtunnelSubdomain = (req.body.localtunnelSubdomain || '').trim();
+    }
+    if (req.body.ngrokAuthtoken !== undefined) {
+      configData.ngrokAuthtoken = (req.body.ngrokAuthtoken || '').trim();
+    }
+    if (req.body.ngrokDomain !== undefined) {
+      configData.ngrokDomain = (req.body.ngrokDomain || '').trim();
+    }
+    if (req.body.customDomain !== undefined) {
+      configData.customDomain = (req.body.customDomain || '').trim();
+    }
+    const updated = await savePagoMovilConfigDb(configData);
+    syncPagoMovilTunnelConfigInMemory(configData);
+    const cur = await getPagoMovilTunnelStatus();
+    if (req.body.restartTunnel && cur.hasActiveProcess) {
+      await stopPagoMovilTunnel();
+      await startPagoMovilTunnel();
+    } else if (req.body.autoStartTunnel && !cur.hasActiveProcess) {
+      await startPagoMovilTunnel();
+    }
+    res.json({ success: true, config: updated });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Serve product images publicly with CORS headers for all client terminals & browsers (multi-folder fallback)
 app.use('/api/ai/images', (req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -248,6 +428,8 @@ app.use((req, res, next) => {
   if (
     req.path.startsWith('/api/license') ||
     req.path.startsWith('/api/ai') ||
+    req.path.startsWith('/api/cashea') ||
+    req.path.startsWith('/api/conciliacion') ||
     req.path === '/api/status' ||
     req.path === '/api/health' ||
     !req.path.startsWith('/api/')
@@ -2659,6 +2841,11 @@ freePortIfOccupied(PORT).then(() => {
     setTimeout(() => {
       initWhatsAppClient();
     }, 6000);
+
+    // Auto-iniciar túnel silencioso de Pago Móvil en segundo plano si fue habilitado por el administrador
+    setTimeout(() => {
+      autoStartPagoMovilTunnelIfEnabled();
+    }, 4000);
   });
 
   server.on('error', (err) => {
