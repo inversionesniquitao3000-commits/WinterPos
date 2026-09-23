@@ -34,3 +34,8 @@ backend/data/product_images/*
 *.sqlite3
 *.db
 backend/backend/
+
+# Archivos y scripts temporales de diagnóstico
+scratch/
+backend/check_data.js
+
