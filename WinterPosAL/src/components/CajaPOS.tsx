@@ -1760,6 +1760,8 @@ export default function CajaPOS({
         setShowDevolucionModal(false);
         setShowQuickClientModal(false);
         setShowCambioDivisasModal(false);
+        setShowCasheaModal(false);
+        setShowConciliacionModal(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);

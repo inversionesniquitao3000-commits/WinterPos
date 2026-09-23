@@ -3,9 +3,10 @@ import {
   FileText, Search, Plus, X, Check, RefreshCw, AlertTriangle, 
   Trash2, DollarSign, Calculator, 
   Building2, Package, PauseCircle,
-  Sparkles, CheckCircle2
+  Sparkles, CheckCircle2, Camera
 } from 'lucide-react';
 import { getApiBaseUrl } from '../utils';
+import ModalEscaneoFotoFactura from '../components/ModalEscaneoFotoFactura';
 
 export interface InvoiceItemDraft {
   producto_id?: number;
@@ -97,6 +98,7 @@ export default function MobileCargaFacturaModal({
 
   // Paused Draft notification
   const [hasPausedDraft, setHasPausedDraft] = useState(false);
+  const [showEscaneoFotoModal, setShowEscaneoFotoModal] = useState(false);
 
   // Quick Product Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -569,6 +571,17 @@ export default function MobileCargaFacturaModal({
           </div>
 
           <div className="flex items-center gap-1.5">
+            {/* Foto OCR Button */}
+            <button
+              type="button"
+              onClick={() => setShowEscaneoFotoModal(true)}
+              className="px-2.5 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold flex items-center gap-1 transition active:scale-95"
+              title="Escanear ticket/factura con cámara OCR"
+            >
+              <Camera className="w-3.5 h-3.5 text-emerald-300" />
+              <span>Foto OCR</span>
+            </button>
+
             {/* Pause Button */}
             <button
               type="button"
@@ -1326,8 +1339,57 @@ export default function MobileCargaFacturaModal({
               </button>
             </div>
           </div>
-        </div>
       )}
+
+      {/* Modal de Escaneo e Inteligencia OCR de Factura por Foto */}
+      <ModalEscaneoFotoFactura
+        isOpen={showEscaneoFotoModal}
+        onClose={() => setShowEscaneoFotoModal(false)}
+        tasaBcv={tasaDia || 1}
+        existingProducts={existingProducts as any}
+        onAddNewProductFast={async (prodData) => {
+          const newId = Date.now();
+          const mockProd = {
+            id: newId,
+            barcode: prodData.barcode || `AUTO-${newId}`,
+            description: prodData.description || 'PRODUCTO NUEVO',
+            category: prodData.category || 'GENERAL',
+            stock_actual: 0,
+            precio_costo_usd: prodData.precio_costo_usd || 1,
+            precio_detalle_usd: prodData.precio_detalle_usd || 1.3,
+            precio_mayor_usd: prodData.precio_mayor_usd || 1.15
+          };
+          existingProducts.push(mockProd);
+          return mockProd as any;
+        }}
+        onApplyToInvoice={(data) => {
+          if (data.invoiceNumber) {
+            setNumeroFactura(data.invoiceNumber.slice(0, 10));
+          }
+          if (data.items && data.items.length > 0) {
+            setItems(prev => {
+              const newDrafts: InvoiceItemDraft[] = data.items.map(item => ({
+                producto_id: item.product.id,
+                barcode: item.product.barcode || `S/C-${item.product.id}`,
+                description: item.product.description.toUpperCase(),
+                category: item.product.category || 'GENERAL',
+                isNewProduct: false,
+                cantidad: item.qty,
+                costo_unitario_usd: item.precio_costo_usd,
+                costo_total_usd: Math.round(item.qty * item.precio_costo_usd * 100) / 100,
+                precio_detalle_usd: item.precio_detalle_usd,
+                precio_mayor_usd: item.precio_mayor_usd,
+                margen_detalle_pct: item.precio_costo_usd > 0 ? Math.round(((item.precio_detalle_usd - item.precio_costo_usd) / item.precio_costo_usd) * 100) : 30,
+                margen_mayor_pct: item.precio_costo_usd > 0 ? Math.round(((item.precio_mayor_usd - item.precio_costo_usd) / item.precio_costo_usd) * 100) : 15
+              }));
+
+              const existingIds = new Set(prev.map(i => i.producto_id));
+              const filteredNew = newDrafts.filter(d => !existingIds.has(d.producto_id));
+              return [...filteredNew, ...prev];
+            });
+          }
+        }}
+      />
     </div>
   );
 }

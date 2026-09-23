@@ -2306,7 +2306,7 @@ export async function wipeDatabase(options) {
 }
 
 export async function backupDatabase() {
-  return {
+  const data = {
     config: await getCompanyConfig(),
     users: await getUsers(),
     roles: await getRoles(),
@@ -2326,6 +2326,31 @@ export async function backupDatabase() {
     cotizacionesProveedores: await getCotizacionesProveedores(),
     timestamp: new Date().toISOString()
   };
+
+  // Sync disk JSON files so fallback files always match Postgres exactly
+  try {
+    if (data.config) writeJsonFile('config.json', data.config);
+    if (data.users) writeJsonFile('users.json', data.users);
+    if (data.roles) writeJsonFile('roles.json', data.roles);
+    if (data.products) writeJsonFile('products.json', data.products);
+    if (data.clients) writeJsonFile('clients.json', data.clients);
+    if (data.sales) writeJsonFile('sales.json', data.sales);
+    if (data.abonos) writeJsonFile('abonos.json', data.abonos);
+    if (data.movements) writeJsonFile('movements.json', data.movements);
+    if (data.tasas) writeJsonFile('tasas.json', data.tasas);
+    if (data.cierres) writeJsonFile('cierres.json', data.cierres);
+    if (data.priceHistory) writeJsonFile('price_history.json', data.priceHistory);
+    if (data.accionistas) writeJsonFile('accionistas.json', data.accionistas);
+    if (data.inversiones) writeJsonFile('inversiones.json', data.inversiones);
+    if (data.proveedores) writeJsonFile('proveedores.json', data.proveedores);
+    if (data.compras) writeJsonFile('compras.json', data.compras);
+    if (data.pagosProveedores || data.pagos_proveedores) writeJsonFile('pagos_proveedores.json', data.pagosProveedores || data.pagos_proveedores);
+    if (data.cotizacionesProveedores || data.cotizaciones_proveedores) writeJsonFile('cotizaciones_proveedores.json', data.cotizacionesProveedores || data.cotizaciones_proveedores);
+  } catch (syncErr) {
+    console.warn('⚠️ Error al sincronizar archivos JSON locales durante backup:', syncErr.message);
+  }
+
+  return data;
 }
 
 export async function restoreCierresToPostgres(cierres) {
@@ -2409,8 +2434,10 @@ export async function restoreSalesToPostgres(sales) {
     ]);
 
     const clientMap = new Map();
+    const clientMapById = new Map();
     cRes.rows.forEach(c => {
       if (c.cedula_rif) clientMap.set(c.cedula_rif.trim().toUpperCase(), c.id);
+      clientMapById.set(Number(c.id), c.id);
     });
     const defaultClientId = cRes.rows[0]?.id || 1;
 
@@ -2442,7 +2469,14 @@ export async function restoreSalesToPostgres(sales) {
         if (isNaN(sId)) continue;
 
         const cDoc = (s.client?.cedula_rif || s.clientDoc || '').trim().toUpperCase();
-        const clientId = clientMap.get(cDoc) || defaultClientId;
+        const rawClientId = parseInt(s.client?.id || s.cliente_id || s.clienteId, 10);
+        let clientId = clientMap.get(cDoc);
+        if (!clientId && !isNaN(rawClientId) && clientMapById.has(rawClientId)) {
+          clientId = clientMapById.get(rawClientId);
+        }
+        if (!clientId) {
+          clientId = defaultClientId;
+        }
 
         const uName = (s.usuario || '').toLowerCase().trim();
         const userId = userMap.get(uName) || defaultUserId;
@@ -2642,90 +2676,159 @@ export async function syncJsonBackupsToPostgresIfEmpty() {
 
 export async function restoreDatabase(data) {
   if (usePostgres) {
-    try {
-      if (data.products) {
+    // 1. Roles
+    if (Array.isArray(data.roles)) {
+      try {
+        await pool.query('TRUNCATE TABLE Roles RESTART IDENTITY CASCADE');
+        for (const r of data.roles) {
+          await pool.query(
+            'INSERT INTO Roles (id, nombre, permisos) VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET nombre = EXCLUDED.nombre, permisos = EXCLUDED.permisos',
+            [r.id, r.nombre, typeof r.permisos === 'string' ? r.permisos : JSON.stringify(r.permisos)]
+          );
+        }
+        await pool.query("SELECT setval(pg_get_serial_sequence('Roles', 'id'), COALESCE((SELECT MAX(id) FROM Roles), 1))");
+      } catch (err) {
+        console.error('Error restaurando Roles en Postgres:', err.message);
+      }
+    }
+
+    // 2. Users
+    if (Array.isArray(data.users)) {
+      try {
+        await pool.query('TRUNCATE TABLE Usuarios RESTART IDENTITY CASCADE');
+        for (const u of data.users) {
+          await pool.query(
+            'INSERT INTO Usuarios (id, usuario, nombre, rol, estado, clave, permisos) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (id) DO UPDATE SET usuario = EXCLUDED.usuario, nombre = EXCLUDED.nombre',
+            [u.id, u.usuario, u.nombre, u.rol, u.estado || 'Activo', u.clave || 'admin', typeof u.permisos === 'string' ? u.permisos : JSON.stringify(u.permisos)]
+          );
+        }
+        await pool.query("SELECT setval(pg_get_serial_sequence('Usuarios', 'id'), COALESCE((SELECT MAX(id) FROM Usuarios), 1))");
+      } catch (err) {
+        console.error('Error restaurando Usuarios en Postgres:', err.message);
+      }
+    }
+
+    // 3. Products
+    if (Array.isArray(data.products)) {
+      try {
         await pool.query('TRUNCATE TABLE Productos RESTART IDENTITY CASCADE');
         for (const p of data.products) {
           await pool.query(
             `INSERT INTO Productos (id, codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, 
              precio_costo_usd, precio_detalle_usd, precio_mayor_usd, precio_bulto_usd, cantidad_mayorista, cant_bulto, ganancia_detalle, ganancia_mayor, ganancia_bulto, fijar_margen, exento_impuesto, imagen_url, 
              estado, a_granel, fecha_vencimiento, porcentaje_impuesto) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+             ON CONFLICT (id) DO UPDATE SET codigo_barras_clave = EXCLUDED.codigo_barras_clave, descripcion = EXCLUDED.descripcion`,
             [p.id, p.barcode || p.codigo_barras_clave, p.description || p.descripcion, p.category || p.categoria, p.stock_actual, p.stock_minimo,
             p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.precio_bulto_usd || 0, p.cantidad_mayorista || 12, p.cant_bulto || 0, parseFloat(p.ganancia_detalle) || 0, parseFloat(p.ganancia_mayor) || 0, parseFloat(p.ganancia_bulto) || 0, !!p.fijar_margen, p.exento_impuesto, p.imagen_url || '',
             p.estado || 'Activo', p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
           );
         }
         await pool.query("SELECT setval(pg_get_serial_sequence('Productos', 'id'), COALESCE((SELECT MAX(id) FROM Productos), 1))");
+      } catch (err) {
+        console.error('Error restaurando Productos en Postgres:', err.message);
       }
-      if (data.clients) {
+    }
+
+    // 4. Clients
+    if (Array.isArray(data.clients)) {
+      try {
         await pool.query('TRUNCATE TABLE Clientes RESTART IDENTITY CASCADE');
         for (const c of data.clients) {
+          const cId = parseInt(c.id, 10);
+          if (isNaN(cId)) continue;
+          const cDoc = (c.cedula_rif || c.cedula || c.rif || `V-${String(cId).padStart(8, '0')}`).trim().toUpperCase();
+          const cNombre = c.nombre || 'CLIENTE REGISTRADO';
           await pool.query(
             `INSERT INTO Clientes (id, cedula_rif, nombre, telefono, direccion, limite_credito, credito_disponible, porcentaje_descuento, estado, aplica_precio_costo) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-            [c.id, c.cedula_rif, c.nombre, c.telefono || '', c.direccion || '', c.limite_credito, c.credito_disponible, c.porcentaje_descuento, c.estado || 'Activo', c.aplica_precio_costo || false]
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             ON CONFLICT (id) DO UPDATE SET
+               cedula_rif = EXCLUDED.cedula_rif,
+               nombre = EXCLUDED.nombre,
+               telefono = EXCLUDED.telefono,
+               direccion = EXCLUDED.direccion,
+               limite_credito = EXCLUDED.limite_credito,
+               credito_disponible = EXCLUDED.credito_disponible,
+               porcentaje_descuento = EXCLUDED.porcentaje_descuento,
+               estado = EXCLUDED.estado,
+               aplica_precio_costo = EXCLUDED.aplica_precio_costo`,
+            [cId, cDoc, cNombre, c.telefono || '', c.direccion || '', parseFloat(c.limite_credito || 0), parseFloat(c.credito_disponible || 0), parseFloat(c.porcentaje_descuento || 0), c.estado || 'Activo', !!c.aplica_precio_costo]
           );
         }
         await pool.query("SELECT setval(pg_get_serial_sequence('Clientes', 'id'), COALESCE((SELECT MAX(id) FROM Clientes), 1))");
+      } catch (err) {
+        console.error('Error restaurando Clientes en Postgres:', err.message);
       }
-      if (data.users) {
-        await pool.query('TRUNCATE TABLE Usuarios RESTART IDENTITY CASCADE');
-        for (const u of data.users) {
-          await pool.query(
-            'INSERT INTO Usuarios (id, usuario, nombre, rol, estado, clave, permisos) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-            [u.id, u.usuario, u.nombre, u.rol, u.estado || 'Activo', u.clave || 'admin', typeof u.permisos === 'string' ? u.permisos : JSON.stringify(u.permisos)]
-          );
-        }
-        await pool.query("SELECT setval(pg_get_serial_sequence('Usuarios', 'id'), COALESCE((SELECT MAX(id) FROM Usuarios), 1))");
+    }
+
+    // Ensure Consumidor Final (ID 1) is guaranteed
+    try {
+      const genCheck = await pool.query("SELECT id FROM Clientes WHERE id = 1 OR cedula_rif = 'V-00000000' LIMIT 1");
+      if (genCheck.rowCount === 0) {
+        await pool.query(`
+          INSERT INTO Clientes (id, cedula_rif, nombre, telefono, direccion, limite_credito, credito_disponible, porcentaje_descuento, estado, aplica_precio_costo)
+          VALUES (1, 'V-00000000', 'CONSUMIDOR FINAL', '', 'LOCAL', 0, 0, 0, 'Activo', false) ON CONFLICT (id) DO NOTHING
+        `);
       }
-      if (data.roles) {
-        await pool.query('TRUNCATE TABLE Roles RESTART IDENTITY CASCADE');
-        for (const r of data.roles) {
-          await pool.query(
-            'INSERT INTO Roles (id, nombre, permisos) VALUES ($1, $2, $3)',
-            [r.id, r.nombre, typeof r.permisos === 'string' ? r.permisos : JSON.stringify(r.permisos)]
-          );
-        }
-        await pool.query("SELECT setval(pg_get_serial_sequence('Roles', 'id'), COALESCE((SELECT MAX(id) FROM Roles), 1))");
-      }
-      if (data.accionistas) {
+    } catch (_) { }
+
+    // 5. Accionistas
+    if (Array.isArray(data.accionistas)) {
+      try {
         await pool.query('TRUNCATE TABLE Accionistas RESTART IDENTITY CASCADE');
         for (const a of data.accionistas) {
           await pool.query(
-            'INSERT INTO Accionistas (id, nombre, cedula_rif, telefono, estado) VALUES ($1, $2, $3, $4, $5)',
+            'INSERT INTO Accionistas (id, nombre, cedula_rif, telefono, estado) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO UPDATE SET nombre = EXCLUDED.nombre',
             [a.id, a.nombre, a.cedula_rif || '', a.telefono || '', a.estado || 'Activo']
           );
         }
         await pool.query("SELECT setval(pg_get_serial_sequence('Accionistas', 'id'), COALESCE((SELECT MAX(id) FROM Accionistas), 1))");
+      } catch (err) {
+        console.error('Error restaurando Accionistas en Postgres:', err.message);
       }
-      if (data.inversiones) {
+    }
+
+    // 6. Inversiones
+    if (Array.isArray(data.inversiones)) {
+      try {
         await pool.query('TRUNCATE TABLE Inversiones_Accionistas RESTART IDENTITY CASCADE');
         for (const inv of data.inversiones) {
           await pool.query(
-            'INSERT INTO Inversiones_Accionistas (id, accionista_id, fecha, monto_usd, observacion) VALUES ($1, $2, $3, $4, $5)',
+            'INSERT INTO Inversiones_Accionistas (id, accionista_id, fecha, monto_usd, observacion) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO NOTHING',
             [inv.id, inv.accionista_id, inv.fecha, inv.monto_usd, inv.observacion || '']
           );
         }
         await pool.query("SELECT setval(pg_get_serial_sequence('Inversiones_Accionistas', 'id'), COALESCE((SELECT MAX(id) FROM Inversiones_Accionistas), 1))");
+      } catch (err) {
+        console.error('Error restaurando Inversiones en Postgres:', err.message);
       }
-      if (data.proveedores) {
+    }
+
+    // 7. Proveedores
+    if (Array.isArray(data.proveedores)) {
+      try {
         await pool.query('TRUNCATE TABLE Proveedores RESTART IDENTITY CASCADE');
         for (const p of data.proveedores) {
           await pool.query(
             `INSERT INTO Proveedores (id, rif, razon_social, contacto_nombre, telefono, correo, direccion, dias_credito, limite_credito_usd, saldo_pendiente_usd, estado)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) ON CONFLICT (id) DO UPDATE SET razon_social = EXCLUDED.razon_social`,
             [p.id, p.rif, p.razon_social, p.contacto_nombre || '', p.telefono || '', p.correo || '', p.direccion || '', p.dias_credito || 0, p.limite_credito_usd || 0, p.saldo_pendiente_usd || 0, p.estado || 'Activo']
           );
         }
         await pool.query("SELECT setval(pg_get_serial_sequence('Proveedores', 'id'), COALESCE((SELECT MAX(id) FROM Proveedores), 1))");
+      } catch (err) {
+        console.error('Error restaurando Proveedores en Postgres:', err.message);
       }
-      if (data.compras) {
+    }
+
+    // 8. Compras
+    if (Array.isArray(data.compras)) {
+      try {
         await pool.query('TRUNCATE TABLE Compras, Compras_Detalle RESTART IDENTITY CASCADE');
         for (const c of data.compras) {
           await pool.query(
             `INSERT INTO Compras (id, numero_factura, proveedor_id, usuario_id, fecha_emision, fecha_vencimiento, condicion_pago, subtotal_usd, impuesto_usd, descuento_usd, total_usd, total_ves, saldo_pendiente_usd, estatus, observaciones)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) ON CONFLICT (id) DO UPDATE SET numero_factura = EXCLUDED.numero_factura`,
             [c.id, c.numero_factura, c.proveedor_id, c.usuario_id || 1, c.fecha_emision, c.fecha_vencimiento || null, c.condicion_pago || 'Contado', c.subtotal_usd || 0, c.impuesto_usd || 0, c.descuento_usd || 0, c.total_usd || 0, c.total_ves || 0, c.saldo_pendiente_usd || 0, c.estatus || 'Pendiente', c.observaciones || '']
           );
           if (Array.isArray(c.items)) {
@@ -2740,50 +2843,32 @@ export async function restoreDatabase(data) {
         }
         await pool.query("SELECT setval(pg_get_serial_sequence('Compras', 'id'), COALESCE((SELECT MAX(id) FROM Compras), 1))");
         await pool.query("SELECT setval(pg_get_serial_sequence('Compras_Detalle', 'id'), COALESCE((SELECT MAX(id) FROM Compras_Detalle), 1))");
+      } catch (err) {
+        console.error('Error restaurando Compras en Postgres:', err.message);
       }
-      const pagosList = data.pagosProveedores || data.pagos_proveedores;
-      if (pagosList) {
-        await pool.query('TRUNCATE TABLE Pagos_Proveedores RESTART IDENTITY CASCADE');
-        for (const pg of pagosList) {
-          await pool.query(
-            `INSERT INTO Pagos_Proveedores (id, compra_id, proveedor_id, usuario_id, caja_id, monto_usd, monto_ves, tasa_cambio, metodo_pago, banco_origen, numero_referencia, afecto_caja_efectivo, observacion, fecha)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-            [pg.id, pg.compra_id || null, pg.proveedor_id, pg.usuario_id || 1, pg.caja_id || null, pg.monto_usd || 0, pg.monto_ves || 0, pg.tasa_cambio || 1, pg.metodo_pago || 'Efectivo$', pg.banco_origen || '', pg.numero_referencia || '', !!pg.afecto_caja_efectivo, pg.observacion || '', pg.fecha || new Date()]
-          );
-        }
-        await pool.query("SELECT setval(pg_get_serial_sequence('Pagos_Proveedores', 'id'), COALESCE((SELECT MAX(id) FROM Pagos_Proveedores), 1))");
-      }
-      const cotList = data.cotizacionesProveedores || data.cotizaciones_proveedores;
-      if (cotList) {
-        await pool.query('TRUNCATE TABLE Cotizaciones_Proveedores RESTART IDENTITY CASCADE');
-        for (const cot of cotList) {
-          await pool.query(
-            `INSERT INTO Cotizaciones_Proveedores (id, numero_cotizacion, proveedor_id, usuario_id, fecha, fecha_vigencia, total_usd, total_ves, detalles_json, estatus)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-            [cot.id, cot.numero_cotizacion, cot.proveedor_id, cot.usuario_id || 1, cot.fecha, cot.fecha_vigencia || null, cot.total_usd || 0, cot.total_ves || 0, typeof cot.detalles_json === 'string' ? cot.detalles_json : JSON.stringify(cot.detalles_json || {}), cot.estatus || 'Pendiente']
-          );
-        }
-        await pool.query("SELECT setval(pg_get_serial_sequence('Cotizaciones_Proveedores', 'id'), COALESCE((SELECT MAX(id) FROM Cotizaciones_Proveedores), 1))");
-      }
-      if (data.config) {
-        await saveCompanyConfig(data.config);
-      }
+    }
 
-      // Restore Cierres, Ventas, Abonos and Tasas to PostgreSQL
-      if (Array.isArray(data.cierres) && data.cierres.length > 0) {
-        await restoreCierresToPostgres(data.cierres);
+    // 9. Config
+    if (data.config) {
+      try {
+        await saveCompanyConfig(data.config);
+      } catch (cfgErr) {
+        console.error('Error restaurando Config en Postgres:', cfgErr.message);
       }
-      if (Array.isArray(data.sales) && data.sales.length > 0) {
-        await restoreSalesToPostgres(data.sales);
-      }
-      if (Array.isArray(data.abonos) && data.abonos.length > 0) {
-        await restoreAbonosToPostgres(data.abonos);
-      }
-      if (Array.isArray(data.tasas) && data.tasas.length > 0) {
-        await restoreTasasToPostgres(data.tasas);
-      }
-    } catch (err) {
-      console.error('Error al restaurar en Postgres:', err.message);
+    }
+
+    // 10. Restore Cierres, Ventas, Abonos and Tasas to PostgreSQL
+    if (Array.isArray(data.cierres) && data.cierres.length > 0) {
+      await restoreCierresToPostgres(data.cierres);
+    }
+    if (Array.isArray(data.sales) && data.sales.length > 0) {
+      await restoreSalesToPostgres(data.sales);
+    }
+    if (Array.isArray(data.abonos) && data.abonos.length > 0) {
+      await restoreAbonosToPostgres(data.abonos);
+    }
+    if (Array.isArray(data.tasas) && data.tasas.length > 0) {
+      await restoreTasasToPostgres(data.tasas);
     }
   }
 

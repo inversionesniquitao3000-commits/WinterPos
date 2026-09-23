@@ -3,11 +3,12 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Product, InventoryMovement, PriceAdjustmentHistory, User, CompanyConfig } from '../types';
-import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator, PauseCircle, Play, Trash2, Wand2, Sparkles, ShieldAlert, RotateCcw, BarChart3, TrendingUp, Award, DollarSign, X, Image as ImageIcon, Link as LinkIcon, UploadCloud, Check, Loader2, Building2, QrCode, Truck, AlertOctagon, AlertTriangle, Clock, Copy, ClipboardCheck, Eye, Maximize2, ExternalLink } from 'lucide-react';
+import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator, PauseCircle, Play, Trash2, Wand2, Sparkles, ShieldAlert, RotateCcw, BarChart3, TrendingUp, Award, DollarSign, X, Image as ImageIcon, Link as LinkIcon, UploadCloud, Check, Loader2, Building2, QrCode, Truck, AlertOctagon, AlertTriangle, Clock, Copy, ClipboardCheck, Eye, Maximize2, ExternalLink, Camera } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr, getApiBaseUrl, formatImageUrl } from '../utils';
 import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
 import AsistenteImportacionPDF from './AsistenteImportacionPDF';
+import ModalEscaneoFotoFactura from './ModalEscaneoFotoFactura';
 import BarcodeVisualizer from './BarcodeVisualizer';
 
 interface InventarioProps {
@@ -205,6 +206,9 @@ export default function Inventario({
     y: number;
     product: Product;
   } | null>(null);
+
+  // Estado para el modal de escaneo por foto / OCR de factura
+  const [showEscaneoFotoModal, setShowEscaneoFotoModal] = useState(false);
 
   useEffect(() => {
     const handleCloseContextMenu = () => {
@@ -12455,6 +12459,17 @@ export default function Inventario({
                     />
                   </div>
                 </div>
+
+                {/* Botón Escanear Foto / OCR */}
+                <button
+                  type="button"
+                  onClick={() => setShowEscaneoFotoModal(true)}
+                  className="bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-extrabold text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-sm transition-all active:scale-95 border border-emerald-500 cursor-pointer"
+                  title="Subir o tomar foto de la factura (ticket de los chinos/proveedor) para extraer ítems por OCR"
+                >
+                  <Camera className="w-4 h-4 text-emerald-100" />
+                  <span>Cargar por Foto / OCR</span>
+                </button>
               </div>
 
               <div className="text-[11px] font-mono text-slate-500 font-bold bg-white border border-slate-200 px-3 py-1 rounded-lg">
@@ -14253,6 +14268,61 @@ export default function Inventario({
           </div>
         </div>
       )}
+
+      {/* Modal de Escaneo e Inteligencia OCR de Factura por Foto */}
+      <ModalEscaneoFotoFactura
+        isOpen={showEscaneoFotoModal}
+        onClose={() => setShowEscaneoFotoModal(false)}
+        tasaBcv={Number((bcvRateUSD || tasaDia || 1).toFixed(2))}
+        existingProducts={products}
+        onAddNewProductFast={async (prodData) => {
+          const newId = Date.now();
+          const fullProd: Product = {
+            id: newId,
+            barcode: prodData.barcode || `AUTO-${newId}`,
+            description: prodData.description || 'PRODUCTO NUEVO',
+            category: prodData.category || 'GENERAL',
+            stock_actual: prodData.stock_actual || 0,
+            stock_minimo: prodData.stock_minimo || 5,
+            precio_costo_usd: prodData.precio_costo_usd || 1,
+            precio_detalle_usd: prodData.precio_detalle_usd || 1.3,
+            precio_mayor_usd: prodData.precio_mayor_usd || 1.15,
+            cantidad_mayorista: prodData.cantidad_mayorista || 6,
+            exento_impuesto: prodData.exento_impuesto ?? true,
+            estado: 'Activo',
+            imagen_url: prodData.imagen_url || ''
+          };
+          onAddProduct(fullProd);
+          return fullProd;
+        }}
+        onApplyToInvoice={(data) => {
+          if (data.invoiceNumber) {
+            setInvoiceNumber(data.invoiceNumber.slice(0, 10));
+          }
+          if (data.items && data.items.length > 0) {
+            setInvoiceProducts(prev => {
+              const existingMap = new Map(prev.map(i => [i.product.id, i]));
+              data.items.forEach(newItem => {
+                if (existingMap.has(newItem.product.id)) {
+                  const existing = existingMap.get(newItem.product.id)!;
+                  existing.qty += newItem.qty;
+                  existing.precio_costo_usd = newItem.precio_costo_usd;
+                } else {
+                  existingMap.set(newItem.product.id, {
+                    product: newItem.product,
+                    qty: newItem.qty,
+                    precio_costo_usd: newItem.precio_costo_usd,
+                    precio_detalle_usd: newItem.precio_detalle_usd,
+                    precio_mayor_usd: newItem.precio_mayor_usd
+                  });
+                }
+              });
+              return Array.from(existingMap.values());
+            });
+          }
+          showToast(`✅ ${data.items.length} productos transferidos a la factura.`);
+        }}
+      />
 
       {/* HIDDEN CAPTURE CONTAINER FOR ATTACHED WHATSAPP REPORT DOCUMENT */}
       {capturingReportMode && (

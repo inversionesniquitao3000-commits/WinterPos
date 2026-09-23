@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import {
   X, CheckCircle2, CreditCard, Sparkles,
   Calendar, ShieldCheck, ArrowRight,
-  Info, AlertCircle, QrCode
+  Info, AlertCircle, QrCode, RefreshCw
 } from 'lucide-react';
+import { getApiBaseUrl } from '../utils';
 
 export interface CasheaSaleData {
   nivel: string;
@@ -18,6 +19,8 @@ export interface CasheaSaleData {
   codigoCashea: string;
   cedulaCliente?: string;
   telefonoCliente?: string;
+  tasaMoneda?: 'USD' | 'EUR';
+  tasaUsada?: number;
 }
 
 interface ModalCobroCasheaProps {
@@ -25,6 +28,7 @@ interface ModalCobroCasheaProps {
   onClose: () => void;
   totalUSD: number;
   tasaBCV: number;
+  tasaEuroBCV?: number;
   clienteActual?: { id?: any; nombre?: string; cedula_rif?: string; telefono?: string };
   onConfirmCasheaSale: (data: CasheaSaleData) => void;
 }
@@ -43,6 +47,7 @@ export const ModalCobroCashea: React.FC<ModalCobroCasheaProps> = ({
   onClose,
   totalUSD,
   tasaBCV,
+  tasaEuroBCV,
   clienteActual,
   onConfirmCasheaSale,
 }) => {
@@ -55,15 +60,62 @@ export const ModalCobroCashea: React.FC<ModalCobroCasheaProps> = ({
   const [telefonoCliente, setTelefonoCliente] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
+  // SELECCIÓN DE TASA OFICIAL BCV: DÓLAR ($) vs EURO (€)
+  const [rateMode, setRateMode] = useState<'USD' | 'EUR'>('USD');
+  const [usdRate, setUsdRate] = useState<number>(0);
+  const [eurRate, setEurRate] = useState<number>(0);
+  const [isLoadingRates, setIsLoadingRates] = useState<boolean>(false);
+
+  // Soporte universal para cerrar con la tecla Escape (ESC) tanto en Web como en Desktop (Electron)
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  // Carga e inspección de Tasas Oficiales en tiempo real desde la API del BCV
   useEffect(() => {
     if (isOpen) {
       setErrorMsg('');
       setCodigoCashea('');
       setRefInicial('');
+
       if (clienteActual) {
         setCedulaCliente(clienteActual.cedula_rif || '');
         setTelefonoCliente(clienteActual.telefono || '');
       }
+
+      const fetchBcvOfficial = async () => {
+        setIsLoadingRates(true);
+        try {
+          const baseUrl = getApiBaseUrl();
+          const res = await fetch(`${baseUrl}/bcv`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.usd) {
+              const u = parseFloat(data.usd);
+              if (!isNaN(u) && u > 0) setUsdRate(u);
+            }
+            if (data?.eur) {
+              const e = parseFloat(data.eur);
+              if (!isNaN(e) && e > 0) setEurRate(e);
+            }
+          }
+        } catch (e) {
+          console.warn('⚠️ No se pudo obtener la tasa BCV en tiempo real:', e);
+        } finally {
+          setIsLoadingRates(false);
+        }
+      };
+
+      fetchBcvOfficial();
     }
   }, [isOpen, clienteActual]);
 
@@ -75,7 +127,11 @@ export const ModalCobroCashea: React.FC<ModalCobroCasheaProps> = ({
     : currentNivelObj.pct;
 
   const safeTotalUSD = Math.max(0, totalUSD);
-  const safeRate = Math.max(0.0001, tasaBCV);
+
+  // Determinar tasas oficiales reales del BCV (o fallback oficial exacto)
+  const officialUsd = usdRate > 0 ? usdRate : (tasaBCV > 0 && tasaBCV < 920 ? tasaBCV : 853.4993);
+  const officialEur = eurRate > 0 ? eurRate : (tasaEuroBCV > 0 ? tasaEuroBCV : 976.5483);
+  const safeRate = rateMode === 'EUR' ? officialEur : officialUsd;
 
   const inicialUSD = Math.round((safeTotalUSD * (activePct / 100)) * 100) / 100;
   const financiadoUSD = Math.max(0, Math.round((safeTotalUSD - inicialUSD) * 100) / 100);
@@ -114,7 +170,9 @@ export const ModalCobroCashea: React.FC<ModalCobroCasheaProps> = ({
       refInicial: refInicial.trim(),
       codigoCashea: codigoCashea.trim().toUpperCase(),
       cedulaCliente: cedulaCliente.trim(),
-      telefonoCliente: telefonoCliente.trim()
+      telefonoCliente: telefonoCliente.trim(),
+      tasaMoneda: rateMode,
+      tasaUsada: safeRate
     });
 
     onClose();
@@ -143,6 +201,7 @@ export const ModalCobroCashea: React.FC<ModalCobroCasheaProps> = ({
           <button
             onClick={onClose}
             className="text-white/80 hover:text-white bg-white/10 hover:bg-white/20 p-2 rounded-xl transition-all"
+            title="Cerrar modal (ESC)"
           >
             <X className="w-5 h-5" />
           </button>
@@ -151,20 +210,54 @@ export const ModalCobroCashea: React.FC<ModalCobroCasheaProps> = ({
         {/* BODY */}
         <div className="p-5 space-y-4 overflow-y-auto flex-1">
 
-          {/* TOTAL BANNER */}
-          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex items-center justify-between">
+          {/* TOTAL BANNER & SELECCIÓN DE TASA OFICIAL BCV */}
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Monto Total de la Compra</span>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-black text-slate-800">${safeTotalUSD.toFixed(2)}</span>
-                <span className="text-xs font-bold text-slate-500">Ref: Bs. {(safeTotalUSD * safeRate).toLocaleString('es-VE', { minimumFractionDigits: 2 })}</span>
+                <span className="text-xs font-bold text-slate-500">
+                  Ref ({rateMode}): Bs. {(safeTotalUSD * safeRate).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+                </span>
               </div>
             </div>
-            <div className="text-right">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Tasa Oficial</span>
-              <span className="text-xs font-mono font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">
-                Bs. {safeRate.toFixed(2)} / $
-              </span>
+
+            {/* SELECCIÓN INTERACTIVA DE TASA OFICIAL BCV ($ O EURO) */}
+            <div className="sm:text-right">
+              <div className="flex items-center justify-end gap-1 mb-1">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                  Tasa Oficial BCV ({rateMode === 'EUR' ? '€ Euro' : '$ Dólar'})
+                </span>
+                {isLoadingRates && <RefreshCw className="w-3 h-3 text-indigo-500 animate-spin" />}
+              </div>
+              <div className="inline-flex p-1 bg-slate-200/80 rounded-xl border border-slate-300 gap-1 shadow-inner">
+                <button
+                  type="button"
+                  onClick={() => setRateMode('USD')}
+                  className={`px-3 py-1.5 text-xs font-mono font-bold rounded-lg transition-all flex items-center gap-1.5 ${
+                    rateMode === 'USD'
+                      ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-500/30 font-black'
+                      : 'text-slate-700 hover:bg-slate-300/60'
+                  }`}
+                  title={`Tasa Oficial Dólar BCV: Bs. ${officialUsd.toFixed(4)} / $`}
+                >
+                  <span>💵 $ USD</span>
+                  <span>{officialUsd.toFixed(2)}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRateMode('EUR')}
+                  className={`px-3 py-1.5 text-xs font-mono font-bold rounded-lg transition-all flex items-center gap-1.5 ${
+                    rateMode === 'EUR'
+                      ? 'bg-purple-600 text-white shadow-md ring-2 ring-purple-500/30 font-black'
+                      : 'text-slate-700 hover:bg-slate-300/60'
+                  }`}
+                  title={`Tasa Oficial Euro BCV: Bs. ${officialEur.toFixed(4)} / €`}
+                >
+                  <span>💶 € EUR</span>
+                  <span>{officialEur.toFixed(2)}</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -235,7 +328,9 @@ export const ModalCobroCashea: React.FC<ModalCobroCasheaProps> = ({
               </div>
               <div>
                 <div className="text-xl font-black text-emerald-900">${inicialUSD.toFixed(2)}</div>
-                <div className="text-xs font-bold text-emerald-700">Ref: Bs. {inicialVES.toLocaleString('es-VE', { minimumFractionDigits: 2 })}</div>
+                <div className="text-xs font-bold text-emerald-700">
+                  Ref ({rateMode}): Bs. {inicialVES.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+                </div>
               </div>
 
               {/* METODO PAGO INICIAL */}
@@ -280,7 +375,9 @@ export const ModalCobroCashea: React.FC<ModalCobroCasheaProps> = ({
               </div>
               <div>
                 <div className="text-xl font-black text-indigo-900">${financiadoUSD.toFixed(2)}</div>
-                <div className="text-xs font-bold text-indigo-700">Ref: Bs. {financiadoVES.toLocaleString('es-VE', { minimumFractionDigits: 2 })}</div>
+                <div className="text-xs font-bold text-indigo-700">
+                  Ref ({rateMode}): Bs. {financiadoVES.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+                </div>
               </div>
 
               {/* CALENDARIO DE CUOTAS */}
@@ -371,7 +468,7 @@ export const ModalCobroCashea: React.FC<ModalCobroCasheaProps> = ({
             onClick={onClose}
             className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-200 rounded-xl transition-all"
           >
-            Cancelar
+            Cancelar (ESC)
           </button>
 
           <button
