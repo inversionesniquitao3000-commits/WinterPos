@@ -846,14 +846,21 @@ export function getApiBaseUrl(): string {
   const browserHost = window.location.hostname;
   const isLocalHost = browserHost === 'localhost' || browserHost === '127.0.0.1';
   const savedIp = localStorage.getItem('pos_lan_ip');
-  const dbMode = localStorage.getItem('pos_db_mode') || (isLocalHost ? 'local' : 'remote');
+  const savedPort = localStorage.getItem('pos_lan_port') || '5000';
+  const dbMode = localStorage.getItem('pos_db_mode');
 
+  // Si se está navegando desde una IP remota / red (como Tailscale 100.x.y.z o IP LAN en navegador móvil),
+  // la API backend SIEMPRE debe apuntar al mismo host que sirvió la página web.
+  if (!isLocalHost) {
+    return `http://${browserHost}:${savedPort}/api`;
+  }
+
+  // Si estamos en localhost (ej: App de Escritorio Electron o navegador local) y se configuró servidor central remoto:
   if (dbMode === 'remote' && savedIp) {
-    return `http://${savedIp}:5000/api`;
+    return `http://${savedIp}:${savedPort}/api`;
   }
   
-  const host = isLocalHost ? 'localhost' : browserHost;
-  return `http://${host}:5000/api`;
+  return `http://localhost:${savedPort}/api`;
 }
 
 export function formatImageUrl(url: string | undefined | null): string {

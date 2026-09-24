@@ -25,11 +25,12 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
   const [showConfig, setShowConfig] = useState(false);
   const [clickCount, setClickCount] = useState(0);
   const [serverIP, setServerIP] = useState(() => {
+    const browserHost = window.location.hostname;
+    const isLocalHost = browserHost === 'localhost' || browserHost === '127.0.0.1';
+    if (!isLocalHost) return browserHost;
     const saved = localStorage.getItem('pos_lan_ip');
     if (saved) return saved;
-    return window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-      ? window.location.hostname
-      : '127.0.0.1';
+    return '127.0.0.1';
   });
   const [serverPort, setServerPort] = useState(() => {
     const saved = localStorage.getItem('pos_lan_port');
