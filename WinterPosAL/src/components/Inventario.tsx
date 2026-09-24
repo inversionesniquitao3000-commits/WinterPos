@@ -6022,8 +6022,31 @@ export default function Inventario({
                 <tbody className="divide-y divide-slate-100 text-[11px] text-slate-700">
                   {filteredMovements.length === 0 ? (
                     <tr>
-                      <td colSpan={10} className="text-center py-8 text-slate-400 font-sans">
-                        No se encontraron movimientos con los filtros aplicados.
+                      <td colSpan={10} className="text-center py-10 text-slate-500 font-sans space-y-3">
+                        <p className="text-sm font-semibold text-slate-700">No se encontraron movimientos con los filtros aplicados.</p>
+                        {safeMovements.length > 0 && kardexFilterByRange && (
+                          <div className="flex flex-col items-center justify-center gap-2 pt-2">
+                            <p className="text-xs text-slate-500">
+                              💡 Tu base de datos contiene <strong className="text-blue-600 font-bold">{safeMovements.length.toLocaleString()} movimientos de Kardex</strong> registrados en fechas anteriores a hoy.
+                            </p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <button
+                                type="button"
+                                onClick={() => handleSetKardexDatePreset('mes')}
+                                className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-sm transition-all cursor-pointer"
+                              >
+                                📅 Ver Movimientos de Este Mes
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setKardexFilterByRange(false)}
+                                className="px-3 py-1 bg-slate-700 hover:bg-slate-800 text-white rounded-lg text-xs font-bold shadow-sm transition-all cursor-pointer"
+                              >
+                                🔓 Ver Todo el Historial ({safeMovements.length.toLocaleString()} registros)
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ) : (
@@ -6116,8 +6139,31 @@ export default function Inventario({
                 <tbody className="divide-y divide-slate-100 text-[11px] text-slate-700">
                   {groupedMovements.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="text-center py-8 text-slate-400 font-sans">
-                        No se han registrado lotes de movimientos.
+                      <td colSpan={7} className="text-center py-10 text-slate-500 font-sans space-y-3">
+                        <p className="text-sm font-semibold text-slate-700">No se han registrado lotes de movimientos con los filtros aplicados.</p>
+                        {safeMovements.length > 0 && kardexFilterByRange && (
+                          <div className="flex flex-col items-center justify-center gap-2 pt-2">
+                            <p className="text-xs text-slate-500">
+                              💡 Tu base de datos contiene <strong className="text-blue-600 font-bold">{safeMovements.length.toLocaleString()} movimientos de Kardex</strong> registrados en fechas anteriores a hoy.
+                            </p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <button
+                                type="button"
+                                onClick={() => handleSetKardexDatePreset('mes')}
+                                className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-sm transition-all cursor-pointer"
+                              >
+                                📅 Ver Movimientos de Este Mes
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setKardexFilterByRange(false)}
+                                className="px-3 py-1 bg-slate-700 hover:bg-slate-800 text-white rounded-lg text-xs font-bold shadow-sm transition-all cursor-pointer"
+                              >
+                                🔓 Ver Todo el Historial ({safeMovements.length.toLocaleString()} registros)
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ) : (
