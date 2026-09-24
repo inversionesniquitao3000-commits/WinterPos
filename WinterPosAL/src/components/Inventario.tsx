@@ -1662,7 +1662,8 @@ export default function Inventario({
   useEffect(() => {
     const fetchBcvRatesForStats = async () => {
       try {
-        const res = await fetch(getApiBaseUrl() + '/api/bcv');
+        const baseUrl = getApiBaseUrl().replace(/\/api\/?$/, '');
+        const res = await fetch(`${baseUrl}/api/bcv`);
         if (res.ok) {
           const data = await res.json();
           if (data) {
@@ -3394,18 +3395,24 @@ export default function Inventario({
 
     if (type === 'detalle') {
       setNewDetail(val);
-      if (costNum > 0 && basePrice > costNum) {
-        setNewGananciaDetalle((((basePrice - costNum) / costNum) * 100).toFixed(2));
+      if (costNum > 0 && priceNum > 0) {
+        setNewGananciaDetalle((((basePrice - costNum) / costNum) * 100).toFixed(1));
+      } else if (!val || priceNum === 0) {
+        setNewGananciaDetalle('0');
       }
     } else if (type === 'mayor') {
       setNewMayor(val);
-      if (costNum > 0 && basePrice > costNum) {
-        setNewGananciaMayor((((basePrice - costNum) / costNum) * 100).toFixed(2));
+      if (costNum > 0 && priceNum > 0) {
+        setNewGananciaMayor((((basePrice - costNum) / costNum) * 100).toFixed(1));
+      } else if (!val || priceNum === 0) {
+        setNewGananciaMayor('0');
       }
     } else if (type === 'bulto') {
       setNewBulto(val);
-      if (costNum > 0 && basePrice > costNum) {
-        setNewGananciaBulto((((basePrice - costNum) / costNum) * 100).toFixed(2));
+      if (costNum > 0 && priceNum > 0) {
+        setNewGananciaBulto((((basePrice - costNum) / costNum) * 100).toFixed(1));
+      } else if (!val || priceNum === 0) {
+        setNewGananciaBulto('0');
       }
     }
   };
@@ -3452,18 +3459,24 @@ export default function Inventario({
 
     if (type === 'detalle') {
       setEditDetail(val);
-      if (costNum > 0 && basePrice > costNum) {
-        setEditGananciaDetalle((((basePrice - costNum) / costNum) * 100).toFixed(2));
+      if (costNum > 0 && priceNum > 0) {
+        setEditGananciaDetalle((((basePrice - costNum) / costNum) * 100).toFixed(1));
+      } else if (!val || priceNum === 0) {
+        setEditGananciaDetalle('0');
       }
     } else if (type === 'mayor') {
       setEditMayor(val);
-      if (costNum > 0 && basePrice > costNum) {
-        setEditGananciaMayor((((basePrice - costNum) / costNum) * 100).toFixed(2));
+      if (costNum > 0 && priceNum > 0) {
+        setEditGananciaMayor((((basePrice - costNum) / costNum) * 100).toFixed(1));
+      } else if (!val || priceNum === 0) {
+        setEditGananciaMayor('0');
       }
     } else if (type === 'bulto') {
       setEditBulto(val);
-      if (costNum > 0 && basePrice > costNum) {
-        setEditGananciaBulto((((basePrice - costNum) / costNum) * 100).toFixed(2));
+      if (costNum > 0 && priceNum > 0) {
+        setEditGananciaBulto((((basePrice - costNum) / costNum) * 100).toFixed(1));
+      } else if (!val || priceNum === 0) {
+        setEditGananciaBulto('0');
       }
     }
   };
@@ -3568,6 +3581,8 @@ export default function Inventario({
     const cost = parseFloat(editCost) || 0;
     const detail = parseFloat(editDetail) || 0;
     const mayor = parseFloat(editMayor) || 0;
+    const bulto = parseFloat(editBulto) || 0;
+    const cantBulto = parseInt(editCantBulto) || 0;
 
     if (detail <= cost) {
       showAlert('El precio de venta al detalle debe ser mayor al precio de costo.', 'Precios Inválidos', 'warning');
@@ -3582,10 +3597,24 @@ export default function Inventario({
       return;
     }
 
-    const finalImg = await ensureCleanImageUrl(editImageUrl, finalBarcode);
+    // Bulto / Caja: solo se valida si está en uso (Unids/Bulto > 0 y precio bulto > 0). Si está en 0 no se usa y no impide guardar.
+    const isBultoActive = cantBulto > 0 && bulto > 0;
+    if (isBultoActive) {
+      if (cost > 0 && bulto < cost) {
+        showAlert(`El precio de Bulto / Caja ($${bulto.toFixed(2)}) no puede ser menor al precio de costo ($${cost.toFixed(2)}). Recuerde la jerarquía: Costo < Bulto < Mayor < Detalle.`, 'Precio de Bulto Inválido', 'warning');
+        return;
+      }
+      if (mayor > 0 && bulto > mayor) {
+        showAlert(`El precio de Bulto / Caja ($${bulto.toFixed(2)}) no puede ser mayor al precio de venta al mayor ($${mayor.toFixed(2)}). Recuerde la jerarquía: Costo < Bulto < Mayor < Detalle.`, 'Precio de Bulto Inválido', 'warning');
+        return;
+      }
+      if (detail > 0 && bulto > detail) {
+        showAlert(`El precio de Bulto / Caja ($${bulto.toFixed(2)}) no puede ser mayor al precio de venta al detalle ($${detail.toFixed(2)}). Recuerde la jerarquía: Costo < Bulto < Mayor < Detalle.`, 'Precio de Bulto Inválido', 'warning');
+        return;
+      }
+    }
 
-    const bulto = parseFloat(editBulto) || 0;
-    const cantBulto = parseInt(editCantBulto) || 0;
+    const finalImg = await ensureCleanImageUrl(editImageUrl, finalBarcode);
 
     const updatedProd: Product = {
       ...selectedProduct,
@@ -3608,7 +3637,7 @@ export default function Inventario({
       precio_costo_usd: cost,
       precio_detalle_usd: detail,
       precio_mayor_usd: mayor,
-      precio_bulto_usd: bulto
+      precio_bulto_usd: cantBulto > 0 ? bulto : 0
     };
 
     const success = await onUpdateProduct(updatedProd);
@@ -4097,6 +4126,8 @@ export default function Inventario({
     const cost = parseFloat(newCost) || 0;
     const detail = parseFloat(newDetail) || 0;
     const mayor = parseFloat(newMayor) || 0;
+    const bulto = parseFloat(newBulto) || 0;
+    const cantBulto = parseInt(newCantBulto) || 0;
 
     if (detail <= cost) {
       showAlert('El precio de venta al detalle debe ser mayor al precio de costo.', 'Precios Inválidos', 'warning');
@@ -4111,10 +4142,25 @@ export default function Inventario({
       return;
     }
 
+    // Bulto / Caja: solo se valida si está en uso (Unids/Bulto > 0 y precio bulto > 0). Si está en 0 no se usa y no impide guardar.
+    const isBultoActive = cantBulto > 0 && bulto > 0;
+    if (isBultoActive) {
+      if (cost > 0 && bulto < cost) {
+        showAlert(`El precio de Bulto / Caja ($${bulto.toFixed(2)}) no puede ser menor al precio de costo ($${cost.toFixed(2)}). Recuerde la jerarquía: Costo < Bulto < Mayor < Detalle.`, 'Precio de Bulto Inválido', 'warning');
+        return;
+      }
+      if (mayor > 0 && bulto > mayor) {
+        showAlert(`El precio de Bulto / Caja ($${bulto.toFixed(2)}) no puede ser mayor al precio de venta al mayor ($${mayor.toFixed(2)}). Recuerde la jerarquía: Costo < Bulto < Mayor < Detalle.`, 'Precio de Bulto Inválido', 'warning');
+        return;
+      }
+      if (detail > 0 && bulto > detail) {
+        showAlert(`El precio de Bulto / Caja ($${bulto.toFixed(2)}) no puede ser mayor al precio de venta al detalle ($${detail.toFixed(2)}). Recuerde la jerarquía: Costo < Bulto < Mayor < Detalle.`, 'Precio de Bulto Inválido', 'warning');
+        return;
+      }
+    }
+
     const min = newAGranel ? (parseFloat(newMinStock) || 0) : (parseInt(newMinStock) || 0);
     const wholesale = parseInt(newWholesaleQty) || 12;
-    const bulto = parseFloat(newBulto) || 0;
-    const cantBulto = parseInt(newCantBulto) || 0;
 
     const finalImg = await ensureCleanImageUrl(newImageUrl, barcodeVal);
 
@@ -4128,7 +4174,7 @@ export default function Inventario({
       precio_costo_usd: cost,
       precio_detalle_usd: detail,
       precio_mayor_usd: mayor,
-      precio_bulto_usd: bulto,
+      precio_bulto_usd: cantBulto > 0 ? bulto : 0,
       cantidad_mayorista: wholesale,
       cant_bulto: cantBulto,
       ganancia_detalle: parseFloat(newGananciaDetalle) || 0,
@@ -7779,37 +7825,77 @@ export default function Inventario({
                       </div>
 
                       {/* Bulto */}
-                      <div className="bg-white border border-amber-200 rounded-lg p-2 shadow-2xs space-y-1">
-                        <div className="flex items-center justify-between gap-1">
-                          <label className="text-[10.5px] font-extrabold text-amber-950 whitespace-nowrap truncate">Bulto / Caja ($)</label>
-                          <div className="flex items-center gap-1 bg-amber-50 border border-amber-300 rounded-md px-1.5 py-0.5 shadow-2xs" title="Margen de ganancia sobre costo para Bulto (%)">
-                            <span className="text-[10.5px] font-black text-amber-800">%</span>
+                      {(() => {
+                        const bNum = parseFloat(newBulto) || 0;
+                        const cNum = parseFloat(newCost) || 0;
+                        const mNum = parseFloat(newMayor) || 0;
+                        const dNum = parseFloat(newDetail) || 0;
+                        const cantB = parseInt(newCantBulto) || 0;
+
+                        // Si cantBulto es 0 o bulto es 0, no está en uso y no debe marcar error
+                        const isBultoActive = cantB > 0 && bNum > 0;
+                        const isBelowCost = isBultoActive && cNum > 0 && bNum < cNum;
+                        const isAboveMayor = isBultoActive && mNum > 0 && bNum > mNum;
+                        const isAboveDetail = isBultoActive && dNum > 0 && bNum > dNum;
+                        const hasError = isBelowCost || isAboveMayor || isAboveDetail;
+
+                        return (
+                          <div className={`rounded-lg p-2 shadow-2xs space-y-1 transition-all ${
+                            hasError
+                              ? 'bg-red-50/70 border-2 border-red-400 ring-2 ring-red-100'
+                              : 'bg-white border border-amber-200'
+                          }`}>
+                            <div className="flex items-center justify-between gap-1">
+                              <label className={`text-[10.5px] font-extrabold whitespace-nowrap truncate ${hasError ? 'text-red-950' : 'text-amber-950'}`}>
+                                Bulto / Caja ($)
+                              </label>
+                              <div className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 shadow-2xs ${
+                                hasError ? 'bg-red-100 border border-red-300' : 'bg-amber-50 border border-amber-300'
+                              }`} title="Margen de ganancia sobre costo para Bulto (%)">
+                                <span className={`text-[10.5px] font-black ${hasError ? 'text-red-700' : 'text-amber-800'}`}>%</span>
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  placeholder="8"
+                                  value={newGananciaBulto}
+                                  onChange={(e) => handleNewMarginChange('bulto', e.target.value)}
+                                  className={`w-14 sm:w-16 bg-white border rounded px-1.5 py-0.5 text-xs font-mono font-black text-center focus:ring-1 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none shadow-inner ${
+                                    hasError ? 'border-red-400 text-red-900 focus:ring-red-500' : 'border-amber-300 text-amber-950 focus:ring-amber-500'
+                                  }`}
+                                />
+                              </div>
+                            </div>
                             <input
                               type="number"
-                              step="0.1"
+                              step="0.01"
                               min="0"
-                              placeholder="8"
-                              value={newGananciaBulto}
-                              onChange={(e) => handleNewMarginChange('bulto', e.target.value)}
-                              className="w-14 sm:w-16 bg-white border border-amber-300 rounded px-1.5 py-0.5 text-xs text-amber-950 font-mono font-black text-center focus:ring-1 focus:ring-amber-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none shadow-inner"
+                              placeholder="0.00"
+                              value={newBulto}
+                              onChange={(e) => handleNewPriceChange('bulto', e.target.value)}
+                              className={`w-full rounded px-2 py-1 text-sm font-mono font-black focus:bg-white focus:outline-none transition-all ${
+                                hasError
+                                  ? 'bg-red-50 border-2 border-red-400 text-red-900 focus:border-red-600'
+                                  : 'bg-slate-50 border border-amber-300 text-amber-950 focus:border-amber-500'
+                              }`}
                             />
+                            {hasError ? (
+                              <span className="text-[10px] text-red-600 block mt-1 font-mono truncate font-extrabold animate-pulse">
+                                {isBelowCost ? `⚠️ Menor al Costo ($${cNum.toFixed(2)})` :
+                                 isAboveMayor ? `⚠️ Mayor que P. Mayor ($${mNum.toFixed(2)})` :
+                                 `⚠️ Mayor que P. Detalle ($${dNum.toFixed(2)})`}
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-amber-900 block mt-1 font-mono truncate font-bold">
+                                {cantB === 0
+                                  ? 'No se usa (Unids / Bulto: 0)'
+                                  : newTaxActive && bNum > 0
+                                  ? `Base: $${(bNum / (1 + (parseFloat(newTaxPct) || 16) / 100)).toFixed(2)} + IVA`
+                                  : 'Opcional'}
+                              </span>
+                            )}
                           </div>
-                        </div>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="0.00"
-                          value={newBulto}
-                          onChange={(e) => handleNewPriceChange('bulto', e.target.value)}
-                          className="w-full bg-slate-50 border border-amber-300 rounded px-2 py-1 text-sm text-amber-950 font-mono font-black focus:bg-white focus:outline-none"
-                        />
-                        <span className="text-[11px] text-amber-900 block mt-1 font-mono truncate font-bold">
-                          {newTaxActive && (parseFloat(newBulto) || 0) > 0
-                            ? `Base: $${((parseFloat(newBulto) || 0) / (1 + (parseFloat(newTaxPct) || 16) / 100)).toFixed(2)} + IVA`
-                            : 'Opcional'}
-                        </span>
-                      </div>
+                        );
+                      })()}
                     </div>
                   </div>
 
@@ -8396,37 +8482,77 @@ export default function Inventario({
                       </div>
 
                       {/* Bulto */}
-                      <div className="bg-white border border-amber-200 rounded-lg p-2 shadow-2xs space-y-1">
-                        <div className="flex items-center justify-between gap-1">
-                          <label className="text-[10.5px] font-extrabold text-amber-950 whitespace-nowrap truncate">Bulto / Caja ($)</label>
-                          <div className="flex items-center gap-1 bg-amber-50 border border-amber-300 rounded-md px-1.5 py-0.5 shadow-2xs" title="Margen de ganancia sobre costo para Bulto (%)">
-                            <span className="text-[10.5px] font-black text-amber-800">%</span>
+                      {(() => {
+                        const bNum = parseFloat(editBulto) || 0;
+                        const cNum = parseFloat(editCost) || 0;
+                        const mNum = parseFloat(editMayor) || 0;
+                        const dNum = parseFloat(editDetail) || 0;
+                        const cantB = parseInt(editCantBulto) || 0;
+
+                        // Si cantBulto es 0 o bulto es 0, no está en uso y no debe marcar error
+                        const isBultoActive = cantB > 0 && bNum > 0;
+                        const isBelowCost = isBultoActive && cNum > 0 && bNum < cNum;
+                        const isAboveMayor = isBultoActive && mNum > 0 && bNum > mNum;
+                        const isAboveDetail = isBultoActive && dNum > 0 && bNum > dNum;
+                        const hasError = isBelowCost || isAboveMayor || isAboveDetail;
+
+                        return (
+                          <div className={`rounded-lg p-2 shadow-2xs space-y-1 transition-all ${
+                            hasError
+                              ? 'bg-red-50/70 border-2 border-red-400 ring-2 ring-red-100'
+                              : 'bg-white border border-amber-200'
+                          }`}>
+                            <div className="flex items-center justify-between gap-1">
+                              <label className={`text-[10.5px] font-extrabold whitespace-nowrap truncate ${hasError ? 'text-red-950' : 'text-amber-950'}`}>
+                                Bulto / Caja ($)
+                              </label>
+                              <div className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 shadow-2xs ${
+                                hasError ? 'bg-red-100 border border-red-300' : 'bg-amber-50 border border-amber-300'
+                              }`} title="Margen de ganancia sobre costo para Bulto (%)">
+                                <span className={`text-[10.5px] font-black ${hasError ? 'text-red-700' : 'text-amber-800'}`}>%</span>
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  placeholder="8"
+                                  value={editGananciaBulto}
+                                  onChange={(e) => handleEditMarginChange('bulto', e.target.value)}
+                                  className={`w-14 sm:w-16 bg-white border rounded px-1.5 py-0.5 text-xs font-mono font-black text-center focus:ring-1 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none shadow-inner ${
+                                    hasError ? 'border-red-400 text-red-900 focus:ring-red-500' : 'border-amber-300 text-amber-950 focus:ring-amber-500'
+                                  }`}
+                                />
+                              </div>
+                            </div>
                             <input
                               type="number"
-                              step="0.1"
+                              step="0.01"
                               min="0"
-                              placeholder="8"
-                              value={editGananciaBulto}
-                              onChange={(e) => handleEditMarginChange('bulto', e.target.value)}
-                              className="w-14 sm:w-16 bg-white border border-amber-300 rounded px-1.5 py-0.5 text-xs text-amber-950 font-mono font-black text-center focus:ring-1 focus:ring-amber-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none shadow-inner"
+                              placeholder="0.00"
+                              value={editBulto}
+                              onChange={(e) => handleEditPriceChange('bulto', e.target.value)}
+                              className={`w-full rounded px-2 py-1 text-sm font-mono font-black focus:bg-white focus:outline-none transition-all ${
+                                hasError
+                                  ? 'bg-red-50 border-2 border-red-400 text-red-900 focus:border-red-600'
+                                  : 'bg-slate-50 border border-amber-300 text-amber-950 focus:border-amber-500'
+                              }`}
                             />
+                            {hasError ? (
+                              <span className="text-[10px] text-red-600 block mt-1 font-mono truncate font-extrabold animate-pulse">
+                                {isBelowCost ? `⚠️ Menor al Costo ($${cNum.toFixed(2)})` :
+                                 isAboveMayor ? `⚠️ Mayor que P. Mayor ($${mNum.toFixed(2)})` :
+                                 `⚠️ Mayor que P. Detalle ($${dNum.toFixed(2)})`}
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-amber-900 block mt-1 font-mono truncate font-bold">
+                                {cantB === 0
+                                  ? 'No se usa (Unids / Bulto: 0)'
+                                  : editTaxActive && bNum > 0
+                                  ? `Base: $${(bNum / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA`
+                                  : 'Opcional'}
+                              </span>
+                            )}
                           </div>
-                        </div>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="0.00"
-                          value={editBulto}
-                          onChange={(e) => handleEditPriceChange('bulto', e.target.value)}
-                          className="w-full bg-slate-50 border border-amber-300 rounded px-2 py-1 text-sm text-amber-950 font-mono font-black focus:bg-white focus:outline-none"
-                        />
-                        <span className="text-[11px] text-amber-900 block mt-1 font-mono truncate font-bold">
-                          {editTaxActive && (parseFloat(editBulto) || 0) > 0
-                            ? `Base: $${((parseFloat(editBulto) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA`
-                            : 'Opcional'}
-                        </span>
-                      </div>
+                        );
+                      })()}
                     </div>
                   </div>
 
@@ -14274,6 +14400,7 @@ export default function Inventario({
         isOpen={showEscaneoFotoModal}
         onClose={() => setShowEscaneoFotoModal(false)}
         tasaBcv={Number((bcvRateUSD || tasaDia || 1).toFixed(2))}
+        tasaEuroBcv={bcvRatesLive.eur > 0 ? Number(bcvRatesLive.eur.toFixed(2)) : undefined}
         existingProducts={products}
         onAddNewProductFast={async (prodData) => {
           const newId = Date.now();

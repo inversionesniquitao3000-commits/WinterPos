@@ -129,9 +129,9 @@ export const ModalCobroCashea: React.FC<ModalCobroCasheaProps> = ({
   const safeTotalUSD = Math.max(0, totalUSD);
 
   // Determinar tasas oficiales reales del BCV (o fallback oficial exacto)
-  const officialUsd = usdRate > 0 ? usdRate : (tasaBCV > 0 && tasaBCV < 920 ? tasaBCV : 853.4993);
-  const officialEur = eurRate > 0 ? eurRate : (tasaEuroBCV > 0 ? tasaEuroBCV : 976.5483);
-  const safeRate = rateMode === 'EUR' ? officialEur : officialUsd;
+  const officialUsd: number = (usdRate && usdRate > 0) ? usdRate : (tasaBCV > 0 && tasaBCV < 920 ? tasaBCV : 853.4993);
+  const officialEur: number = (eurRate && eurRate > 0) ? eurRate : ((tasaEuroBCV ?? 0) > 0 ? (tasaEuroBCV ?? 976.5483) : 976.5483);
+  const safeRate: number = rateMode === 'EUR' ? officialEur : officialUsd;
 
   const inicialUSD = Math.round((safeTotalUSD * (activePct / 100)) * 100) / 100;
   const financiadoUSD = Math.max(0, Math.round((safeTotalUSD - inicialUSD) * 100) / 100);

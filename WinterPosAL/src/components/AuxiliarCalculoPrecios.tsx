@@ -276,13 +276,21 @@ export default function AuxiliarCalculoPrecios({
   let rawMayorUSD = unitCostUSD > 0 ? (unitCostUSD * (1 + pctMayor / 100)) : (parseFloat(initialMayor) || 0);
   let rawBultoUSD = unitCostUSD > 0 ? (unitCostUSD * (1 + pctBulto / 100)) : (parseFloat(initialBulto) || 0);
 
-  // Additional check to enforce rawMayorUSD < rawDetailUSD and rawBultoUSD < rawMayorUSD
+  // Additional check to enforce hierarchy: unitCostUSD <= rawBultoUSD <= rawMayorUSD < rawDetailUSD
   if (rawMayorUSD >= rawDetailUSD && rawDetailUSD > 0) {
     rawMayorUSD = Math.max(0, rawDetailUSD - 0.01);
     isMayorAdjusted = true;
   }
-  if (rawBultoUSD >= rawMayorUSD && rawMayorUSD > 0) {
-    rawBultoUSD = Math.max(0, rawMayorUSD - 0.01);
+  if (rawBultoUSD > rawMayorUSD && rawMayorUSD > 0) {
+    rawBultoUSD = Math.max(unitCostUSD, rawMayorUSD - 0.01);
+    isBultoAdjusted = true;
+  }
+  if (rawBultoUSD > rawDetailUSD && rawDetailUSD > 0) {
+    rawBultoUSD = Math.max(unitCostUSD, rawDetailUSD - 0.01);
+    isBultoAdjusted = true;
+  }
+  if (unitCostUSD > 0 && rawBultoUSD < unitCostUSD) {
+    rawBultoUSD = unitCostUSD;
     isBultoAdjusted = true;
   }
 

@@ -230,7 +230,36 @@ export default function CajaPOS({
     const detail = parseFloat(editDetail) || 0;
     const mayor = parseFloat(editMayor) || 0;
     const bulto = parseFloat(editBulto) || 0;
+
+    if (detail <= cost) {
+      showAlert('El precio de venta al detalle debe ser mayor al precio de costo.', 'Precios Inválidos', 'warning');
+      return;
+    }
+    if (mayor <= cost) {
+      showAlert('El precio de venta al mayor debe ser mayor al precio de costo.', 'Precios Inválidos', 'warning');
+      return;
+    }
+    if (mayor >= detail) {
+      showAlert('El precio de venta al mayor debe ser estrictamente menor al precio de venta al detalle.', 'Precios Inválidos', 'warning');
+      return;
+    }
     const cantBulto = parseInt(editCantBulto) || 0;
+    const isBultoActive = cantBulto > 0 && bulto > 0;
+    if (isBultoActive) {
+      if (cost > 0 && bulto < cost) {
+        showAlert(`El precio de Bulto / Caja ($${bulto.toFixed(2)}) no puede ser menor al precio de costo ($${cost.toFixed(2)}). Recuerde la jerarquía: Costo < Bulto < Mayor < Detalle.`, 'Precio de Bulto Inválido', 'warning');
+        return;
+      }
+      if (mayor > 0 && bulto > mayor) {
+        showAlert(`El precio de Bulto / Caja ($${bulto.toFixed(2)}) no puede ser mayor al precio de venta al mayor ($${mayor.toFixed(2)}). Recuerde la jerarquía: Costo < Bulto < Mayor < Detalle.`, 'Precio de Bulto Inválido', 'warning');
+        return;
+      }
+      if (detail > 0 && bulto > detail) {
+        showAlert(`El precio de Bulto / Caja ($${bulto.toFixed(2)}) no puede ser mayor al precio de venta al detalle ($${detail.toFixed(2)}). Recuerde la jerarquía: Costo < Bulto < Mayor < Detalle.`, 'Precio de Bulto Inválido', 'warning');
+        return;
+      }
+    }
+
     const gananciaBulto = parseFloat(editGananciaBulto) || 0;
     const minStock = parseInt(editMinStock) || 5;
     const wholesaleQty = parseInt(editWholesaleQty) || 6;
@@ -257,7 +286,7 @@ export default function CajaPOS({
       precio_costo_usd: cost,
       precio_detalle_usd: detail,
       precio_mayor_usd: mayor,
-      precio_bulto_usd: bulto,
+      precio_bulto_usd: cantBulto > 0 ? bulto : 0,
       cant_bulto: cantBulto,
       ganancia_detalle: gananciaDetalle,
       ganancia_mayor: gananciaMayor,
@@ -3837,27 +3866,25 @@ export default function CajaPOS({
 
                             {/* Precios y Stock */}
                             <div className="text-right flex-shrink-0 flex flex-col items-end justify-center">
+                              <div className={`${hasStock ? 'text-emerald-600' : 'text-slate-700'} font-bold font-mono ${sizeStyles.priceUSDClass} leading-tight`}>
+                                ${p.precio_detalle_usd.toFixed(2)}{' '}
+                                <span className={`${hasStock ? 'text-slate-600 font-bold' : 'text-slate-500 font-medium'} font-mono ${sizeStyles.priceVESClass}`}>
+                                  / {formatBs(priceVES)}
+                                </span>
+                              </div>
                               {hasStock ? (
-                                <>
-                                  <div className={`text-emerald-600 font-bold font-mono ${sizeStyles.priceUSDClass} leading-tight`}>
-                                    ${p.precio_detalle_usd.toFixed(2)}{' '}
-                                    <span className={`text-slate-600 font-bold font-mono ${sizeStyles.priceVESClass}`}>
-                                      / {formatBs(priceVES)}
-                                    </span>
-                                  </div>
-                                  <span className={`${sizeStyles.stockClass} text-slate-500 font-sans font-semibold mt-0.5`}>
-                                    Stock: {formatStockVal(p.stock_actual, p.a_granel)}{!p.a_granel ? ' uds' : ''}
-                                  </span>
-                                </>
+                                <span className={`${sizeStyles.stockClass} text-slate-500 font-sans font-semibold mt-0.5`}>
+                                  Stock: {formatStockVal(p.stock_actual, p.a_granel)}{!p.a_granel ? ' uds' : ''}
+                                </span>
                               ) : (
-                                <>
-                                  <span className={`text-red-500 font-bold font-mono ${sizeStyles.priceUSDClass} leading-tight`}>
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                  <span className="text-[9px] font-bold text-red-600 bg-red-100/90 px-1 py-0.2 rounded font-sans border border-red-200">
                                     SIN STOCK
                                   </span>
-                                  <span className={`${sizeStyles.stockClass} text-slate-400 font-sans font-normal mt-0.5`}>
+                                  <span className={`${sizeStyles.stockClass} text-slate-400 font-sans font-normal`}>
                                     Stock: {formatStockVal(p.stock_actual, p.a_granel)}{!p.a_granel ? ' uds' : ''}
                                   </span>
-                                </>
+                                </div>
                               )}
                             </div>
                           </button>
@@ -3896,17 +3923,24 @@ export default function CajaPOS({
                               (G)
                             </span>
                           )}
-                          {hasStock ? (
-                            <span className="float-right text-emerald-600 font-bold font-mono text-right flex flex-col items-end">
-                              <span>${p.precio_detalle_usd.toFixed(2)} <span className="text-slate-600 font-bold text-[11px] font-mono">/ {formatBs(priceVES)}</span></span>
-                              <span className="text-[9px] text-slate-500 font-sans font-semibold">Stock: {formatStockVal(p.stock_actual, p.a_granel)}{!p.a_granel ? ' uds' : ''}</span>
+                          <span className="float-right text-right flex flex-col items-end">
+                            <span className={`${hasStock ? 'text-emerald-600' : 'text-slate-700'} font-bold font-mono`}>
+                              ${p.precio_detalle_usd.toFixed(2)}{' '}
+                              <span className={`${hasStock ? 'text-slate-600 font-bold' : 'text-slate-500 font-medium'} text-[11px] font-mono`}>
+                                / {formatBs(priceVES)}
+                              </span>
                             </span>
-                          ) : (
-                            <span className="float-right text-red-500 font-bold font-mono text-right flex flex-col items-end">
-                              <span>SIN STOCK</span>
-                              <span className="text-[9px] text-slate-400 font-sans font-normal">Stock: {formatStockVal(p.stock_actual, p.a_granel)}{!p.a_granel ? ' uds' : ''}</span>
-                            </span>
-                          )}
+                            {hasStock ? (
+                              <span className="text-[9px] text-slate-500 font-sans font-semibold">
+                                Stock: {formatStockVal(p.stock_actual, p.a_granel)}{!p.a_granel ? ' uds' : ''}
+                              </span>
+                            ) : (
+                              <span className="text-[9px] text-red-500 font-sans font-bold flex items-center gap-1">
+                                <span className="bg-red-50 text-red-600 px-1 rounded border border-red-200">SIN STOCK</span>
+                                <span className="text-slate-400 font-normal">({formatStockVal(p.stock_actual, p.a_granel)}{!p.a_granel ? ' uds' : ''})</span>
+                              </span>
+                            )}
+                          </span>
                         </button>
                       );
                     })}
@@ -9193,23 +9227,60 @@ export default function CajaPOS({
                       </div>
 
                       {/* Bulto */}
-                      <div className="bg-white border border-amber-200 rounded-lg p-2 shadow-2xs space-y-1">
-                        <label className="text-[10.5px] font-extrabold text-amber-950 block mb-0.5 whitespace-nowrap truncate">Bulto / Caja ($)</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="0.00"
-                          value={editBulto}
-                          onChange={(e) => setEditBulto(e.target.value)}
-                          className="w-full bg-slate-50 border border-amber-300 rounded px-2 py-1 text-sm text-amber-950 font-mono font-black focus:bg-white focus:outline-none"
-                        />
-                        <span className="text-[11px] text-amber-900 block mt-1 font-mono truncate font-bold">
-                          {editTaxActive && (parseFloat(editBulto) || 0) > 0
-                            ? `Base: $${((parseFloat(editBulto) || 0) / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA`
-                            : 'Opcional'}
-                        </span>
-                      </div>
+                      {(() => {
+                        const bNum = parseFloat(editBulto) || 0;
+                        const cNum = parseFloat(editCost) || 0;
+                        const mNum = parseFloat(editMayor) || 0;
+                        const dNum = parseFloat(editDetail) || 0;
+                        const cantB = parseInt(editCantBulto) || 0;
+
+                        // Si cantBulto es 0 o bulto es 0, no está en uso y no debe marcar error
+                        const isBultoActive = cantB > 0 && bNum > 0;
+                        const isBelowCost = isBultoActive && cNum > 0 && bNum < cNum;
+                        const isAboveMayor = isBultoActive && mNum > 0 && bNum > mNum;
+                        const isAboveDetail = isBultoActive && dNum > 0 && bNum > dNum;
+                        const hasError = isBelowCost || isAboveMayor || isAboveDetail;
+
+                        return (
+                          <div className={`rounded-lg p-2 shadow-2xs space-y-1 transition-all ${
+                            hasError
+                              ? 'bg-red-50/70 border-2 border-red-400 ring-2 ring-red-100'
+                              : 'bg-white border border-amber-200'
+                          }`}>
+                            <label className={`text-[10.5px] font-extrabold block mb-0.5 whitespace-nowrap truncate ${hasError ? 'text-red-950' : 'text-amber-950'}`}>
+                              Bulto / Caja ($)
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              placeholder="0.00"
+                              value={editBulto}
+                              onChange={(e) => setEditBulto(e.target.value)}
+                              className={`w-full rounded px-2 py-1 text-sm font-mono font-black focus:bg-white focus:outline-none transition-all ${
+                                hasError
+                                  ? 'bg-red-50 border-2 border-red-400 text-red-900 focus:border-red-600'
+                                  : 'bg-slate-50 border border-amber-300 text-amber-950 focus:border-amber-500'
+                              }`}
+                            />
+                            {hasError ? (
+                              <span className="text-[10px] text-red-600 block mt-1 font-mono truncate font-extrabold animate-pulse">
+                                {isBelowCost ? `⚠️ Menor al Costo ($${cNum.toFixed(2)})` :
+                                 isAboveMayor ? `⚠️ Mayor que P. Mayor ($${mNum.toFixed(2)})` :
+                                 `⚠️ Mayor que P. Detalle ($${dNum.toFixed(2)})`}
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-amber-900 block mt-1 font-mono truncate font-bold">
+                                {cantB === 0
+                                  ? 'No se usa (Unids / Bulto: 0)'
+                                  : editTaxActive && bNum > 0
+                                  ? `Base: $${(bNum / (1 + (parseFloat(editTaxPct) || 16) / 100)).toFixed(2)} + IVA`
+                                  : 'Opcional'}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
 

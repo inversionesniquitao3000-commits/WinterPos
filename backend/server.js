@@ -1165,7 +1165,7 @@ setInterval(() => {
   fetchBcvRates().catch(() => { });
 }, 5 * 60 * 1000);
 
-app.get('/api/bcv', async (req, res) => {
+app.get(['/api/bcv', '/bcv', '/api/api/bcv'], async (req, res) => {
   const rates = await fetchBcvRates();
   res.json(rates);
 });

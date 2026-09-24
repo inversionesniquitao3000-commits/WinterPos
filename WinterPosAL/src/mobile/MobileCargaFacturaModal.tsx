@@ -1339,6 +1339,7 @@ export default function MobileCargaFacturaModal({
               </button>
             </div>
           </div>
+        </div>
       )}
 
       {/* Modal de Escaneo e Inteligencia OCR de Factura por Foto */}
@@ -1346,6 +1347,7 @@ export default function MobileCargaFacturaModal({
         isOpen={showEscaneoFotoModal}
         onClose={() => setShowEscaneoFotoModal(false)}
         tasaBcv={tasaDia || 1}
+        tasaEuroBcv={bcvRates?.eur}
         existingProducts={existingProducts as any}
         onAddNewProductFast={async (prodData) => {
           const newId = Date.now();

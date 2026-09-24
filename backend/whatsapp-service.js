@@ -474,6 +474,27 @@ export async function initWhatsAppClient() {
   startAuthWatchdog();
 
   try {
+    // Auto-parche para bug en whatsapp-web.js (PR #201923) por cambio interno en WhatsApp Web (Sep 2026):
+    // La propiedad privada __x_id de MediaData colisiona con el getter de memoización al enviar multimedia.
+    try {
+      const fsMod = await import('fs');
+      const pathMod = await import('path');
+      const utilsPath = pathMod.resolve('node_modules/whatsapp-web.js/src/util/Injected/Utils.js');
+      if (fsMod.existsSync(utilsPath)) {
+        let content = fsMod.readFileSync(utilsPath, 'utf8');
+        if (!content.includes('delete message.__x_id;')) {
+          content = content.replace(
+            /(\s+\.\.\.extraOptions,\s+\};)/,
+            '$1\n        delete message.__x_id;'
+          );
+          fsMod.writeFileSync(utilsPath, content, 'utf8');
+          console.log('[WhatsApp] Auto-parche __x_id verificado y aplicado en whatsapp-web.js.');
+        }
+      }
+    } catch (patchErr) {
+      console.warn('[WhatsApp] Verificación de auto-parche omitida:', patchErr.message);
+    }
+
     const { default: pkg } = await import('whatsapp-web.js');
     const { Client, LocalAuth, MessageMedia } = pkg;
     const qrcode = await import('qrcode');
@@ -662,6 +683,30 @@ async function ensureWWebJSInjected(c) {
     if (!isReady && typeof c.inject === 'function') {
       await c.inject().catch(() => {});
     }
+
+    // Parche en tiempo de ejecución: WhatsApp Web actualizó su motor interno (septiembre 2026),
+    // haciendo que el getter de memoización falle con "Data passed to getter must include an id property"
+    // cuando se envían archivos multimedia porque el modelo MediaData inyecta su propiedad privada __x_id.
+    // Este interceptor asegura que __x_id sea eliminado del objeto message antes de que WAWeb procese el mensaje.
+    try {
+      await c.pupPage.evaluate(() => {
+        try {
+          if (typeof window.require === 'function') {
+            const sendChatAction = window.require('WAWebSendMsgChatAction');
+            if (sendChatAction && typeof sendChatAction.addAndSendMsgToChat === 'function' && !sendChatAction._patchedXid) {
+              const origAddAndSend = sendChatAction.addAndSendMsgToChat;
+              sendChatAction.addAndSendMsgToChat = function(chat, msg) {
+                if (msg && msg.__x_id !== undefined) {
+                  delete msg.__x_id;
+                }
+                return origAddAndSend.apply(this, arguments);
+              };
+              sendChatAction._patchedXid = true;
+            }
+          }
+        } catch (_) {}
+      });
+    } catch (_) {}
   } catch (_) {}
 }
 
@@ -768,10 +813,20 @@ export async function sendCierreReport(imageBase64, textSummary) {
         try {
           await client.sendMessage(target, media, { caption: textSummary });
         } catch (captionErr) {
-          console.warn('[WhatsApp] Falló envío con caption combinado, enviando secuencial:', captionErr.message || captionErr);
-          await client.sendMessage(target, media);
-          if (textSummary) {
-            await client.sendMessage(target, textSummary);
+          console.warn('[WhatsApp] Falló envío con caption combinado, intentando secuencial:', captionErr.message || captionErr);
+          try {
+            await client.sendMessage(target, media);
+            if (textSummary) {
+              await client.sendMessage(target, textSummary);
+            }
+          } catch (mediaErr) {
+            console.warn('[WhatsApp] Falló envío de multimedia, despachando resumen en texto como respaldo:', mediaErr.message || mediaErr);
+            if (textSummary) {
+              await client.sendMessage(target, textSummary);
+              console.log('[WhatsApp] Resumen en texto enviado con éxito tras fallo de imagen.');
+              return { success: true, fallbackTextOnly: true };
+            }
+            throw mediaErr;
           }
         }
       } else {
