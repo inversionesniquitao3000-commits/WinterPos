@@ -1,4 +1,4 @@
-import { restoreSalesToPostgres, restoreCierresToPostgres, restoreAbonosToPostgres, restoreTasasToPostgres, readJsonFile } from './db-store.js';
+import { restoreSalesToPostgres, restoreCierresToPostgres, restoreAbonosToPostgres, restoreTasasToPostgres, restoreMovementsToPostgres, readJsonFile } from './db-store.js';
 
 async function main() {
   console.log('🚀 Iniciando migración directa a PostgreSQL...');
@@ -6,8 +6,9 @@ async function main() {
   const cierres = readJsonFile('cierres.json', []);
   const abonos = readJsonFile('abonos.json', []);
   const tasas = readJsonFile('tasas.json', []);
+  const movements = readJsonFile('movements.json', []);
 
-  console.log(`📊 Encontrados: ${sales.length} ventas, ${cierres.length} cierres, ${abonos.length} abonos, ${tasas.length} tasas.`);
+  console.log(`📊 Encontrados: ${sales.length} ventas, ${cierres.length} cierres, ${abonos.length} abonos, ${tasas.length} tasas, ${movements.length} movimientos de Kardex.`);
 
   if (cierres.length > 0) {
     console.log('⏳ Restaurando cierres...');
@@ -24,6 +25,10 @@ async function main() {
   if (tasas.length > 0) {
     console.log('⏳ Restaurando tasas...');
     await restoreTasasToPostgres(tasas);
+  }
+  if (movements.length > 0) {
+    console.log('⏳ Restaurando movimientos de Kardex...');
+    await restoreMovementsToPostgres(movements);
   }
 
   console.log('🎉 ¡Migración a PostgreSQL completada con éxito total!');

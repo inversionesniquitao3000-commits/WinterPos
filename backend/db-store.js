@@ -2643,6 +2643,145 @@ export async function restoreTasasToPostgres(tasas) {
   }
 }
 
+export async function restoreMovementsToPostgres(movements) {
+  if (!usePostgres || !Array.isArray(movements) || movements.length === 0) return;
+  try {
+    const [pRes, uRes] = await Promise.all([
+      pool.query('SELECT id, codigo_barras_clave, descripcion FROM Productos'),
+      pool.query('SELECT id, nombre, usuario FROM Usuarios')
+    ]);
+
+    const prodMapByBarcode = new Map();
+    const prodMapByDesc = new Map();
+    const prodMapById = new Map();
+    pRes.rows.forEach(p => {
+      if (p.codigo_barras_clave) prodMapByBarcode.set(p.codigo_barras_clave.trim().toUpperCase(), p.id);
+      if (p.descripcion) prodMapByDesc.set(p.descripcion.trim().toUpperCase(), p.id);
+      prodMapById.set(Number(p.id), p.id);
+    });
+    const defaultProdId = pRes.rows[0]?.id || 1;
+
+    const userMap = new Map();
+    uRes.rows.forEach(u => {
+      if (u.nombre) userMap.set(u.nombre.toLowerCase().trim(), u.id);
+      if (u.usuario) userMap.set(u.usuario.toLowerCase().trim(), u.id);
+    });
+    const defaultUserId = uRes.rows[0]?.id || 1;
+
+    // Clean existing movements table for clean restore
+    await pool.query('TRUNCATE TABLE Movimientos_Inventario RESTART IDENTITY CASCADE');
+
+    const validTipos = new Set(['Entrada', 'Salida', 'Merma', 'Venta', 'Devolucion', 'Entrada Rápida']);
+
+    for (const m of movements) {
+      try {
+        const mId = parseInt(m.id, 10);
+
+        // Resolve Product ID
+        let prodId = null;
+        const rawProdId = parseInt(m.productId || m.producto_id || m.productoId, 10);
+        if (!isNaN(rawProdId) && prodMapById.has(rawProdId)) {
+          prodId = prodMapById.get(rawProdId);
+        }
+        if (!prodId && m.productCode) {
+          prodId = prodMapByBarcode.get(String(m.productCode).trim().toUpperCase());
+        }
+        if (!prodId && m.productDescription) {
+          prodId = prodMapByDesc.get(String(m.productDescription).trim().toUpperCase());
+        }
+        if (!prodId) prodId = defaultProdId;
+
+        // Resolve User ID
+        const rawUserId = parseInt(m.usuario_id || m.usuarioId, 10);
+        const uName = (m.usuario || '').toLowerCase().trim();
+        let userId = (!isNaN(rawUserId)) ? rawUserId : (userMap.get(uName) || defaultUserId);
+
+        // Resolve Quantity
+        let qty = parseFloat(m.qty || m.cantidad || 0);
+        if (qty === 0) {
+          qty = (parseFloat(m.stock_posterior) || 0) - (parseFloat(m.stock_anterior) || 0);
+        }
+        if (qty === 0) qty = 0.001; // Avoid CHECK (cantidad <> 0) constraint
+
+        // Resolve Tipo (ensure exact enum match)
+        let tipo = m.type || m.tipo || (qty >= 0 ? 'Entrada' : 'Salida');
+        if (tipo === 'Devolución') tipo = 'Devolucion';
+        if (tipo === 'Entrada Rapida' || tipo === 'Entrada Rápida') tipo = 'Entrada Rápida';
+        if (!validTipos.has(tipo)) {
+          const tLower = String(tipo).toLowerCase();
+          if (tLower.includes('merma')) tipo = 'Merma';
+          else if (tLower.includes('salida')) tipo = 'Salida';
+          else if (tLower.includes('devoluc')) tipo = 'Devolucion';
+          else if (tLower.includes('venta')) tipo = 'Venta';
+          else tipo = qty >= 0 ? 'Entrada' : 'Salida';
+        }
+
+        const stockAnt = parseFloat(m.stock_anterior || 0);
+        const stockPost = parseFloat(m.stock_posterior || 0);
+        const motivo = (m.motivo || 'Movimiento de Inventario').substring(0, 255);
+        const fecha = m.date || m.fecha || getLocalISODateString();
+
+        try {
+          if (!isNaN(mId)) {
+            await pool.query(
+              `INSERT INTO Movimientos_Inventario (
+                id, producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo, fecha
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+              ON CONFLICT (id) DO UPDATE SET
+                producto_id = EXCLUDED.producto_id,
+                cantidad = EXCLUDED.cantidad,
+                stock_anterior = EXCLUDED.stock_anterior,
+                stock_posterior = EXCLUDED.stock_posterior,
+                motivo = EXCLUDED.motivo,
+                fecha = EXCLUDED.fecha`,
+              [mId, prodId, userId, tipo, qty, stockAnt, stockPost, motivo, fecha]
+            );
+          } else {
+            await pool.query(
+              `INSERT INTO Movimientos_Inventario (
+                producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo, fecha
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+              [prodId, userId, tipo, qty, stockAnt, stockPost, motivo, fecha]
+            );
+          }
+        } catch (insertErr) {
+          // If custom enum is rejected, fallback to 'Entrada' or 'Salida'
+          const fallbackType = qty >= 0 ? 'Entrada' : 'Salida';
+          if (!isNaN(mId)) {
+            await pool.query(
+              `INSERT INTO Movimientos_Inventario (
+                id, producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo, fecha
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+              ON CONFLICT (id) DO UPDATE SET
+                producto_id = EXCLUDED.producto_id,
+                cantidad = EXCLUDED.cantidad,
+                stock_anterior = EXCLUDED.stock_anterior,
+                stock_posterior = EXCLUDED.stock_posterior,
+                motivo = EXCLUDED.motivo,
+                fecha = EXCLUDED.fecha`,
+              [mId, prodId, userId, fallbackType, qty, stockAnt, stockPost, motivo, fecha]
+            );
+          } else {
+            await pool.query(
+              `INSERT INTO Movimientos_Inventario (
+                producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo, fecha
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+              [prodId, userId, fallbackType, qty, stockAnt, stockPost, motivo, fecha]
+            );
+          }
+        }
+      } catch (movErr) {
+        console.warn(`⚠️ Error insertando movimiento Kardex (${m.id}):`, movErr.message);
+      }
+    }
+
+    await pool.query("SELECT setval(pg_get_serial_sequence('Movimientos_Inventario', 'id'), COALESCE((SELECT MAX(id) FROM Movimientos_Inventario), 1))");
+    console.log(`✅ [Restore] ${movements.length} movimientos de Kardex restaurados en PostgreSQL.`);
+  } catch (err) {
+    console.error('Error restaurando movimientos en Postgres:', err.message);
+  }
+}
+
 export async function syncJsonBackupsToPostgresIfEmpty() {
   if (!usePostgres) return;
   try {
@@ -2653,6 +2792,7 @@ export async function syncJsonBackupsToPostgresIfEmpty() {
       const existingCierres = readJsonFile('cierres.json', []);
       const existingAbonos = readJsonFile('abonos.json', []);
       const existingTasas = readJsonFile('tasas.json', []);
+      const existingMovements = readJsonFile('movements.json', []);
 
       if (existingCierres.length > 0) {
         console.log(`📥 Importando automáticamente ${existingCierres.length} cierres de caja a PostgreSQL...`);
@@ -2667,6 +2807,20 @@ export async function syncJsonBackupsToPostgresIfEmpty() {
       }
       if (existingTasas.length > 0) {
         await restoreTasasToPostgres(existingTasas);
+      }
+      if (existingMovements.length > 0) {
+        console.log(`📥 Importando automáticamente ${existingMovements.length} movimientos de Kardex a PostgreSQL...`);
+        await restoreMovementsToPostgres(existingMovements);
+      }
+    } else {
+      // Incluso si ya hay ventas, verificar si Movimientos_Inventario está vacío y movements.json tiene datos
+      const mCheck = await pool.query('SELECT COUNT(*) as count FROM Movimientos_Inventario');
+      if (parseInt(mCheck.rows[0].count, 10) === 0) {
+        const existingMovements = readJsonFile('movements.json', []);
+        if (existingMovements.length > 0) {
+          console.log(`📥 Importando automáticamente ${existingMovements.length} movimientos de Kardex a PostgreSQL...`);
+          await restoreMovementsToPostgres(existingMovements);
+        }
       }
     }
   } catch (syncErr) {
@@ -2857,7 +3011,7 @@ export async function restoreDatabase(data) {
       }
     }
 
-    // 10. Restore Cierres, Ventas, Abonos and Tasas to PostgreSQL
+    // 10. Restore Cierres, Ventas, Abonos, Tasas and Movements (Kardex) to PostgreSQL
     if (Array.isArray(data.cierres) && data.cierres.length > 0) {
       await restoreCierresToPostgres(data.cierres);
     }
@@ -2869,6 +3023,9 @@ export async function restoreDatabase(data) {
     }
     if (Array.isArray(data.tasas) && data.tasas.length > 0) {
       await restoreTasasToPostgres(data.tasas);
+    }
+    if (Array.isArray(data.movements) && data.movements.length > 0) {
+      await restoreMovementsToPostgres(data.movements);
     }
   }
 

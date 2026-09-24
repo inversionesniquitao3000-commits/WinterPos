@@ -1979,7 +1979,8 @@ app.post('/api/db/sync-sales-from-json', async (req, res) => {
     const existingSales = readJsonFile('sales.json', []);
     const existingCierres = readJsonFile('cierres.json', []);
     const existingAbonos = readJsonFile('abonos.json', []);
-    let countC = 0, countS = 0;
+    const existingMovements = readJsonFile('movements.json', []);
+    let countC = 0, countS = 0, countM = 0;
     if (existingCierres.length > 0) {
       await restoreCierresToPostgres(existingCierres);
       countC = existingCierres.length;
@@ -1991,7 +1992,11 @@ app.post('/api/db/sync-sales-from-json', async (req, res) => {
     if (existingAbonos.length > 0) {
       await restoreAbonosToPostgres(existingAbonos);
     }
-    res.json({ success: true, message: `Sincronizadas ${countS} ventas y ${countC} cierres a PostgreSQL.`, countS, countC });
+    if (existingMovements.length > 0) {
+      await restoreMovementsToPostgres(existingMovements);
+      countM = existingMovements.length;
+    }
+    res.json({ success: true, message: `Sincronizadas ${countS} ventas, ${countC} cierres y ${countM} movimientos de Kardex a PostgreSQL.`, countS, countC, countM });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2836,6 +2841,11 @@ freePortIfOccupied(PORT).then(() => {
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Servidor API de WinterPosAL corriendo en http://localhost:${PORT}`);
     console.log(`Expuesto en red LAN para recibir conexiones de otras terminales.`);
+
+    // Auto-sincronizar copias de respaldo JSON a PostgreSQL si la BD se encuentra vacía o faltan movimientos de Kardex
+    setTimeout(() => {
+      syncJsonBackupsToPostgresIfEmpty();
+    }, 2000);
 
     // Initialize WhatsApp connection in background after startup (non-blocking for UI)
     setTimeout(() => {
