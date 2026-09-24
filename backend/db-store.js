@@ -381,6 +381,18 @@ try {
         SELECT MAX(id) FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' GROUP BY usuario_id
       );
 
+    CREATE TABLE IF NOT EXISTS Combos_Recetas (
+      id BIGSERIAL PRIMARY KEY,
+      producto_padre_id BIGINT NOT NULL REFERENCES Productos(id) ON DELETE CASCADE,
+      producto_hijo_id BIGINT NOT NULL REFERENCES Productos(id) ON DELETE CASCADE,
+      cantidad NUMERIC(15, 3) NOT NULL DEFAULT 1,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT uq_combo_padre_hijo UNIQUE (producto_padre_id, producto_hijo_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_combos_padre ON Combos_Recetas(producto_padre_id);
+    CREATE INDEX IF NOT EXISTS idx_combos_hijo ON Combos_Recetas(producto_hijo_id);
+
     DO $$ BEGIN
       IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'usuarios') THEN
         ALTER TABLE Usuarios ALTER COLUMN rol TYPE VARCHAR(100) USING rol::text;
@@ -391,6 +403,9 @@ try {
       END IF;
       IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'productos') THEN
         ALTER TABLE Productos ADD COLUMN IF NOT EXISTS porcentaje_impuesto NUMERIC DEFAULT 0;
+        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS es_combo BOOLEAN DEFAULT FALSE;
+        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS producto_bulto_padre_id BIGINT;
+        ALTER TABLE Productos ADD COLUMN IF NOT EXISTS factor_conversion_bulto NUMERIC DEFAULT 1;
         UPDATE Productos SET porcentaje_impuesto = 16 WHERE exento_impuesto = FALSE AND (porcentaje_impuesto IS NULL OR porcentaje_impuesto = 0);
         UPDATE Productos SET porcentaje_impuesto = 0 WHERE exento_impuesto = TRUE;
         PERFORM setval(pg_get_serial_sequence('Productos', 'id'), COALESCE((SELECT MAX(id) FROM Productos), 1));
@@ -6883,6 +6898,371 @@ export async function reconcileShiftPagoMovilDb(cajaId) {
   } catch (err) {
     console.error('Error conciliando turno BDV:', err.message);
     return { success: false, error: err.message };
+  }
+}
+
+// ==========================================
+// 23. COMBOS Y DESGLOSE BULTO ↔ DETAL (ACID ATOMIC & KARDEX)
+// ==========================================
+
+export async function unpackBultoToDetal(detalId, bultoId, cantidadBultos = 1, usuarioName = 'SISTEMA') {
+  if (!usePostgres) throw new Error('El desempaque de bultos requiere base de datos PostgreSQL');
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Lock Bulto Padre row with FOR UPDATE
+    const bultoRes = await client.query(
+      `SELECT id, codigo_barras_clave, descripcion, stock_actual, precio_costo_usd 
+       FROM Productos WHERE id = $1 FOR UPDATE`,
+      [Number(bultoId)]
+    );
+    if (bultoRes.rowCount === 0) {
+      throw new Error('No se encontró el Producto Bulto en la base de datos.');
+    }
+    const bulto = bultoRes.rows[0];
+    const bultoStock = parseFloat(bulto.stock_actual || 0);
+    const cantBultosToUnpack = Math.abs(parseFloat(cantidadBultos || 1));
+
+    if (bultoStock < cantBultosToUnpack) {
+      throw new Error(`Stock insuficiente en Bulto "${bulto.descripcion}". Disponible: ${bultoStock}, Requerido: ${cantBultosToUnpack}`);
+    }
+
+    // 2. Lock Detal Hito row with FOR UPDATE
+    const detalRes = await client.query(
+      `SELECT id, codigo_barras_clave, descripcion, stock_actual, precio_costo_usd, factor_conversion_bulto 
+       FROM Productos WHERE id = $1 FOR UPDATE`,
+      [Number(detalId)]
+    );
+    if (detalRes.rowCount === 0) {
+      throw new Error('No se encontró el Producto al Detal en la base de datos.');
+    }
+    const detal = detalRes.rows[0];
+    const detalStock = parseFloat(detal.stock_actual || 0);
+    const factor = parseFloat(detal.factor_conversion_bulto || 1);
+    if (factor <= 0) {
+      throw new Error('El factor de conversión del bulto debe ser mayor a 0.');
+    }
+
+    // 3. Calculate Prorated Costs & New Stock Quantities (Pilar #4)
+    const bultoCost = parseFloat(bulto.precio_costo_usd || 0);
+    const unitCostNew = factor > 0 ? (bultoCost / factor) : (parseFloat(detal.precio_costo_usd || 0));
+    const detalQtyAdded = cantBultosToUnpack * factor;
+
+    const bultoNewStock = bultoStock - cantBultosToUnpack;
+    const detalNewStock = detalStock + detalQtyAdded;
+
+    // 4. Update Stock in DB
+    await client.query(
+      `UPDATE Productos SET stock_actual = $1 WHERE id = $2`,
+      [bultoNewStock, bulto.id]
+    );
+    await client.query(
+      `UPDATE Productos SET stock_actual = $1, precio_costo_usd = $2 WHERE id = $3`,
+      [detalNewStock, unitCostNew, detal.id]
+    );
+
+    // 5. Get User ID for Kardex
+    const uRes = await client.query(
+      `SELECT id FROM Usuarios WHERE TRIM(UPPER(nombre)) = TRIM(UPPER($1)) OR TRIM(UPPER(usuario)) = TRIM(UPPER($1)) LIMIT 1`,
+      [String(usuarioName).trim()]
+    );
+    const userId = uRes.rowCount > 0 ? uRes.rows[0].id : 1;
+
+    // 6. Insert Kardex Audit Entries (Salida Bulto, Entrada Detal)
+    const motivoBulto = `Salida por Desglose/Desempaque de ${cantBultosToUnpack} bulto(s) hacia detal: ${detal.descripcion}`;
+    const motivoDetal = `Entrada por Desglose/Desempaque de ${cantBultosToUnpack} bulto(s) (${detalQtyAdded} uds) desde: ${bulto.descripcion}`;
+
+    await client.query(
+      `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
+       VALUES ($1, $2, 'Salida', $3, $4, $5, $6)`,
+      [bulto.id, userId, -cantBultosToUnpack, bultoStock, bultoNewStock, motivoBulto]
+    );
+
+    await client.query(
+      `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
+       VALUES ($1, $2, 'Entrada', $3, $4, $5, $6)`,
+      [detal.id, userId, detalQtyAdded, detalStock, detalNewStock, motivoDetal]
+    );
+
+    await client.query('COMMIT');
+    console.log(`✅ [Desglose Bulto] ${cantBultosToUnpack} Bulto(s) desempacados exitosamente (${detalQtyAdded} unidades agregadas a ${detal.descripcion}).`);
+
+    return {
+      success: true,
+      bultoId: bulto.id,
+      bultoNewStock,
+      detalId: detal.id,
+      detalNewStock,
+      detalQtyAdded,
+      unitCostNew
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error desempacando bulto (ACID Rollback):', err.message);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function getCombos(padreId) {
+  if (!usePostgres) return [];
+  try {
+    const res = await pool.query(
+      `SELECT c.id, c.producto_padre_id, c.producto_hijo_id, c.cantidad,
+              p.codigo_barras_clave as barcode, p.descripcion, p.stock_actual, p.precio_costo_usd, p.precio_detalle_usd, p.a_granel, p.es_combo, p.producto_bulto_padre_id, p.factor_conversion_bulto
+       FROM Combos_Recetas c
+       JOIN Productos p ON c.producto_hijo_id = p.id
+       WHERE c.producto_padre_id = $1
+       ORDER BY c.id ASC`,
+      [Number(padreId)]
+    );
+    return res.rows.map(r => ({
+      id: r.id,
+      producto_padre_id: r.producto_padre_id,
+      producto_hijo_id: r.producto_hijo_id,
+      cantidad: parseFloat(r.cantidad || 1),
+      barcode: r.barcode || '',
+      descripcion: r.descripcion || '',
+      stock_actual: parseFloat(r.stock_actual || 0),
+      precio_costo_usd: parseFloat(r.precio_costo_usd || 0),
+      precio_detalle_usd: parseFloat(r.precio_detalle_usd || 0),
+      a_granel: !!r.a_granel,
+      es_combo: !!r.es_combo,
+      producto_bulto_padre_id: r.producto_bulto_padre_id,
+      factor_conversion_bulto: parseFloat(r.factor_conversion_bulto || 1)
+    }));
+  } catch (err) {
+    console.error('Error en getCombos:', err.message);
+    return [];
+  }
+}
+
+export async function saveCombo(padreId, items = []) {
+  if (!usePostgres) throw new Error('La gestión de combos requiere base de datos PostgreSQL');
+  if (!padreId) throw new Error('Se requiere el ID del producto principal del combo.');
+
+  // Pilar #3: Prohibir anidación de combos
+  for (const it of items) {
+    const hijoId = Number(it.producto_hijo_id || it.hijo_id);
+    if (hijoId === Number(padreId)) {
+      throw new Error('Un combo no puede contenerse a sí mismo.');
+    }
+    const checkRes = await pool.query('SELECT es_combo, descripcion FROM Productos WHERE id = $1', [hijoId]);
+    if (checkRes.rowCount > 0 && checkRes.rows[0].es_combo) {
+      throw new Error(`No se permite anidar combos. El producto "${checkRes.rows[0].descripcion}" ya es un Combo.`);
+    }
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Remove previous combo recipe
+    await client.query('DELETE FROM Combos_Recetas WHERE producto_padre_id = $1', [Number(padreId)]);
+
+    // 2. Insert new components
+    for (const it of items) {
+      const hijoId = Number(it.producto_hijo_id || it.hijo_id);
+      const qty = Math.abs(parseFloat(it.cantidad || 1));
+      if (qty <= 0) continue;
+
+      await client.query(
+        `INSERT INTO Combos_Recetas (producto_padre_id, producto_hijo_id, cantidad)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (producto_padre_id, producto_hijo_id) DO UPDATE SET cantidad = EXCLUDED.cantidad`,
+        [Number(padreId), hijoId, qty]
+      );
+    }
+
+    // 3. Mark parent product as es_combo = TRUE
+    const hasItems = items.length > 0;
+    await client.query('UPDATE Productos SET es_combo = $1 WHERE id = $2', [hasItems, Number(padreId)]);
+
+    await client.query('COMMIT');
+    return { success: true, count: items.length };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error guardando combo (ACID Rollback):', err.message);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function deleteCombo(padreId) {
+  if (!usePostgres) return { success: false };
+  try {
+    await pool.query('DELETE FROM Combos_Recetas WHERE producto_padre_id = $1', [Number(padreId)]);
+    await pool.query('UPDATE Productos SET es_combo = FALSE WHERE id = $1', [Number(padreId)]);
+    return { success: true };
+  } catch (err) {
+    console.error('Error eliminando combo:', err.message);
+    throw err;
+  }
+}
+
+export async function saveBultoVinculo(detalId, bultoId, factorConversion = 1) {
+  if (!usePostgres) throw new Error('Requiere base de datos PostgreSQL');
+  try {
+    const bId = bultoId ? Number(bultoId) : null;
+    const factor = Math.abs(parseFloat(factorConversion || 1)) || 1;
+
+    await pool.query(
+      `UPDATE Productos SET producto_bulto_padre_id = $1, factor_conversion_bulto = $2 WHERE id = $3`,
+      [bId, factor, Number(detalId)]
+    );
+    return { success: true, detalId, bultoId: bId, factor };
+  } catch (err) {
+    console.error('Error guardando vínculo bulto-detal:', err.message);
+    throw err;
+  }
+}
+
+// ==========================================
+// 24. REPORTE ABC DE INVENTARIO (REGLA PARETO 80/20 & MULTIVARIABLE)
+// ==========================================
+
+export async function getInventoryAbcReport(days = 90, metric = 'sales') {
+  if (!usePostgres) return { items: [], summary: {} };
+
+  try {
+    const daysNum = Math.max(1, parseInt(days, 10) || 90);
+    const res = await pool.query(
+      `SELECT 
+         p.id,
+         p.codigo_barras_clave as barcode,
+         p.descripcion as description,
+         COALESCE(p.categoria, 'SIN CATEGORIA') as category,
+         COALESCE(p.stock_actual, 0) as stock_actual,
+         COALESCE(p.stock_minimo, 0) as stock_minimo,
+         COALESCE(p.precio_costo_usd, 0) as precio_costo_usd,
+         COALESCE(p.precio_detalle_usd, 0) as precio_detalle_usd,
+         COALESCE(p.es_combo, false) as es_combo,
+         COALESCE(p.a_granel, false) as a_granel,
+         COALESCE(SUM(CASE WHEN v.id IS NOT NULL THEN vd.cantidad ELSE 0 END), 0) as total_qty_sold,
+         COALESCE(SUM(CASE WHEN v.id IS NOT NULL THEN vd.total_fila_usd ELSE 0 END), 0) as total_sales_usd,
+         COALESCE(SUM(CASE WHEN v.id IS NOT NULL THEN (vd.cantidad * p.precio_costo_usd) ELSE 0 END), 0) as total_cogs_usd
+       FROM Productos p
+       LEFT JOIN Ventas_Detalle vd ON vd.producto_id = p.id
+       LEFT JOIN Ventas v ON v.id = vd.venta_id 
+         AND v.fecha >= (CURRENT_DATE - (INTERVAL '1 day' * $1::integer)) 
+         AND (v.estatus IS NULL OR v.estatus != 'Anulada')
+       GROUP BY p.id, p.codigo_barras_clave, p.descripcion, p.categoria, p.stock_actual, p.stock_minimo, p.precio_costo_usd, p.precio_detalle_usd, p.es_combo, p.a_granel
+       ORDER BY p.id ASC`,
+      [daysNum]
+    );
+
+    const rawRows = res.rows.map(r => {
+      const stock = parseFloat(r.stock_actual || 0);
+      const cost = parseFloat(r.precio_costo_usd || 0);
+      const price = parseFloat(r.precio_detalle_usd || 0);
+      const qtySold = parseFloat(r.total_qty_sold || 0);
+      const salesUsd = parseFloat(r.total_sales_usd || 0);
+      const cogsUsd = parseFloat(r.total_cogs_usd || 0);
+      const profitUsd = salesUsd - cogsUsd;
+
+      return {
+        id: r.id,
+        barcode: r.barcode || '',
+        description: r.description || 'Producto',
+        category: r.category,
+        stock_actual: stock,
+        stock_minimo: parseFloat(r.stock_minimo || 0),
+        precio_costo_usd: cost,
+        precio_detalle_usd: price,
+        stock_value_cost_usd: stock * cost,
+        stock_value_detail_usd: stock * price,
+        es_combo: !!r.es_combo,
+        a_granel: !!r.a_granel,
+        total_qty_sold: qtySold,
+        total_sales_usd: salesUsd,
+        total_cogs_usd: cogsUsd,
+        total_profit_usd: profitUsd
+      };
+    });
+
+    // Calculate total sums across company
+    const grandTotalSalesUSD = rawRows.reduce((acc, r) => acc + r.total_sales_usd, 0);
+    const grandTotalProfitUSD = rawRows.reduce((acc, r) => acc + r.total_profit_usd, 0);
+    const grandTotalQtySold = rawRows.reduce((acc, r) => acc + r.total_qty_sold, 0);
+
+    // Sort according to metric ('sales', 'profit', 'qty')
+    rawRows.sort((a, b) => {
+      if (metric === 'profit') return b.total_profit_usd - a.total_profit_usd;
+      if (metric === 'qty') return b.total_qty_sold - a.total_qty_sold;
+      return b.total_sales_usd - a.total_sales_usd;
+    });
+
+    // Pareto Cumulative % Classification (Pilar #5)
+    let accumVal = 0;
+    const targetGrandTotal = metric === 'profit' ? Math.max(0.001, grandTotalProfitUSD) : (metric === 'qty' ? Math.max(0.001, grandTotalQtySold) : Math.max(0.001, grandTotalSalesUSD));
+
+    let countA = 0, countB = 0, countC = 0;
+    let valA = 0, valB = 0, valC = 0;
+    let capitalFrozenC = 0;
+
+    const items = rawRows.map(r => {
+      const metricVal = metric === 'profit' ? Math.max(0, r.total_profit_usd) : (metric === 'qty' ? Math.max(0, r.total_qty_sold) : Math.max(0, r.total_sales_usd));
+      accumVal += metricVal;
+      const accumPct = Math.min(100, (accumVal / targetGrandTotal) * 100);
+
+      let abcClass = 'C';
+      if (r.total_sales_usd > 0 && accumPct <= 80) {
+        abcClass = 'A';
+        countA++;
+        valA += r.total_sales_usd;
+      } else if (r.total_sales_usd > 0 && accumPct <= 95) {
+        abcClass = 'B';
+        countB++;
+        valB += r.total_sales_usd;
+      } else {
+        abcClass = 'C';
+        countC++;
+        valC += r.total_sales_usd;
+        capitalFrozenC += r.stock_value_cost_usd;
+      }
+
+      return {
+        ...r,
+        abc_class: abcClass,
+        accumulated_pct: parseFloat(accumPct.toFixed(2))
+      };
+    });
+
+    return {
+      success: true,
+      periodDays: daysNum,
+      metric,
+      summary: {
+        totalProductsCount: items.length,
+        grandTotalSalesUSD,
+        grandTotalProfitUSD,
+        grandTotalQtySold,
+        classA: {
+          count: countA,
+          salesUSD: valA,
+          pctOfTotal: grandTotalSalesUSD > 0 ? parseFloat(((valA / grandTotalSalesUSD) * 100).toFixed(1)) : 0
+        },
+        classB: {
+          count: countB,
+          salesUSD: valB,
+          pctOfTotal: grandTotalSalesUSD > 0 ? parseFloat(((valB / grandTotalSalesUSD) * 100).toFixed(1)) : 0
+        },
+        classC: {
+          count: countC,
+          salesUSD: valC,
+          pctOfTotal: grandTotalSalesUSD > 0 ? parseFloat(((valC / grandTotalSalesUSD) * 100).toFixed(1)) : 0,
+          capitalFrozenCostUSD: capitalFrozenC
+        }
+      },
+      items
+    };
+  } catch (err) {
+    console.error('Error generando reporte ABC de inventario:', err.message);
+    throw err;
   }
 }
 

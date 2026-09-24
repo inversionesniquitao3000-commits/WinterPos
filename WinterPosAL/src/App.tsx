@@ -540,7 +540,7 @@ export default function App() {
 
       if (mode === 'local') {
         try {
-          const res = await fetch(`http://localhost:5000/api/status`);
+          const res = await fetch(`${getApiBaseUrl()}/status`);
           if (res.ok) {
             const data = await res.json();
             if (data.localIp) {

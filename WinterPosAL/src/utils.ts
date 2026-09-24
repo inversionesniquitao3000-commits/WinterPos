@@ -860,7 +860,7 @@ export function getApiBaseUrl(): string {
     return `http://${savedIp}:${savedPort}/api`;
   }
   
-  return `http://localhost:${savedPort}/api`;
+  return `http://127.0.0.1:${savedPort}/api`;
 }
 
 export function formatImageUrl(url: string | undefined | null): string {

@@ -25,6 +25,9 @@ export interface Product {
   a_granel?: boolean;
   fecha_vencimiento?: string;
   porcentaje_impuesto?: number;
+  es_combo?: boolean;
+  producto_bulto_padre_id?: number | null;
+  factor_conversion_bulto?: number;
 }
 
 export type PriceType = 'DETALLE' | 'MAYOR' | 'BULTO';

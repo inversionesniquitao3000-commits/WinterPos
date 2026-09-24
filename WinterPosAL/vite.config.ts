@@ -31,7 +31,7 @@ export default defineConfig({
     proxy: {
       // Redirige todas las llamadas /api del frontend al backend Express
       '/api': {
-        target: 'http://localhost:5000',
+        target: 'http://127.0.0.1:5000',
         changeOrigin: true,
         secure: false
       }

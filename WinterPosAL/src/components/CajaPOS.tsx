@@ -9,7 +9,7 @@ import {
   Banknote, Eye, LogOut, X, Image as ImageIcon, ZoomIn,
   Edit, Minus, Sparkles, Package, QrCode, UploadCloud, Link as LinkIcon, Save,
   CreditCard, Smartphone, Fingerprint, Wallet, Globe, CalendarClock,
-  Landmark
+  Landmark, PackageCheck
 } from 'lucide-react';
 import { formatNumberToWordsUSD, printTicketReceipt, printCierreTicketReport, formatBs, formatImageUrl } from '../utils';
 import { useDialog } from '../hooks/useDialog';
@@ -141,6 +141,22 @@ export default function CajaPOS({
 
   // Right-Click Context Menu State
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; product: Product } | null>(null);
+
+  // Smart Cascade Unpack Confirmation Modal (Pilar #1 & ACID)
+  const [smartUnpackModal, setSmartUnpackModal] = useState<{
+    isOpen: boolean;
+    detalId: number;
+    detalDescription: string;
+    bultoId: number;
+    bultoDescription: string;
+    bultoStock: number;
+    factorConversion: number;
+    targetProductToAdd: Product;
+    targetQty: number;
+    isComboChild?: boolean;
+    comboDescription?: string;
+  } | null>(null);
+  const [isUnpackingSmartBulto, setIsUnpackingSmartBulto] = useState<boolean>(false);
 
   // Quick Product Modals from Context Menu
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -2067,14 +2083,72 @@ export default function CajaPOS({
     focusSearchInput();
   };
 
-  const handleAddProduct = (prod: Product, qty: number = 1) => {
+  const handleAddProduct = async (prod: Product, qty: number = 1) => {
     if (!cajaAbierta) {
       showToast('Debe abrir la caja registradora para poder realizar ventas.', 'error');
       return;
     }
 
-    // Strict block: do not add to sales list if there is no stock
-    if (prod.stock_actual <= 0) {
+    // Pilar #1: Combo cascading unpack verification
+    if (prod.es_combo) {
+      try {
+        const res = await fetch(`/api/combos?padreId=${prod.id}`);
+        const recipes = await res.json();
+        if (Array.isArray(recipes) && recipes.length > 0) {
+          for (const recipe of recipes) {
+            const reqQty = (parseFloat(recipe.cantidad) || 1) * qty;
+            const childProd = products.find(p => p.id === recipe.producto_hijo_id);
+            const childStock = childProd ? childProd.stock_actual : parseFloat(recipe.stock_actual || 0);
+
+            if (childStock < reqQty) {
+              const bultoPadreId = childProd?.producto_bulto_padre_id || recipe.producto_bulto_padre_id;
+              const bultoProd = products.find(p => p.id === bultoPadreId);
+
+              if (bultoProd && (bultoProd.stock_actual || 0) > 0) {
+                setSmartUnpackModal({
+                  isOpen: true,
+                  detalId: recipe.producto_hijo_id,
+                  detalDescription: recipe.descripcion,
+                  bultoId: bultoProd.id,
+                  bultoDescription: bultoProd.description || bultoProd.descripcion || 'Bulto Padre',
+                  bultoStock: bultoProd.stock_actual,
+                  factorConversion: recipe.factor_conversion_bulto || childProd?.factor_conversion_bulto || 24,
+                  targetProductToAdd: prod,
+                  targetQty: qty,
+                  isComboChild: true,
+                  comboDescription: prod.description
+                });
+                return;
+              } else {
+                showToast(`Stock insuficiente en componente "${recipe.descripcion}" del combo "${prod.description}". Requerido: ${reqQty}, Disponible: ${childStock}`, 'error');
+                return;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error verificando receta del combo:', err);
+      }
+    } else if (prod.stock_actual <= 0) {
+      if (prod.producto_bulto_padre_id) {
+        const bultoProd = products.find(p => p.id === prod.producto_bulto_padre_id);
+        if (bultoProd && (bultoProd.stock_actual || 0) > 0) {
+          setSmartUnpackModal({
+            isOpen: true,
+            detalId: prod.id,
+            detalDescription: prod.description,
+            bultoId: bultoProd.id,
+            bultoDescription: bultoProd.description || bultoProd.descripcion || 'Bulto Padre',
+            bultoStock: bultoProd.stock_actual,
+            factorConversion: prod.factor_conversion_bulto || 24,
+            targetProductToAdd: prod,
+            targetQty: qty,
+            isComboChild: false
+          });
+          return;
+        }
+      }
+
       showToast(`Sin Existencias: El producto "${prod.description}" no cuenta con stock disponible en almacén.`, 'error');
       return;
     }
@@ -2087,6 +2161,44 @@ export default function CajaPOS({
     }
 
     executeAddProduct(prod, qty);
+  };
+
+  const handleConfirmSmartUnpack = async () => {
+    if (!smartUnpackModal) return;
+    setIsUnpackingSmartBulto(true);
+    try {
+      const res = await fetch('/api/inventory/unpack-bulto', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          detalId: smartUnpackModal.detalId,
+          bultoId: smartUnpackModal.bultoId,
+          cantidadBultos: 1,
+          usuario: currentUser?.nombre || currentUser?.usuario || 'CAJERO POS'
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`✅ Desempaque Exitoso: 1 Bulto desempacado (+${data.detalQtyAdded} uds agregadas a ${smartUnpackModal.detalDescription}).`, 'success');
+        if (onUpdateProduct) {
+          const bultoProd = products.find(p => p.id === smartUnpackModal.bultoId);
+          const detalProd = products.find(p => p.id === smartUnpackModal.detalId);
+          if (bultoProd) onUpdateProduct({ ...bultoProd, stock_actual: data.bultoNewStock });
+          if (detalProd) onUpdateProduct({ ...detalProd, stock_actual: data.detalNewStock, precio_costo_usd: data.unitCostNew });
+        }
+        const targetProd = smartUnpackModal.targetProductToAdd;
+        const targetQty = smartUnpackModal.targetQty;
+        setSmartUnpackModal(null);
+        executeAddProduct(targetProd, targetQty);
+      } else {
+        throw new Error(data.error || 'Error al desempacar bulto');
+      }
+    } catch (err: any) {
+      console.error('Error desempacando bulto:', err);
+      showToast(`Error al desempacar: ${err.message}`, 'error');
+    } finally {
+      setIsUnpackingSmartBulto(false);
+    }
   };
 
   const handleConfirmBulkAdd = () => {
@@ -9379,6 +9491,72 @@ export default function CajaPOS({
           showToast('✅ Pago Móvil verificado en BDV y aplicado al cobro.', 'success');
         }}
       />
+
+      {/* SMART CASCADE UNPACK CONFIRMATION MODAL (PILAR #1 & ACID) */}
+      {smartUnpackModal && smartUnpackModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-xs animate-in fade-in duration-200 font-sans">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden">
+            <div className="bg-gradient-to-r from-amber-600 to-amber-700 text-white p-5 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-white/20 rounded-2xl backdrop-blur-md">
+                  <PackageCheck className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black uppercase font-mono tracking-wide">
+                    ⚠️ Confirmación de Desempaque Requerida
+                  </h3>
+                  <p className="text-xs text-amber-100">
+                    {smartUnpackModal.isComboChild ? `Componente del Combo: ${smartUnpackModal.comboDescription}` : 'Venta Directa de Producto'}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSmartUnpackModal(null)}
+                className="p-2 text-amber-100 hover:text-white bg-amber-800/40 rounded-xl"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl text-xs text-slate-800 space-y-2">
+                <p className="font-bold text-amber-900">
+                  El producto al detal <strong className="text-slate-900">"{smartUnpackModal.detalDescription}"</strong> no tiene stock suficiente al detal (0 Uds).
+                </p>
+                <p>
+                  Sin embargo, hay <strong className="text-amber-800 font-mono font-bold">{smartUnpackModal.bultoStock} Bultos</strong> disponibles de <strong className="text-slate-900">"{smartUnpackModal.bultoDescription}"</strong> (Factor: {smartUnpackModal.factorConversion} Uds/Bulto).
+                </p>
+              </div>
+
+              <p className="text-xs font-semibold text-slate-700 text-center">
+                ¿Desea desempacar 1 Bulto ahora (+{smartUnpackModal.factorConversion} Uds) para abastecer el inventario y continuar la venta?
+              </p>
+
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-[11px] text-slate-500 font-mono">
+                🔒 Transacción Atómica Postgres (BEGIN ... COMMIT con locking SELECT FOR UPDATE y prorrateo exacto de costos en Kardex).
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border-t border-slate-200 p-4 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setSmartUnpackModal(null)}
+                disabled={isUnpackingSmartBulto}
+                className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-200 hover:bg-slate-300 rounded-xl transition-all cursor-pointer"
+              >
+                Cancelar Venta
+              </button>
+              <button
+                onClick={handleConfirmSmartUnpack}
+                disabled={isUnpackingSmartBulto}
+                className="px-5 py-2 text-xs font-black uppercase text-white bg-amber-600 hover:bg-amber-700 rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                {isUnpackingSmartBulto ? <RefreshCw className="w-4 h-4 animate-spin" /> : <PackageCheck className="w-4 h-4" />}
+                Sí, Desempacar 1 Bulto (+{smartUnpackModal.factorConversion} Uds)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

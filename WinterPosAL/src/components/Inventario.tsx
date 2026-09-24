@@ -10,6 +10,10 @@ import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
 import AsistenteImportacionPDF from './AsistenteImportacionPDF';
 import ModalEscaneoFotoFactura from './ModalEscaneoFotoFactura';
 import BarcodeVisualizer from './BarcodeVisualizer';
+import ReporteAbcInventario from './ReporteAbcInventario';
+import ModalGestionCombos from './ModalGestionCombos';
+import ModalDesempaqueBulto from './ModalDesempaqueBulto';
+import { Gift, PackageCheck, PieChart } from 'lucide-react';
 
 interface InventarioProps {
   products: Product[];
@@ -100,9 +104,15 @@ export default function Inventario({
     return Boolean(_currentUser.permisos?.inventario?.ajustes_avanzados) || Boolean(_currentUser.permisos?.inventario?.admin);
   }, [_currentUser]);
 
-  const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'movimientos' | 'precios' | 'estadisticas'>('catalogo');
+  const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'movimientos' | 'precios' | 'estadisticas' | 'abc'>('catalogo');
   const [selectedMovementDetail, setSelectedMovementDetail] = useState<any>(null);
   const [successMsg, setSuccessMsg] = useState('');
+
+  // States for Combos and Bultos Unpacking
+  const [showComboModal, setShowComboModal] = useState<boolean>(false);
+  const [comboPadreProduct, setComboPadreProduct] = useState<Product | null>(null);
+  const [showDesempaqueModal, setShowDesempaqueModal] = useState<boolean>(false);
+  const [desempaqueDetalProduct, setDesempaqueDetalProduct] = useState<Product | null>(null);
 
   // AI & Manual Image generation states & handlers
   const [isGeneratingAiImage, setIsGeneratingAiImage] = useState(false);
@@ -4882,6 +4892,16 @@ export default function Inventario({
         >
           <BarChart3 className="w-3.5 h-3.5 text-indigo-600" />
           Estadísticas
+        </button>
+        <button
+          onClick={() => setActiveSubTab('abc')}
+          className={`px-4 py-2 rounded-t-lg font-bold text-xs uppercase font-sans border-t border-x transition-all flex items-center gap-1.5 ${activeSubTab === 'abc'
+              ? 'bg-white border-slate-200 text-purple-900 shadow-2xs font-extrabold'
+              : 'bg-slate-50 border-transparent text-slate-500 hover:text-slate-700 font-sans'
+            }`}
+        >
+          <PieChart className="w-3.5 h-3.5 text-purple-600" />
+          Análisis ABC (Pareto)
         </button>
       </div>
 
@@ -14384,6 +14404,36 @@ export default function Inventario({
               <span>Ajustar Existencia (Stock)</span>
             </button>
 
+            {/* 3b. Armar Receta / Combo */}
+            <button
+              type="button"
+              onClick={() => {
+                const prod = contextMenu.product;
+                setContextMenu(null);
+                setComboPadreProduct(prod);
+                setShowComboModal(true);
+              }}
+              className="w-full text-left px-2.5 py-1.5 hover:bg-purple-50 hover:text-purple-900 rounded-lg flex items-center gap-2 font-bold transition-colors"
+            >
+              <Gift className="w-3.5 h-3.5 text-purple-600 flex-shrink-0" />
+              <span>Armar Receta / Combo 🎁</span>
+            </button>
+
+            {/* 3c. Vínculo Bulto ↔ Detal */}
+            <button
+              type="button"
+              onClick={() => {
+                const prod = contextMenu.product;
+                setContextMenu(null);
+                setDesempaqueDetalProduct(prod);
+                setShowDesempaqueModal(true);
+              }}
+              className="w-full text-left px-2.5 py-1.5 hover:bg-blue-50 hover:text-blue-900 rounded-lg flex items-center gap-2 font-bold transition-colors"
+            >
+              <PackageCheck className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
+              <span>Vínculo Bulto ↔ Detal (ACID) 📦</span>
+            </button>
+
             <div className="border-t border-slate-100 my-1"></div>
 
             {/* 4. Gestionar Foto Manual */}
@@ -14608,6 +14658,42 @@ export default function Inventario({
           </div>
         </div>
       )}
+
+      {/* PANEL ANALISIS ABC (PARETO 80/20) */}
+      {activeSubTab === 'abc' && (
+        <ReporteAbcInventario tasaDia={tasaDia || 1} />
+      )}
+
+      {/* MODAL GESTION COMBOS / RECETAS */}
+      <ModalGestionCombos
+        isOpen={showComboModal}
+        onClose={() => setShowComboModal(false)}
+        padreProduct={comboPadreProduct}
+        allProducts={products}
+        tasaDia={tasaDia || 1}
+        onSavedSuccess={() => {
+          if (onUpdateProduct && comboPadreProduct) {
+            onUpdateProduct({ ...comboPadreProduct, es_combo: true });
+          }
+        }}
+        showAlert={showAlert}
+      />
+
+      {/* MODAL ENLACE & DESEMPAQUE BULTO (ACID) */}
+      <ModalDesempaqueBulto
+        isOpen={showDesempaqueModal}
+        onClose={() => setShowDesempaqueModal(false)}
+        detalProduct={desempaqueDetalProduct}
+        allProducts={products}
+        tasaDia={tasaDia || 1}
+        currentUser={_currentUser}
+        onSuccessUnpack={() => {
+          if (onUpdateProduct && desempaqueDetalProduct) {
+            onUpdateProduct(desempaqueDetalProduct);
+          }
+        }}
+        showAlert={showAlert}
+      />
 
     </div>
   );

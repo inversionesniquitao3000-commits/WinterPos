@@ -23,7 +23,8 @@ import {
   getLastInvoiceNumber, getSyncSummary,
   getDocumentosEmpresa, saveDocumentoEmpresa, updateDocumentoEmpresa, deleteDocumentoEmpresa,
   saveBdvMovements, getBdvMovements, validateBdvPayment, reconcileShiftPagoMovilDb,
-  getPagoMovilConfigDb, savePagoMovilConfigDb
+  getPagoMovilConfigDb, savePagoMovilConfigDb,
+  unpackBultoToDetal, getCombos, saveCombo, deleteCombo, saveBultoVinculo, getInventoryAbcReport
 } from './db-store.js';
 
 import { calculateCasheaBreakdown, CASHEA_LEVELS } from './cashea-service.js';
@@ -733,6 +734,72 @@ app.post('/api/movements', async (req, res) => {
 app.post('/api/movements/bulk', async (req, res) => {
   const saved = await saveMovementsBulk(req.body);
   res.json({ success: true, count: saved.length, movements: saved });
+});
+
+// -------------------------------------------------------------
+// COMBOS, DESGLOSE BULTO ↔ DETAL Y REPORTE ABC
+// -------------------------------------------------------------
+app.get('/api/combos/:padreId?', async (req, res) => {
+  try {
+    const padreId = req.params.padreId || req.query.padreId;
+    if (!padreId) return res.json([]);
+    const list = await getCombos(padreId);
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/combos', async (req, res) => {
+  try {
+    const { padreId, items } = req.body || {};
+    const result = await saveCombo(padreId, items);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/combos/:padreId?', async (req, res) => {
+  try {
+    const padreId = req.params.padreId || req.query.padreId;
+    const result = await deleteCombo(padreId);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/inventory/unpack-bulto', async (req, res) => {
+  try {
+    const { detalId, bultoId, cantidadBultos, usuario } = req.body || {};
+    const result = await unpackBultoToDetal(detalId, bultoId, cantidadBultos || 1, usuario || 'OPERADOR');
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/inventory/link-bulto', async (req, res) => {
+  try {
+    const { detalId, bultoId, factorConversion } = req.body || {};
+    const result = await saveBultoVinculo(detalId, bultoId, factorConversion);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/reports/inventory-abc', async (req, res) => {
+  try {
+    const days = parseInt(req.query.days || '90', 10);
+    const metric = req.query.metric || 'sales';
+    const report = await getInventoryAbcReport(days, metric);
+    res.json(report);
+  } catch (err) {
+    console.error('Error en /api/reports/inventory-abc:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // SALIDA DE INVENTARIO (MERMAS, REVERSIÓN, USO INTERNO)
