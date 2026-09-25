@@ -929,10 +929,15 @@ export default function CajaPOS({
         ? rawDevCode
         : `${rawDevCode}-${existingDevs.length + 1}`;
 
+      const devClient = (currentSale.client?.id
+        ? currentSale.client
+        : (clients.find(c => c.cedula_rif && c.cedula_rif === currentSale.client?.cedula_rif) || currentSale.client || defaultClient)
+      );
+
       const returnSaleResult = {
         factura_nro: devFacturaNro,
         factura_afectada: currentSale.factura_nro,
-        client: currentSale.client,
+        client: devClient,
         items: devItems.filter(i => i.returnQty > 0).map(i => ({
           product: i.product,
           qty: i.returnQty,
@@ -956,7 +961,7 @@ export default function CajaPOS({
       if (hasExchange) {
         const exchangeSaleResult = {
           factura_nro: '',
-          client: currentSale.client,
+          client: devClient,
           items: devExchangeItems.map(i => ({
             product: i.product,
             qty: i.qty,
@@ -989,9 +994,10 @@ export default function CajaPOS({
       setDevItems([]);
       setDevExchangeItems([]);
       setDevMotivo('');
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      showToast("Error al registrar la devolución o canje de mercancía.", "error");
+      const errorMsg = e?.message || "Error al registrar la devolución o canje de mercancía.";
+      showToast(errorMsg, "error");
     }
   };
 
@@ -8436,7 +8442,7 @@ export default function CajaPOS({
             <div className="bg-red-50 border-2 border-red-300 text-red-900 px-8 py-6 rounded-2xl shadow-2xl flex flex-col items-center gap-3 max-w-sm text-center ring-8 ring-red-500/10 pointer-events-auto">
               <AlertCircle className="w-12 h-12 text-red-600 animate-bounce" />
               <div className="space-y-1">
-                <span className="block text-xs font-black text-red-650 uppercase font-sans tracking-wide">Error de Lectura</span>
+                <span className="block text-xs font-black text-red-650 uppercase font-sans tracking-wide">Error en Operación</span>
                 <span className="block text-sm font-extrabold font-sans leading-snug">{toast.text}</span>
               </div>
             </div>

@@ -3442,7 +3442,7 @@ export async function getSales(limit = null, sinceId = null, excludeTerminal = n
                v.vuelto_usd as "vueltoUSD", v.vuelto_ves as "vueltoVES",
                v.tipo_documento, v.nro_fiscal, v.serial_fiscal, v.nro_z, v.estatus_fiscal,
                v.base_imponible_usd, v.iva_usd, v.exento_usd, v.igtf_usd,
-               v.estacion_nombre as terminal, c.cedula_rif as "clientDoc", c.nombre as "clientName", u.nombre as usuario,
+               v.estacion_nombre as terminal, c.id as "clientId", c.cedula_rif as "clientDoc", c.nombre as "clientName", u.nombre as usuario,
                cac.estatus as caja_estatus,
                COALESCE((
                  SELECT json_agg(json_build_object(
@@ -3500,6 +3500,7 @@ export async function getSales(limit = null, sinceId = null, excludeTerminal = n
         exento_usd: parseFloat(row.exento_usd || 0),
         igtf_usd: parseFloat(row.igtf_usd || 0),
         client: {
+          id: row.clientId ? Number(row.clientId) : undefined,
           cedula_rif: row.clientDoc,
           nombre: row.clientName
         },
@@ -3555,8 +3556,25 @@ export async function saveSale(s) {
     try {
       await clientTarget.query('BEGIN');
 
-      // Get IDs
-      let clientId = 1;
+      // Resolve default fallback client dynamically from database
+      let defaultClientRow = null;
+      const defRes = await clientTarget.query(
+        "SELECT id, cedula_rif, nombre, limite_credito, credito_disponible FROM Clientes WHERE cedula_rif = 'V-00000000' OR cedula_rif = '00000000' ORDER BY id ASC LIMIT 1"
+      );
+      if (defRes.rowCount > 0) {
+        defaultClientRow = defRes.rows[0];
+      } else {
+        const firstRes = await clientTarget.query(
+          "SELECT id, cedula_rif, nombre, limite_credito, credito_disponible FROM Clientes ORDER BY id ASC LIMIT 1"
+        );
+        if (firstRes.rowCount > 0) {
+          defaultClientRow = firstRes.rows[0];
+        }
+      }
+      const defaultClientId = defaultClientRow ? defaultClientRow.id : 1;
+
+      // Get Client ID and Row
+      let clientId = defaultClientId;
       let clientRow = null;
       if (s.client?.id && Number(s.client.id) > 0 && Number(s.client.id) < 1000000000) {
         const idRes = await clientTarget.query('SELECT id, cedula_rif, nombre, limite_credito, credito_disponible FROM Clientes WHERE id = $1', [Number(s.client.id)]);
@@ -3576,13 +3594,20 @@ export async function saveSale(s) {
         }
       }
 
+      // If client is generic or was not found by doc/id, fallback to guaranteed default client
+      if (!clientRow) {
+        clientRow = defaultClientRow;
+        clientId = defaultClientId;
+      }
+
       // Validar si la venta utiliza Crédito de Cliente
       const totalCreditoUSD = (s.pagos || [])
         .filter(p => p.metodo === 'CreditoCliente')
         .reduce((sum, p) => sum + (parseFloat(p.montoUSD || p.monto) || 0), 0);
 
       if (totalCreditoUSD > 0) {
-        if (!clientRow || clientId === 1) {
+        const isGeneric = !clientRow || clientRow.id == defaultClientId || clientRow.cedula_rif === 'V-00000000' || clientRow.cedula_rif === '00000000';
+        if (isGeneric) {
           throw new Error('No se puede otorgar crédito al cliente general o cliente no registrado en el sistema.');
         }
         const disponible = parseFloat(clientRow.credito_disponible || 0);
@@ -3634,7 +3659,13 @@ export async function saveSale(s) {
         activeCaja = await clientTarget.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
       }
 
-      const cajaId = activeCaja.rowCount > 0 ? activeCaja.rows[0].id : 1;
+      let cajaId = null;
+      if (activeCaja && activeCaja.rowCount > 0) {
+        cajaId = activeCaja.rows[0].id;
+      } else {
+        const anyCaja = await clientTarget.query("SELECT id FROM Cajas_Apertura_Cierre ORDER BY id DESC LIMIT 1");
+        cajaId = anyCaja.rowCount > 0 ? anyCaja.rows[0].id : null;
+      }
 
       // Safe sequence generator for invoice numbers (auto-creates seq_factura if missing)
       const fetchNextSeqFactura = async () => {
@@ -3741,11 +3772,24 @@ export async function saveSale(s) {
           await clientTarget.query('UPDATE Productos SET stock_actual = $1 WHERE id = $2', [newStock, prodId]);
 
           // Log Kardex
-          await clientTarget.query(
-            `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [prodId, userId, isDevSale ? 'Devolucion' : 'Venta', stockDelta, currentStock, newStock, isDevSale ? `Devolución Facturada: ${factura_nro}` : `Venta Facturada: ${factura_nro}`]
-          );
+          try {
+            await clientTarget.query(
+              `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+              [prodId, userId, isDevSale ? 'Devolucion' : 'Venta', stockDelta, currentStock, newStock, isDevSale ? `Devolución Facturada: ${factura_nro}` : `Venta Facturada: ${factura_nro}`]
+            );
+          } catch (kardexErr) {
+            if (kardexErr.message && kardexErr.message.includes('tipo_movimiento_inv')) {
+              const fallbackType = stockDelta >= 0 ? 'Entrada' : 'Salida';
+              await clientTarget.query(
+                `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                [prodId, userId, fallbackType, stockDelta, currentStock, newStock, isDevSale ? `Devolución Facturada: ${factura_nro}` : `Venta Facturada: ${factura_nro}`]
+              );
+            } else {
+              console.warn('⚠️ No se pudo registrar Kardex en Postgres para la venta:', kardexErr.message);
+            }
+          }
         }
       }
 

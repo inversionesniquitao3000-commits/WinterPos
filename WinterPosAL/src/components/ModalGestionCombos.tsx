@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   Gift, 
   Search, 
@@ -8,11 +8,10 @@ import {
   Save, 
   AlertTriangle, 
   Boxes, 
-  Check, 
-  DollarSign, 
   RefreshCw 
 } from 'lucide-react';
 import { Product } from '../types';
+import { getApiBaseUrl } from '../utils';
 
 interface ComboRecipeItem {
   id?: number;
@@ -62,7 +61,7 @@ export default function ModalGestionCombos({
     if (!padreProduct) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/combos?padreId=${padreProduct.id}`);
+      const res = await fetch(`${getApiBaseUrl()}/combos?padreId=${padreProduct.id}`);
       if (!res.ok) {
         console.error(`HTTP error loading combo: ${res.status}`);
         return;
@@ -154,7 +153,7 @@ export default function ModalGestionCombos({
 
     setSaving(true);
     try {
-      const res = await fetch('/api/combos', {
+      const res = await fetch(`${getApiBaseUrl()}/combos`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

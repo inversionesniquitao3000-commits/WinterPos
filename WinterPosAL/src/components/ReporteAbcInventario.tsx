@@ -1,23 +1,18 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   PieChart, 
-  TrendingUp, 
-  PackageCheck, 
   AlertTriangle, 
-  DollarSign, 
   RefreshCw, 
   Search, 
   Filter, 
-  Download, 
-  Layers, 
   Sparkles,
   Info,
-  Boxes,
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
   ChevronsRight
 } from 'lucide-react';
+import { getApiBaseUrl } from '../utils';
 
 interface AbcItem {
   id: number;
@@ -75,7 +70,7 @@ export default function ReporteAbcInventario({ tasaDia, onRefreshProducts }: Rep
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/reports/inventory-abc?days=${periodDays}&metric=${metric}`);
+      const res = await fetch(`${getApiBaseUrl()}/reports/inventory-abc?days=${periodDays}&metric=${metric}`);
       const resText = await res.text();
       let data: any = {};
       try {
@@ -87,6 +82,7 @@ export default function ReporteAbcInventario({ tasaDia, onRefreshProducts }: Rep
       if (res.ok && data.success) {
         setItems(data.items || []);
         setSummary(data.summary || null);
+        if (onRefreshProducts) onRefreshProducts();
       } else {
         throw new Error(data.error || `HTTP ${res.status}: Error al obtener el reporte ABC`);
       }

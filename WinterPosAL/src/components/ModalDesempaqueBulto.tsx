@@ -1,17 +1,14 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   PackageCheck, 
   Boxes, 
-  ArrowRight, 
   RefreshCw, 
   X, 
-  Check, 
-  AlertTriangle, 
-  DollarSign, 
-  Layers,
+  Check,
   Sparkles
 } from 'lucide-react';
 import { Product } from '../types';
+import { getApiBaseUrl } from '../utils';
 
 interface ModalDesempaqueBultoProps {
   isOpen: boolean;
@@ -78,7 +75,7 @@ export default function ModalDesempaqueBulto({
     }
     setSavingLink(true);
     try {
-      const res = await fetch('/api/inventory/link-bulto', {
+      const res = await fetch(`${getApiBaseUrl()}/inventory/link-bulto`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -113,7 +110,7 @@ export default function ModalDesempaqueBulto({
 
     setLoading(true);
     try {
-      const res = await fetch('/api/inventory/unpack-bulto', {
+      const res = await fetch(`${getApiBaseUrl()}/inventory/unpack-bulto`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -186,9 +183,18 @@ export default function ModalDesempaqueBulto({
             <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
               {/* Bulto product selector */}
               <div className="sm:col-span-8 space-y-1">
-                <label className="text-[11px] font-bold text-slate-600 uppercase">
-                  Producto Bulto Padre (Caja/Empaque Cerrado):
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold text-slate-600 uppercase">
+                    Producto Bulto Padre (Caja/Empaque Cerrado):
+                  </label>
+                  <input
+                    type="text"
+                    value={searchBultoQuery}
+                    onChange={(e) => setSearchBultoQuery(e.target.value)}
+                    placeholder="Buscar bulto..."
+                    className="text-[10px] px-2 py-0.5 border border-slate-300 rounded-md w-36 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                  />
+                </div>
                 <select
                   value={selectedBultoId}
                   onChange={(e) => setSelectedBultoId(e.target.value)}
