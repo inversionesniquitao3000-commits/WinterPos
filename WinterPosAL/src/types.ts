@@ -26,6 +26,14 @@ export interface Product {
   fecha_vencimiento?: string;
   porcentaje_impuesto?: number;
   es_combo?: boolean;
+  receta_items?: {
+    producto_hijo_id: number;
+    cantidad: number;
+    barcode?: string;
+    descripcion?: string;
+    stock_actual?: number;
+  }[];
+  receta_resumen?: string;
   producto_bulto_padre_id?: number | null;
   factor_conversion_bulto?: number;
 }
@@ -334,6 +342,7 @@ export interface CierreCaja {
   fechaApertura?: string;
   costoTotalUsd?: number;
   utilidadUsd?: number;
+  totalTickets?: number;
   ventaEfectivoComisionVes?: number;
   ventaEfectivoComisionUsd?: number;
   usuario: string;

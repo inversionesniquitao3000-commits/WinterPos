@@ -408,6 +408,8 @@ try {
         ALTER TABLE Productos ADD COLUMN IF NOT EXISTS factor_conversion_bulto NUMERIC DEFAULT 1;
         UPDATE Productos SET porcentaje_impuesto = 16 WHERE exento_impuesto = FALSE AND (porcentaje_impuesto IS NULL OR porcentaje_impuesto = 0);
         UPDATE Productos SET porcentaje_impuesto = 0 WHERE exento_impuesto = TRUE;
+        ALTER TABLE Productos DROP CONSTRAINT IF EXISTS productos_cantidad_mayorista_check;
+        ALTER TABLE Productos ADD CONSTRAINT productos_cantidad_mayorista_check CHECK (cantidad_mayorista >= 0);
         PERFORM setval(pg_get_serial_sequence('Productos', 'id'), COALESCE((SELECT MAX(id) FROM Productos), 1));
       END IF;
       IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'clientes') THEN
@@ -719,6 +721,7 @@ const defaultWhatsAppConfig = {
 📅 *Fecha:* {fecha}
 👤 *Cajero:* {usuario}
 🖥️ *Terminal:* {terminal}
+🧾 *Tickets Emitidos:* {totalTickets}
 
 💵 *EFECTIVO ESPERADO EN GAVETA:*
 • Dólares (USD): $ {dineroEnCajaExpected}
@@ -732,8 +735,12 @@ const defaultWhatsAppConfig = {
 • Dólares (USD): {diffUsd}
 • Bolívares (VES): {diffVes}
 
+💳 *INGRESOS POR MEDIOS DE PAGO:*
+{desglosePagos}
+
 🛍️ *VENTAS TOTALES DEL TURNO:* $ {ventaTotalUsd} USD
 📉 *DESCUENTOS APLICADOS:* $ {descuentosUsd} USD
+💰 *UTILIDAD NETA DEL TURNO:* $ {utilidadNetaUsd} USD
 
 *WinterPosAL Cloud System*`,
   utilidadesMessageTemplate: `💼 *REPORTE DE UTILIDADES Y GASTOS OPERATIVOS*
@@ -1005,31 +1012,83 @@ export async function getUsers() {
 export async function getProducts() {
   if (usePostgres) {
     try {
+      // 1. Calcular stock virtual disponible para todos los combos según sus recetas
+      const comboStockMap = {};
+      const comboRecipesMap = {};
+      try {
+        const comboRecipesRes = await pool.query(
+          `SELECT c.producto_padre_id, c.producto_hijo_id, c.cantidad, 
+                  p.descripcion, p.codigo_barras_clave as barcode, p.stock_actual 
+           FROM Combos_Recetas c 
+           JOIN Productos p ON c.producto_hijo_id = p.id
+           ORDER BY c.id ASC`
+        );
+        for (const row of comboRecipesRes.rows) {
+          const padreId = parseInt(row.producto_padre_id, 10);
+          const childStock = Math.max(0, parseFloat(row.stock_actual || 0));
+          const reqQty = Math.max(0.001, parseFloat(row.cantidad || 1));
+          const possible = Math.floor(childStock / reqQty);
+          if (comboStockMap[padreId] === undefined) {
+            comboStockMap[padreId] = possible;
+          } else {
+            comboStockMap[padreId] = Math.min(comboStockMap[padreId], possible);
+          }
+
+          if (!comboRecipesMap[padreId]) {
+            comboRecipesMap[padreId] = [];
+          }
+          comboRecipesMap[padreId].push({
+            producto_hijo_id: parseInt(row.producto_hijo_id, 10),
+            cantidad: reqQty,
+            descripcion: row.descripcion || '',
+            barcode: row.barcode || '',
+            stock_actual: childStock
+          });
+        }
+      } catch (cErr) {
+        console.warn('Advertencia calculando stock virtual de combos en getProducts:', cErr.message);
+      }
+
       const res = await pool.query('SELECT * FROM Productos ORDER BY id ASC');
-      return res.rows.map(r => ({
-        id: parseInt(r.id, 10),
-        barcode: r.codigo_barras_clave || '',
-        description: r.descripcion || '',
-        category: r.categoria || '',
-        stock_actual: parseFloat(r.stock_actual || 0),
-        stock_minimo: parseFloat(r.stock_minimo || 0),
-        precio_costo_usd: parseFloat(r.precio_costo_usd || 0),
-        precio_detalle_usd: parseFloat(r.precio_detalle_usd || 0),
-        precio_mayor_usd: parseFloat(r.precio_mayor_usd || 0),
-        precio_bulto_usd: parseFloat(r.precio_bulto_usd || 0),
-        cantidad_mayorista: parseInt(r.cantidad_mayorista || 12, 10),
-        cant_bulto: parseInt(r.cant_bulto || 0, 10),
-        ganancia_detalle: parseFloat(r.ganancia_detalle || 0),
-        ganancia_mayor: parseFloat(r.ganancia_mayor || 0),
-        ganancia_bulto: parseFloat(r.ganancia_bulto || 0),
-        fijar_margen: !!r.fijar_margen,
-        exento_impuesto: !!r.exento_impuesto,
-        imagen_url: r.imagen_url || '',
-        estado: r.estado || 'Activo',
-        a_granel: !!r.a_granel,
-        fecha_vencimiento: r.fecha_vencimiento || null,
-        porcentaje_impuesto: parseFloat(r.porcentaje_impuesto || 0)
-      }));
+      return res.rows.map(r => {
+        const prodId = parseInt(r.id, 10);
+        const isCombo = !!r.es_combo;
+        const effectiveStock = isCombo
+          ? (comboStockMap[prodId] !== undefined ? comboStockMap[prodId] : 0)
+          : parseFloat(r.stock_actual || 0);
+
+        return {
+          id: prodId,
+          barcode: r.codigo_barras_clave || '',
+          description: r.descripcion || '',
+          category: r.categoria || '',
+          stock_actual: effectiveStock,
+          stock_minimo: parseFloat(r.stock_minimo || 0),
+          precio_costo_usd: parseFloat(r.precio_costo_usd || 0),
+          precio_detalle_usd: parseFloat(r.precio_detalle_usd || 0),
+          precio_mayor_usd: parseFloat(r.precio_mayor_usd || 0),
+          precio_bulto_usd: parseFloat(r.precio_bulto_usd || 0),
+          cantidad_mayorista: r.cantidad_mayorista !== null && r.cantidad_mayorista !== undefined ? Math.max(0, parseInt(r.cantidad_mayorista, 10) || 0) : 0,
+          cant_bulto: parseInt(r.cant_bulto || 0, 10),
+          ganancia_detalle: parseFloat(r.ganancia_detalle || 0),
+          ganancia_mayor: parseFloat(r.ganancia_mayor || 0),
+          ganancia_bulto: parseFloat(r.ganancia_bulto || 0),
+          fijar_margen: !!r.fijar_margen,
+          exento_impuesto: !!r.exento_impuesto,
+          imagen_url: r.imagen_url || '',
+          estado: r.estado || 'Activo',
+          a_granel: !!r.a_granel,
+          es_combo: isCombo,
+          receta_items: isCombo ? (comboRecipesMap[prodId] || []) : [],
+          receta_resumen: isCombo && comboRecipesMap[prodId] && comboRecipesMap[prodId].length > 0
+            ? comboRecipesMap[prodId].map(c => `${c.cantidad}x ${c.descripcion}`).join(' + ')
+            : '',
+          producto_bulto_padre_id: r.producto_bulto_padre_id ? parseInt(r.producto_bulto_padre_id, 10) : null,
+          factor_conversion_bulto: parseFloat(r.factor_conversion_bulto || 1),
+          fecha_vencimiento: r.fecha_vencimiento || null,
+          porcentaje_impuesto: parseFloat(r.porcentaje_impuesto || 0)
+        };
+      });
     } catch (err) {
       console.error('Error en getProducts (Postgres):', err.message);
     }
@@ -1044,18 +1103,39 @@ export async function saveProduct(p) {
 
   if (usePostgres) {
     try {
+      const barcodeClean = (p.barcode || '').trim();
+      if (barcodeClean) {
+        const existing = await pool.query(
+          'SELECT id, descripcion, estado FROM Productos WHERE UPPER(TRIM(codigo_barras_clave)) = UPPER(TRIM($1)) LIMIT 1',
+          [barcodeClean]
+        );
+        if (existing.rowCount > 0) {
+          const found = existing.rows[0];
+          if (found.estado === 'Inactivo') {
+            throw new Error(`El código '${barcodeClean}' ya pertenece al producto inactivo "${found.descripcion}". Puede reactivarlo filtrando por "Solo Inactivos" en Inventario.`);
+          } else {
+            throw new Error(`Ya existe otro producto registrado con la clave o código '${barcodeClean}' ("${found.descripcion}").`);
+          }
+        }
+      }
+
+      const cantMayorista = p.cantidad_mayorista !== undefined && p.cantidad_mayorista !== null && !isNaN(parseInt(p.cantidad_mayorista)) ? Math.max(0, parseInt(p.cantidad_mayorista)) : 0;
+      const esComboVal = !!p.es_combo;
+
       const res = await pool.query(
-        `INSERT INTO Productos (codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, precio_costo_usd, precio_detalle_usd, precio_mayor_usd, precio_bulto_usd, cantidad_mayorista, cant_bulto, ganancia_detalle, ganancia_mayor, ganancia_bulto, fijar_margen, exento_impuesto, imagen_url, estado, a_granel, fecha_vencimiento, porcentaje_impuesto)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21) RETURNING id`,
-        [p.barcode, p.description, p.category, stockActual, stockMinimo, p.precio_costo_usd, p.precio_detalle_usd, p.precio_mayor_usd, p.precio_bulto_usd || 0, p.cantidad_mayorista || 12, p.cant_bulto || 0, parseFloat(p.ganancia_detalle) || 0, parseFloat(p.ganancia_mayor) || 0, parseFloat(p.ganancia_bulto) || 0, !!p.fijar_margen, p.exento_impuesto, p.imagen_url, p.estado, p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0]
+        `INSERT INTO Productos (codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, precio_costo_usd, precio_detalle_usd, precio_mayor_usd, precio_bulto_usd, cantidad_mayorista, cant_bulto, ganancia_detalle, ganancia_mayor, ganancia_bulto, fijar_margen, exento_impuesto, imagen_url, estado, a_granel, fecha_vencimiento, porcentaje_impuesto, es_combo)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22) RETURNING id`,
+        [p.barcode, p.description, p.category, stockActual, stockMinimo, parseFloat(p.precio_costo_usd) || 0, parseFloat(p.precio_detalle_usd) || 0, parseFloat(p.precio_mayor_usd) || 0, parseFloat(p.precio_bulto_usd) || 0, cantMayorista, parseInt(p.cant_bulto) || 0, parseFloat(p.ganancia_detalle) || 0, parseFloat(p.ganancia_mayor) || 0, parseFloat(p.ganancia_bulto) || 0, !!p.fijar_margen, p.exento_impuesto, p.imagen_url, p.estado || 'Activo', p.a_granel || false, p.fecha_vencimiento || null, p.porcentaje_impuesto || 0, esComboVal]
       );
-      return { ...p, id: res.rows[0].id, stock_actual: stockActual, stock_minimo: stockMinimo };
+      return { ...p, id: res.rows[0].id, stock_actual: stockActual, stock_minimo: stockMinimo, cantidad_mayorista: cantMayorista, es_combo: esComboVal };
     } catch (err) {
       console.error('Error en saveProduct (Postgres):', err.message);
+      throw err;
     }
   }
   const products = readJsonFile('products.json', mockProducts);
-  const newProduct = { ...p, id: Date.now(), stock_actual: stockActual, stock_minimo: stockMinimo };
+  const cantMayoristaFallback = p.cantidad_mayorista !== undefined && p.cantidad_mayorista !== null && !isNaN(parseInt(p.cantidad_mayorista)) ? Math.max(0, parseInt(p.cantidad_mayorista)) : 0;
+  const newProduct = { ...p, id: Date.now(), stock_actual: stockActual, stock_minimo: stockMinimo, cantidad_mayorista: cantMayoristaFallback, es_combo: !!p.es_combo, estado: p.estado || 'Activo' };
   products.push(newProduct);
   writeJsonFile('products.json', products);
   return newProduct;
@@ -1069,14 +1149,15 @@ export async function updateProduct(p) {
   const barcode = (p.barcode || p.codigo_barras_clave || '').trim();
   const description = (p.description || p.descripcion || '').trim();
   const prodId = parseInt(p.id) || 0;
+  const cantMayorista = p.cantidad_mayorista !== undefined && p.cantidad_mayorista !== null && !isNaN(parseInt(p.cantidad_mayorista)) ? Math.max(0, parseInt(p.cantidad_mayorista)) : 0;
 
   if (usePostgres) {
     try {
       const res = await pool.query(
         `UPDATE Productos 
-         SET codigo_barras_clave = $1, descripcion = $2, categoria = $3, stock_minimo = $4, precio_costo_usd = $5, precio_detalle_usd = $6, precio_mayor_usd = $7, precio_bulto_usd = $8, cantidad_mayorista = $9, cant_bulto = $10, ganancia_detalle = $11, ganancia_mayor = $12, ganancia_bulto = $13, fijar_margen = $14, exento_impuesto = $15, imagen_url = $16, estado = $17, a_granel = $18, fecha_vencimiento = $19, porcentaje_impuesto = $20, stock_actual = $21
-         WHERE id = $22 RETURNING *`,
-        [barcode, description, category, stockMinimo, parseFloat(p.precio_costo_usd) || 0, parseFloat(p.precio_detalle_usd) || 0, parseFloat(p.precio_mayor_usd) || 0, parseFloat(p.precio_bulto_usd) || 0, parseInt(p.cantidad_mayorista) || 12, parseInt(p.cant_bulto) || 0, parseFloat(p.ganancia_detalle) || 0, parseFloat(p.ganancia_mayor) || 0, parseFloat(p.ganancia_bulto) || 0, !!p.fijar_margen, !!p.exento_impuesto, p.imagen_url || '', p.estado || 'Activo', isGranel, p.fecha_vencimiento || null, parseFloat(p.porcentaje_impuesto || 0), stockActual, prodId]
+         SET codigo_barras_clave = $1, descripcion = $2, categoria = $3, stock_minimo = $4, precio_costo_usd = $5, precio_detalle_usd = $6, precio_mayor_usd = $7, precio_bulto_usd = $8, cantidad_mayorista = $9, cant_bulto = $10, ganancia_detalle = $11, ganancia_mayor = $12, ganancia_bulto = $13, fijar_margen = $14, exento_impuesto = $15, imagen_url = $16, estado = $17, a_granel = $18, fecha_vencimiento = $19, porcentaje_impuesto = $20, stock_actual = $21, es_combo = COALESCE($22, es_combo)
+         WHERE id = $23 RETURNING *`,
+        [barcode, description, category, stockMinimo, parseFloat(p.precio_costo_usd) || 0, parseFloat(p.precio_detalle_usd) || 0, parseFloat(p.precio_mayor_usd) || 0, parseFloat(p.precio_bulto_usd) || 0, cantMayorista, parseInt(p.cant_bulto) || 0, parseFloat(p.ganancia_detalle) || 0, parseFloat(p.ganancia_mayor) || 0, parseFloat(p.ganancia_bulto) || 0, !!p.fijar_margen, !!p.exento_impuesto, p.imagen_url || '', p.estado || 'Activo', isGranel, p.fecha_vencimiento || null, parseFloat(p.porcentaje_impuesto || 0), stockActual, p.es_combo !== undefined ? !!p.es_combo : null, prodId]
       );
       if (res.rowCount > 0) {
         const r = res.rows[0];
@@ -1136,7 +1217,33 @@ export async function updateProductStock(prodId, stockActual) {
         isGranel = !!prodRes.rows[0].a_granel;
       }
       const finalStock = isGranel ? stockActual : Math.round(stockActual);
-      await pool.query('UPDATE Productos SET stock_actual = $1 WHERE id = $2', [finalStock, prodId]);
+      await pool.query(
+        "UPDATE Productos SET stock_actual = $1, estado = CASE WHEN $1::numeric > 0 THEN 'Activo' ELSE estado END WHERE id = $2",
+        [finalStock, prodId]
+      );
+
+      // Si este producto es ingrediente de algún combo, recalcular de inmediato el stock virtual de los combos padre
+      try {
+        const parentCombos = await pool.query(
+          'SELECT DISTINCT producto_padre_id FROM Combos_Recetas WHERE producto_hijo_id = $1',
+          [prodId]
+        );
+        for (const r of parentCombos.rows) {
+          const padreId = r.producto_padre_id;
+          const recalcRes = await pool.query(
+            `SELECT MIN(FLOOR(p.stock_actual / c.cantidad)) AS virtual_stock
+             FROM Combos_Recetas c
+             JOIN Productos p ON c.producto_hijo_id = p.id
+             WHERE c.producto_padre_id = $1 AND c.cantidad > 0`,
+            [padreId]
+          );
+          const newVirtual = Math.max(0, parseFloat(recalcRes.rows[0]?.virtual_stock || 0));
+          await pool.query('UPDATE Productos SET stock_actual = $1 WHERE id = $2', [newVirtual, padreId]);
+        }
+      } catch (comboErr) {
+        console.warn('⚠️ No se pudo recalcular combos padre tras actualizar stock:', comboErr.message);
+      }
+
       return true;
     } catch (err) {
       console.error('Error en updateProductStock (Postgres):', err.message);
@@ -1148,6 +1255,9 @@ export async function updateProductStock(prodId, stockActual) {
     isGranel = !!products[idx].a_granel;
     const finalStock = isGranel ? stockActual : Math.round(stockActual);
     products[idx].stock_actual = finalStock;
+    if (finalStock > 0 && products[idx].estado === 'Inactivo') {
+      products[idx].estado = 'Activo';
+    }
     writeJsonFile('products.json', products);
     return true;
   }
@@ -1160,6 +1270,7 @@ export async function updateProductStockBulk(updates) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      const touchedProductIds = [];
       for (const update of updates) {
         const prodRes = await client.query('SELECT a_granel FROM Productos WHERE id = $1', [update.prodId]);
         let isGranel = false;
@@ -1167,8 +1278,37 @@ export async function updateProductStockBulk(updates) {
           isGranel = !!prodRes.rows[0].a_granel;
         }
         const finalStock = isGranel ? update.stock_actual : Math.round(update.stock_actual);
-        await client.query('UPDATE Productos SET stock_actual = $1 WHERE id = $2', [finalStock, update.prodId]);
+        await client.query(
+          "UPDATE Productos SET stock_actual = $1, estado = CASE WHEN $1::numeric > 0 THEN 'Activo' ELSE estado END WHERE id = $2",
+          [finalStock, update.prodId]
+        );
+        touchedProductIds.push(update.prodId);
       }
+
+      // Recalcular combos que contengan los productos modificados
+      if (touchedProductIds.length > 0) {
+        try {
+          const parentCombos = await client.query(
+            'SELECT DISTINCT producto_padre_id FROM Combos_Recetas WHERE producto_hijo_id = ANY($1)',
+            [touchedProductIds]
+          );
+          for (const r of parentCombos.rows) {
+            const padreId = r.producto_padre_id;
+            const recalcRes = await client.query(
+              `SELECT MIN(FLOOR(p.stock_actual / c.cantidad)) AS virtual_stock
+               FROM Combos_Recetas c
+               JOIN Productos p ON c.producto_hijo_id = p.id
+               WHERE c.producto_padre_id = $1 AND c.cantidad > 0`,
+              [padreId]
+            );
+            const newVirtual = Math.max(0, parseFloat(recalcRes.rows[0]?.virtual_stock || 0));
+            await client.query('UPDATE Productos SET stock_actual = $1 WHERE id = $2', [newVirtual, padreId]);
+          }
+        } catch (cErr) {
+          console.warn('⚠️ Error recalculando combos en bulk:', cErr.message);
+        }
+      }
+
       await client.query('COMMIT');
       return true;
     } catch (err) {
@@ -3453,7 +3593,20 @@ export async function getSales(limit = null, sinceId = null, excludeTerminal = n
                    'priceUSD', vd.precio_unitario_usd,
                    'totalUSD', vd.total_fila_usd,
                    'product', json_build_object(
+                     'id', p.id,
                      'barcode', p.codigo_barras_clave,
+                     'es_combo', p.es_combo,
+                     'receta_items', (
+                       SELECT COALESCE(json_agg(json_build_object(
+                         'producto_hijo_id', cr.producto_hijo_id,
+                         'cantidad', cr.cantidad,
+                         'descripcion', ch.descripcion,
+                         'barcode', ch.codigo_barras_clave
+                       )), '[]'::json)
+                       FROM Combos_Recetas cr
+                       JOIN Productos ch ON cr.producto_hijo_id = ch.id
+                       WHERE cr.producto_padre_id = p.id
+                     ),
                      'description', p.descripcion,
                      'precio_costo_usd', p.precio_costo_usd,
                      'exento_impuesto', p.exento_impuesto,
@@ -3511,11 +3664,14 @@ export async function getSales(limit = null, sinceId = null, excludeTerminal = n
           priceUSD: parseFloat(i.priceUSD || i.precio_unitario_usd || 0),
           totalUSD: parseFloat(i.totalUSD || i.total_fila_usd || 0),
           product: {
+            id: i.product?.id ? Number(i.product.id) : undefined,
             barcode: i.product?.barcode || '',
             description: i.product?.description || '',
             precio_costo_usd: parseFloat(i.product?.precio_costo_usd || 0),
             exento_impuesto: !!i.product?.exento_impuesto,
-            porcentaje_impuesto: parseFloat(i.product?.porcentaje_impuesto || 0)
+            porcentaje_impuesto: parseFloat(i.product?.porcentaje_impuesto || 0),
+            es_combo: !!i.product?.es_combo,
+            receta_items: Array.isArray(i.product?.receta_items) ? i.product.receta_items : []
           }
         })),
         subtotal: parseFloat(row.subtotal_usd || 0),
@@ -3736,9 +3892,9 @@ export async function saveSale(s) {
       const isDevSale = factura_nro.startsWith('DEV-');
       for (const item of s.items) {
         const barcode = item.product?.barcode || item.product?.codigo_barras_clave || '';
-        let prodRes = await clientTarget.query('SELECT id, stock_actual, precio_detalle_usd, a_granel FROM Productos WHERE codigo_barras_clave = $1', [barcode]);
+        let prodRes = await clientTarget.query('SELECT id, stock_actual, precio_detalle_usd, a_granel, es_combo, descripcion FROM Productos WHERE codigo_barras_clave = $1', [barcode]);
         if (prodRes.rowCount === 0 && item.product?.id) {
-          prodRes = await clientTarget.query('SELECT id, stock_actual, precio_detalle_usd, a_granel FROM Productos WHERE id = $1', [item.product.id]);
+          prodRes = await clientTarget.query('SELECT id, stock_actual, precio_detalle_usd, a_granel, es_combo, descripcion FROM Productos WHERE id = $1', [item.product.id]);
         }
         if (prodRes.rowCount > 0) {
           const prodId = prodRes.rows[0].id;
@@ -3768,26 +3924,107 @@ export async function saveSale(s) {
             ]
           );
 
-          // Update Stock (increment for DEV-, decrement for FAC-)
-          await clientTarget.query('UPDATE Productos SET stock_actual = $1 WHERE id = $2', [newStock, prodId]);
+          // Si el producto es un COMBO, descontar en cascada el stock de sus componentes de receta
+          const isCombo = !!(prodRes.rows[0].es_combo || item.product?.es_combo);
+          const prodDesc = prodRes.rows[0].descripcion || item.product?.description || 'Producto';
 
-          // Log Kardex
-          try {
-            await clientTarget.query(
-              `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
-               VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-              [prodId, userId, isDevSale ? 'Devolucion' : 'Venta', stockDelta, currentStock, newStock, isDevSale ? `Devolución Facturada: ${factura_nro}` : `Venta Facturada: ${factura_nro}`]
+          if (isCombo) {
+            const comboRes = await clientTarget.query(
+              `SELECT c.producto_hijo_id, c.cantidad, p.stock_actual, p.a_granel, p.descripcion 
+               FROM Combos_Recetas c 
+               JOIN Productos p ON c.producto_hijo_id = p.id 
+               WHERE c.producto_padre_id = $1`,
+              [prodId]
             );
-          } catch (kardexErr) {
-            if (kardexErr.message && kardexErr.message.includes('tipo_movimiento_inv')) {
-              const fallbackType = stockDelta >= 0 ? 'Entrada' : 'Salida';
+
+            for (const comp of comboRes.rows) {
+              const compId = comp.producto_hijo_id;
+              const compDesc = comp.descripcion || `Componente #${compId}`;
+              const compCurrentStock = parseFloat(comp.stock_actual || 0);
+              const compIsGranel = !!comp.a_granel;
+              const compQtyPerCombo = parseFloat(comp.cantidad || 1);
+              const totalCompQty = compQtyPerCombo * cleanQty;
+              const compDelta = isDevSale ? totalCompQty : -totalCompQty;
+              let compNewStock = compCurrentStock + compDelta;
+              if (!compIsGranel) {
+                compNewStock = Math.round(compNewStock);
+              }
+              compNewStock = Math.max(0, compNewStock);
+
+              await clientTarget.query('UPDATE Productos SET stock_actual = $1 WHERE id = $2', [compNewStock, compId]);
+
+              const motivoCombo = isDevSale 
+                ? `Devolución Combo "${prodDesc}": ${factura_nro}` 
+                : `Venta Combo "${prodDesc}": ${factura_nro}`;
+
+              try {
+                await clientTarget.query(
+                  `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                  [compId, userId, isDevSale ? 'Devolucion' : 'Venta', compDelta, compCurrentStock, compNewStock, motivoCombo]
+                );
+              } catch (kardexErr) {
+                const fallbackType = compDelta >= 0 ? 'Entrada' : 'Salida';
+                await clientTarget.query(
+                  `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                  [compId, userId, fallbackType, compDelta, compCurrentStock, compNewStock, motivoCombo]
+                ).catch(() => {});
+              }
+            }
+
+            // Recalcular y actualizar el stock virtual resultante del combo padre
+            const recalcRes = await clientTarget.query(
+              `SELECT MIN(FLOOR(p.stock_actual / c.cantidad)) AS virtual_stock
+               FROM Combos_Recetas c
+               JOIN Productos p ON c.producto_hijo_id = p.id
+               WHERE c.producto_padre_id = $1 AND c.cantidad > 0`,
+              [prodId]
+            );
+            const newVirtualStock = Math.max(0, parseFloat(recalcRes.rows[0]?.virtual_stock || 0));
+            await clientTarget.query('UPDATE Productos SET stock_actual = $1 WHERE id = $2', [newVirtualStock, prodId]);
+
+            // Registrar también el movimiento del combo padre en Kardex
+            const motivoPadre = isDevSale 
+              ? `Devolución Facturada: ${factura_nro} (Combo ${cleanQty} uds)` 
+              : `Venta Facturada: ${factura_nro} (Combo ${cleanQty} uds)`;
+            try {
               await clientTarget.query(
                 `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
                  VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-                [prodId, userId, fallbackType, stockDelta, currentStock, newStock, isDevSale ? `Devolución Facturada: ${factura_nro}` : `Venta Facturada: ${factura_nro}`]
+                [prodId, userId, isDevSale ? 'Devolucion' : 'Venta', isDevSale ? cleanQty : -cleanQty, currentStock, newVirtualStock, motivoPadre]
               );
-            } else {
-              console.warn('⚠️ No se pudo registrar Kardex en Postgres para la venta:', kardexErr.message);
+            } catch (errPadre) {
+              const fallbackType = isDevSale ? 'Entrada' : 'Salida';
+              await clientTarget.query(
+                `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                [prodId, userId, fallbackType, isDevSale ? cleanQty : -cleanQty, currentStock, newVirtualStock, motivoPadre]
+              ).catch(() => {});
+            }
+          } else {
+            // Producto estándar no combo: descuento directo
+            // Update Stock (increment for DEV-, decrement for FAC-)
+            await clientTarget.query('UPDATE Productos SET stock_actual = $1 WHERE id = $2', [newStock, prodId]);
+
+            // Log Kardex
+            try {
+              await clientTarget.query(
+                `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                [prodId, userId, isDevSale ? 'Devolucion' : 'Venta', stockDelta, currentStock, newStock, isDevSale ? `Devolución Facturada: ${factura_nro}` : `Venta Facturada: ${factura_nro}`]
+              );
+            } catch (kardexErr) {
+              if (kardexErr.message && kardexErr.message.includes('tipo_movimiento_inv')) {
+                const fallbackType = stockDelta >= 0 ? 'Entrada' : 'Salida';
+                await clientTarget.query(
+                  `INSERT INTO Movimientos_Inventario (producto_id, usuario_id, tipo, cantidad, stock_anterior, stock_posterior, motivo)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                  [prodId, userId, fallbackType, stockDelta, currentStock, newStock, isDevSale ? `Devolución Facturada: ${factura_nro}` : `Venta Facturada: ${factura_nro}`]
+                );
+              } else {
+                console.warn('⚠️ No se pudo registrar Kardex en Postgres para la venta:', kardexErr.message);
+              }
             }
           }
         }
@@ -4994,13 +5231,58 @@ export async function deleteProduct(id) {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        const res = await client.query('SELECT stock_actual FROM Productos WHERE id = $1', [id]);
-        if (res.rowCount > 0 && parseInt(res.rows[0].stock_actual) > 0) {
-          throw new Error('No se puede eliminar un producto con existencia mayor a 0');
+        const res = await client.query('SELECT stock_actual, descripcion FROM Productos WHERE id = $1', [id]);
+        if (res.rowCount === 0) {
+          await client.query('ROLLBACK');
+          return false;
         }
-        await client.query('DELETE FROM Productos WHERE id = $1', [id]);
-        await client.query('COMMIT');
-        return true;
+        if (parseFloat(res.rows[0].stock_actual || 0) > 0) {
+          throw new Error('No se puede eliminar un producto con existencia mayor a 0. Ajuste el stock a cero primero.');
+        }
+
+        // Verificar si el producto tiene historial en Ventas_Detalle o Compras_Detalle
+        const historyCheck = await client.query(`
+          SELECT 
+            EXISTS(SELECT 1 FROM Ventas_Detalle WHERE producto_id = $1) as has_sales,
+            EXISTS(SELECT 1 FROM Compras_Detalle WHERE producto_id = $1) as has_purchases
+        `, [id]);
+
+        const hasSales = historyCheck.rows[0]?.has_sales;
+        const hasPurchases = historyCheck.rows[0]?.has_purchases;
+
+        if (hasSales || hasPurchases) {
+          // Inactivación lógica (Soft Delete) para preservar la integridad contable y fiscal
+          await client.query("UPDATE Productos SET estado = 'Inactivo' WHERE id = $1", [id]);
+          await client.query('COMMIT');
+          return {
+            success: true,
+            action: 'inactivated',
+            message: 'El producto posee historial contable (ventas o compras registradas). Ha sido archivado e inactivado del catálogo para preservar los reportes y facturas anteriores.'
+          };
+        }
+
+        // Intento de borrado físico (para productos sin historial de ventas ni compras)
+        try {
+          await client.query('DELETE FROM Productos WHERE id = $1', [id]);
+          await client.query('COMMIT');
+          return {
+            success: true,
+            action: 'deleted',
+            message: 'Producto eliminado permanentemente de la base de datos.'
+          };
+        } catch (deleteErr) {
+          // Si surge una restricción de clave foránea no prevista (código 23503), respaldar con inactivación
+          if (deleteErr.code === '23503') {
+            await client.query("UPDATE Productos SET estado = 'Inactivo' WHERE id = $1", [id]);
+            await client.query('COMMIT');
+            return {
+              success: true,
+              action: 'inactivated',
+              message: 'El producto posee registros asociados en el sistema. Ha sido archivado e inactivado para proteger la integridad contable.'
+            };
+          }
+          throw deleteErr;
+        }
       } catch (err) {
         await client.query('ROLLBACK');
         throw err;
@@ -5017,13 +5299,26 @@ export async function deleteProduct(id) {
   let products = readJsonFile('products.json', []);
   const initialLen = products.length;
   const prod = products.find(p => p.id == id);
-  if (prod && prod.stock_actual > 0) {
-    throw new Error('No se puede eliminar un producto con existencia mayor a 0');
+  if (prod && parseFloat(prod.stock_actual || 0) > 0) {
+    throw new Error('No se puede eliminar un producto con existencia mayor a 0. Ajuste el stock a cero primero.');
   }
+
+  const sales = readJsonFile('sales.json', []);
+  const hasSales = sales.some(s => Array.isArray(s.items) && s.items.some(i => (i.product && i.product.id == id) || i.id == id));
+  if (hasSales && prod) {
+    prod.estado = 'Inactivo';
+    writeJsonFile('products.json', products);
+    return {
+      success: true,
+      action: 'inactivated',
+      message: 'El producto posee historial contable. Ha sido archivado e inactivado del catálogo.'
+    };
+  }
+
   products = products.filter(p => p.id != id);
   if (products.length < initialLen) {
     writeJsonFile('products.json', products);
-    return true;
+    return { success: true, action: 'deleted', message: 'Producto eliminado permanentemente.' };
   }
   return false;
 }
@@ -7054,15 +7349,17 @@ export async function unpackBultoToDetal(detalId, bultoId, cantidadBultos = 1, u
 export async function getCombos(padreId) {
   if (!usePostgres) return [];
   try {
-    const res = await pool.query(
-      `SELECT c.id, c.producto_padre_id, c.producto_hijo_id, c.cantidad,
-              p.codigo_barras_clave as barcode, p.descripcion, p.stock_actual, p.precio_costo_usd, p.precio_detalle_usd, p.a_granel, p.es_combo, p.producto_bulto_padre_id, p.factor_conversion_bulto
-       FROM Combos_Recetas c
-       JOIN Productos p ON c.producto_hijo_id = p.id
-       WHERE c.producto_padre_id = $1
-       ORDER BY c.id ASC`,
-      [Number(padreId)]
-    );
+    let query = `SELECT c.id, c.producto_padre_id, c.producto_hijo_id, c.cantidad,
+            p.codigo_barras_clave as barcode, p.descripcion, p.stock_actual, p.precio_costo_usd, p.precio_detalle_usd, p.a_granel, p.es_combo, p.producto_bulto_padre_id, p.factor_conversion_bulto
+     FROM Combos_Recetas c
+     JOIN Productos p ON c.producto_hijo_id = p.id`;
+    const params = [];
+    if (padreId && String(padreId).toLowerCase() !== 'all') {
+      query += ` WHERE c.producto_padre_id = $1`;
+      params.push(Number(padreId));
+    }
+    query += ` ORDER BY c.id ASC`;
+    const res = await pool.query(query, params);
     return res.rows.map(r => ({
       id: r.id,
       producto_padre_id: r.producto_padre_id,
@@ -7084,14 +7381,51 @@ export async function getCombos(padreId) {
   }
 }
 
-export async function saveCombo(padreId, items = []) {
+export async function saveCombo(padreId, items = [], options = {}) {
   if (!usePostgres) throw new Error('La gestión de combos requiere base de datos PostgreSQL');
-  if (!padreId) throw new Error('Se requiere el ID del producto principal del combo.');
+  if (!padreId && !options.barcode) throw new Error('Se requiere el ID o código del producto principal del combo.');
+
+  const { pvpUSD, updateCost = true, barcode } = options;
+
+  let actualPadreId = Number(padreId) || 0;
+  let padreRes = await pool.query('SELECT id, codigo_barras_clave, descripcion, es_combo FROM Productos WHERE id = $1', [actualPadreId]);
+
+  if (padreRes.rowCount === 0 && barcode) {
+    const byCode = await pool.query(
+      'SELECT id, codigo_barras_clave, descripcion, es_combo FROM Productos WHERE UPPER(TRIM(codigo_barras_clave)) = UPPER(TRIM($1)) LIMIT 1',
+      [String(barcode).trim()]
+    );
+    if (byCode.rowCount > 0) {
+      actualPadreId = Number(byCode.rows[0].id);
+      padreRes = byCode;
+    }
+  }
+
+  if (padreRes.rowCount === 0 && (barcode || options.parentProduct)) {
+    const pData = options.parentProduct || {};
+    const code = (barcode || pData.barcode || '').trim().toUpperCase();
+    const desc = (pData.description || 'PRODUCTO COMBO').trim().toUpperCase();
+    const cat = (pData.category || 'COMBOS').trim().toUpperCase();
+    if (code) {
+      const insRes = await pool.query(
+        `INSERT INTO Productos (codigo_barras_clave, descripcion, categoria, stock_actual, stock_minimo, precio_costo_usd, precio_detalle_usd, precio_mayor_usd, precio_bulto_usd, cantidad_mayorista, cant_bulto, ganancia_detalle, ganancia_mayor, ganancia_bulto, fijar_margen, exento_impuesto, imagen_url, estado, a_granel, fecha_vencimiento, porcentaje_impuesto, es_combo)
+         VALUES ($1, $2, $3, 0, 0, 0, $4, 0, 0, 0, 0, 0, 0, 0, false, false, '', 'Activo', false, null, 16, true) RETURNING *`,
+        [code, desc, cat, parseFloat(pvpUSD) || 0]
+      );
+      actualPadreId = Number(insRes.rows[0].id);
+      padreRes = insRes;
+      console.log(`[saveCombo] Auto-registrado producto combo padre '${code}' (${desc}) con ID ${actualPadreId}`);
+    }
+  }
+
+  if (padreRes.rowCount === 0) {
+    throw new Error(`El producto principal del combo (${barcode ? `Código: "${barcode}"` : `ID: ${padreId}`}) no se encuentra registrado en el maestro de productos.`);
+  }
 
   // Pilar #3: Prohibir anidación de combos
   for (const it of items) {
     const hijoId = Number(it.producto_hijo_id || it.hijo_id);
-    if (hijoId === Number(padreId)) {
+    if (hijoId === actualPadreId) {
       throw new Error('Un combo no puede contenerse a sí mismo.');
     }
     const checkRes = await pool.query('SELECT es_combo, descripcion FROM Productos WHERE id = $1', [hijoId]);
@@ -7105,28 +7439,105 @@ export async function saveCombo(padreId, items = []) {
     await client.query('BEGIN');
 
     // 1. Remove previous combo recipe
-    await client.query('DELETE FROM Combos_Recetas WHERE producto_padre_id = $1', [Number(padreId)]);
+    await client.query('DELETE FROM Combos_Recetas WHERE producto_padre_id = $1', [actualPadreId]);
 
-    // 2. Insert new components
+    let totalCostoReceta = 0;
+    // 2. Insert new components & calculate recipe total cost
     for (const it of items) {
       const hijoId = Number(it.producto_hijo_id || it.hijo_id);
       const qty = Math.abs(parseFloat(it.cantidad || 1));
       if (qty <= 0) continue;
 
+      const hijoRes = await client.query('SELECT precio_costo_usd FROM Productos WHERE id = $1', [hijoId]);
+      if (hijoRes.rowCount > 0) {
+        const cCost = parseFloat(hijoRes.rows[0].precio_costo_usd || 0);
+        totalCostoReceta += (cCost * qty);
+      }
+
       await client.query(
         `INSERT INTO Combos_Recetas (producto_padre_id, producto_hijo_id, cantidad)
          VALUES ($1, $2, $3)
          ON CONFLICT (producto_padre_id, producto_hijo_id) DO UPDATE SET cantidad = EXCLUDED.cantidad`,
-        [Number(padreId), hijoId, qty]
+        [actualPadreId, hijoId, qty]
       );
     }
 
-    // 3. Mark parent product as es_combo = TRUE
+    // 3. Mark parent product as es_combo = TRUE, update cost and PVP if provided
     const hasItems = items.length > 0;
-    await client.query('UPDATE Productos SET es_combo = $1 WHERE id = $2', [hasItems, Number(padreId)]);
+    let queryFields = ['es_combo = $1'];
+    let params = [hasItems];
+    let pIdx = 2;
+
+    if (updateCost && hasItems) {
+      queryFields.push(`precio_costo_usd = $${pIdx++}`);
+      params.push(Math.round(totalCostoReceta * 1000) / 1000);
+    }
+
+    const cleanPvp = parseFloat(pvpUSD);
+    if (!isNaN(cleanPvp) && cleanPvp > 0) {
+      queryFields.push(`precio_detalle_usd = $${pIdx++}`);
+      params.push(Math.round(cleanPvp * 100) / 100);
+    }
+
+    params.push(actualPadreId);
+    await client.query(
+      `UPDATE Productos SET ${queryFields.join(', ')} WHERE id = $${pIdx}`,
+      params
+    );
+
+    // Fetch updated product with virtual stock for combos
+    const updatedRes = await client.query('SELECT * FROM Productos WHERE id = $1', [actualPadreId]);
+    let virtualStock = 0;
+    let cleanRecipeItems = [];
+    if (hasItems) {
+      const vRes = await client.query(
+        `SELECT MIN(FLOOR(p.stock_actual / GREATEST(c.cantidad, 0.001))) as max_combos
+         FROM Combos_Recetas c
+         JOIN Productos p ON c.producto_hijo_id = p.id
+         WHERE c.producto_padre_id = $1`,
+        [actualPadreId]
+      );
+      if (vRes.rowCount > 0 && vRes.rows[0].max_combos !== null) {
+        virtualStock = Math.max(0, parseInt(vRes.rows[0].max_combos, 10));
+      }
+
+      const recRes = await client.query(
+        `SELECT c.producto_hijo_id, c.cantidad, p.descripcion, p.codigo_barras_clave as barcode, p.stock_actual
+         FROM Combos_Recetas c
+         JOIN Productos p ON c.producto_hijo_id = p.id
+         WHERE c.producto_padre_id = $1
+         ORDER BY c.id ASC`,
+        [actualPadreId]
+      );
+      cleanRecipeItems = recRes.rows.map(r => ({
+        producto_hijo_id: parseInt(r.producto_hijo_id, 10),
+        cantidad: parseFloat(r.cantidad || 1),
+        descripcion: r.descripcion || '',
+        barcode: r.barcode || '',
+        stock_actual: parseFloat(r.stock_actual || 0)
+      }));
+    }
+
+    const cleanUpdatedProd = updatedRes.rows[0] ? {
+      ...updatedRes.rows[0],
+      barcode: updatedRes.rows[0].codigo_barras_clave || '',
+      description: updatedRes.rows[0].descripcion || '',
+      category: updatedRes.rows[0].categoria || '',
+      stock_actual: virtualStock,
+      precio_costo_usd: parseFloat(updatedRes.rows[0].precio_costo_usd || 0),
+      precio_detalle_usd: parseFloat(updatedRes.rows[0].precio_detalle_usd || 0),
+      es_combo: true,
+      receta_items: cleanRecipeItems,
+      receta_resumen: cleanRecipeItems.map(c => `${c.cantidad}x ${c.descripcion}`).join(' + ')
+    } : null;
 
     await client.query('COMMIT');
-    return { success: true, count: items.length };
+    return { 
+      success: true, 
+      count: items.length, 
+      totalCostoReceta,
+      updatedProduct: cleanUpdatedProd
+    };
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Error guardando combo (ACID Rollback):', err.message);
@@ -7136,11 +7547,16 @@ export async function saveCombo(padreId, items = []) {
   }
 }
 
-export async function deleteCombo(padreId) {
+export async function deleteCombo(padreId, barcode) {
   if (!usePostgres) return { success: false };
   try {
-    await pool.query('DELETE FROM Combos_Recetas WHERE producto_padre_id = $1', [Number(padreId)]);
-    await pool.query('UPDATE Productos SET es_combo = FALSE WHERE id = $1', [Number(padreId)]);
+    let actualPadreId = Number(padreId) || 0;
+    if (actualPadreId <= 0 && barcode) {
+      const byCode = await pool.query('SELECT id FROM Productos WHERE UPPER(TRIM(codigo_barras_clave)) = UPPER(TRIM($1))', [String(barcode).trim()]);
+      if (byCode.rowCount > 0) actualPadreId = Number(byCode.rows[0].id);
+    }
+    await pool.query('DELETE FROM Combos_Recetas WHERE producto_padre_id = $1', [actualPadreId]);
+    await pool.query('UPDATE Productos SET es_combo = FALSE WHERE id = $1', [actualPadreId]);
     return { success: true };
   } catch (err) {
     console.error('Error eliminando combo:', err.message);

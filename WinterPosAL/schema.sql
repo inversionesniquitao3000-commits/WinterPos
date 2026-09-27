@@ -367,3 +367,23 @@ CREATE TABLE IF NOT EXISTS Movimientos_Bancarios_BDV (
 CREATE INDEX IF NOT EXISTS idx_mov_bancarios_ref ON Movimientos_Bancarios_BDV(referencia);
 CREATE INDEX IF NOT EXISTS idx_mov_bancarios_fecha ON Movimientos_Bancarios_BDV(fecha);
 CREATE INDEX IF NOT EXISTS idx_mov_bancarios_conciliado ON Movimientos_Bancarios_BDV(conciliado);
+
+-- ==========================================
+-- 21. COMBOS Y VÍNCULOS BULTO-DETAL
+-- ==========================================
+ALTER TABLE Productos ADD COLUMN IF NOT EXISTS es_combo BOOLEAN DEFAULT FALSE;
+ALTER TABLE Productos ADD COLUMN IF NOT EXISTS producto_bulto_padre_id BIGINT REFERENCES Productos(id) ON DELETE SET NULL;
+ALTER TABLE Productos ADD COLUMN IF NOT EXISTS factor_conversion_bulto NUMERIC(12, 3) DEFAULT 1;
+ALTER TABLE Productos DROP CONSTRAINT IF EXISTS productos_cantidad_mayorista_check;
+ALTER TABLE Productos ADD CONSTRAINT productos_cantidad_mayorista_check CHECK (cantidad_mayorista >= 0);
+
+CREATE TABLE IF NOT EXISTS Combos_Recetas (
+    id BIGSERIAL PRIMARY KEY,
+    producto_padre_id BIGINT NOT NULL REFERENCES Productos(id) ON DELETE CASCADE,
+    producto_hijo_id BIGINT NOT NULL REFERENCES Productos(id) ON DELETE CASCADE,
+    cantidad NUMERIC(12, 3) NOT NULL CHECK (cantidad > 0),
+    CONSTRAINT uk_combo_padre_hijo UNIQUE (producto_padre_id, producto_hijo_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_combos_padre ON Combos_Recetas(producto_padre_id);
+CREATE INDEX IF NOT EXISTS idx_combos_hijo ON Combos_Recetas(producto_hijo_id);

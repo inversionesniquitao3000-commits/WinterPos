@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Product, InventoryMovement, PriceAdjustmentHistory, User, CompanyConfig } from '../types';
-import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator, PauseCircle, Play, Trash2, Wand2, Sparkles, ShieldAlert, RotateCcw, BarChart3, TrendingUp, Award, DollarSign, X, Image as ImageIcon, Link as LinkIcon, UploadCloud, Check, Loader2, Building2, QrCode, Truck, AlertOctagon, AlertTriangle, Clock, Copy, ClipboardCheck, Eye, Maximize2, ExternalLink, Camera } from 'lucide-react';
+import { Package, History, PenTool, Plus, Search, Layers, RefreshCw, Minus, Printer, ArrowUpDown, ArrowUp, ArrowDown, Edit, CheckCircle2, Upload, Download, Tag, FileSpreadsheet, MessageCircle, ChevronDown, Calculator, PauseCircle, Play, Trash2, Wand2, Sparkles, ShieldAlert, RotateCcw, FilterX, BarChart3, TrendingUp, Award, DollarSign, X, Image as ImageIcon, Link as LinkIcon, UploadCloud, Check, Loader2, Building2, QrCode, Truck, AlertOctagon, AlertTriangle, Clock, Copy, ClipboardCheck, Eye, Maximize2, ExternalLink, Camera } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr, getApiBaseUrl, formatImageUrl } from '../utils';
 import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
@@ -23,7 +23,7 @@ interface InventarioProps {
   tasaDia?: number;
   bcvRateUSD?: number;
   companyConfig?: CompanyConfig;
-  onAddProduct: (prod: Product) => void;
+  onAddProduct: (prod: Product) => Promise<Product | null> | void;
   onAddProductsBulk: (productsArray: any[]) => Promise<number | null>;
   onUpdateProductStock: (prodId: number, type: 'Entrada' | 'Salida' | 'Merma' | 'Devolucion', qty: number, reason: string) => void;
   onUpdateProductPrices: (prodId: number, prices: { cost: number; detail: number; mayor: number }, reason: string) => void;
@@ -59,6 +59,61 @@ const formatStockVal = (val: any, aGranel?: boolean) => {
 
   const formatted = parts.join(' ');
   return isNegative ? `-${formatted}` : formatted;
+};
+
+interface SavedInventoryFilters {
+  searchTerm: string;
+  selectedCategories: string[];
+  filterStock: 'todos' | 'con_existencia' | 'sin_existencia' | 'menor_igual' | 'mayor_igual';
+  customStockValue: string;
+  filterMinStock: 'todos' | 'bajo_minimo';
+  filterTax: 'todos' | 'exentos' | 'gravables';
+  filterGranel: 'todos' | 'a_granel' | 'unidad';
+  filterEstado: 'activos' | 'inactivos' | 'todos';
+  lastActivity: number;
+}
+
+const DEFAULT_INVENTORY_FILTERS: SavedInventoryFilters = {
+  searchTerm: '',
+  selectedCategories: [],
+  filterStock: 'todos',
+  customStockValue: '5',
+  filterMinStock: 'todos',
+  filterTax: 'todos',
+  filterGranel: 'todos',
+  filterEstado: 'activos',
+  lastActivity: 0,
+};
+
+const INVENTORY_INACTIVITY_LIMIT_MS = 60 * 60 * 1000; // 1 hora de inactividad
+
+const getInitialInventoryFilters = (): SavedInventoryFilters => {
+  try {
+    const raw = localStorage.getItem('pos_inventory_filters');
+    if (!raw) return { ...DEFAULT_INVENTORY_FILTERS };
+    const parsed = JSON.parse(raw);
+    const now = Date.now();
+    // Reestablecer si pasó más de 1 hora de inactividad
+    if (!parsed.lastActivity || (now - parsed.lastActivity) > INVENTORY_INACTIVITY_LIMIT_MS) {
+      localStorage.removeItem('pos_inventory_filters');
+      sessionStorage.removeItem('pos_inventory_search_term');
+      return { ...DEFAULT_INVENTORY_FILTERS };
+    }
+    return {
+      searchTerm: typeof parsed.searchTerm === 'string' ? parsed.searchTerm : '',
+      selectedCategories: Array.isArray(parsed.selectedCategories) ? parsed.selectedCategories : [],
+      filterStock: ['todos', 'con_existencia', 'sin_existencia', 'menor_igual', 'mayor_igual'].includes(parsed.filterStock) ? parsed.filterStock : 'todos',
+      customStockValue: typeof parsed.customStockValue === 'string' ? parsed.customStockValue : '5',
+      filterMinStock: ['todos', 'bajo_minimo'].includes(parsed.filterMinStock) ? parsed.filterMinStock : 'todos',
+      filterTax: ['todos', 'exentos', 'gravables'].includes(parsed.filterTax) ? parsed.filterTax : 'todos',
+      filterGranel: ['todos', 'a_granel', 'unidad'].includes(parsed.filterGranel) ? parsed.filterGranel : 'todos',
+      filterEstado: ['activos', 'inactivos', 'todos'].includes(parsed.filterEstado) ? parsed.filterEstado : 'activos',
+      lastActivity: typeof parsed.lastActivity === 'number' ? parsed.lastActivity : now,
+    };
+  } catch (e) {
+    console.error('Error al leer filtros guardados de inventario:', e);
+    return { ...DEFAULT_INVENTORY_FILTERS };
+  }
 };
 
 export default function Inventario({
@@ -1475,28 +1530,56 @@ export default function Inventario({
     setSuccessMsg(msg);
     setTimeout(() => setSuccessMsg(''), 4000);
   };
-  const [searchTerm, setSearchTerm] = useState<string>(() => {
-    return sessionStorage.getItem('pos_inventory_search_term') || '';
-  });
+  const initialFilters = useRef(getInitialInventoryFilters()).current;
 
-  useEffect(() => {
-    if (searchTerm) {
-      sessionStorage.setItem('pos_inventory_search_term', searchTerm);
-    } else {
-      sessionStorage.removeItem('pos_inventory_search_term');
-    }
-  }, [searchTerm]);
+  const [searchTerm, setSearchTerm] = useState<string>(initialFilters.searchTerm);
 
   // Filter states
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>(initialFilters.selectedCategories);
   const [showCategoryMenu, setShowCategoryMenu] = useState(false);
   const categoryMenuRef = useRef<HTMLDivElement>(null);
 
-  const [filterStock, setFilterStock] = useState<'todos' | 'con_existencia' | 'sin_existencia' | 'menor_igual' | 'mayor_igual'>('todos');
-  const [customStockValue, setCustomStockValue] = useState<string>('5');
-  const [filterMinStock, setFilterMinStock] = useState<'todos' | 'bajo_minimo'>('todos');
-  const [filterTax, setFilterTax] = useState<'todos' | 'exentos' | 'gravables'>('todos');
-  const [filterGranel, setFilterGranel] = useState<'todos' | 'a_granel' | 'unidad'>('todos');
+  const [filterStock, setFilterStock] = useState<'todos' | 'con_existencia' | 'sin_existencia' | 'menor_igual' | 'mayor_igual'>(initialFilters.filterStock);
+  const [customStockValue, setCustomStockValue] = useState<string>(initialFilters.customStockValue);
+  const [filterMinStock, setFilterMinStock] = useState<'todos' | 'bajo_minimo'>(initialFilters.filterMinStock);
+  const [filterTax, setFilterTax] = useState<'todos' | 'exentos' | 'gravables'>(initialFilters.filterTax);
+  const [filterGranel, setFilterGranel] = useState<'todos' | 'a_granel' | 'unidad'>(initialFilters.filterGranel);
+  const [filterEstado, setFilterEstado] = useState<'activos' | 'inactivos' | 'todos'>(initialFilters.filterEstado);
+
+  // Persistir filtros automáticamente en localStorage con timestamp de última actividad
+  useEffect(() => {
+    const isDefault = !searchTerm &&
+      selectedCategories.length === 0 &&
+      filterStock === 'todos' &&
+      customStockValue === '5' &&
+      filterMinStock === 'todos' &&
+      filterTax === 'todos' &&
+      filterGranel === 'todos' &&
+      filterEstado === 'activos';
+
+    if (isDefault) {
+      localStorage.removeItem('pos_inventory_filters');
+      sessionStorage.removeItem('pos_inventory_search_term');
+    } else {
+      const dataToSave: SavedInventoryFilters = {
+        searchTerm,
+        selectedCategories,
+        filterStock,
+        customStockValue,
+        filterMinStock,
+        filterTax,
+        filterGranel,
+        filterEstado,
+        lastActivity: Date.now()
+      };
+      localStorage.setItem('pos_inventory_filters', JSON.stringify(dataToSave));
+      if (searchTerm) {
+        sessionStorage.setItem('pos_inventory_search_term', searchTerm);
+      } else {
+        sessionStorage.removeItem('pos_inventory_search_term');
+      }
+    }
+  }, [searchTerm, selectedCategories, filterStock, customStockValue, filterMinStock, filterTax, filterGranel, filterEstado]);
 
 
 
@@ -2916,6 +2999,8 @@ export default function Inventario({
   };
 
   // Stock Adjustment form state
+  const [adjustMode, setAdjustMode] = useState<'conteo' | 'movimiento'>('conteo');
+  const [exactStockInput, setExactStockInput] = useState<string>('');
   const [adjustType, setAdjustType] = useState<'Entrada' | 'Salida' | 'Merma' | 'Devolucion'>('Entrada');
   const [adjustQty, setAdjustQty] = useState('');
   const [adjustReason, setAdjustReason] = useState('');
@@ -2934,14 +3019,30 @@ export default function Inventario({
     }
 
     const ok = await showConfirm(
-      `¿Está seguro de que desea eliminar el producto "${selectedProduct.description}" permanentemente del sistema? Esta acción no se puede deshacer.`,
+      `¿Está seguro de que desea eliminar el producto "${selectedProduct.description}"? Si posee ventas históricas asociadas, será archivado e inactivado del catálogo para preservar los reportes contables.`,
       'Eliminar Producto',
-      { confirmLabel: 'Eliminar', isDanger: true }
+      { confirmLabel: 'Eliminar / Archivar', isDanger: true }
     );
     if (ok) {
       const success = await onDeleteProduct(selectedProduct.id);
       if (success) {
         setSelectedProduct(null);
+      }
+    }
+  };
+
+  const handleReactivateProductClick = async () => {
+    if (!selectedProduct) return;
+    const ok = await showConfirm(
+      `¿Desea reactivar el producto "${selectedProduct.description}" para que vuelva a estar disponible en el catálogo activo y venta en caja?`,
+      'Reactivar Producto',
+      { confirmLabel: 'Reactivar', isDanger: false }
+    );
+    if (ok) {
+      const success = await onUpdateProduct({ ...selectedProduct, estado: 'Activo' });
+      if (success) {
+        showToast('Producto reactivado exitosamente.');
+        setSelectedProduct(prev => prev ? { ...prev, estado: 'Activo' } : null);
       }
     }
   };
@@ -3316,6 +3417,7 @@ export default function Inventario({
   const [newTaxName, setNewTaxName] = useState('IVA');
   const [newTaxPct, setNewTaxPct] = useState('16');
   const [newAGranel, setNewAGranel] = useState(false);
+  const [newEsCombo, setNewEsCombo] = useState(false);
   const [newVencimiento, setNewVencimiento] = useState('');
 
   // New product margins (%)
@@ -3334,12 +3436,13 @@ export default function Inventario({
   const [editMayor, setEditMayor] = useState('');
   const [editBulto, setEditBulto] = useState('');
   const [editMinStock, setEditMinStock] = useState('5');
-  const [editWholesaleQty, setEditWholesaleQty] = useState('12');
+  const [editWholesaleQty, setEditWholesaleQty] = useState('0');
   const [editCantBulto, setEditCantBulto] = useState('0');
   const [editTaxActive, setEditTaxActive] = useState(true);
   const [editTaxName, setEditTaxName] = useState('IVA');
   const [editTaxPct, setEditTaxPct] = useState('16');
   const [editAGranel, setEditAGranel] = useState(false);
+  const [editEsCombo, setEditEsCombo] = useState(false);
   const [editVencimiento, setEditVencimiento] = useState('');
 
   // Edit product margins (%)
@@ -3502,12 +3605,13 @@ export default function Inventario({
     setEditMayor((p.precio_mayor_usd ?? 0).toString());
     setEditBulto((p.precio_bulto_usd ?? 0).toString());
     setEditMinStock((p.stock_minimo ?? 5).toString());
-    setEditWholesaleQty((p.cantidad_mayorista ?? 12).toString());
+    setEditWholesaleQty((p.cantidad_mayorista !== undefined && p.cantidad_mayorista !== null ? p.cantidad_mayorista : 0).toString());
     setEditCantBulto((p.cant_bulto ?? 0).toString());
     setEditTaxActive(!p.exento_impuesto);
     setEditTaxName('IVA');
     setEditTaxPct((p.porcentaje_impuesto && p.porcentaje_impuesto > 0 ? p.porcentaje_impuesto : 16).toString());
     setEditAGranel(p.a_granel || false);
+    setEditEsCombo(!!p.es_combo);
     setEditVencimiento(p.fecha_vencimiento || '');
     setEditImageUrl(p.imagen_url || '');
 
@@ -3593,18 +3697,25 @@ export default function Inventario({
     const mayor = parseFloat(editMayor) || 0;
     const bulto = parseFloat(editBulto) || 0;
     const cantBulto = parseInt(editCantBulto) || 0;
+    const isCombo = !!selectedProduct.es_combo || editEsCombo;
 
-    if (detail <= cost) {
+    // Detalle vs Costo: solo bloquea si no es combo y el costo es mayor a 0 y detalle <= costo
+    if (!isCombo && cost > 0 && detail <= cost) {
       showAlert('El precio de venta al detalle debe ser mayor al precio de costo.', 'Precios Inválidos', 'warning');
       return;
     }
-    if (mayor <= cost) {
-      showAlert('El precio de venta al mayor debe ser mayor al precio de costo.', 'Precios Inválidos', 'warning');
-      return;
-    }
-    if (mayor >= detail) {
-      showAlert('El precio de venta al mayor debe ser estrictamente menor al precio de venta al detalle.', 'Precios Inválidos', 'warning');
-      return;
+
+    // Precio Mayor: solo se valida si está en uso (mayor > 0). Si es 0 no se vende al mayor.
+    const isMayorActive = mayor > 0;
+    if (isMayorActive) {
+      if (cost > 0 && mayor <= cost) {
+        showAlert('El precio de venta al mayor debe ser mayor al precio de costo.', 'Precios Inválidos', 'warning');
+        return;
+      }
+      if (detail > 0 && mayor >= detail) {
+        showAlert('El precio de venta al mayor debe ser estrictamente menor al precio de venta al detalle.', 'Precios Inválidos', 'warning');
+        return;
+      }
     }
 
     // Bulto / Caja: solo se valida si está en uso (Unids/Bulto > 0 y precio bulto > 0). Si está en 0 no se usa y no impide guardar.
@@ -3633,7 +3744,7 @@ export default function Inventario({
       category: editCat.trim().toUpperCase(),
       stock_actual: editAGranel ? selectedProduct.stock_actual : Math.round(selectedProduct.stock_actual),
       stock_minimo: editAGranel ? (parseFloat(editMinStock) || 0) : (parseInt(editMinStock) || 0),
-      cantidad_mayorista: parseInt(editWholesaleQty) || 12,
+      cantidad_mayorista: Math.max(0, parseInt(editWholesaleQty) || 0),
       cant_bulto: cantBulto,
       ganancia_detalle: parseFloat(editGananciaDetalle) || 0,
       ganancia_mayor: parseFloat(editGananciaMayor) || 0,
@@ -3643,6 +3754,7 @@ export default function Inventario({
       porcentaje_impuesto: editTaxActive ? (parseFloat(editTaxPct) || 0) : 0,
       imagen_url: finalImg,
       a_granel: editAGranel,
+      es_combo: isCombo,
       fecha_vencimiento: editVencimiento.trim() !== '' ? editVencimiento.trim() : undefined,
       precio_costo_usd: cost,
       precio_detalle_usd: detail,
@@ -3864,7 +3976,86 @@ export default function Inventario({
   // Reset page when filters or search change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, selectedCategories, filterStock, customStockValue, filterMinStock, filterTax]);
+  }, [searchTerm, selectedCategories, filterStock, customStockValue, filterMinStock, filterTax, filterGranel, filterEstado]);
+
+  const handleClearAllFilters = () => {
+    setSearchTerm('');
+    setSelectedCategories([]);
+    setFilterStock('todos');
+    setCustomStockValue('5');
+    setFilterMinStock('todos');
+    setFilterTax('todos');
+    setFilterGranel('todos');
+    setFilterEstado('activos');
+    setCurrentPage(1);
+    localStorage.removeItem('pos_inventory_filters');
+    sessionStorage.removeItem('pos_inventory_search_term');
+  };
+
+  // Monitoreo de actividad e inactividad de 1 hora dentro del módulo
+  useEffect(() => {
+    let lastUpdate = Date.now();
+    const handleActivity = () => {
+      const now = Date.now();
+      if (now - lastUpdate > 30000) {
+        lastUpdate = now;
+        try {
+          const raw = localStorage.getItem('pos_inventory_filters');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            parsed.lastActivity = now;
+            localStorage.setItem('pos_inventory_filters', JSON.stringify(parsed));
+          }
+        } catch (_) { }
+      }
+    };
+
+    window.addEventListener('mousemove', handleActivity);
+    window.addEventListener('keydown', handleActivity);
+    window.addEventListener('click', handleActivity);
+
+    const checkInterval = setInterval(() => {
+      try {
+        const raw = localStorage.getItem('pos_inventory_filters');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed.lastActivity && (Date.now() - parsed.lastActivity) > INVENTORY_INACTIVITY_LIMIT_MS) {
+            handleClearAllFilters();
+          }
+        }
+      } catch (_) { }
+    }, 60000);
+
+    return () => {
+      window.removeEventListener('mousemove', handleActivity);
+      window.removeEventListener('keydown', handleActivity);
+      window.removeEventListener('click', handleActivity);
+      clearInterval(checkInterval);
+    };
+  }, []);
+
+  const hasActiveFilters = Boolean(
+    searchTerm.trim() !== '' ||
+    selectedCategories.length > 0 ||
+    filterStock !== 'todos' ||
+    customStockValue !== '5' ||
+    filterMinStock !== 'todos' ||
+    filterTax !== 'todos' ||
+    filterGranel !== 'todos' ||
+    filterEstado !== 'activos'
+  );
+
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (searchTerm.trim()) count++;
+    if (selectedCategories.length > 0) count += selectedCategories.length;
+    if (filterStock !== 'todos') count++;
+    if (filterMinStock !== 'todos') count++;
+    if (filterTax !== 'todos') count++;
+    if (filterGranel !== 'todos') count++;
+    if (filterEstado !== 'activos') count++;
+    return count;
+  }, [searchTerm, selectedCategories, filterStock, filterMinStock, filterTax, filterGranel, filterEstado]);
 
   const filteredProducts = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -3904,9 +4095,64 @@ export default function Inventario({
           filterGranel === 'a_granel' ? p.a_granel === true :
             filterGranel === 'unidad' ? !p.a_granel : true;
 
-      return matchesSearch && matchesCategory && matchesStock && matchesMinStock && matchesTax && matchesGranel;
+      const matchesEstado =
+        filterEstado === 'todos' ? true :
+          filterEstado === 'activos' ? (p.estado !== 'Inactivo') :
+            filterEstado === 'inactivos' ? (p.estado === 'Inactivo') : true;
+
+      return matchesSearch && matchesCategory && matchesStock && matchesMinStock && matchesTax && matchesGranel && matchesEstado;
     });
-  }, [safeProducts, searchTerm, selectedCategories, filterStock, customStockValue, filterMinStock, filterTax, filterGranel]);
+  }, [safeProducts, searchTerm, selectedCategories, filterStock, customStockValue, filterMinStock, filterTax, filterGranel, filterEstado]);
+
+  const filtCombos = useMemo(() => filteredProducts.filter(p => p?.es_combo), [filteredProducts]);
+  const hasCombosInFilter = filtCombos.length > 0;
+
+  // Cache de recetas de combos para visualización garantizada en inventario
+  const [comboRecipesMap, setComboRecipesMap] = useState<Record<number, any[]>>({});
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadCombos = async () => {
+      try {
+        const res = await fetch('/api/combos');
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && isMounted) {
+            const map: Record<number, any[]> = {};
+            for (const item of data) {
+              const pId = item.producto_padre_id;
+              if (!map[pId]) map[pId] = [];
+              map[pId].push(item);
+            }
+            setComboRecipesMap(map);
+          }
+        }
+      } catch (e) {
+        console.error('Error cargando recetas en Inventario:', e);
+      }
+    };
+    loadCombos();
+    window.addEventListener('pos_refresh_products', loadCombos);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('pos_refresh_products', loadCombos);
+    };
+  }, []);
+
+  const getComboSummary = useCallback((p: Product | any): string => {
+    if (!p) return '';
+    if (p.receta_resumen && typeof p.receta_resumen === 'string' && p.receta_resumen.trim().length > 0) {
+      return p.receta_resumen;
+    }
+    if (Array.isArray(p.receta_items) && p.receta_items.length > 0) {
+      return p.receta_items.map((it: any) => `${it.cantidad}x ${it.descripcion}`).join(' • ');
+    }
+    const fromMap = comboRecipesMap[p.id];
+    if (Array.isArray(fromMap) && fromMap.length > 0) {
+      return fromMap.map((it: any) => `${it.cantidad}x ${it.descripcion}`).join(' • ');
+    }
+    return '';
+  }, [comboRecipesMap]);
 
   const sortedProducts = useMemo(() => {
     if (sortRules.length === 0) return filteredProducts;
@@ -4045,9 +4291,11 @@ export default function Inventario({
 
   const handleOpenAdjust = (prod: Product) => {
     setSelectedProduct(prod);
+    setAdjustMode('conteo');
+    setExactStockInput(prod.stock_actual !== undefined ? String(prod.stock_actual) : '0');
     setAdjustType('Entrada');
     setAdjustQty('');
-    setAdjustReason('');
+    setAdjustReason('Auditoría y conteo físico');
     setShowAdjustModal(true);
   };
 
@@ -4064,23 +4312,52 @@ export default function Inventario({
     e.preventDefault();
     if (!selectedProduct) return;
 
-    const qty = selectedProduct.a_granel ? parseFloat(adjustQty) : parseInt(adjustQty);
-    if (isNaN(qty) || qty <= 0) {
-      showAlert('Por favor ingrese una cantidad válida mayor a cero.', 'Cantidad Inválida', 'warning');
-      return;
-    }
-
-    if (!selectedProduct.a_granel && !Number.isInteger(parseFloat(adjustQty))) {
-      showAlert('Este producto se vende por unidad. La cantidad debe ser un número entero.', 'Cantidad Inválida', 'warning');
-      return;
-    }
-
     if (!adjustReason.trim()) {
-      showAlert('Debe especificar un motivo/justificación de manera obligatoria.', 'Justificación Requerida', 'warning');
+      showAlert('Debe especificar un motivo o justificación de auditoría.', 'Justificación Requerida', 'warning');
       return;
     }
 
-    onUpdateProductStock(selectedProduct.id, adjustType, qty, adjustReason.trim());
+    if (adjustMode === 'conteo') {
+      const newStock = selectedProduct.a_granel ? parseFloat(exactStockInput) : parseInt(exactStockInput, 10);
+      if (isNaN(newStock) || newStock < 0) {
+        showAlert('Por favor ingrese un stock físico válido mayor o igual a cero.', 'Stock Inválido', 'warning');
+        return;
+      }
+      if (!selectedProduct.a_granel && !Number.isInteger(parseFloat(exactStockInput))) {
+        showAlert('Este producto se vende por unidad. El stock debe ser un número entero.', 'Stock Inválido', 'warning');
+        return;
+      }
+
+      const currentStock = selectedProduct.stock_actual || 0;
+      const diff = newStock - currentStock;
+
+      if (Math.abs(diff) < 0.0001) {
+        showAlert(`El stock ingresado (${newStock}) coincide exactamente con el stock actual en sistema. No se realizaron cambios.`, 'Sin Cambios', 'info');
+        setShowAdjustModal(false);
+        setSelectedProduct(null);
+        return;
+      }
+
+      const type: 'Entrada' | 'Salida' = diff > 0 ? 'Entrada' : 'Salida';
+      const cleanQty = Math.abs(diff);
+      const auditNote = `[Conteo Físico: ${currentStock} ➔ ${newStock} (${diff > 0 ? '+' : ''}${diff})] ${adjustReason.trim()}`;
+
+      onUpdateProductStock(selectedProduct.id, type, cleanQty, auditNote);
+    } else {
+      const qty = selectedProduct.a_granel ? parseFloat(adjustQty) : parseInt(adjustQty, 10);
+      if (isNaN(qty) || qty <= 0) {
+        showAlert('Por favor ingrese una cantidad válida mayor a cero.', 'Cantidad Inválida', 'warning');
+        return;
+      }
+
+      if (!selectedProduct.a_granel && !Number.isInteger(parseFloat(adjustQty))) {
+        showAlert('Este producto se vende por unidad. La cantidad debe ser un número entero.', 'Cantidad Inválida', 'warning');
+        return;
+      }
+
+      onUpdateProductStock(selectedProduct.id, adjustType, qty, adjustReason.trim());
+    }
+
     setShowAdjustModal(false);
     setSelectedProduct(null);
   };
@@ -4098,13 +4375,19 @@ export default function Inventario({
       return;
     }
 
-    if (detail <= cost) {
+    if (!selectedProduct.es_combo && cost > 0 && detail <= cost) {
       showAlert('El precio de venta al detalle debe ser mayor al precio de costo.', 'Precios Inválidos', 'warning');
       return;
     }
-    if (mayor <= cost) {
-      showAlert('El precio de venta al mayor debe ser mayor al precio de costo.', 'Precios Inválidos', 'warning');
-      return;
+    if (mayor > 0) {
+      if (cost > 0 && mayor <= cost) {
+        showAlert('El precio de venta al mayor debe ser mayor al precio de costo.', 'Precios Inválidos', 'warning');
+        return;
+      }
+      if (detail > 0 && mayor >= detail) {
+        showAlert('El precio de venta al mayor debe ser estrictamente menor al precio de venta al detalle.', 'Precios Inválidos', 'warning');
+        return;
+      }
     }
 
     if (!priceReason.trim()) {
@@ -4139,17 +4422,25 @@ export default function Inventario({
     const bulto = parseFloat(newBulto) || 0;
     const cantBulto = parseInt(newCantBulto) || 0;
 
-    if (detail <= cost) {
+    // Validación de Detalle vs Costo:
+    // Si no es combo y el costo es mayor a 0, el precio de venta al detalle debe ser mayor al costo.
+    // Si es combo o ambos están en 0 (combo por armar), es completamente válido.
+    if (!newEsCombo && cost > 0 && detail <= cost) {
       showAlert('El precio de venta al detalle debe ser mayor al precio de costo.', 'Precios Inválidos', 'warning');
       return;
     }
-    if (mayor <= cost) {
-      showAlert('El precio de venta al mayor debe ser mayor al precio de costo.', 'Precios Inválidos', 'warning');
-      return;
-    }
-    if (mayor >= detail) {
-      showAlert('El precio de venta al mayor debe ser estrictamente menor al precio de venta al detalle.', 'Precios Inválidos', 'warning');
-      return;
+
+    // Precio Mayor: solo se valida si está activo (mayor > 0). Si es 0 significa que no se vende al mayor.
+    const isMayorActive = mayor > 0;
+    if (isMayorActive) {
+      if (cost > 0 && mayor <= cost) {
+        showAlert('El precio de venta al mayor debe ser mayor al precio de costo.', 'Precios Inválidos', 'warning');
+        return;
+      }
+      if (detail > 0 && mayor >= detail) {
+        showAlert('El precio de venta al mayor debe ser estrictamente menor al precio de venta al detalle.', 'Precios Inválidos', 'warning');
+        return;
+      }
     }
 
     // Bulto / Caja: solo se valida si está en uso (Unids/Bulto > 0 y precio bulto > 0). Si está en 0 no se usa y no impide guardar.
@@ -4170,7 +4461,7 @@ export default function Inventario({
     }
 
     const min = newAGranel ? (parseFloat(newMinStock) || 0) : (parseInt(newMinStock) || 0);
-    const wholesale = parseInt(newWholesaleQty) || 12;
+    const wholesale = Math.max(0, parseInt(newWholesaleQty) || 0);
 
     const finalImg = await ensureCleanImageUrl(newImageUrl, barcodeVal);
 
@@ -4196,12 +4487,19 @@ export default function Inventario({
       imagen_url: finalImg || '',
       estado: 'Activo',
       a_granel: newAGranel,
+      es_combo: newEsCombo,
       fecha_vencimiento: newVencimiento.trim() !== '' ? newVencimiento.trim() : undefined
     };
 
-    onAddProduct(newProd);
+    const savedProd = await onAddProduct(newProd);
     clearPausedDraft();
     setShowNewProdModal(false);
+
+    // Si fue creado como combo, abrir automáticamente el modal de armar combo con el producto persistido
+    if (newEsCombo) {
+      setComboPadreProduct((savedProd as Product) || newProd);
+      setShowComboModal(true);
+    }
 
     // Clear form
     setNewClave('');
@@ -4212,6 +4510,8 @@ export default function Inventario({
     setNewMayor('');
     setNewBulto('');
     setNewCantBulto('0');
+    setNewWholesaleQty('0');
+    setNewEsCombo(false);
     setNewGananciaDetalle('30');
     setNewGananciaMayor('15');
     setNewGananciaBulto('8');
@@ -4741,15 +5041,19 @@ export default function Inventario({
 
         {/* Right side metrics cards placed exactly in the red outline box */}
         {activeSubTab === 'catalogo' && (() => {
-          const totalP1 = safeProducts.reduce((acc, p) => acc + (p?.precio_detalle_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0);
-          const totalCost = safeProducts.reduce((acc, p) => acc + (p?.precio_costo_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0);
-          const totalUds = safeProducts.reduce((acc, p) => acc + (!p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0);
-          const totalKg = safeProducts.reduce((acc, p) => acc + (p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0);
+          // Auditoría: Los combos son agrupaciones comerciales de stock virtual.
+          // Se excluyen de las sumas monetarias y físicas de almacén para no duplicar el valor de sus componentes individuales.
+          const isPhysical = (p: any) => !p?.es_combo;
 
-          const filtP1 = filteredProducts.reduce((acc, p) => acc + (p?.precio_detalle_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0);
-          const filtCost = filteredProducts.reduce((acc, p) => acc + (p?.precio_costo_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0);
-          const filtUds = filteredProducts.reduce((acc, p) => acc + (!p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0);
-          const filtKg = filteredProducts.reduce((acc, p) => acc + (p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0);
+          const totalP1 = safeProducts.filter(isPhysical).reduce((acc, p) => acc + (p?.precio_detalle_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0);
+          const totalCost = safeProducts.filter(isPhysical).reduce((acc, p) => acc + (p?.precio_costo_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0);
+          const totalUds = safeProducts.filter(isPhysical).reduce((acc, p) => acc + (!p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0);
+          const totalKg = safeProducts.filter(isPhysical).reduce((acc, p) => acc + (p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0);
+
+          const filtP1 = filteredProducts.filter(isPhysical).reduce((acc, p) => acc + (p?.precio_detalle_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0);
+          const filtCost = filteredProducts.filter(isPhysical).reduce((acc, p) => acc + (p?.precio_costo_usd || 0) * (parseFloat(p?.stock_actual as any) || 0), 0);
+          const filtUds = filteredProducts.filter(isPhysical).reduce((acc, p) => acc + (!p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0);
+          const filtKg = filteredProducts.filter(isPhysical).reduce((acc, p) => acc + (p?.a_granel ? (parseFloat(p?.stock_actual as any) || 0) : 0), 0);
 
           const hasFilters = filteredProducts.length !== safeProducts.length;
 
@@ -4799,6 +5103,7 @@ export default function Inventario({
               {/* FILA 2: TARJETAS DE MÉTRICAS FILTRADAS (HOMOGÉNEAS CON SOMBREADO CELESTE PARA DISTINGUIR ABAJO) */}
               {hasFilters && (
                 <div className="flex flex-wrap items-center justify-end gap-2.5">
+
                   {canViewCost ? (
                     <>
                       <div className="bg-sky-50/90 border border-sky-200 rounded-xl px-4 py-1.5 shadow-2xs flex items-center gap-2.5">
@@ -4909,28 +5214,51 @@ export default function Inventario({
       {activeSubTab === 'catalogo' && (
         <div className="space-y-4">
           <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between bg-slate-50 border border-slate-200 rounded-xl py-2 px-4 shadow-sm">
-            {/* Search Input */}
-            <div className="relative flex-grow max-w-md">
-              <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                <Search className="w-4 h-4" />
-              </span>
-              <input
-                type="text"
-                placeholder="Buscar por código o descripción..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'ArrowDown' && paginatedProducts.length > 0) {
-                    e.preventDefault();
-                    (e.target as HTMLInputElement).blur();
-                    const firstProd = paginatedProducts[0];
-                    setSelectedProduct(firstProd);
-                    const rowEl = document.getElementById(`inv-prod-row-${firstProd.id}`);
-                    if (rowEl) rowEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-                  }
-                }}
-                className="w-full bg-white border border-slate-300 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-800 focus:border-winter-inventarioStart font-sans focus:outline-none"
-              />
+            {/* Search Input & Botón Limpiar Filtros */}
+            <div className="flex items-center gap-2.5 flex-grow max-w-xl">
+              <div className="relative flex-grow">
+                <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                  <Search className="w-4 h-4" />
+                </span>
+                <input
+                  type="text"
+                  placeholder="Buscar por código o descripción..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'ArrowDown' && paginatedProducts.length > 0) {
+                      e.preventDefault();
+                      (e.target as HTMLInputElement).blur();
+                      const firstProd = paginatedProducts[0];
+                      setSelectedProduct(firstProd);
+                      const rowEl = document.getElementById(`inv-prod-row-${firstProd.id}`);
+                      if (rowEl) rowEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                    }
+                  }}
+                  className="w-full bg-white border border-slate-300 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-800 focus:border-winter-inventarioStart font-sans focus:outline-none"
+                />
+              </div>
+
+              {/* Botón Limpiar Filtros */}
+              <button
+                type="button"
+                onClick={handleClearAllFilters}
+                title={hasActiveFilters ? "Limpiar todos los filtros y búsqueda aplicados" : "No hay filtros activos"}
+                disabled={!hasActiveFilters}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold font-sans transition-all whitespace-nowrap shadow-sm border ${
+                  hasActiveFilters
+                    ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200 hover:border-rose-300 active:scale-95 cursor-pointer ring-1 ring-rose-200'
+                    : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
+                }`}
+              >
+                <FilterX className="w-3.5 h-3.5 flex-shrink-0" />
+                <span>Limpiar Filtros</span>
+                {activeFiltersCount > 0 && (
+                  <span className="ml-0.5 px-1.5 py-0.2 bg-rose-600 text-white text-[10px] font-extrabold rounded-full">
+                    {activeFiltersCount}
+                  </span>
+                )}
+              </button>
             </div>
 
             <div className="relative" ref={reportMenuRef}>
@@ -5025,21 +5353,21 @@ export default function Inventario({
           </div>
 
           {/* FILTER CONTROLS */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5 bg-slate-50/50 border border-slate-200/60 rounded-xl py-1.5 px-3 shadow-sm">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 bg-slate-50/50 border border-slate-200/60 rounded-xl py-1.5 px-2.5 shadow-sm">
             {/* Multi-Category Selector */}
-            <div className="relative flex flex-col gap-0.5" ref={categoryMenuRef}>
-              <label className="text-[10px] font-bold text-slate-500 font-sans uppercase">Categorías (Multi-Selección)</label>
+            <div className="relative flex flex-col gap-0.5 min-w-0" ref={categoryMenuRef}>
+              <label className="text-[9.5px] font-bold text-slate-500 font-sans uppercase truncate" title="Categorías (Multi-Selección)">Categorías</label>
               <button
                 type="button"
                 onClick={() => setShowCategoryMenu(prev => !prev)}
-                className="bg-white border border-slate-300 rounded-lg py-1 px-2.5 text-xs text-slate-800 font-sans focus:border-winter-inventarioStart focus:outline-none flex items-center justify-between gap-1 text-left shadow-sm"
+                className="bg-white border border-slate-300 rounded-lg py-1 px-2 text-[11px] text-slate-800 font-sans focus:border-winter-inventarioStart focus:outline-none flex items-center justify-between gap-1 text-left shadow-sm min-w-0"
               >
                 <span className="truncate font-bold">
                   {selectedCategories.length === 0
                     ? 'TODAS LAS CATEGORÍAS'
                     : selectedCategories.length === 1
                       ? selectedCategories[0]
-                      : `${selectedCategories.length} SELECCIONADAS (${selectedCategories.join(', ')})`}
+                      : `${selectedCategories.length} SELECCIONADAS`}
                 </span>
                 <ChevronDown className={`w-3.5 h-3.5 text-slate-400 flex-shrink-0 transition-transform ${showCategoryMenu ? 'rotate-180' : ''}`} />
               </button>
@@ -5080,24 +5408,24 @@ export default function Inventario({
             </div>
 
             {/* Stock Existence Filter */}
-            <div className="flex flex-col gap-0.5">
-              <label className="text-[10px] font-bold text-slate-500 font-sans uppercase">Existencia (Stock)</label>
-              <div className="flex items-center gap-1.5">
+            <div className="flex flex-col gap-0.5 min-w-0">
+              <label className="text-[9.5px] font-bold text-slate-500 font-sans uppercase truncate" title="Existencia (Stock)">Existencia (Stock)</label>
+              <div className="flex items-center gap-1 min-w-0">
                 <select
                   value={filterStock}
                   onChange={(e) => setFilterStock(e.target.value as any)}
-                  className="bg-white border border-slate-300 rounded-lg py-1 px-2 text-xs text-slate-800 font-sans font-bold focus:border-winter-inventarioStart focus:outline-none shadow-sm flex-1"
+                  className="bg-white border border-slate-300 rounded-lg py-1 px-1.5 text-[11px] text-slate-800 font-sans font-bold focus:border-winter-inventarioStart focus:outline-none shadow-sm flex-1 truncate min-w-0"
                 >
                   <option value="todos">TODOS LOS PRODUCTOS</option>
-                  <option value="con_existencia">CON EXISTENCIA (&gt; 0)</option>
-                  <option value="sin_existencia">SIN EXISTENCIA (0)</option>
-                  <option value="menor_igual">EXISTENCIA MENOR O IGUAL A (≤ NÚMERO)</option>
-                  <option value="mayor_igual">EXISTENCIA MAYOR O IGUAL A (≥ NÚMERO)</option>
+                  <option value="con_existencia">CON STOCK (&gt; 0)</option>
+                  <option value="sin_existencia">SIN STOCK (0)</option>
+                  <option value="menor_igual">STOCK (≤ NÚMERO)</option>
+                  <option value="mayor_igual">STOCK (≥ NÚMERO)</option>
                 </select>
 
                 {(filterStock === 'menor_igual' || filterStock === 'mayor_igual') && (
-                  <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-lg px-2 py-0.5 shadow-sm">
-                    <span className="text-[11px] font-extrabold text-indigo-700">
+                  <div className="flex items-center gap-0.5 bg-white border border-slate-300 rounded-lg px-1 py-0.5 shadow-sm flex-shrink-0">
+                    <span className="text-[10px] font-extrabold text-indigo-700">
                       {filterStock === 'menor_igual' ? '≤' : '≥'}
                     </span>
                     <input
@@ -5106,8 +5434,8 @@ export default function Inventario({
                       step="any"
                       value={customStockValue}
                       onChange={(e) => setCustomStockValue(e.target.value)}
-                      placeholder="Ej: 10"
-                      className="w-14 text-xs font-mono font-bold text-slate-800 outline-none"
+                      placeholder="10"
+                      className="w-10 text-[11px] font-mono font-bold text-slate-800 outline-none"
                     />
                   </div>
                 )}
@@ -5115,12 +5443,12 @@ export default function Inventario({
             </div>
 
             {/* Min Stock Warning Filter */}
-            <div className="flex flex-col gap-0.5">
-              <label className="text-[10px] font-bold text-slate-500 font-sans uppercase">Alertas de Stock</label>
+            <div className="flex flex-col gap-0.5 min-w-0">
+              <label className="text-[9.5px] font-bold text-slate-500 font-sans uppercase truncate" title="Alertas de Stock">Alertas de Stock</label>
               <select
                 value={filterMinStock}
                 onChange={(e) => setFilterMinStock(e.target.value as any)}
-                className="bg-white border border-slate-300 rounded-lg py-1 px-2 text-xs text-slate-800 font-sans focus:border-winter-inventarioStart focus:outline-none"
+                className="bg-white border border-slate-300 rounded-lg py-1 px-1.5 text-[11px] text-slate-800 font-sans font-bold focus:border-winter-inventarioStart focus:outline-none truncate min-w-0"
               >
                 <option value="todos">MOSTRAR TODO EL STOCK</option>
                 <option value="bajo_minimo">BAJO STOCK MÍNIMO (ALERTA)</option>
@@ -5128,30 +5456,44 @@ export default function Inventario({
             </div>
 
             {/* Tax Regime Filter (Exentos vs Gravables) */}
-            <div className="flex flex-col gap-0.5">
-              <label className="text-[10px] font-bold text-slate-500 font-sans uppercase">Régimen IVA (Exento / Gravable)</label>
+            <div className="flex flex-col gap-0.5 min-w-0">
+              <label className="text-[9.5px] font-bold text-slate-500 font-sans uppercase truncate" title="Régimen IVA (Exento / Gravable)">Régimen IVA</label>
               <select
                 value={filterTax}
                 onChange={(e) => setFilterTax(e.target.value as any)}
-                className="bg-white border border-slate-300 rounded-lg py-1 px-2 text-xs text-slate-800 font-sans font-bold focus:border-winter-inventarioStart focus:outline-none shadow-sm"
+                className="bg-white border border-slate-300 rounded-lg py-1 px-1.5 text-[11px] text-slate-800 font-sans font-bold focus:border-winter-inventarioStart focus:outline-none shadow-sm truncate min-w-0"
               >
                 <option value="todos">TODOS (TODOS LOS PRODUCTOS)</option>
-                <option value="exentos">🟢 SOLO EXENTOS (E) - 0% IVA</option>
-                <option value="gravables">🔵 SOLO GRAVABLES (G) - CON IVA 16%</option>
+                <option value="exentos">🟢 SOLO EXENTOS (0% IVA)</option>
+                <option value="gravables">🔵 SOLO GRAVABLES (CON IVA)</option>
               </select>
             </div>
 
             {/* Tipo de Venta Filter (A Granel vs Unidad) */}
-            <div className="flex flex-col gap-0.5">
-              <label className="text-[10px] font-bold text-slate-500 font-sans uppercase">Tipo de Venta (Granel / Unidad)</label>
+            <div className="flex flex-col gap-0.5 min-w-0">
+              <label className="text-[9.5px] font-bold text-slate-500 font-sans uppercase truncate" title="Tipo de Venta (Granel / Unidad)">Tipo de Venta</label>
               <select
                 value={filterGranel}
                 onChange={(e) => setFilterGranel(e.target.value as any)}
-                className="bg-white border border-slate-300 rounded-lg py-1 px-2 text-xs text-slate-800 font-sans font-bold focus:border-winter-inventarioStart focus:outline-none shadow-sm"
+                className="bg-white border border-slate-300 rounded-lg py-1 px-1.5 text-[11px] text-slate-800 font-sans font-bold focus:border-winter-inventarioStart focus:outline-none shadow-sm truncate min-w-0"
               >
                 <option value="todos">TODOS (GRANEL Y UNIDAD)</option>
-                <option value="a_granel">⚖️ SOLO A GRANEL (KG / PESO)</option>
-                <option value="unidad">📦 SOLO UNIDADES (DETAL / BULTO)</option>
+                <option value="a_granel">⚖️ SOLO A GRANEL (PESO)</option>
+                <option value="unidad">📦 SOLO UNIDADES (DETAL)</option>
+              </select>
+            </div>
+
+            {/* Estado Catálogo Filter (Activos vs Inactivos) */}
+            <div className="flex flex-col gap-0.5 min-w-0">
+              <label className="text-[9.5px] font-bold text-slate-500 font-sans uppercase truncate" title="Estado Catálogo (Activos / Inactivos)">Estado Catálogo</label>
+              <select
+                value={filterEstado}
+                onChange={(e) => setFilterEstado(e.target.value as any)}
+                className="bg-white border border-slate-300 rounded-lg py-1 px-1.5 text-[11px] text-slate-800 font-sans font-bold focus:border-winter-inventarioStart focus:outline-none shadow-sm truncate min-w-0"
+              >
+                <option value="activos">🟢 SOLO ACTIVOS</option>
+                <option value="inactivos">🔴 SOLO INACTIVOS</option>
+                <option value="todos">⚪ TODOS</option>
               </select>
             </div>
           </div>
@@ -5248,6 +5590,18 @@ export default function Inventario({
                       Mostrando {Math.min((currentPage - 1) * pageSize + 1, sortedProducts.length)} - {Math.min(currentPage * pageSize, sortedProducts.length)} de {sortedProducts.length} productos
                     </span>
                   </div>
+
+                  {/* Indicador de Combos Virtuales en el centro de la barra superior según solicitud */}
+                  {hasCombosInFilter && (
+                    <div className="bg-purple-50 border border-purple-250 text-purple-900 rounded-xl px-3 py-1 shadow-2xs flex items-center gap-1.5" title="Los combos son agrupaciones comerciales de stock virtual. Sus componentes individuales ya suman al stock y costo del inventario; por lo tanto, están excluidos de las sumas totales para evitar duplicar existencias contables.">
+                      <span className="font-extrabold text-purple-700 text-[11px] font-sans flex items-center gap-1">
+                        <span>🎁</span> {filtCombos.length} Combo{filtCombos.length > 1 ? 's' : ''} (Virtual)
+                      </span>
+                      <span className="text-purple-700 text-[10.5px] font-medium hidden sm:inline">
+                        — Excluido para no duplicar existencias
+                      </span>
+                    </div>
+                  )}
 
                   {totalPages > 1 && (
                     <div className="flex items-center gap-1.5 font-bold">
@@ -5389,6 +5743,11 @@ export default function Inventario({
                             >
                               <div className="font-bold text-slate-850 text-[11px] leading-tight flex items-center gap-1.5 flex-wrap select-text">
                                 <span className="select-text cursor-text selection:bg-indigo-600 selection:text-white">{p.description}</span>
+                                {p.estado === 'Inactivo' && (
+                                  <span className="bg-rose-100 text-rose-800 border border-rose-300 font-extrabold text-[8.5px] px-1.5 py-0.2 rounded font-sans shadow-2xs select-none uppercase tracking-wider" title="Producto Inactivo / Archivado (Excluido de la venta en Caja)">
+                                    Inactivo
+                                  </span>
+                                )}
                                 {p.exento_impuesto === true ? (
                                   <span className="bg-amber-100 text-amber-900 border border-amber-300 font-extrabold text-[8.5px] px-1 py-0.2 rounded font-mono shadow-2xs select-none" title="Producto Exento de IVA (0%)">
                                     (E)
@@ -5398,7 +5757,38 @@ export default function Inventario({
                                     (G)
                                   </span>
                                 )}
+                                {p.es_combo && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setComboPadreProduct(p);
+                                      setShowComboModal(true);
+                                    }}
+                                    className="bg-purple-100 hover:bg-purple-200 text-purple-900 border border-purple-300 font-extrabold text-[8.5px] px-1.5 py-0.2 rounded font-sans shadow-2xs select-none flex items-center gap-1 cursor-pointer transition-colors"
+                                    title="Producto Combo / Receta Promocional. Clic para ver o modificar componentes"
+                                  >
+                                    <span>🎁 COMBO</span>
+                                  </button>
+                                )}
                               </div>
+                              {/* Receta del combo si aplica */}
+                              {p.es_combo && (p.receta_resumen || (p.receta_items && p.receta_items.length > 0)) && (
+                                <div
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setComboPadreProduct(p);
+                                    setShowComboModal(true);
+                                  }}
+                                  className="mt-1 text-[9.5px] text-purple-800 font-medium flex items-center gap-1 bg-purple-50 hover:bg-purple-100/80 border border-purple-200/90 rounded px-1.5 py-0.5 cursor-pointer transition-colors select-none max-w-fit shadow-2xs"
+                                  title={`Clic para ver o editar la receta del combo.\n${getComboSummary(p)}`}
+                                >
+                                  <span className="font-bold text-purple-950 flex-shrink-0">🎁 Receta:</span>
+                                  <span className="truncate max-w-[280px]">
+                                    {getComboSummary(p) || 'Cargando componentes de la receta...'}
+                                  </span>
+                                </div>
+                              )}
                               {(p.a_granel || p.fecha_vencimiento) && (
                                 <div className="flex gap-1.5 mt-0.5 text-[8px] leading-none">
                                   {p.a_granel && (
@@ -5415,10 +5805,22 @@ export default function Inventario({
                             <td className="px-2 py-1 font-sans truncate select-text cursor-text selection:bg-indigo-600 selection:text-white" title={p.category}>{p.category}</td>
                             <td className="px-2 py-1 text-center font-mono text-slate-500 select-text cursor-text selection:bg-indigo-600 selection:text-white">{formatStockVal(p.stock_minimo, p.a_granel)}</td>
                             <td className={`px-2 py-1 text-center font-black font-mono select-text cursor-text selection:bg-indigo-600 selection:text-white ${isLowStock ? 'text-red-500 animate-pulse font-bold' : 'text-slate-800'}`}>
-                              {formatStockVal(p.stock_actual, p.a_granel)}
+                              <div className="flex flex-col items-center justify-center">
+                                <span>{formatStockVal(p.stock_actual, p.a_granel)}</span>
+                                {p.es_combo && (
+                                  <span className="text-[7.5px] font-sans font-extrabold text-purple-700 bg-purple-50 border border-purple-200 px-1 rounded tracking-tight mt-0.5" title="Stock virtual calculado automáticamente según la disponibilidad de sus ingredientes">
+                                    VIRTUAL
+                                  </span>
+                                )}
+                              </div>
                             </td>
                             {canViewCost && (
-                              <td className="px-2 py-1 text-center font-mono text-slate-600 select-text cursor-text selection:bg-indigo-600 selection:text-white">${p.precio_costo_usd.toFixed(2)}</td>
+                              <td className="px-2 py-1 text-center font-mono text-slate-600 select-text cursor-text selection:bg-indigo-600 selection:text-white">
+                                <div>${p.precio_costo_usd.toFixed(2)}</div>
+                                {p.es_combo && (
+                                  <span className="text-[7.5px] text-purple-600 font-sans block font-semibold" title="Costo calculado por la suma de los componentes de la receta">(receta)</span>
+                                )}
+                              </td>
                             )}
                             <td className="px-2 py-1 text-center font-mono text-emerald-600 font-bold select-text cursor-text selection:bg-indigo-600 selection:text-white">${p.precio_detalle_usd.toFixed(2)}</td>
                             <td className="px-2 py-1 text-center font-mono text-slate-600 select-text cursor-text selection:bg-indigo-600 selection:text-white">
@@ -5794,23 +6196,34 @@ export default function Inventario({
                     <span>Modificar</span>
                   </button>
 
-                  {/* BUTTON 4: ELIMINAR */}
-                  {hasPermission('eliminar') && (
+                  {/* BUTTON 4: ELIMINAR O REACTIVAR */}
+                  {selectedProduct?.estado === 'Inactivo' ? (
                     <button
-                      onClick={handleDeleteProductClick}
-                      disabled={!selectedProduct || selectedProduct.stock_actual > 0}
-                      className="w-full bg-red-655 hover:bg-red-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-350 text-white border border-red-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all enabled:active:scale-95 disabled:cursor-not-allowed"
-                      title={
-                        !selectedProduct
-                          ? "Seleccione un producto para eliminar"
-                          : selectedProduct.stock_actual > 0
-                            ? "No se puede eliminar un producto con existencia mayor a 0"
-                            : "Eliminar producto permanentemente"
-                      }
+                      onClick={handleReactivateProductClick}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all enabled:active:scale-95"
+                      title="Reactivar producto para que vuelva a estar disponible en el catálogo activo y caja"
                     >
-                      <Minus className="w-4 h-4 bg-red-700/50 disabled:bg-transparent rounded-full p-0.5" />
-                      <span>Eliminar</span>
+                      <RotateCcw className="w-4 h-4 bg-emerald-700/50 rounded-full p-0.5" />
+                      <span>Reactivar</span>
                     </button>
+                  ) : (
+                    hasPermission('eliminar') && (
+                      <button
+                        onClick={handleDeleteProductClick}
+                        disabled={!selectedProduct || selectedProduct.stock_actual > 0}
+                        className="w-full bg-red-655 hover:bg-red-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:border-slate-350 text-white border border-red-700 py-2 px-3 rounded shadow-sm flex items-center gap-2 font-sans font-bold text-[11px] uppercase tracking-wider text-left transition-all enabled:active:scale-95 disabled:cursor-not-allowed"
+                        title={
+                          !selectedProduct
+                            ? "Seleccione un producto para eliminar"
+                            : selectedProduct.stock_actual > 0
+                              ? "No se puede eliminar un producto con existencia mayor a 0"
+                              : "Eliminar producto del catálogo (se archivará si posee ventas históricas)"
+                        }
+                      >
+                        <Minus className="w-4 h-4 bg-red-700/50 disabled:bg-transparent rounded-full p-0.5" />
+                        <span>Eliminar</span>
+                      </button>
+                    )
                   )}
                 </div>
 
@@ -7162,91 +7575,365 @@ export default function Inventario({
         </div>
       )}
 
-      {/* MODAL: STOCK ADJUSTMENT - Light theme */}
-      {showAdjustModal && selectedProduct && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in font-mono text-slate-800">
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden w-full max-w-md shadow-2xl p-6 space-y-4">
-            <div className="flex justify-between items-center border-b border-slate-200 pb-3">
-              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
-                <RefreshCw className="w-4 h-4 text-winter-inventarioStart" />
-                AJUSTAR EXISTENCIAS
-              </h3>
-              <button onClick={() => { setShowAdjustModal(false); setSelectedProduct(null); }} className="text-slate-400 hover:text-slate-700">✕</button>
-            </div>
+      {/* MODAL: STOCK ADJUSTMENT - Redesigned with Exact Count & Movement modes */}
+      {showAdjustModal && selectedProduct && (() => {
+        const isGranel = Boolean(selectedProduct.a_granel);
+        const currentStock = typeof selectedProduct.stock_actual === 'number' 
+          ? selectedProduct.stock_actual 
+          : (parseFloat(selectedProduct.stock_actual as any) || 0);
+        const unitLabel = isGranel ? 'Kg' : 'UND';
 
-            <div className="text-xs bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-1">
-              <div><span className="text-slate-500 font-sans">Producto:</span> <span className="text-slate-800 font-bold select-text">{selectedProduct.description}</span></div>
-              <div><span className="text-slate-500 font-sans">Código:</span> <span className="text-slate-600 font-bold font-mono">{selectedProduct.barcode}</span></div>
-              <div><span className="text-slate-500 font-sans">Stock Físico Actual:</span> <span className="text-emerald-700 font-black font-mono">{selectedProduct.stock_actual} UND</span></div>
-            </div>
+        // Calculation for Exact Count Mode
+        const parsedExact = isGranel ? parseFloat(exactStockInput) : parseInt(exactStockInput, 10);
+        const isValidExact = !isNaN(parsedExact) && parsedExact >= 0;
+        const diffExact = isValidExact ? (parsedExact - currentStock) : 0;
 
-            <form onSubmit={handleSaveStockAdjust} className="space-y-4">
-              <div>
-                <label className="text-xs text-slate-500 block mb-1 font-sans">Tipo de Ajuste</label>
-                <select
-                  value={adjustType}
-                  onChange={(e) => setAdjustType(e.target.value as any)}
-                  className="w-full bg-slate-55 border border-slate-350 rounded p-2.5 text-xs text-slate-800 outline-none focus:bg-white focus:border-winter-inventarioStart"
-                >
-                  <option value="Entrada">Entrada (Compras, Ajustes Positivos)</option>
-                  <option value="Salida">Salida (Ajustes Negativos)</option>
-                  <option value="Merma">Merma (Deterioro, Pérdida, Rotura, Vencimiento)</option>
-                  <option value="Devolucion">Devolución (Retorno de Cliente)</option>
-                </select>
-              </div>
+        // Calculation for Manual Movement Mode
+        const parsedQty = isGranel ? parseFloat(adjustQty) : parseInt(adjustQty, 10);
+        const isValidQty = !isNaN(parsedQty) && parsedQty > 0;
+        const manualMultiplier = (adjustType === 'Entrada' || adjustType === 'Devolucion') ? 1 : -1;
+        const resultingManualStock = isValidQty ? Math.max(0, currentStock + (parsedQty * manualMultiplier)) : currentStock;
 
-              <div>
-                <label className="text-xs text-slate-500 block mb-1 font-sans">Cantidad de Ajuste</label>
-                <input
-                  type="number"
-                  step={selectedProduct?.a_granel ? "0.001" : "1"}
-                  min={selectedProduct?.a_granel ? "0.001" : "1"}
-                  required
-                  placeholder={selectedProduct?.a_granel ? "Ej: 1.50" : "Ej: 15"}
-                  value={adjustQty}
-                  onChange={(e) => setAdjustQty(e.target.value)}
-                  className="w-full bg-slate-55 border border-slate-350 rounded p-2.5 text-xs text-slate-850 font-bold font-mono focus:bg-white focus:border-winter-inventarioStart focus:outline-none"
-                />
-              </div>
+        const quickReasonsConteo = [
+          'Auditoría y conteo físico',
+          'Ajuste de inventario en estante',
+          'Cuadre de existencias',
+          'Mercancía sobrante encontrada'
+        ];
 
-              <div>
-                <label className="text-xs text-slate-500 block mb-1 font-sans">
-                  Justificación de Auditoría <span className="text-red-500 font-bold">*</span>
-                </label>
-                <textarea
-                  required
-                  placeholder="Escriba detalladamente la justificación física de este ajuste de inventario..."
-                  value={adjustReason}
-                  onChange={(e) => setAdjustReason(e.target.value)}
-                  rows={3}
-                  className="w-full bg-slate-55 border border-slate-355 rounded p-2.5 text-xs text-slate-800 focus:bg-white focus:border-winter-inventarioStart focus:outline-none font-sans resize-none"
-                />
-                {adjustType === 'Merma' && (
-                  <p className="text-[10px] text-red-650 font-bold font-sans mt-1">
-                    ⚠️ Al marcar como 'Merma', el inventario se deducirá automáticamente y se auditará con especial severidad en el Kardex.
-                  </p>
-                )}
-              </div>
+        const quickReasonsMovimiento = [
+          'Compra local de reposición',
+          'Merma por rotura / vencimiento',
+          'Retorno de cliente / devolución',
+          'Consumo interno / muestra'
+        ];
 
-              <div className="flex gap-2 pt-2">
+        return (
+          <div 
+            className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/80 backdrop-blur-xs animate-in fade-in duration-200"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setShowAdjustModal(false);
+                setSelectedProduct(null);
+              }
+            }}
+          >
+            <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg max-h-[92vh] flex flex-col overflow-hidden font-sans">
+              
+              {/* HEADER */}
+              <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-4 sm:p-5 flex items-center justify-between border-b border-indigo-900/50">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="p-2.5 sm:p-3 bg-indigo-500/20 border border-indigo-400/30 rounded-2xl flex-shrink-0">
+                    <RefreshCw className="w-6 h-6 text-indigo-300" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-base sm:text-lg font-extrabold tracking-tight text-white font-sans">
+                        Ajustar Existencias y Stock
+                      </h3>
+                      <span className="px-2 py-0.5 text-[10px] font-bold uppercase bg-indigo-500/30 text-indigo-200 rounded-full border border-indigo-400/30 font-sans">
+                        Auditoría Kardex
+                      </span>
+                    </div>
+                    <p className="text-xs text-indigo-200 mt-0.5 truncate font-sans">
+                      Ajuste físico en tiempo real con historial de movimientos
+                    </p>
+                  </div>
+                </div>
                 <button
                   type="button"
                   onClick={() => { setShowAdjustModal(false); setSelectedProduct(null); }}
-                  className="w-1/3 bg-slate-100 border border-slate-250 text-slate-600 py-2.5 rounded font-sans text-xs hover:bg-slate-200 transition-all"
+                  title="Cerrar modal (ESC)"
+                  className="p-2 text-slate-400 hover:text-white bg-slate-800/60 hover:bg-slate-800 rounded-xl transition-all cursor-pointer flex-shrink-0"
                 >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="w-2/3 bg-winter-inventarioStart hover:bg-winter-inventarioEnd text-white py-2.5 rounded font-bold font-sans text-xs tracking-wider transition-all"
-                >
-                  AUDITAR Y REGISTRAR
+                  <X className="w-5 h-5" />
                 </button>
               </div>
-            </form>
+
+              {/* BODY */}
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+                
+                {/* TARJETA DE PRODUCTO SELECCIONADO */}
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 flex items-center justify-between gap-3 shadow-2xs">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex-shrink-0 overflow-hidden flex items-center justify-center p-0.5">
+                      {selectedProduct.imagen_url ? (
+                        <img 
+                          src={formatImageUrl(selectedProduct.imagen_url)} 
+                          alt={selectedProduct.description}
+                          className="w-full h-full object-contain"
+                        />
+                      ) : (
+                        <Package className="w-6 h-6 text-slate-400" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs sm:text-sm font-bold text-slate-900 truncate font-sans">
+                        {selectedProduct.description}
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-500">
+                        <span className="font-mono font-semibold">Cód: {selectedProduct.barcode}</span>
+                        {selectedProduct.category && (
+                          <span className="font-sans text-[10px] text-slate-400 uppercase">
+                            • {selectedProduct.category}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="text-right flex-shrink-0">
+                    <div className="text-[10px] uppercase font-bold text-slate-400 font-sans">
+                      Stock en Sistema
+                    </div>
+                    <div className="text-sm sm:text-base font-black font-mono text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-lg border border-emerald-200 mt-0.5">
+                      {currentStock} {unitLabel}
+                    </div>
+                  </div>
+                </div>
+
+                {/* SELECTOR DE MODALIDAD (CONTEO EXACTO vs MOVIMIENTO MANUAL) */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 uppercase font-sans block">
+                    Modalidad de Ajuste:
+                  </label>
+                  <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                    <button
+                      type="button"
+                      onClick={() => setAdjustMode('conteo')}
+                      className={`py-2 px-3 rounded-lg text-xs font-bold font-sans transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                        adjustMode === 'conteo'
+                          ? 'bg-white text-indigo-700 shadow-sm border border-slate-200'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <span>🎯 Conteo Físico Real</span>
+                      <span className="text-[9px] px-1 py-0.2 rounded bg-indigo-50 text-indigo-700 font-extrabold border border-indigo-200">
+                        Exacto
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdjustMode('movimiento')}
+                      className={`py-2 px-3 rounded-lg text-xs font-bold font-sans transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                        adjustMode === 'movimiento'
+                          ? 'bg-white text-indigo-700 shadow-sm border border-slate-200'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <span>➕➖ Movimiento Manual</span>
+                    </button>
+                  </div>
+                </div>
+
+                <form onSubmit={handleSaveStockAdjust} className="space-y-4">
+                  {/* MODO 1: CONTEO FÍSICO EXACTO */}
+                  {adjustMode === 'conteo' ? (
+                    <div className="bg-indigo-50/60 border border-indigo-200/80 rounded-2xl p-4 space-y-3.5">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <label className="text-xs font-extrabold uppercase text-indigo-950 font-sans block">
+                            Nuevo Stock Físico Contado:
+                          </label>
+                          <span className="text-[11px] text-indigo-700 font-sans">
+                            Escribe directamente cuántas unidades hay físicamente en tu estante o almacén.
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setExactStockInput('0')}
+                          className="px-2 py-0.5 text-[10px] font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-md transition-colors cursor-pointer"
+                          title="Fijar stock en cero"
+                        >
+                          Poner en 0
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const val = isGranel ? parseFloat(exactStockInput) : parseInt(exactStockInput, 10);
+                            const current = isNaN(val) ? 0 : val;
+                            setExactStockInput(String(Math.max(0, current - 1)));
+                          }}
+                          className="w-10 h-10 bg-white hover:bg-slate-50 border border-indigo-200 rounded-xl font-black text-sm text-slate-700 flex items-center justify-center cursor-pointer shadow-2xs"
+                        >
+                          -1
+                        </button>
+
+                        <div className="relative flex-1">
+                          <input
+                            type="number"
+                            step={isGranel ? "0.001" : "1"}
+                            min="0"
+                            required
+                            autoFocus={true}
+                            value={exactStockInput}
+                            onChange={(e) => setExactStockInput(e.target.value)}
+                            placeholder="0"
+                            className="w-full h-11 bg-white border-2 border-indigo-300 focus:border-indigo-600 rounded-xl px-4 text-center font-mono font-black text-base sm:text-lg text-indigo-950 outline-none shadow-inner"
+                          />
+                          <span className="absolute right-3.5 top-3 text-xs font-bold text-indigo-500 font-mono pointer-events-none">
+                            {unitLabel}
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const val = isGranel ? parseFloat(exactStockInput) : parseInt(exactStockInput, 10);
+                            const current = isNaN(val) ? 0 : val;
+                            setExactStockInput(String(current + 1));
+                          }}
+                          className="w-10 h-10 bg-white hover:bg-slate-50 border border-indigo-200 rounded-xl font-black text-sm text-slate-700 flex items-center justify-center cursor-pointer shadow-2xs"
+                        >
+                          +1
+                        </button>
+                      </div>
+
+                      {/* RESUMEN DEL CONTEO EN VIVO */}
+                      <div className="bg-white border border-indigo-100 rounded-xl p-3 grid grid-cols-3 gap-2 text-center text-xs shadow-2xs">
+                        <div>
+                          <span className="text-[10px] uppercase font-bold text-slate-400 font-sans block">Stock Anterior</span>
+                          <span className="font-mono font-bold text-slate-700 mt-0.5 block">{currentStock} {unitLabel}</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] uppercase font-bold text-slate-400 font-sans block">Diferencia</span>
+                          <span className={`font-mono font-extrabold mt-0.5 block ${
+                            diffExact > 0 
+                              ? 'text-emerald-700' 
+                              : diffExact < 0 
+                                ? 'text-rose-700' 
+                                : 'text-slate-500'
+                          }`}>
+                            {diffExact > 0 ? `+${diffExact.toFixed(isGranel ? 3 : 0)} 📈` : diffExact < 0 ? `${diffExact.toFixed(isGranel ? 3 : 0)} 📉` : '0 ⚖️'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] uppercase font-bold text-indigo-600 font-sans block">Nuevo Stock</span>
+                          <span className="font-mono font-black text-indigo-950 mt-0.5 block">
+                            {isValidExact ? `${parsedExact} ${unitLabel}` : '--'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* MODO 2: MOVIMIENTO MANUAL */
+                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3.5">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs font-bold text-slate-700 uppercase font-sans block mb-1">
+                            Tipo de Movimiento:
+                          </label>
+                          <select
+                            value={adjustType}
+                            onChange={(e) => setAdjustType(e.target.value as any)}
+                            className="w-full bg-white border border-slate-350 rounded-xl p-2.5 text-xs text-slate-800 font-bold font-sans outline-none focus:border-indigo-500 shadow-2xs"
+                          >
+                            <option value="Entrada">🟢 Entrada (Ajuste Positivo)</option>
+                            <option value="Salida">🔴 Salida (Ajuste Negativo)</option>
+                            <option value="Merma">⚠️ Merma (Rotura, Daño, Pérdida)</option>
+                            <option value="Devolucion">🔄 Devolución (Retorno de Cliente)</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-xs font-bold text-slate-700 uppercase font-sans block mb-1">
+                            Cantidad a Mover:
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="number"
+                              step={isGranel ? "0.001" : "1"}
+                              min={isGranel ? "0.001" : "1"}
+                              required
+                              placeholder={isGranel ? "Ej: 1.50" : "Ej: 5"}
+                              value={adjustQty}
+                              onChange={(e) => setAdjustQty(e.target.value)}
+                              className="w-full bg-white border border-slate-350 rounded-xl p-2.5 text-xs text-slate-900 font-bold font-mono focus:border-indigo-500 outline-none shadow-2xs"
+                            />
+                            <span className="absolute right-3 top-2.5 text-xs font-bold text-slate-400 font-mono pointer-events-none">
+                              {unitLabel}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* PREVIEW MOVIMIENTO MANUAL */}
+                      <div className="bg-white border border-slate-200 rounded-xl p-2.5 flex items-center justify-between text-xs">
+                        <span className="text-slate-600 font-sans">
+                          Efecto en Stock: <strong>{currentStock} {unitLabel}</strong> {manualMultiplier > 0 ? '+' : '-'} <strong>{isValidQty ? parsedQty : 0} {unitLabel}</strong>
+                        </span>
+                        <span className="font-bold text-indigo-900 font-mono bg-indigo-50 px-2 py-0.5 rounded-lg border border-indigo-100">
+                          = {resultingManualStock} {unitLabel}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* CAMPO DE JUSTIFICACIÓN DE AUDITORÍA */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-700 uppercase font-sans">
+                        Motivo / Justificación de Auditoría <span className="text-rose-500 font-bold">*</span>
+                      </label>
+                      <span className="text-[10px] text-slate-400">Requerido por Kardex</span>
+                    </div>
+
+                    {/* CHIPS DE SUGERENCIAS RÁPIDAS */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {(adjustMode === 'conteo' ? quickReasonsConteo : quickReasonsMovimiento).map((chip) => (
+                        <button
+                          key={chip}
+                          type="button"
+                          onClick={() => setAdjustReason(chip)}
+                          className={`text-[10.5px] px-2.5 py-1 rounded-lg border transition-all cursor-pointer font-sans ${
+                            adjustReason === chip
+                              ? 'bg-indigo-100 text-indigo-900 border-indigo-300 font-bold'
+                              : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-200'
+                          }`}
+                        >
+                          {chip}
+                        </button>
+                      ))}
+                    </div>
+
+                    <textarea
+                      required
+                      placeholder="Escriba la justificación o detalle físico de este ajuste de inventario..."
+                      value={adjustReason}
+                      onChange={(e) => setAdjustReason(e.target.value)}
+                      rows={2}
+                      className="w-full bg-slate-50 border border-slate-350 focus:bg-white focus:border-indigo-500 rounded-xl p-2.5 text-xs text-slate-800 outline-none font-sans resize-none shadow-2xs"
+                    />
+                  </div>
+
+                  {/* BOTONES DE ACCIÓN */}
+                  <div className="flex items-center gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => { setShowAdjustModal(false); setSelectedProduct(null); }}
+                      className="w-1/3 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 font-bold font-sans text-xs rounded-xl transition-all cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      className="w-2/3 py-2.5 bg-winter-inventarioStart hover:bg-winter-inventarioEnd text-white font-extrabold font-sans text-xs uppercase tracking-wider rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+                    >
+                      <Check className="w-4 h-4 text-white" />
+                      <span>Auditar y Registrar Stock</span>
+                    </button>
+                  </div>
+                </form>
+
+              </div>
+
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* MODAL: PRICE ADJUSTMENT - Light theme */}
       {showPriceModal && selectedProduct && (
@@ -7578,6 +8265,37 @@ export default function Inventario({
                         />
                       </div>
                     </div>
+
+                    {/* Switch / Toggle: Producto Combo Promocional */}
+                    <div className="bg-purple-50/80 border border-purple-200/90 rounded-xl p-2.5 space-y-1 transition-all">
+                      <label className="flex items-center gap-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={newEsCombo}
+                          onChange={(e) => {
+                            const val = e.target.checked;
+                            setNewEsCombo(val);
+                            if (val) {
+                              setNewWholesaleQty('0');
+                              setNewMayor('0');
+                              setNewBulto('0');
+                              setNewCantBulto('0');
+                              if (!newCost) setNewCost('0');
+                              if (!newDetail) setNewDetail('0');
+                            }
+                          }}
+                          className="rounded border-purple-300 text-purple-600 focus:ring-purple-500 w-4 h-4 cursor-pointer"
+                        />
+                        <div className="min-w-0">
+                          <span className="text-xs font-bold text-purple-950 flex items-center gap-1">
+                            <span>🎁 ¿Es un Producto Combo / Promocional?</span>
+                          </span>
+                          <span className="text-[10px] text-purple-700 block leading-tight">
+                            Permite costo y precio inicial en 0. Se calcularán con la receta y no requiere venta al mayor.
+                          </span>
+                        </div>
+                      </label>
+                    </div>
                   </div>
 
                   {/* Bloque Imagen del Producto */}
@@ -7722,7 +8440,7 @@ export default function Inventario({
                         <label className="text-[9.5px] font-bold text-slate-700 block mb-0.5 whitespace-nowrap">Cant. Mayor</label>
                         <input
                           type="number"
-                          min="1"
+                          min="0"
                           value={newWholesaleQty}
                           onChange={(e) => setNewWholesaleQty(e.target.value)}
                           className="w-full bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-xs text-slate-900 focus:outline-none font-mono text-center font-bold"
@@ -8229,6 +8947,35 @@ export default function Inventario({
                         />
                       </div>
                     </div>
+
+                    {/* Switch / Toggle: Producto Combo Promocional */}
+                    <div className="bg-purple-50/80 border border-purple-200/90 rounded-xl p-2.5 space-y-1 transition-all">
+                      <label className="flex items-center gap-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={editEsCombo}
+                          onChange={(e) => {
+                            const val = e.target.checked;
+                            setEditEsCombo(val);
+                            if (val) {
+                              setEditWholesaleQty('0');
+                              setEditMayor('0');
+                              setEditBulto('0');
+                              setEditCantBulto('0');
+                            }
+                          }}
+                          className="rounded border-purple-300 text-purple-600 focus:ring-purple-500 w-4 h-4 cursor-pointer"
+                        />
+                        <div className="min-w-0">
+                          <span className="text-xs font-bold text-purple-950 flex items-center gap-1">
+                            <span>🎁 ¿Es un Producto Combo / Promocional?</span>
+                          </span>
+                          <span className="text-[10px] text-purple-700 block leading-tight">
+                            Permite costo y precio inicial en 0. Se calcularán con la receta y no requiere venta al mayor.
+                          </span>
+                        </div>
+                      </label>
+                    </div>
                   </div>
 
                   {/* Bloque Imagen del Producto */}
@@ -8373,7 +9120,7 @@ export default function Inventario({
                         <label className="text-[9.5px] font-bold text-slate-700 block mb-0.5 whitespace-nowrap">Cant. Mayor</label>
                         <input
                           type="number"
-                          min="1"
+                          min="0"
                           value={editWholesaleQty}
                           onChange={(e) => setEditWholesaleQty(e.target.value)}
                           className="w-full bg-slate-50 border border-slate-300 rounded px-1.5 py-1 text-xs text-slate-900 focus:outline-none font-mono text-center font-bold"
@@ -14416,7 +15163,7 @@ export default function Inventario({
               className="w-full text-left px-2.5 py-1.5 hover:bg-purple-50 hover:text-purple-900 rounded-lg flex items-center gap-2 font-bold transition-colors"
             >
               <Gift className="w-3.5 h-3.5 text-purple-600 flex-shrink-0" />
-              <span>Armar Receta / Combo 🎁</span>
+              <span>{contextMenu.product.es_combo ? 'Ver / Modificar Receta del Combo 🎁' : 'Armar Receta / Combo 🎁'}</span>
             </button>
 
             {/* 3c. Vínculo Bulto ↔ Detal */}
@@ -14464,28 +15211,47 @@ export default function Inventario({
               <span>Generar Foto con IA</span>
             </button>
 
-            {/* 6. Eliminar Producto */}
-            {hasPermission('eliminar') && (
+            {/* 6. Eliminar o Reactivar Producto */}
+            {contextMenu.product.estado === 'Inactivo' ? (
               <>
                 <div className="border-t border-slate-100 my-1"></div>
                 <button
                   type="button"
-                  disabled={contextMenu.product.stock_actual > 0}
                   onClick={() => {
                     setSelectedProduct(contextMenu.product);
                     setContextMenu(null);
-                    handleDeleteProductClick();
+                    handleReactivateProductClick();
                   }}
-                  className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 font-bold transition-colors ${contextMenu.product.stock_actual > 0
-                      ? 'opacity-40 cursor-not-allowed text-slate-400'
-                      : 'hover:bg-rose-50 text-rose-600 hover:text-rose-700'
-                    }`}
-                  title={contextMenu.product.stock_actual > 0 ? "Solo se puede eliminar con existencia 0" : "Eliminar producto"}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 font-bold transition-colors hover:bg-emerald-50 text-emerald-600 hover:text-emerald-700"
+                  title="Reactivar producto e integrarlo al catálogo activo y caja"
                 >
-                  <Minus className="w-3.5 h-3.5 text-rose-600 flex-shrink-0" />
-                  <span>Eliminar Producto</span>
+                  <RotateCcw className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                  <span>Reactivar Producto</span>
                 </button>
               </>
+            ) : (
+              hasPermission('eliminar') && (
+                <>
+                  <div className="border-t border-slate-100 my-1"></div>
+                  <button
+                    type="button"
+                    disabled={contextMenu.product.stock_actual > 0}
+                    onClick={() => {
+                      setSelectedProduct(contextMenu.product);
+                      setContextMenu(null);
+                      handleDeleteProductClick();
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-lg flex items-center gap-2 font-bold transition-colors ${contextMenu.product.stock_actual > 0
+                        ? 'opacity-40 cursor-not-allowed text-slate-400'
+                        : 'hover:bg-rose-50 text-rose-600 hover:text-rose-700'
+                      }`}
+                    title={contextMenu.product.stock_actual > 0 ? "Solo se puede eliminar con existencia 0" : "Eliminar producto del catálogo (se archivará si posee historial)"}
+                  >
+                    <Minus className="w-3.5 h-3.5 text-rose-600 flex-shrink-0" />
+                    <span>Eliminar Producto</span>
+                  </button>
+                </>
+              )
             )}
           </div>
         </div>
@@ -14671,10 +15437,15 @@ export default function Inventario({
         padreProduct={comboPadreProduct}
         allProducts={products}
         tasaDia={tasaDia || 1}
-        onSavedSuccess={() => {
-          if (onUpdateProduct && comboPadreProduct) {
-            onUpdateProduct({ ...comboPadreProduct, es_combo: true });
+        onSavedSuccess={(updatedProduct?: any) => {
+          if (updatedProduct && onUpdateProduct && comboPadreProduct) {
+            onUpdateProduct({
+              ...comboPadreProduct,
+              ...updatedProduct,
+              es_combo: true
+            });
           }
+          window.dispatchEvent(new Event('pos_refresh_products'));
         }}
         showAlert={showAlert}
       />

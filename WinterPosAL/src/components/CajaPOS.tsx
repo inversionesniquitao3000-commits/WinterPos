@@ -11,7 +11,7 @@ import {
   CreditCard, Smartphone, Fingerprint, Wallet, Globe, CalendarClock,
   Landmark, PackageCheck
 } from 'lucide-react';
-import { formatNumberToWordsUSD, printTicketReceipt, printCierreTicketReport, formatBs, formatImageUrl } from '../utils';
+import { formatNumberToWordsUSD, printTicketReceipt, printCierreTicketReport, formatBs, formatImageUrl, generateMetodosPagoDesglose } from '../utils';
 import { useDialog } from '../hooks/useDialog';
 import CambioDivisasModal from './CambioDivisasModal';
 import AuxiliarCalculoPrecios from './AuxiliarCalculoPrecios';
@@ -157,6 +157,68 @@ export default function CajaPOS({
     comboDescription?: string;
   } | null>(null);
   const [isUnpackingSmartBulto, setIsUnpackingSmartBulto] = useState<boolean>(false);
+
+  // Cache de recetas de combos para visualización garantizada
+  const [comboRecipesMap, setComboRecipesMap] = useState<Record<number, any[]>>({});
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadCombos = async () => {
+      try {
+        const comboUrl = getApiUrl ? getApiUrl('/combos') : '/api/combos';
+        const res = await fetch(comboUrl);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && isMounted) {
+            const map: Record<number, any[]> = {};
+            for (const item of data) {
+              const pId = item.producto_padre_id;
+              if (!map[pId]) map[pId] = [];
+              map[pId].push(item);
+            }
+            setComboRecipesMap(map);
+          }
+        }
+      } catch (e) {
+        console.error('Error cargando recetas en CajaPOS:', e);
+      }
+    };
+    loadCombos();
+    window.addEventListener('pos_refresh_products', loadCombos);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('pos_refresh_products', loadCombos);
+    };
+  }, [getApiUrl]);
+
+  const getComboSummary = useCallback((p: Product | any): string => {
+    if (!p) return '';
+    if (p.receta_resumen && typeof p.receta_resumen === 'string' && p.receta_resumen.trim().length > 0) {
+      return p.receta_resumen;
+    }
+    if (Array.isArray(p.receta_items) && p.receta_items.length > 0) {
+      return p.receta_items.map((it: any) => `${it.cantidad}x ${it.descripcion}`).join(' • ');
+    }
+    const fromMap = comboRecipesMap[p.id];
+    if (Array.isArray(fromMap) && fromMap.length > 0) {
+      return fromMap.map((it: any) => `${it.cantidad}x ${it.descripcion}`).join(' • ');
+    }
+    const catP = products.find(cp => cp.id === p.id);
+    if (catP?.receta_resumen) return catP.receta_resumen;
+    if (Array.isArray(catP?.receta_items) && catP.receta_items.length > 0) {
+      return catP.receta_items.map((it: any) => `${it.cantidad}x ${it.descripcion}`).join(' • ');
+    }
+    return '';
+  }, [comboRecipesMap, products]);
+
+  const getComboItems = useCallback((p: Product | any): any[] => {
+    if (!p) return [];
+    if (Array.isArray(p.receta_items) && p.receta_items.length > 0) return p.receta_items;
+    if (Array.isArray(comboRecipesMap[p.id]) && comboRecipesMap[p.id].length > 0) return comboRecipesMap[p.id];
+    const catP = products.find(cp => cp.id === p.id);
+    if (Array.isArray(catP?.receta_items) && catP.receta_items.length > 0) return catP.receta_items;
+    return [];
+  }, [comboRecipesMap, products]);
 
   // Quick Product Modals from Context Menu
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -1200,6 +1262,7 @@ export default function CajaPOS({
     const map = new Map<string, Product>();
     for (let i = 0; i < products.length; i++) {
       const p = products[i];
+      if (p.estado === 'Inactivo') continue;
       if (p.barcode) {
         map.set(p.barcode.toUpperCase().trim(), p);
       }
@@ -1223,6 +1286,7 @@ export default function CajaPOS({
     const matches: Product[] = [];
     for (let i = 0; i < products.length; i++) {
       const p = products[i];
+      if (p.estado === 'Inactivo') continue;
       const desc = p.description.toLowerCase();
       const code = (p.barcode || '').toLowerCase();
       if (code.startsWith(term) || desc.includes(term) || code.includes(term)) {
@@ -1311,8 +1375,10 @@ export default function CajaPOS({
   const filteredSearchProducts = useMemo(() => {
     if (entradaBarcode.trim() === "") return [];
     return products.filter(
-      p => p.description.toLowerCase().includes(entradaBarcode.toLowerCase()) ||
+      p => p.estado !== 'Inactivo' && (
+        p.description.toLowerCase().includes(entradaBarcode.toLowerCase()) ||
         p.barcode.toLowerCase().includes(entradaBarcode.toLowerCase())
+      )
     );
   }, [entradaBarcode, products]);
 
@@ -1323,8 +1389,10 @@ export default function CajaPOS({
       return;
     }
     const exactMatch = products.find(
-      p => p.barcode.toUpperCase() === entradaBarcode.trim().toUpperCase() ||
+      p => p.estado !== 'Inactivo' && (
+        p.barcode.toUpperCase() === entradaBarcode.trim().toUpperCase() ||
         p.id.toString() === entradaBarcode.trim()
+      )
     );
     if (exactMatch) {
       setMatchedProduct(exactMatch);
@@ -3478,6 +3546,7 @@ export default function CajaPOS({
         expectedVes,
         costoTotalUsd,
         utilidadUsd,
+        totalTickets: targetShiftSales.filter(s => !s.factura_nro?.startsWith('DEV-')).length,
         ventasEfectivoUsd,
         ventasEfectivoVes,
         abonoClientesUsd,
@@ -3557,11 +3626,11 @@ export default function CajaPOS({
     const diffUsd = realUsd - cierreResult.dineroEnCajaExpected;
     const diffVes = realVes - cierreResult.expectedVes;
 
-    const template = waCierreStatus.messageTemplate ||
-      `📊 *REPORTE DE ARQUEO Y CIERRE DE CAJA*\n\n` +
+    const defaultFullTemplate = `📊 *REPORTE DE ARQUEO Y CIERRE DE CAJA*\n\n` +
       `📅 *Fecha:* {fecha}\n` +
       `👤 *Cajero:* {usuario}\n` +
-      `🖥️ *Terminal:* {terminal}\n\n` +
+      `🖥️ *Terminal:* {terminal}\n` +
+      `🧾 *Tickets Emitidos:* {totalTickets}\n\n` +
       `💵 *EFECTIVO ESPERADO EN GAVETA:*\n` +
       `• Dólares (USD): $ {dineroEnCajaExpected}\n` +
       `• Bolívares (VES): Bs {expectedVes}\n\n` +
@@ -3571,22 +3640,54 @@ export default function CajaPOS({
       `⚖️ *DIFERENCIA (BALANCE):*\n` +
       `• Dólares (USD): {diffUsd}\n` +
       `• Bolívares (VES): {diffVes}\n\n` +
+      `💳 *INGRESOS POR MEDIOS DE PAGO:*\n` +
+      `{desglosePagos}\n\n` +
       `🛍️ *VENTAS TOTALES DEL TURNO:* $ {ventaTotalUsd} USD\n` +
-      `📉 *DESCUENTOS APLICADOS:* $ {descuentosUsd} USD\n\n` +
+      `📉 *DESCUENTOS APLICADOS:* $ {descuentosUsd} USD\n` +
+      `💰 *UTILIDAD NETA DEL TURNO:* $ {utilidadNetaUsd} USD\n\n` +
       `*WinterPosAL Cloud System*`;
+
+    let template = waCierreStatus.messageTemplate || defaultFullTemplate;
+    if (template.includes('EFECTIVO ESPERADO EN GAVETA') && !template.includes('{desglosePagos}') && !template.includes('{totalTickets}')) {
+      template = defaultFullTemplate;
+    }
+
+    const totalTicketsCount = cierreResult.totalTickets != null ? cierreResult.totalTickets : (Array.isArray(shiftSales) ? shiftSales.filter(s => !s.factura_nro?.startsWith('DEV-')).length : 0);
+    const desglosePagosFormatted = generateMetodosPagoDesglose(cierreResult, tasaDia);
+    const utilidadNetaVal = cierreResult.utilidadUsd != null ? cierreResult.utilidadUsd : (cierreResult.ventaTotalUsd - (cierreResult.costoTotalUsd || 0));
+    const utilidadNetaUsdStr = utilidadNetaVal.toFixed(2);
+    const utilidadNetaVesStr = (utilidadNetaVal * (tasaDia || 1)).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
     const summaryText = template
       .replace(/{fecha}/g, cierreResult.fechaCierre || cierreResult.fecha || '')
       .replace(/{usuario}/g, cierreResult.usuario.toUpperCase())
       .replace(/{terminal}/g, localStorage.getItem('pos_terminal_name') || 'CAJA_01')
+      .replace(/{totalTickets}/g, String(totalTicketsCount))
+      .replace(/{cantTickets}/g, String(totalTicketsCount))
       .replace(/{dineroEnCajaExpected}/g, cierreResult.dineroEnCajaExpected.toFixed(2))
       .replace(/{expectedVes}/g, cierreResult.expectedVes.toFixed(2))
       .replace(/{realUsd}/g, realUsd.toFixed(2))
       .replace(/{realVes}/g, realVes.toFixed(2))
       .replace(/{diffUsd}/g, diffUsd >= 0 ? `+$${diffUsd.toFixed(2)} (Sobrante)` : `-$${Math.abs(diffUsd).toFixed(2)} (Faltante)`)
       .replace(/{diffVes}/g, diffVes >= 0 ? `+Bs ${diffVes.toFixed(2)} (Sobrante)` : `-Bs ${Math.abs(diffVes).toFixed(2)} (Faltante)`)
+      .replace(/{desglosePagos}/g, desglosePagosFormatted)
+      .replace(/{ingresosPorMetodo}/g, desglosePagosFormatted)
       .replace(/{ventaTotalUsd}/g, cierreResult.ventaTotalUsd.toFixed(2))
-      .replace(/{descuentosUsd}/g, cierreResult.descuentosUsd.toFixed(2));
+      .replace(/{descuentosUsd}/g, cierreResult.descuentosUsd.toFixed(2))
+      .replace(/{utilidadNetaUsd}/g, utilidadNetaUsdStr)
+      .replace(/{utilidadNetaVes}/g, utilidadNetaVesStr)
+      .replace(/{utilidadNeta}/g, utilidadNetaUsdStr)
+      .replace(/{pagoEfectivoUsd}/g, `$${((cierreResult.pagosEfectivoUsd || 0) + (cierreResult.abonosEfectivoUsd || 0)).toFixed(2)} USD`)
+      .replace(/{pagoEfectivoBs}/g, `Bs ${(cierreResult.pagosEfectivoBsVes || 0).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+      .replace(/{pagoPuntoVes}/g, `Bs ${(cierreResult.pagosPuntoVes || 0).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+      .replace(/{pagoBiopagoVes}/g, `Bs ${(cierreResult.pagosBiopagoVes || 0).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+      .replace(/{pagoPagoMovilVes}/g, `Bs ${(cierreResult.pagosPagoMovilVes || 0).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+      .replace(/{pagoTransferenciaVes}/g, `Bs ${(cierreResult.pagosTransferenciaVes || 0).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+      .replace(/{pagoBinanceUsd}/g, `$${((cierreResult.pagosBinanceUsd || 0) + (cierreResult.abonosBinanceUsd || 0)).toFixed(2)} USD`)
+      .replace(/{pagoPayPalUsd}/g, `$${((cierreResult.pagosPayPalUsd || 0) + (cierreResult.abonosPayPalUsd || 0)).toFixed(2)} USD`)
+      .replace(/{pagoTarjetaUsd}/g, `$${(cierreResult.pagosTarjetaUsd || 0).toFixed(2)} USD`)
+      .replace(/{pagoCreditoUsd}/g, `$${(cierreResult.pagosCreditoUsd || 0).toFixed(2)} USD`)
+      .replace(/{pagoCasheaUsd}/g, `$${(cierreResult.pagosCasheaUsd || 0).toFixed(2)} USD`);
 
     let waSuccess = false;
     let fallbackTriggered = false;
@@ -3976,10 +4077,21 @@ export default function CajaPOS({
                                     (G)
                                   </span>
                                 )}
+                                {p.es_combo && (
+                                  <span className="bg-purple-100 text-purple-900 border border-purple-300 font-extrabold text-[8px] px-1 py-0.2 rounded font-sans inline-block shadow-2xs" title="Producto Combo / Receta Promocional">
+                                    🎁 COMBO
+                                  </span>
+                                )}
                               </div>
                               <div className={`font-semibold text-slate-800 leading-snug truncate ${sizeStyles.titleClass} ${!hasStock ? 'line-through text-slate-400' : ''}`} title={p.description}>
                                 {p.description}
                               </div>
+                              {p.es_combo && (
+                                <div className="text-[9px] text-purple-700 font-medium truncate flex items-center gap-1 mt-0.5" title={getComboSummary(p)}>
+                                  <span className="font-bold text-purple-900 bg-purple-50 px-1 rounded border border-purple-200 flex-shrink-0">Incluye:</span>
+                                  <span className="truncate">{getComboSummary(p) || 'Receta de componentes'}</span>
+                                </div>
+                              )}
                             </div>
 
                             {/* Precios y Stock */}
@@ -3991,8 +4103,13 @@ export default function CajaPOS({
                                 </span>
                               </div>
                               {hasStock ? (
-                                <span className={`${sizeStyles.stockClass} text-slate-500 font-sans font-semibold mt-0.5`}>
-                                  Stock: {formatStockVal(p.stock_actual, p.a_granel)}{!p.a_granel ? ' uds' : ''}
+                                <span className={`${sizeStyles.stockClass} text-slate-500 font-sans font-semibold mt-0.5 flex items-center gap-1`}>
+                                  <span>Stock: {formatStockVal(p.stock_actual, p.a_granel)}{!p.a_granel ? ' uds' : ''}</span>
+                                  {p.es_combo && (
+                                    <span className="text-[9px] text-purple-700 font-bold bg-purple-50 border border-purple-200 px-1 rounded">
+                                      receta
+                                    </span>
+                                  )}
                                 </span>
                               ) : (
                                 <div className="flex items-center gap-1.5 mt-0.5">
@@ -4041,6 +4158,17 @@ export default function CajaPOS({
                               (G)
                             </span>
                           )}
+                          {p.es_combo && (
+                            <span className="bg-purple-100 text-purple-900 border border-purple-300 font-extrabold text-[8px] px-1 py-0.2 rounded font-sans ml-1.5 inline-block shadow-2xs" title="Producto Combo / Receta Promocional">
+                              🎁 COMBO
+                            </span>
+                          )}
+                          {p.es_combo && (
+                            <div className="text-[9.5px] text-purple-700 font-medium truncate mt-0.5" title={getComboSummary(p)}>
+                              <span className="font-bold text-purple-900 bg-purple-50 px-1 rounded border border-purple-200 mr-1">Incluye:</span>
+                              <span>{getComboSummary(p) || 'Receta de componentes'}</span>
+                            </div>
+                          )}
                           <span className="float-right text-right flex flex-col items-end">
                             <span className={`${hasStock ? 'text-emerald-600' : 'text-slate-700'} font-bold font-mono`}>
                               ${p.precio_detalle_usd.toFixed(2)}{' '}
@@ -4049,8 +4177,11 @@ export default function CajaPOS({
                               </span>
                             </span>
                             {hasStock ? (
-                              <span className="text-[9px] text-slate-500 font-sans font-semibold">
-                                Stock: {formatStockVal(p.stock_actual, p.a_granel)}{!p.a_granel ? ' uds' : ''}
+                              <span className="text-[9px] text-slate-500 font-sans font-semibold flex items-center gap-1">
+                                <span>Stock: {formatStockVal(p.stock_actual, p.a_granel)}{!p.a_granel ? ' uds' : ''}</span>
+                                {p.es_combo && (
+                                  <span className="text-[8.5px] text-purple-700 font-bold bg-purple-50 border border-purple-200 px-1 rounded">receta</span>
+                                )}
                               </span>
                             ) : (
                               <span className="text-[9px] text-red-500 font-sans font-bold flex items-center gap-1">
@@ -4320,10 +4451,23 @@ export default function CajaPOS({
                                 (G)
                               </span>
                             )}
+                            {item.product.es_combo && (
+                              <span className="bg-purple-100 text-purple-900 border border-purple-300 font-extrabold text-[8.5px] px-1.5 py-0.5 rounded font-sans shadow-2xs flex-shrink-0" title="Producto Combo / Receta Promocional">
+                                🎁 COMBO
+                              </span>
+                            )}
                             {item.product.a_granel && (
                               <span className="bg-orange-100 text-orange-800 text-[9px] px-1.5 py-0.5 rounded font-bold font-sans flex-shrink-0">A Granel</span>
                             )}
                           </div>
+                          {item.product.es_combo && (
+                            <div className="mt-1 text-[10px] text-purple-900 bg-purple-50/90 border border-purple-200 rounded-md px-2 py-0.5 flex items-center gap-1.5 shadow-2xs w-fit max-w-full">
+                              <span className="text-purple-700 font-extrabold flex-shrink-0">🎁 Contenido:</span>
+                              <span className="font-semibold text-purple-950 truncate">
+                                {getComboSummary(item.product) || 'Cargando componentes de la receta...'}
+                              </span>
+                            </div>
+                          )}
                         </td>
                         <td className="px-2 py-2.5 text-center whitespace-nowrap">
                           <button
@@ -4455,7 +4599,14 @@ export default function CajaPOS({
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-[9.5px] text-slate-400 font-mono font-bold block">{activeItem.barcode || 'S/C'}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[9.5px] text-slate-400 font-mono font-bold block">{activeItem.barcode || 'S/C'}</span>
+                    {activeItem.es_combo && (
+                      <span className="bg-purple-100 text-purple-900 border border-purple-300 font-extrabold text-[8px] px-1 py-0.2 rounded font-sans inline-block shadow-2xs">
+                        🎁 COMBO
+                      </span>
+                    )}
+                  </div>
                   {activeItem.imagen_url && (
                     <span className="text-[8.5px] text-blue-600 font-bold bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200 flex items-center gap-0.5 opacity-80 group-hover:opacity-100">
                       <ZoomIn className="w-2.5 h-2.5" /> Ver Grande
@@ -4477,9 +4628,45 @@ export default function CajaPOS({
                   </div>
 
                   <span className="text-[9px] text-slate-500 ml-auto bg-slate-100 px-1.5 py-0.5 rounded font-bold font-mono">
-                    Stock: {formatStockVal(activeItem.stock_actual, activeItem.a_granel)}
+                    Stock: {formatStockVal(activeItem.stock_actual, activeItem.a_granel)} {activeItem.es_combo ? '(receta)' : ''}
                   </span>
                 </div>
+
+                {/* Composición de la Receta del Combo si aplica */}
+                {activeItem.es_combo && (
+                  <div className="mt-2 pt-1.5 border-t border-purple-150 flex flex-col gap-1">
+                    <div className="flex items-center justify-between text-[9.5px] font-bold text-purple-900">
+                      <span className="flex items-center gap-1">
+                        <span>🎁 Composición del Combo:</span>
+                      </span>
+                      <span className="text-[8px] bg-purple-100 text-purple-800 px-1 rounded font-sans">
+                        {getComboItems(activeItem).length > 0 ? `${getComboItems(activeItem).length} componentes` : 'receta'}
+                      </span>
+                    </div>
+                    <div className="space-y-0.5 max-h-24 overflow-y-auto pr-0.5">
+                      {getComboItems(activeItem).length > 0 ? (
+                        getComboItems(activeItem).map((ing: any, iIdx: number) => {
+                          const childP = products.find(cp => cp.id === ing.producto_hijo_id);
+                          const curStock = childP ? childP.stock_actual : ing.stock_actual;
+                          return (
+                            <div key={iIdx} className="flex items-center justify-between text-[9.5px] font-sans text-slate-700 bg-purple-50/70 px-1.5 py-0.5 rounded border border-purple-100">
+                              <span className="font-semibold truncate max-w-[170px]" title={ing.descripcion}>
+                                <span className="text-purple-700 font-bold">{ing.cantidad}x</span> {ing.descripcion}
+                              </span>
+                              <span className="text-[8.5px] text-slate-500 font-mono flex-shrink-0" title={`Stock en almacén de ${ing.descripcion}: ${curStock}`}>
+                                disp: <span className={curStock < ing.cantidad ? 'text-red-600 font-bold' : 'text-slate-700 font-semibold'}>{curStock}</span>
+                              </span>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <p className="text-[9.5px] text-purple-800 font-medium italic">
+                          {getComboSummary(activeItem) || 'Cargando componentes de la receta...'}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -6350,13 +6537,23 @@ export default function CajaPOS({
                         ? formatBs(totalNumUSD * tasaVenta)
                         : `$${totalNumUSD.toFixed(2)}`;
 
+                      const isCombo = !!(item.product?.es_combo || item.es_combo);
+                      const comboItems = (item.product?.receta_items && item.product.receta_items.length > 0)
+                        ? item.product.receta_items
+                        : getComboItems(item.product);
+
                       return (
                         <div key={item.product?.id || item.productCode || item.code} className="border-b border-dashed border-slate-150 pb-1.5 last:border-none last:pb-0">
-                          <div className="font-bold text-slate-900 break-words text-[11px] leading-tight uppercase">
-                            {item.product?.description || item.description}
-                            <span className={isExempt ? "text-amber-700 font-extrabold text-[9px] ml-1" : "text-sky-700 font-bold text-[9px] ml-1"}>
+                          <div className="font-bold text-slate-900 break-words text-[11px] leading-tight uppercase flex items-center flex-wrap gap-1">
+                            <span>{item.product?.description || item.description}</span>
+                            <span className={isExempt ? "text-amber-700 font-extrabold text-[9px]" : "text-sky-700 font-bold text-[9px]"}>
                               {taxLabel}
                             </span>
+                            {isCombo && (
+                              <span className="bg-purple-100 text-purple-900 border border-purple-300 font-extrabold text-[8px] px-1 py-0.2 rounded font-sans shadow-2xs">
+                                🎁 COMBO
+                              </span>
+                            )}
                           </div>
                           <div className="flex justify-between items-center text-[10.5px] mt-0.5 pl-2 text-slate-650">
                             <span className="font-mono text-slate-600">
@@ -6366,6 +6563,25 @@ export default function CajaPOS({
                               {totalDisplay}
                             </span>
                           </div>
+                          {isCombo && (
+                            <div className="mt-0.5 pl-3 text-[9px] text-purple-900 font-sans bg-purple-50/60 rounded px-1.5 py-0.5 border border-purple-150/70 space-y-0.5">
+                              <span className="font-extrabold text-purple-700 block text-[8px] uppercase">↳ Incluye en este combo:</span>
+                              {comboItems.length > 0 ? (
+                                comboItems.map((ing: any, iIdx: number) => {
+                                  const totalIng = (ing.cantidad || 1) * Math.abs(rawQty);
+                                  return (
+                                    <div key={iIdx} className="text-slate-700 font-medium">
+                                      • <strong className="text-purple-950 font-bold">{totalIng}x</strong> {ing.descripcion}
+                                    </div>
+                                  );
+                                })
+                              ) : (
+                                <div className="text-purple-800 italic">
+                                  {getComboSummary(item.product) || 'Receta de componentes'}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -6807,7 +7023,7 @@ export default function CajaPOS({
                             Comprobante de Cierre de Caja
                           </h3>
                           <span className="text-[11px] text-slate-300 font-mono">
-                            Estación: <strong>{localStorage.getItem('pos_terminal_name') || 'CAJA_01'}</strong> • Cajero: <strong>{currentUser?.nombre || currentUser?.usuario}</strong>
+                            Estación: <strong>{localStorage.getItem('pos_terminal_name') || 'CAJA_01'}</strong> • Cajero: <strong>{currentUser?.nombre || currentUser?.usuario}</strong> • Tickets: <strong>{cierreResult.totalTickets ?? (Array.isArray(shiftSales) ? shiftSales.filter(s => !s.factura_nro?.startsWith('DEV-')).length : 0)}</strong>
                           </span>
                         </div>
                       </div>

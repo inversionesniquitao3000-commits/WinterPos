@@ -120,6 +120,7 @@ const DEFAULT_WA_TEMPLATE = `📊 *REPORTE DE ARQUEO Y CIERRE DE CAJA*
 📅 *Fecha:* {fecha}
 👤 *Cajero:* {usuario}
 🖥️ *Terminal:* {terminal}
+🧾 *Tickets Emitidos:* {totalTickets}
 
 💵 *EFECTIVO ESPERADO EN GAVETA:*
 • Dólares (USD): $ {dineroEnCajaExpected}
@@ -133,10 +134,15 @@ const DEFAULT_WA_TEMPLATE = `📊 *REPORTE DE ARQUEO Y CIERRE DE CAJA*
 • Dólares (USD): {diffUsd}
 • Bolívares (VES): {diffVes}
 
+💳 *INGRESOS POR MEDIOS DE PAGO:*
+{desglosePagos}
+
 🛍️ *VENTAS TOTALES DEL TURNO:* $ {ventaTotalUsd} USD
 📉 *DESCUENTOS APLICADOS:* $ {descuentosUsd} USD
+💰 *UTILIDAD NETA DEL TURNO:* $ {utilidadNetaUsd} USD
 
 *WinterPosAL Cloud System*`;
+
 
 const DEFAULT_UTILIDADES_WA_TEMPLATE = `💼 *REPORTE DE UTILIDADES Y GASTOS OPERATIVOS*
 🏬 *{empresa}*
@@ -799,9 +805,15 @@ export default function ConfiguracionEmpresa({
         const data = await res.json();
         setWaStatus(data);
         if (data.config) {
+          const currentTmpl = data.config.messageTemplate;
+          const isOldDefault = !currentTmpl || (
+            currentTmpl.includes('EFECTIVO ESPERADO EN GAVETA') &&
+            !currentTmpl.includes('{totalTickets}') &&
+            !currentTmpl.includes('{desglosePagos}')
+          );
           setWaConfig({
             ...data.config,
-            messageTemplate: data.config.messageTemplate || DEFAULT_WA_TEMPLATE,
+            messageTemplate: isOldDefault ? DEFAULT_WA_TEMPLATE : currentTmpl,
             utilidadesMessageTemplate: data.config.utilidadesMessageTemplate || DEFAULT_UTILIDADES_WA_TEMPLATE,
             cobroClientesMessageTemplate: data.config.cobroClientesMessageTemplate || DEFAULT_COBRO_CLIENTES_WA_TEMPLATE
           });
@@ -1837,16 +1849,41 @@ export default function ConfiguracionEmpresa({
 
   const getTemplatePreview = (template: string) => {
     if (!template) return '';
+    const sampleDesglosePagos = [
+      '• *Efectivo ($):* $ 120.00 USD',
+      '• *Efectivo (Bs):* Bs 2.610,00 ($30.00 USD)',
+      '• *Punto de Venta:* Bs 8.700,00 ($100.00 USD)',
+      '• *Pago Móvil:* Bs 4.350,00 ($50.00 USD)',
+      '• *Biopago:* Bs 2.610,00 ($30.00 USD)',
+      '• *Binance ($):* $ 20.50 USD'
+    ].join('\n');
+
     return template
       .replace(/{empresa}/g, config?.nombre_comercio || 'INVERSIONES NIQUITAO 3000 C.A.')
       .replace(/{fecha}/g, new Date().toLocaleDateString())
       .replace(/{tasaBcv}/g, '87.00')
+      .replace(/{totalTickets}/g, '24')
+      .replace(/{cantTickets}/g, '24')
+      .replace(/{desglosePagos}/g, sampleDesglosePagos)
+      .replace(/{ingresosPorMetodo}/g, sampleDesglosePagos)
+      .replace(/{utilidadNetaUsd}/g, '112.40')
+      .replace(/{utilidadNetaVes}/g, '9.778,80')
+      .replace(/{utilidadNeta}/g, '112.40')
+      .replace(/{pagoEfectivoUsd}/g, '$ 120.00 USD')
+      .replace(/{pagoEfectivoBs}/g, 'Bs 2.610,00')
+      .replace(/{pagoPuntoVes}/g, 'Bs 8.700,00')
+      .replace(/{pagoBiopagoVes}/g, 'Bs 2.610,00')
+      .replace(/{pagoPagoMovilVes}/g, 'Bs 4.350,00')
+      .replace(/{pagoTransferenciaVes}/g, 'Bs 0,00')
+      .replace(/{pagoBinanceUsd}/g, '$ 20.50 USD')
+      .replace(/{pagoPayPalUsd}/g, '$ 0.00 USD')
+      .replace(/{pagoTarjetaUsd}/g, '$ 0.00 USD')
+      .replace(/{pagoCreditoUsd}/g, '$ 0.00 USD')
+      .replace(/{pagoCasheaUsd}/g, '$ 0.00 USD')
       .replace(/{utilidadBrutaUsd}/g, '293.84')
       .replace(/{utilidadBrutaVes}/g, '25.564,08')
       .replace(/{totalGastosUsd}/g, '82.00')
       .replace(/{totalGastosVes}/g, '7.134,00')
-      .replace(/{utilidadNetaUsd}/g, '211.84')
-      .replace(/{utilidadNetaVes}/g, '18.430,08')
       .replace(/{cantGastos}/g, '2')
       .replace(/{desgloseGastos}/g, '• *⚡ Luz / Electricidad:* $50.00 USD (Bs 4.350,00)\n• *💧 Agua:* $32.00 USD (Bs 2.784,00)')
       .replace(/{desgloseAccionistas}/g, '1. *JUAN PÉREZ* (50.00% Inv)\n   - Capital Invertido: $10,000.00 USD\n   - 💵 *Monto a Cobrar:* *$105.92 USD* | *Bs 9.215,04 VES*\n\n2. *MARÍA GÓMEZ* (50.00% Inv)\n   - Capital Invertido: $10,000.00 USD\n   - 💵 *Monto a Cobrar:* *$105.92 USD* | *Bs 9.215,04 VES*')
@@ -4670,12 +4707,25 @@ export default function ConfiguracionEmpresa({
                     {waTemplateTab === 'cierre' ? (
                       <>
                         <div className="flex flex-col gap-1.5">
-                          <label className="text-[10px] font-bold font-sans uppercase text-slate-500 tracking-wide">Plantilla del Mensaje de Arqueo y Cierre</label>
+                          <div className="flex items-center justify-between">
+                            <label className="text-[10px] font-bold font-sans uppercase text-slate-500 tracking-wide">Plantilla del Mensaje de Arqueo y Cierre</label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setWaConfig(prev => ({ ...prev, messageTemplate: DEFAULT_WA_TEMPLATE }));
+                                showToast('Plantilla recomendada cargada (con Tickets, Medios de Pago y Utilidad).');
+                              }}
+                              className="text-[9.5px] font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2 py-0.5 rounded transition-all flex items-center gap-1 cursor-pointer"
+                              title="Carga la plantilla completa con tickets emitidos, desglose de pagos y utilidad neta"
+                            >
+                              <span>✨ Restaurar Plantilla Recomendada</span>
+                            </button>
+                          </div>
                           <textarea
                             value={waConfig.messageTemplate}
                             onChange={(e) => setWaConfig(prev => ({ ...prev, messageTemplate: e.target.value }))}
                             disabled={!waConfig.enabled}
-                            rows={14}
+                            rows={15}
                             className="bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 focus:bg-white focus:border-indigo-500 focus:outline-none font-mono w-full disabled:opacity-50"
                             placeholder="Escriba la plantilla del mensaje de WhatsApp..."
                           />
@@ -4686,14 +4736,20 @@ export default function ConfiguracionEmpresa({
                             <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{fecha}'}</code>: Fecha y hora</div>
                             <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{usuario}'}</code>: Nombre del cajero</div>
                             <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{terminal}'}</code>: Nombre de la terminal</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{totalTickets}'}</code>: Total de tickets del turno</div>
                             <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{dineroEnCajaExpected}'}</code>: USD esperado</div>
                             <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{expectedVes}'}</code>: VES esperado</div>
                             <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{realUsd}'}</code>: USD real contado</div>
                             <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{realVes}'}</code>: VES real contado</div>
                             <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{diffUsd}'}</code>: Diferencia USD</div>
                             <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{diffVes}'}</code>: Diferencia VES</div>
+                            <div className="col-span-2 bg-emerald-50/70 border border-emerald-200/80 p-1.5 rounded text-emerald-900 font-semibold">
+                              <code className="bg-white border px-1 py-0.5 rounded text-emerald-700 font-mono font-bold">{'{desglosePagos}'}</code>: Ingresos por medio de pago (solo mayores a cero: Punto, Biopago, Efectivo Bs/$, etc.)
+                            </div>
                             <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{ventaTotalUsd}'}</code>: Venta neta total</div>
                             <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{descuentosUsd}'}</code>: Descuentos total</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-emerald-700 font-mono font-bold">{'{utilidadNetaUsd}'}</code>: Utilidad neta real ($)</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-emerald-700 font-mono font-bold">{'{utilidadNetaVes}'}</code>: Utilidad neta real (Bs)</div>
                           </div>
                         </div>
                       </>

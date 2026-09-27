@@ -22,6 +22,7 @@ import CajaPOS from './components/CajaPOS';
 import ErrorBoundary from './components/ErrorBoundary';
 import { MasterPassModal } from './components/MasterPassModal';
 import { ThemeSelectorModal, ThemeMode, ThemePalette } from './components/ThemeSelectorModal';
+import { useDialog } from './hooks/useDialog';
 
 // High-Performance Lazy Loaded Secondary Modules (Sub-second initial boot)
 const Inventario = lazy(() => import('./components/Inventario'));
@@ -44,6 +45,7 @@ import {
 import { printTicketReceipt, formatBs, formatUSD, getApiBaseUrl } from './utils';
 
 export default function App() {
+  const { showAlert } = useDialog();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   // Detección de entorno: Acceso directo Desktop vs Navegador Web estándar
@@ -744,12 +746,32 @@ export default function App() {
     ganancia_detalle: parseFloat(p.ganancia_detalle) || 0,
     ganancia_mayor: parseFloat(p.ganancia_mayor) || 0,
     ganancia_bulto: parseFloat(p.ganancia_bulto) || 0,
-    fijar_margen: !!p.fijar_margen
+    fijar_margen: !!p.fijar_margen,
+    es_combo: !!p.es_combo,
+    receta_items: Array.isArray(p.receta_items) ? p.receta_items : (p.receta_items || []),
+    receta_resumen: typeof p.receta_resumen === 'string' ? p.receta_resumen : ''
   });
 
-  // Refresh products, movements, and price history automatically when entering the inventario tab
+  // Escucha global para refrescar productos (p. ej. tras guardar combo o ajustar stock)
   useEffect(() => {
-    if (activeTab === 'inventario') {
+    const handleRefreshProducts = () => {
+      fetch(getApiUrl('/productos'))
+        .then(r => r.ok ? r.json() : null)
+        .then(freshProds => {
+          if (Array.isArray(freshProds)) {
+            setProducts(freshProds.map(cleanProductObject));
+          }
+        })
+        .catch(err => console.error('Error refreshing products:', err));
+    };
+
+    window.addEventListener('pos_refresh_products', handleRefreshProducts);
+    return () => window.removeEventListener('pos_refresh_products', handleRefreshProducts);
+  }, []);
+
+  // Refresh products, movements, and price history automatically when entering the inventario or caja tab
+  useEffect(() => {
+    if (activeTab === 'inventario' || activeTab === 'caja') {
       const fetchInventarioData = async () => {
         try {
           const productsRes = await fetch(getApiUrl('/productos'));
@@ -758,7 +780,7 @@ export default function App() {
             setProducts(productsData.map(cleanProductObject));
           }
         } catch (err) {
-          console.error('Error al actualizar productos al entrar al inventario:', err);
+          console.error('Error al actualizar productos al entrar a la pestaña:', err);
         }
 
         try {
@@ -1084,6 +1106,8 @@ export default function App() {
           setShiftSales([]);
 
           setSessionNotice('⚠️ Su turno de caja ha sido cerrado desde la red local. Su sesión fue finalizada. Inicie sesión nuevamente para realizar una nueva apertura.');
+          localStorage.removeItem('pos_inventory_filters');
+          sessionStorage.removeItem('pos_inventory_search_term');
           setCurrentUser(null);
         }
       } catch (pollErr) {
@@ -1472,15 +1496,23 @@ export default function App() {
   };
 
 
-  const handleAddProduct = async (prod: Product) => {
+  const handleAddProduct = async (prod: Product): Promise<Product | null> => {
     const saved = await postApiData('/productos', prod);
     const cleanedSaved = saved ? cleanProductObject(saved) : null;
     const cleanedProd = cleanProductObject(prod);
+    const finalProduct = cleanedSaved || cleanedProd;
     if (cleanedSaved) {
-      setProducts(prev => [...prev, cleanedSaved]);
+      setProducts(prev => {
+        const exists = prev.some(p => p.id === cleanedSaved.id || p.barcode === cleanedSaved.barcode);
+        if (exists) {
+          return prev.map(p => (p.id === cleanedSaved.id || p.barcode === cleanedSaved.barcode) ? cleanedSaved : p);
+        }
+        return [...prev, cleanedSaved];
+      });
     } else {
       setProducts(prev => [...prev, cleanedProd]);
     }
+    return finalProduct;
   };
 
   const handleAddProductsBulk = async (productsArray: any[]) => {
@@ -1498,11 +1530,11 @@ export default function App() {
         return data.count;
       } else {
         const errData = await res.json();
-        alert(`Error al importar productos: ${errData.error || 'No se pudo guardar'}`);
+        showAlert(`Error al importar productos: ${errData.error || 'No se pudo guardar'}`, 'Error de Importación', 'error');
         return null;
       }
     } catch (err: any) {
-      alert(`Error de conexión con el servidor: ${err.message}`);
+      showAlert(`Error de conexión con el servidor: ${err.message}`, 'Error de Conexión', 'error');
       return null;
     }
   };
@@ -1523,11 +1555,11 @@ export default function App() {
         return true;
       } else {
         const errData = await res.json();
-        alert(`Error al actualizar producto: ${errData.error || 'No se pudo guardar'}`);
+        showAlert(`Error al actualizar producto: ${errData.error || 'No se pudo guardar'}`, 'Error al Actualizar', 'error');
         return false;
       }
     } catch (err: any) {
-      alert(`Error de conexión con el servidor: ${err.message}`);
+      showAlert(`Error de conexión con el servidor: ${err.message}`, 'Error de Conexión', 'error');
       return false;
     }
   };
@@ -1538,15 +1570,30 @@ export default function App() {
         method: 'DELETE'
       });
       if (response.ok) {
-        setProducts(prev => prev.filter(p => p.id !== prodId));
+        const data = await response.json();
+        if (data.action === 'inactivated') {
+          setProducts(prev => prev.map(p => p.id === prodId ? { ...p, estado: 'Inactivo' } : p));
+          showAlert(
+            data.message || 'El producto posee historial contable (ventas o compras registradas) y ha sido archivado e inactivado del catálogo para preservar los reportes y facturas anteriores.',
+            'Producto Archivado',
+            'info'
+          );
+        } else {
+          setProducts(prev => prev.filter(p => p.id !== prodId));
+          showAlert(
+            data.message || 'Producto eliminado permanentemente del sistema.',
+            'Producto Eliminado',
+            'success'
+          );
+        }
         return true;
       } else {
         const err = await response.json();
-        alert(`Error al eliminar producto: ${err.error || 'No se pudo completar la operación'}`);
+        showAlert(`Error al eliminar producto: ${err.error || 'No se pudo completar la operación'}`, 'Error al Eliminar', 'error');
         return false;
       }
     } catch (err: any) {
-      alert(`Error al conectar con el servidor: ${err.message}`);
+      showAlert(`Error al conectar con el servidor: ${err.message}`, 'Error de Conexión', 'error');
       return false;
     }
   };
@@ -1599,6 +1646,15 @@ export default function App() {
 
     await postApiData('/productos/stock', { id: prodId, stock_actual: nextStock });
     await postApiData('/movements', newMov);
+
+    fetch(getApiUrl('/productos'))
+      .then(r => r.ok ? r.json() : null)
+      .then(freshProds => {
+        if (Array.isArray(freshProds)) {
+          setProducts(freshProds.map(cleanProductObject));
+        }
+      })
+      .catch(() => {});
   };
 
   const handleUpdateProductStockBulk = async (
@@ -2209,6 +2265,8 @@ export default function App() {
     localStorage.removeItem('pos_movimientos_usd');
     localStorage.removeItem('pos_movimientos_ves');
     localStorage.removeItem('pos_apertura_fecha');
+    localStorage.removeItem('pos_inventory_filters');
+    sessionStorage.removeItem('pos_inventory_search_term');
 
     await postApiData('/cajas/cerrar', newCierre);
     setCurrentUser(null);
@@ -2326,38 +2384,114 @@ export default function App() {
     };
 
     // 2. ONLY ONCE SERVER CONFIRMED: Update local inventory and Kardex
-    setProducts(prevProds =>
-      prevProds.map(p => {
-        const item = sale.items.find(i => (i.product?.id === p.id || i.product?.barcode === p.barcode));
-        if (item) {
-          const rawQty = Math.abs(item.qty);
-          const cleanQty = p.a_granel ? rawQty : Math.round(rawQty);
-          const stockDelta = isDev ? cleanQty : -cleanQty;
-          let nextStock = p.stock_actual + stockDelta;
-          if (!p.a_granel) {
-            nextStock = Math.round(nextStock);
+    setProducts(prevProds => {
+      let updated = [...prevProds];
+      for (const item of sale.items) {
+        const prod = item.product;
+        const rawQty = Math.abs(item.qty);
+        const cleanQty = prod?.a_granel ? rawQty : Math.round(rawQty);
+        const isCombo = !!prod?.es_combo;
+
+        if (isCombo && prod?.receta_items && prod.receta_items.length > 0) {
+          // Descontar cada componente en el inventario local y registrar en Kardex
+          for (const comp of prod.receta_items) {
+            const compQtyPerCombo = comp.cantidad || 1;
+            const totalCompQty = compQtyPerCombo * cleanQty;
+            const compDelta = isDev ? totalCompQty : -totalCompQty;
+
+            const cIdx = updated.findIndex(p => p.id === comp.producto_hijo_id || p.barcode === comp.barcode);
+            if (cIdx >= 0) {
+              const cp = updated[cIdx];
+              const nextCompStock = Math.max(0, cp.stock_actual + compDelta);
+              updated[cIdx] = { ...cp, stock_actual: nextCompStock };
+
+              const compMov: InventoryMovement = {
+                id: Math.random(),
+                date: getLocalISODateString(),
+                productCode: cp.barcode,
+                productDescription: cp.description,
+                type: isDev ? 'Devolución' : 'Venta',
+                qty: compDelta,
+                stock_anterior: cp.stock_actual,
+                stock_posterior: nextCompStock,
+                motivo: isDev 
+                  ? `Devolución Combo: ${prod.description} (${totalCompQty}x ${cp.description}) [${confirmedSale.factura_nro}]`
+                  : `Venta Combo: ${prod.description} (${totalCompQty}x ${cp.description}) [${confirmedSale.factura_nro}]`,
+                usuario: currentUser?.nombre || 'SISTEMA'
+              };
+              setMovements(prev => [...prev, compMov]);
+            }
           }
-          nextStock = Math.max(0, nextStock);
 
-          const newMov: InventoryMovement = {
-            id: Math.random(),
-            date: getLocalISODateString(),
-            productCode: p.barcode,
-            productDescription: p.description,
-            type: isDev ? 'Devolución' : 'Venta',
-            qty: stockDelta,
-            stock_anterior: p.stock_actual,
-            stock_posterior: nextStock,
-            motivo: isDev ? `Devolución Facturada: ${confirmedSale.factura_nro}` : `Venta Facturada: ${confirmedSale.factura_nro}`,
-            usuario: currentUser?.nombre || 'SISTEMA'
-          };
-          setMovements(prevMovs => [...prevMovs, newMov]);
+          // Registrar movimiento del combo padre en Kardex
+          const pIdx = updated.findIndex(p => p.id === prod?.id || p.barcode === prod?.barcode);
+          if (pIdx >= 0) {
+            const p = updated[pIdx];
+            const parentMov: InventoryMovement = {
+              id: Math.random(),
+              date: getLocalISODateString(),
+              productCode: p.barcode,
+              productDescription: p.description,
+              type: isDev ? 'Devolución' : 'Venta',
+              qty: isDev ? cleanQty : -cleanQty,
+              stock_anterior: p.stock_actual,
+              stock_posterior: Math.max(0, p.stock_actual + (isDev ? cleanQty : -cleanQty)),
+              motivo: isDev ? `Devolución Facturada: ${confirmedSale.factura_nro} (Combo ${cleanQty} uds)` : `Venta Facturada: ${confirmedSale.factura_nro} (Combo ${cleanQty} uds)`,
+              usuario: currentUser?.nombre || 'SISTEMA'
+            };
+            setMovements(prev => [...prev, parentMov]);
+          }
+        } else {
+          // Producto estándar no combo
+          const pIdx = updated.findIndex(p => (p.id === prod?.id || p.barcode === prod?.barcode));
+          if (pIdx >= 0) {
+            const p = updated[pIdx];
+            const stockDelta = isDev ? cleanQty : -cleanQty;
+            let nextStock = p.stock_actual + stockDelta;
+            if (!p.a_granel) nextStock = Math.round(nextStock);
+            nextStock = Math.max(0, nextStock);
+            updated[pIdx] = { ...p, stock_actual: nextStock };
 
-          return { ...p, stock_actual: nextStock };
+            const newMov: InventoryMovement = {
+              id: Math.random(),
+              date: getLocalISODateString(),
+              productCode: p.barcode,
+              productDescription: p.description,
+              type: isDev ? 'Devolución' : 'Venta',
+              qty: stockDelta,
+              stock_anterior: p.stock_actual,
+              stock_posterior: nextStock,
+              motivo: isDev ? `Devolución Facturada: ${confirmedSale.factura_nro}` : `Venta Facturada: ${confirmedSale.factura_nro}`,
+              usuario: currentUser?.nombre || 'SISTEMA'
+            };
+            setMovements(prev => [...prev, newMov]);
+          }
         }
-        return p;
-      })
-    );
+      }
+      return updated;
+    });
+
+    // Si la venta incluyó algún producto Combo, sincronizar catálogo y kardex desde el servidor
+    const hasComboSold = sale.items.some(i => i.product?.es_combo);
+    if (hasComboSold) {
+      fetch(getApiUrl('/productos'))
+        .then(r => r.ok ? r.json() : null)
+        .then(freshProds => {
+          if (Array.isArray(freshProds)) {
+            setProducts(freshProds.map(cleanProductObject));
+          }
+        })
+        .catch(() => {});
+
+      fetch(getApiUrl('/movements'))
+        .then(r => r.ok ? r.json() : null)
+        .then(freshMovs => {
+          if (Array.isArray(freshMovs)) {
+            setMovements(freshMovs);
+          }
+        })
+        .catch(() => {});
+    }
 
     // 3. Increment/Decrement client pending balance if Credit was used
     const creditPayment = sale.pagos?.find(p => p.metodo === 'CreditoCliente');
@@ -2410,6 +2544,7 @@ export default function App() {
     sessionStorage.removeItem('pos_inventory_search_term');
     sessionStorage.removeItem('pos_caja_search_term');
     try {
+      localStorage.removeItem('pos_inventory_filters');
       localStorage.removeItem('pos_paused_product_draft');
       window.dispatchEvent(new Event('pos_paused_draft_changed'));
     } catch (_) { }
@@ -2453,6 +2588,8 @@ export default function App() {
             localStorage.removeItem(`pos_movimientos_usd_${uKey}`);
             localStorage.removeItem(`pos_movimientos_ves_${uKey}`);
             localStorage.removeItem(`pos_apertura_fecha_${uKey}`);
+            localStorage.removeItem('pos_inventory_filters');
+            sessionStorage.removeItem('pos_inventory_search_term');
             setCajaAbierta(false);
             setSessionNotice(data.message || '⚠️ Su sesión ha sido finalizada remotamente. Inicie sesión nuevamente.');
             setCurrentUser(null);
@@ -2465,6 +2602,50 @@ export default function App() {
     const interval = setInterval(sendHeartbeat, 5000);
     return () => clearInterval(interval);
   }, [currentUser, terminalName, lanIP, dbMode]);
+
+  // User activity tracker for auto-resetting temporary module filters (e.g. Inventario) after 1 hour of inactivity
+  useEffect(() => {
+    let lastUpdate = Date.now();
+    const handleGlobalActivity = () => {
+      const now = Date.now();
+      if (now - lastUpdate > 30000) {
+        lastUpdate = now;
+        try {
+          const raw = localStorage.getItem('pos_inventory_filters');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            parsed.lastActivity = now;
+            localStorage.setItem('pos_inventory_filters', JSON.stringify(parsed));
+          }
+        } catch (_) { }
+      }
+    };
+
+    window.addEventListener('mousemove', handleGlobalActivity);
+    window.addEventListener('keydown', handleGlobalActivity);
+    window.addEventListener('click', handleGlobalActivity);
+
+    // Check every minute if 1 hour has elapsed with no activity
+    const checkInactivity = setInterval(() => {
+      try {
+        const raw = localStorage.getItem('pos_inventory_filters');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed.lastActivity && (Date.now() - parsed.lastActivity) > 60 * 60 * 1000) {
+            localStorage.removeItem('pos_inventory_filters');
+            sessionStorage.removeItem('pos_inventory_search_term');
+          }
+        }
+      } catch (_) { }
+    }, 60000);
+
+    return () => {
+      window.removeEventListener('mousemove', handleGlobalActivity);
+      window.removeEventListener('keydown', handleGlobalActivity);
+      window.removeEventListener('click', handleGlobalActivity);
+      clearInterval(checkInactivity);
+    };
+  }, []);
 
   // --- PROVEEDORES & COMPRAS & CXP HANDLERS ---
   const handleAddProveedor = async (newProv: Proveedor) => {
@@ -2744,6 +2925,8 @@ export default function App() {
         onLoginSuccess={(user) => {
           setSessionNotice('');
           sessionStartRef.current = Date.now();
+          localStorage.removeItem('pos_inventory_filters');
+          sessionStorage.removeItem('pos_inventory_search_term');
           setCurrentUser(user);
           // Activate Full Screen on Login Success
           if (!document.fullscreenElement) {
@@ -3470,13 +3653,23 @@ export default function App() {
                         ? formatBs(totalNumUSD * tasaVenta)
                         : `$${totalNumUSD.toFixed(2)}`;
 
+                      const isCombo = !!(item.product?.es_combo || (item as any).es_combo);
+                      const comboItems = (item.product?.receta_items && item.product.receta_items.length > 0)
+                        ? item.product.receta_items
+                        : [];
+
                       return (
                         <div key={idx} className="border-b border-dashed border-slate-150 pb-1.5 last:border-none last:pb-0">
-                          <div className="font-bold text-slate-900 break-words text-[11px] leading-tight uppercase">
-                            {item.product?.description || item.description}
-                            <span className={isExempt ? "text-amber-700 font-extrabold text-[9px] ml-1" : "text-sky-700 font-bold text-[9px] ml-1"}>
+                          <div className="font-bold text-slate-900 break-words text-[11px] leading-tight uppercase flex items-center flex-wrap gap-1">
+                            <span>{item.product?.description || item.description}</span>
+                            <span className={isExempt ? "text-amber-700 font-extrabold text-[9px]" : "text-sky-700 font-bold text-[9px]"}>
                               {taxLabel}
                             </span>
+                            {isCombo && (
+                              <span className="bg-purple-100 text-purple-900 border border-purple-300 font-extrabold text-[8px] px-1 py-0.2 rounded font-sans shadow-2xs">
+                                🎁 COMBO
+                              </span>
+                            )}
                           </div>
                           <div className="flex justify-between items-center text-[10.5px] mt-0.5 pl-2 text-slate-650">
                             <span className="font-mono text-slate-600">
@@ -3486,6 +3679,19 @@ export default function App() {
                               {totalDisplay}
                             </span>
                           </div>
+                          {isCombo && comboItems.length > 0 && (
+                            <div className="mt-0.5 pl-3 text-[9px] text-purple-900 font-sans bg-purple-50/60 rounded px-1.5 py-0.5 border border-purple-150/70 space-y-0.5">
+                              <span className="font-extrabold text-purple-700 block text-[8px] uppercase">↳ Incluye en este combo:</span>
+                              {comboItems.map((ing: any, iIdx: number) => {
+                                const totalIng = (ing.cantidad || 1) * Math.abs(rawQty);
+                                return (
+                                  <div key={iIdx} className="text-slate-700 font-medium">
+                                    • <strong className="text-purple-950 font-bold">{totalIng}x</strong> {ing.descripcion}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       );
                     })}

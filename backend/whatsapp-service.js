@@ -167,6 +167,7 @@ const defaultConfig = {
 📅 *Fecha:* {fecha}
 👤 *Cajero:* {usuario}
 🖥️ *Terminal:* {terminal}
+🧾 *Tickets Emitidos:* {totalTickets}
 
 💵 *EFECTIVO ESPERADO EN GAVETA:*
 • Dólares (USD): $ {dineroEnCajaExpected}
@@ -180,8 +181,12 @@ const defaultConfig = {
 • Dólares (USD): {diffUsd}
 • Bolívares (VES): {diffVes}
 
+💳 *INGRESOS POR MEDIOS DE PAGO:*
+{desglosePagos}
+
 🛍️ *VENTAS TOTALES DEL TURNO:* $ {ventaTotalUsd} USD
 📉 *DESCUENTOS APLICADOS:* $ {descuentosUsd} USD
+💰 *UTILIDAD NETA DEL TURNO:* $ {utilidadNetaUsd} USD
 
 *WinterPosAL Cloud System*`,
   utilidadesMessageTemplate: `💼 *REPORTE DE UTILIDADES Y GASTOS OPERATIVOS*

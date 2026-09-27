@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Sale, CierreCaja, User } from '../types';
 import { History, Printer, ShieldAlert, ShoppingCart, Eye, Edit, Trash2, Search, ChevronUp, ChevronDown, ChevronsUpDown, CheckCircle2, FileDown, MessageCircle, FileText, BarChart3 } from 'lucide-react';
-import { formatNumberToWordsUSD, getLocalDateStr, formatBs, printCierreTicketReport } from '../utils';
+import { formatNumberToWordsUSD, getLocalDateStr, formatBs, printCierreTicketReport, generateMetodosPagoDesglose } from '../utils';
 import { useDialog } from '../hooks/useDialog';
 import CentroReportesModal from './CentroReportesModal';
 
@@ -42,6 +42,50 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
   const [cierreInvoiceSearch, setCierreInvoiceSearch] = useState('');
   const [hideZeroLines, setHideZeroLines] = useState(true);
   const [showCentroReportesModal, setShowCentroReportesModal] = useState(false);
+
+  // Cache de recetas de combos para visualización garantizada en el detalle de venta
+  const [comboRecipesMap, setComboRecipesMap] = useState<Record<number, any[]>>({});
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadCombos = async () => {
+      try {
+        const comboUrl = getApiUrl ? getApiUrl('/combos') : '/api/combos';
+        const res = await fetch(comboUrl);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && isMounted) {
+            const map: Record<number, any[]> = {};
+            for (const item of data) {
+              const pId = item.producto_padre_id;
+              if (!map[pId]) map[pId] = [];
+              map[pId].push(item);
+            }
+            setComboRecipesMap(map);
+          }
+        }
+      } catch (e) {
+        console.error('Error cargando recetas en VentasHistorico:', e);
+      }
+    };
+    loadCombos();
+    window.addEventListener('pos_refresh_products', loadCombos);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('pos_refresh_products', loadCombos);
+    };
+  }, [getApiUrl]);
+
+  const getComboItemsForSaleItem = useCallback((item: any): any[] => {
+    if (!item?.product) return [];
+    if (Array.isArray(item.product.receta_items) && item.product.receta_items.length > 0) {
+      return item.product.receta_items;
+    }
+    if (item.product.id && comboRecipesMap[item.product.id]) {
+      return comboRecipesMap[item.product.id];
+    }
+    return [];
+  }, [comboRecipesMap]);
 
   const isAdmin = currentUser?.rol?.toLowerCase() === 'administrador';
 
@@ -247,8 +291,11 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
       let textSummary = `📊 *COMPROBANTE DE CIERRE DE CAJA (REENVÍO)*\n\n`;
       textSummary += `📅 *Fecha:* ${fecha}\n`;
       textSummary += `👤 *Cajero:* ${usuario}\n`;
-      textSummary += `🖥️ *Terminal:* ${terminal}\n\n`;
-      textSummary += `💵 *EFECTIVO ESPERADO EN GAVETA:*\n`;
+      textSummary += `🖥️ *Terminal:* ${terminal}\n`;
+      if (c.totalTickets != null && c.totalTickets > 0) {
+        textSummary += `🧾 *Tickets Emitidos:* ${c.totalTickets}\n`;
+      }
+      textSummary += `\n💵 *EFECTIVO ESPERADO EN GAVETA:*\n`;
       textSummary += `• Dólares (USD): $ ${dineroEnCajaExpected.toFixed(2)}\n`;
       textSummary += `• Bolívares (VES): Bs ${expectedVes.toFixed(2)}\n\n`;
       textSummary += `📥 *EFECTIVO FÍSICO DECLARADO:*\n`;
@@ -257,6 +304,10 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
       textSummary += `⚖️ *DIFERENCIAS AUDITADAS:*\n`;
       textSummary += `• USD: ${diffUsd >= 0 ? `+$${diffUsd.toFixed(2)} (Sobrante)` : `-$${Math.abs(diffUsd).toFixed(2)} (Faltante)`}\n`;
       textSummary += `• VES: ${diffVes >= 0 ? `+Bs ${diffVes.toFixed(2)} (Sobrante)` : `-Bs ${Math.abs(diffVes).toFixed(2)} (Faltante)`}\n\n`;
+
+      const desglose = generateMetodosPagoDesglose(c, tasaDia);
+      textSummary += `💳 *INGRESOS POR MEDIOS DE PAGO:*\n${desglose}\n\n`;
+
       textSummary += `🛍️ *VENTAS TOTALES:* $ ${ventaTotalUsd.toFixed(2)} USD\n`;
       if (descuentosUsd > 0) {
         textSummary += `📉 *DESCUENTOS:* $ ${descuentosUsd.toFixed(2)} USD\n`;
@@ -345,8 +396,11 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
       let textSummary = `📊 *REPORTE DE CIERRE DE CAJA (${i + 1}/${selectedCierres.length})*\n\n`;
       textSummary += `📅 *Fecha Cierre:* ${fecha}\n`;
       textSummary += `👤 *Cajero:* ${usuario}\n`;
-      textSummary += `🖥️ *Terminal:* ${terminal}\n\n`;
-      textSummary += `💵 *EFECTIVO ESPERADO EN GAVETA:*\n`;
+      textSummary += `🖥️ *Terminal:* ${terminal}\n`;
+      if (c.totalTickets != null && c.totalTickets > 0) {
+        textSummary += `🧾 *Tickets Emitidos:* ${c.totalTickets}\n`;
+      }
+      textSummary += `\n💵 *EFECTIVO ESPERADO EN GAVETA:*\n`;
       textSummary += `• Dólares (USD): $ ${dineroEnCajaExpected}\n`;
       textSummary += `• Bolívares (VES): Bs ${expectedVes}\n\n`;
       textSummary += `📥 *EFECTIVO FÍSICO RECIBIDO:*\n`;
@@ -355,8 +409,13 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
       textSummary += `⚖️ *DIFERENCIA (BALANCE):*\n`;
       textSummary += `• Dólares (USD): ${parseFloat(diffUsd) >= 0 ? '+' : ''}$ ${diffUsd}\n`;
       textSummary += `• Bolívares (VES): ${parseFloat(diffVes) >= 0 ? '+' : ''}Bs ${diffVes}\n\n`;
+
+      const desglose = generateMetodosPagoDesglose(c, tasaDia);
+      textSummary += `💳 *INGRESOS POR MEDIOS DE PAGO:*\n${desglose}\n\n`;
+
       textSummary += `🛍️ *VENTAS TOTALES:* $ ${ventaTotalUsd} USD\n`;
-      textSummary += `📉 *DESCUENTOS:* $ ${descuentosUsd} USD\n\n`;
+      textSummary += `📉 *DESCUENTOS:* $ ${descuentosUsd} USD\n`;
+      textSummary += `💰 *UTILIDAD NETA:* $ ${(c.utilidadUsd || 0).toFixed(2)} USD\n\n`;
       textSummary += `*WinterPosAL Cloud System*`;
 
       try {
@@ -3945,6 +4004,31 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                               )}
                             </span>
                             <span className="text-[9px] text-slate-400 block font-mono">{item.product?.barcode}</span>
+                            {item.product?.es_combo && (
+                              <div className="mt-1 flex flex-wrap items-center gap-1 text-[9.5px] font-sans">
+                                <span className="bg-purple-100 text-purple-900 border border-purple-250 font-bold px-1.5 py-0.5 rounded flex items-center gap-1 shadow-2xs">
+                                  <span>🎁</span> Incluye:
+                                </span>
+                                {getComboItemsForSaleItem(item).length > 0 ? (
+                                  getComboItemsForSaleItem(item).map((comp: any, cIdx: number) => {
+                                    const totalCompQty = (comp.cantidad || 1) * Math.abs(item.qty);
+                                    return (
+                                      <span
+                                        key={cIdx}
+                                        className="bg-purple-50/90 text-purple-950 border border-purple-200 px-1.5 py-0.5 rounded font-medium shadow-2xs"
+                                        title={`${comp.descripcion} (${comp.cantidad}x por combo)`}
+                                      >
+                                        <strong className="text-purple-800 font-extrabold">{totalCompQty}x</strong> {comp.descripcion}
+                                      </span>
+                                    );
+                                  })
+                                ) : (
+                                  <span className="text-purple-700 italic text-[9px]">
+                                    {item.product?.receta_resumen || 'Receta de componentes'}
+                                  </span>
+                                )}
+                              </div>
+                            )}
                             {item.isFullyReturned && (
                               <span className="inline-block bg-rose-100 text-rose-700 text-[8.5px] font-bold px-1.5 py-0.5 rounded mt-0.5">
                                 Devuelto Totalmente

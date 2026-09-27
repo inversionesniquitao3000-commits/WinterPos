@@ -166,13 +166,28 @@ export function printTicketReceipt(
       totalDisplay = `$${totalNumUSD.toFixed(2)}`;
     }
 
+    const isCombo = item.product?.es_combo || item.es_combo;
+    const comboBadge = isCombo ? ' [COMBO]' : '';
+    let comboRecipeHtml = '';
+    const recetaItems = item.product?.receta_items || item.receta_items;
+    if (isCombo && Array.isArray(recetaItems) && recetaItems.length > 0) {
+      const itemsList = recetaItems.map((ing: any) => {
+        const totalIngQty = (ing.cantidad || 1) * Math.abs(rawQty);
+        return `<div style="font-size: 8.5px; color: #000; padding-left: 6px; line-height: 1.2;">&gt; Incluye: <b>${totalIngQty}x</b> ${ing.descripcion}</div>`;
+      }).join('');
+      comboRecipeHtml = `<div style="margin-top: 1px; margin-bottom: 2px;">${itemsList}</div>`;
+    } else if (isCombo && (item.product?.receta_resumen || item.receta_resumen)) {
+      comboRecipeHtml = `<div style="font-size: 8.5px; color: #000; padding-left: 6px; line-height: 1.2;">&gt; Incluye: ${item.product?.receta_resumen || item.receta_resumen}</div>`;
+    }
+
     return `
       <div style="margin-bottom: 4px; padding-bottom: 2px; border-bottom: 1px dashed #eee;">
-        <div style="font-weight: bold; font-size: 10px; text-transform: uppercase; word-break: break-word; line-height: 1.2;">${desc} ${taxLabel}</div>
+        <div style="font-weight: bold; font-size: 10px; text-transform: uppercase; word-break: break-word; line-height: 1.2;">${desc} ${taxLabel}${comboBadge}</div>
         <div style="display: flex; justify-content: space-between; font-size: 9.5px; margin-top: 1px; padding-left: 4px;">
           <span>${qtyDisplay} x ${priceDisplay}</span>
           <span style="font-weight: bold;">${totalDisplay}</span>
         </div>
+        ${comboRecipeHtml}
       </div>
     `;
   }).join('');
@@ -954,5 +969,106 @@ export const formatStockVal = (val: any, aGranel?: boolean): string => {
   const formatted = parts.join(' ');
   return isNegative ? `-${formatted}` : formatted;
 };
+
+/**
+ * Genera el desglose formateado para WhatsApp de los métodos de pago que hayan recibido ingresos (> 0).
+ */
+export const generateMetodosPagoDesglose = (cierre: any, tasaBcv?: number): string => {
+  if (!cierre) return '• _Sin movimientos registrados en este turno_';
+  
+  const lines: string[] = [];
+  const tasa = (typeof tasaBcv === 'number' && tasaBcv > 0) ? tasaBcv : 1;
+
+  const fmtVes = (num: number) => {
+    return num.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+  const fmtUsd = (num: number) => {
+    return num.toFixed(2);
+  };
+
+  // 1. Efectivo $
+  const efUsd = (Number(cierre.pagosEfectivoUsd) || 0) + (Number(cierre.abonosEfectivoUsd) || 0);
+  if (efUsd > 0.009) {
+    lines.push(`• *Efectivo ($):* $ ${fmtUsd(efUsd)} USD`);
+  }
+
+  // 2. Efectivo Bs
+  const efVes = Number(cierre.pagosEfectivoBsVes) || 0;
+  if (efVes > 0.009) {
+    const equivUsd = tasa > 1 ? (efVes / tasa) : (Number(cierre.pagosEfectivoBsUsd) || 0);
+    lines.push(`• *Efectivo (Bs):* Bs ${fmtVes(efVes)} ($${fmtUsd(equivUsd)} USD)`);
+  }
+
+  // 3. Punto de Venta (Tarjeta Débito Bs)
+  const puntoVes = Number(cierre.pagosPuntoVes) || 0;
+  if (puntoVes > 0.009) {
+    const equivUsd = tasa > 1 ? (puntoVes / tasa) : (Number(cierre.pagosPuntoUsd) || 0);
+    lines.push(`• *Punto de Venta:* Bs ${fmtVes(puntoVes)} ($${fmtUsd(equivUsd)} USD)`);
+  }
+
+  // 4. Pago Móvil (Bs)
+  const pmVes = Number(cierre.pagosPagoMovilVes) || 0;
+  if (pmVes > 0.009) {
+    const equivUsd = tasa > 1 ? (pmVes / tasa) : (Number(cierre.pagosPagoMovilUsd) || 0);
+    lines.push(`• *Pago Móvil:* Bs ${fmtVes(pmVes)} ($${fmtUsd(equivUsd)} USD)`);
+  }
+
+  // 5. Biopago (Bs)
+  const bioVes = Number(cierre.pagosBiopagoVes) || 0;
+  if (bioVes > 0.009) {
+    const equivUsd = tasa > 1 ? (bioVes / tasa) : (Number(cierre.pagosBiopagoUsd) || 0);
+    lines.push(`• *Biopago:* Bs ${fmtVes(bioVes)} ($${fmtUsd(equivUsd)} USD)`);
+  }
+
+  // 6. Transferencia Bancaria (Bs)
+  const transVes = Number(cierre.pagosTransferenciaVes) || 0;
+  if (transVes > 0.009) {
+    const equivUsd = tasa > 1 ? (transVes / tasa) : (Number(cierre.pagosTransferenciaUsd) || 0);
+    lines.push(`• *Transferencia:* Bs ${fmtVes(transVes)} ($${fmtUsd(equivUsd)} USD)`);
+  }
+
+  // 7. Tarjeta Internacional ($)
+  const tarjUsd = Number(cierre.pagosTarjetaUsd) || 0;
+  if (tarjUsd > 0.009) {
+    lines.push(`• *Tarjeta ($):* $ ${fmtUsd(tarjUsd)} USD`);
+  }
+
+  // 8. Binance ($)
+  const binUsd = (Number(cierre.pagosBinanceUsd) || 0) + (Number(cierre.abonosBinanceUsd) || 0);
+  if (binUsd > 0.009) {
+    lines.push(`• *Binance ($):* $ ${fmtUsd(binUsd)} USD`);
+  }
+
+  // 9. PayPal ($)
+  const payUsd = (Number(cierre.pagosPayPalUsd) || 0) + (Number(cierre.abonosPayPalUsd) || 0);
+  if (payUsd > 0.009) {
+    lines.push(`• *PayPal ($):* $ ${fmtUsd(payUsd)} USD`);
+  }
+
+  // 10. Zelle ($)
+  const zelleUsd = Number(cierre.abonosZelleUsd) || 0;
+  if (zelleUsd > 0.009) {
+    lines.push(`• *Zelle ($):* $ ${fmtUsd(zelleUsd)} USD`);
+  }
+
+  // 11. Crédito Cliente ($)
+  const credUsd = Number(cierre.pagosCreditoUsd) || 0;
+  if (credUsd > 0.009) {
+    lines.push(`• *Crédito Cliente:* $ ${fmtUsd(credUsd)} USD`);
+  }
+
+  // 12. Cashea (BNPL $)
+  const casheaUsd = Number(cierre.pagosCasheaUsd) || 0;
+  if (casheaUsd > 0.009) {
+    lines.push(`• *Cashea:* $ ${fmtUsd(casheaUsd)} USD`);
+  }
+
+  if (lines.length === 0) {
+    return '• _Sin ingresos registrados en este turno_';
+  }
+
+  return lines.join('\n');
+};
+
 
 

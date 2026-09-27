@@ -536,8 +536,13 @@ app.get('/api/productos', async (req, res) => {
 });
 
 app.post('/api/productos', async (req, res) => {
-  const saved = await saveProduct(req.body);
-  res.json(saved);
+  try {
+    const saved = await saveProduct(req.body);
+    res.json(saved);
+  } catch (err) {
+    console.error('Error en POST /api/productos:', err.message);
+    res.status(400).json({ error: err.message });
+  }
 });
 
 app.post('/api/productos/bulk', async (req, res) => {
@@ -680,9 +685,13 @@ app.delete('/api/clientes/:id', async (req, res) => {
 
 app.delete('/api/productos/:id', async (req, res) => {
   try {
-    const success = await deleteProduct(req.params.id);
-    if (success) {
-      res.json({ success: true });
+    const result = await deleteProduct(req.params.id);
+    if (result) {
+      if (typeof result === 'object') {
+        res.json(result);
+      } else {
+        res.json({ success: true, action: 'deleted' });
+      }
     } else {
       res.status(404).json({ error: 'Producto no encontrado o no pudo ser eliminado' });
     }
@@ -742,7 +751,6 @@ app.post('/api/movements/bulk', async (req, res) => {
 app.get('/api/combos/:padreId?', async (req, res) => {
   try {
     const padreId = req.params.padreId || req.query.padreId;
-    if (!padreId) return res.json([]);
     const list = await getCombos(padreId);
     res.json(list);
   } catch (err) {
@@ -752,8 +760,8 @@ app.get('/api/combos/:padreId?', async (req, res) => {
 
 app.post('/api/combos', async (req, res) => {
   try {
-    const { padreId, items } = req.body || {};
-    const result = await saveCombo(padreId, items);
+    const { padreId, barcode, items, pvpUSD, updateCost, parentProduct } = req.body || {};
+    const result = await saveCombo(padreId, items, { pvpUSD, updateCost, barcode, parentProduct });
     res.json(result);
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
@@ -762,8 +770,9 @@ app.post('/api/combos', async (req, res) => {
 
 app.delete('/api/combos/:padreId?', async (req, res) => {
   try {
-    const padreId = req.params.padreId || req.query.padreId;
-    const result = await deleteCombo(padreId);
+    const padreId = req.params.padreId || req.query.padreId || req.body?.padreId;
+    const barcode = req.query.barcode || req.body?.barcode;
+    const result = await deleteCombo(padreId, barcode);
     res.json(result);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

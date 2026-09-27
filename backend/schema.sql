@@ -454,6 +454,8 @@ CREATE INDEX IF NOT EXISTS idx_documentos_vencimiento ON Documentos_Empresa(fech
 ALTER TABLE Productos ADD COLUMN IF NOT EXISTS es_combo BOOLEAN DEFAULT FALSE;
 ALTER TABLE Productos ADD COLUMN IF NOT EXISTS producto_bulto_padre_id BIGINT REFERENCES Productos(id) ON DELETE SET NULL;
 ALTER TABLE Productos ADD COLUMN IF NOT EXISTS factor_conversion_bulto NUMERIC(12, 3) DEFAULT 1;
+ALTER TABLE Productos DROP CONSTRAINT IF EXISTS productos_cantidad_mayorista_check;
+ALTER TABLE Productos ADD CONSTRAINT productos_cantidad_mayorista_check CHECK (cantidad_mayorista >= 0);
 
 CREATE TABLE IF NOT EXISTS Combos_Recetas (
     id BIGSERIAL PRIMARY KEY,

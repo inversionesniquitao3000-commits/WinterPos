@@ -179,6 +179,22 @@ export async function initDatabase() {
       ALTER TABLE Productos ADD COLUMN IF NOT EXISTS fecha_vencimiento VARCHAR(50);
       ALTER TABLE Productos ADD COLUMN IF NOT EXISTS estado VARCHAR(10) DEFAULT 'Activo';
       ALTER TABLE Productos ALTER COLUMN imagen_url TYPE TEXT;
+      ALTER TABLE Productos ADD COLUMN IF NOT EXISTS es_combo BOOLEAN DEFAULT FALSE;
+      ALTER TABLE Productos ADD COLUMN IF NOT EXISTS producto_bulto_padre_id BIGINT;
+      ALTER TABLE Productos ADD COLUMN IF NOT EXISTS factor_conversion_bulto NUMERIC DEFAULT 1;
+      ALTER TABLE Productos DROP CONSTRAINT IF EXISTS productos_cantidad_mayorista_check;
+      ALTER TABLE Productos ADD CONSTRAINT productos_cantidad_mayorista_check CHECK (cantidad_mayorista >= 0);
+
+      CREATE TABLE IF NOT EXISTS Combos_Recetas (
+          id BIGSERIAL PRIMARY KEY,
+          producto_padre_id BIGINT NOT NULL REFERENCES Productos(id) ON DELETE CASCADE,
+          producto_hijo_id BIGINT NOT NULL REFERENCES Productos(id) ON DELETE CASCADE,
+          cantidad NUMERIC(15, 3) NOT NULL DEFAULT 1,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT uq_combo_padre_hijo UNIQUE (producto_padre_id, producto_hijo_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_combos_padre ON Combos_Recetas(producto_padre_id);
+      CREATE INDEX IF NOT EXISTS idx_combos_hijo ON Combos_Recetas(producto_hijo_id);
 
       -- Migración estándar para Tasas_Cambio y Cajas
       ALTER TABLE Tasas_Cambio ADD COLUMN IF NOT EXISTS fecha_actualizacion VARCHAR(50);
