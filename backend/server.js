@@ -2337,25 +2337,34 @@ app.get('/api/whatsapp/status', async (req, res) => {
 });
 
 app.post('/api/whatsapp/install-chromium', async (req, res) => {
-  console.log('[WhatsApp] Petición recibida para instalar/reparar Chromium para Puppeteer...');
+  console.log('[WhatsApp] Petición recibida para verificar o instalar Chromium para Puppeteer...');
   try {
+    const currentStatus = await getWhatsAppStatus();
+
+    // Si Google Chrome o Edge ya existe físicamente en el equipo, no necesitamos descargar Puppeteer por npm
+    if (currentStatus.detectedChromePath) {
+      console.log('[WhatsApp] Chrome ya está instalado en:', currentStatus.detectedChromePath);
+      await unlockWhatsAppSession();
+      return res.json({
+        success: true,
+        message: `Google Chrome ya está instalado en el equipo (${currentStatus.detectedChromePath}). El servicio de WhatsApp se reinició y la auto-reconexión por red está activa.`,
+        detectedPath: currentStatus.detectedChromePath
+      });
+    }
+
     const { exec } = await import('child_process');
     exec('npx puppeteer install', async (error, stdout, stderr) => {
-      // Intenta reinicializar el cliente incluso si npx falla (por estar offline pero tener Chrome instalado)
       try {
         await initWhatsAppClient();
-        const currentStatus = await getWhatsAppStatus();
+        const postStatus = await getWhatsAppStatus();
 
-        if (currentStatus.isMock) {
-          console.warn('[WhatsApp] La instalación o reconexión no logró iniciar un navegador Chrome real.');
-          const detailMsg = currentStatus.lastError || (error ? error.message : stderr) || 'Error desconocido';
+        if (postStatus.isMock && !postStatus.detectedChromePath) {
+          console.warn('[WhatsApp] La instalación no logró encontrar o descargar Chrome.');
+          const detailMsg = postStatus.lastError || (error ? error.message : stderr) || 'Error desconocido';
           return res.status(400).json({
             success: false,
-            error: currentStatus.detectedChromePath
-              ? `Chrome detectado en (${currentStatus.detectedChromePath}), pero falló al iniciar: ${detailMsg}`
-              : 'No se encontró Google Chrome en la ruta predeterminada (C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe).',
-            details: detailMsg,
-            detectedPath: currentStatus.detectedChromePath
+            error: 'No se encontró Google Chrome en la ruta predeterminada (C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe) ni se pudo descargar.',
+            details: detailMsg
           });
         }
 

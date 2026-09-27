@@ -2,8 +2,17 @@ import { getWhatsConfigDb, saveWhatsConfigDb, readJsonFile, writeJsonFile } from
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import dns from 'dns';
+import dnsPromises from 'dns/promises';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
+
+// Priorizar IPv4 a nivel de sistema para evitar retardos o caídas de DNS frecuentes en ISPs venezolanos
+if (typeof dns.setDefaultResultOrder === 'function') {
+  try {
+    dns.setDefaultResultOrder('ipv4first');
+  } catch (_) {}
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -114,11 +123,22 @@ export function deleteFullSessionFolder() {
 // Desbloquear sesiones atrapadas sin borrar credenciales válidas
 export async function unlockWhatsAppSession() {
   console.log('[WhatsApp] Desbloqueando sesiones atrapadas de WhatsApp...');
+  if (autoRetryTimer) {
+    clearTimeout(autoRetryTimer);
+    autoRetryTimer = null;
+  }
+  isAutoRetrying = false;
+  autoRetryAttempt = 0;
   await destroyWhatsAppClient();
   killOrphanedChrome();
   cleanSessionLocks();
   setTimeout(() => {
-    initWhatsAppClient().catch(err => console.warn('[WhatsApp] Error en inicio tras desbloqueo:', err?.message || err));
+    initWhatsAppClient().catch(err => {
+      console.warn('[WhatsApp] Error en inicio tras desbloqueo:', err?.message || err);
+      if (isNetworkError(err)) {
+        scheduleNetworkAutoRetry('Desbloqueo con intermitencia de red');
+      }
+    });
   }, 1000);
   return {
     success: true,
@@ -129,12 +149,23 @@ export async function unlockWhatsAppSession() {
 // Resetear sesión completa (para cuando auth timeout o sesión corrupta)
 export async function resetWhatsAppSession() {
   console.log('[WhatsApp] Reseteando sesión de WhatsApp y limpiando datos...');
+  if (autoRetryTimer) {
+    clearTimeout(autoRetryTimer);
+    autoRetryTimer = null;
+  }
+  isAutoRetrying = false;
+  autoRetryAttempt = 0;
   await destroyWhatsAppClient();
   killOrphanedChrome();
   cleanSessionLocks();
   deleteFullSessionFolder();
   setTimeout(() => {
-    initWhatsAppClient().catch(err => console.warn('[WhatsApp] Error en inicio tras reseteo:', err?.message || err));
+    initWhatsAppClient().catch(err => {
+      console.warn('[WhatsApp] Error en inicio tras reseteo:', err?.message || err);
+      if (isNetworkError(err)) {
+        scheduleNetworkAutoRetry('Reseteo con intermitencia de red');
+      }
+    });
   }, 1500);
   return {
     success: true,
@@ -233,6 +264,111 @@ let detectedChromePath = null;
 let heartbeatTimer = null;
 let authWatchdogTimer = null;
 let isReconnecting = false;
+let autoRetryTimer = null;
+let isAutoRetrying = false;
+let autoRetryAttempt = 0;
+
+// Helper para detectar si un fallo es transitorio de red, DNS o conectividad con WhatsApp
+export function isNetworkError(err) {
+  if (!err) return false;
+  const msg = String(err?.message || err?.stack || err || '').toLowerCase();
+  return (
+    msg.includes('err_name_not_resolved') ||
+    msg.includes('err_internet_disconnected') ||
+    msg.includes('err_connection_timed_out') ||
+    msg.includes('err_connection_reset') ||
+    msg.includes('err_connection_refused') ||
+    msg.includes('err_connection_closed') ||
+    msg.includes('err_network_changed') ||
+    msg.includes('err_timed_out') ||
+    msg.includes('err_address_unreachable') ||
+    msg.includes('err_quic_protocol_error') ||
+    msg.includes('navigation timeout') ||
+    msg.includes('waiting for selector') ||
+    msg.includes('net::err') ||
+    msg.includes('enotfound') ||
+    msg.includes('etimedout') ||
+    msg.includes('econnrefused') ||
+    msg.includes('econnreset') ||
+    msg.includes('ehostunreach') ||
+    msg.includes('enetunreach') ||
+    msg.includes('socket hang up') ||
+    msg.includes('getaddrinfo')
+  );
+}
+
+// Comprueba si hay resolución de DNS y salida a Internet activa hacia WhatsApp o servidores globales
+export async function checkInternetConnectivity() {
+  try {
+    await dnsPromises.lookup('web.whatsapp.com');
+    return true;
+  } catch (e1) {
+    try {
+      await dnsPromises.lookup('google.com');
+      return true;
+    } catch (e2) {
+      try {
+        await dnsPromises.lookup('1.1.1.1');
+        return true;
+      } catch (e3) {
+        return false;
+      }
+    }
+  }
+}
+
+// Programa la auto-recuperación en segundo plano sin intervención manual del usuario
+export function scheduleNetworkAutoRetry(reason = 'Intermitencia de Red/DNS') {
+  if (autoRetryTimer) {
+    clearTimeout(autoRetryTimer);
+    autoRetryTimer = null;
+  }
+
+  isAutoRetrying = true;
+  connectionStatus = 'AUTHENTICATING';
+  autoRetryAttempt++;
+
+  const delayMs = Math.min(3000 + autoRetryAttempt * 2000, 14000);
+  console.log(`[WhatsApp Auto-Heal] Programado auto-reintento #${autoRetryAttempt} en ${Math.round(delayMs / 1000)}s (${reason})...`);
+
+  autoRetryTimer = setTimeout(async () => {
+    autoRetryTimer = null;
+    try {
+      const config = await getWhatsAppConfig();
+      if (!config.enabled) {
+        isAutoRetrying = false;
+        autoRetryAttempt = 0;
+        return;
+      }
+
+      console.log('[WhatsApp Auto-Heal] Comprobando disponibilidad de Internet/DNS...');
+      const isOnline = await checkInternetConnectivity();
+      if (!isOnline) {
+        lastInitError = `⚠️ Sin conexión a Internet detectada (DNS / red no responde). El sistema auto-reintentará continuamente en segundo plano (intento #${autoRetryAttempt}).`;
+        console.warn(`[WhatsApp Auto-Heal] Aún sin señal de Internet. Próxima verificación programada en ${Math.round(delayMs / 1000)}s...`);
+        scheduleNetworkAutoRetry('Aún sin Internet');
+        return;
+      }
+
+      console.log('[WhatsApp Auto-Heal] ¡Conexión a Internet restablecida! Reanudando motor de WhatsApp automáticamente...');
+      lastInitError = '🔄 Internet restablecido. Reinicializando cliente de WhatsApp automáticamente...';
+
+      killOrphanedChrome();
+      cleanSessionLocks();
+
+      await initWhatsAppClient();
+      isAutoRetrying = false;
+      autoRetryAttempt = 0;
+    } catch (err) {
+      console.warn('[WhatsApp Auto-Heal] Reintento automático encontró error:', err?.message || err);
+      if (isNetworkError(err)) {
+        scheduleNetworkAutoRetry(err?.message || 'Error de red persistente');
+      } else {
+        isAutoRetrying = false;
+      }
+    }
+  }, delayMs);
+}
 
 // Load config
 export async function getWhatsAppConfig() {
@@ -264,6 +400,8 @@ export async function getWhatsAppStatus() {
     status: connectionStatus,
     qr: connectionStatus === 'QR_READY' ? lastQrCode : '',
     isMock: isMockMode,
+    isAutoRetrying: isAutoRetrying,
+    autoRetryAttempt: autoRetryAttempt,
     detectedChromePath: detectedChromePath,
     lastError: lastInitError,
     config
@@ -272,6 +410,13 @@ export async function getWhatsAppStatus() {
 
 // Destroy client session
 async function destroyWhatsAppClient() {
+  if (autoRetryTimer) {
+    clearTimeout(autoRetryTimer);
+    autoRetryTimer = null;
+  }
+  isAutoRetrying = false;
+  autoRetryAttempt = 0;
+
   if (heartbeatTimer) {
     clearInterval(heartbeatTimer);
     heartbeatTimer = null;
@@ -382,6 +527,19 @@ function startHeartbeat() {
 
     try {
       if (client.pupPage && !client.pupPage.isClosed()) {
+        const pageUrl = client.pupPage.url() || '';
+
+        // Si la página cayó en la pantalla offline de Chrome (dinosaurio / ERR_INTERNET_DISCONNECTED / ERR_NAME_NOT_RESOLVED)
+        if (pageUrl.includes('chrome-error://') || pageUrl.includes('chromewebdata')) {
+          console.warn('[WhatsApp Heartbeat] Navegador en pantalla de error de red (offline). Verificando si volvió Internet...');
+          const isOnline = await checkInternetConnectivity();
+          if (isOnline) {
+            console.log('[WhatsApp Heartbeat] ¡Internet disponible! Recargando web.whatsapp.com...');
+            await client.pupPage.goto('https://web.whatsapp.com/', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+          }
+          return;
+        }
+
         const pageState = await client.pupPage.evaluate(() => {
           const hasChatList = !!document.querySelector('#pane-side') || 
                               !!document.querySelector('[data-testid="chat-list"]') ||
@@ -397,6 +555,9 @@ function startHeartbeat() {
             console.log('[WhatsApp Heartbeat] Sincronización activa verificada. Estableciendo estado CONNECTED.');
             connectionStatus = 'CONNECTED';
             lastQrCode = '';
+            lastInitError = null;
+            isAutoRetrying = false;
+            autoRetryAttempt = 0;
             ensureWWebJSInjected(client);
           } else if (pageState.hasQrCanvas && connectionStatus === 'CONNECTED') {
             console.warn('[WhatsApp Heartbeat] La sesión fue desvinculada desde el teléfono.');
@@ -425,6 +586,19 @@ function startAuthWatchdog() {
 
     try {
       if (client.pupPage && !client.pupPage.isClosed()) {
+        const pageUrl = client.pupPage.url() || '';
+
+        // Si la página no pudo cargar por caída de red inicial
+        if (pageUrl.includes('chrome-error://') || pageUrl.includes('chromewebdata')) {
+          console.warn('[WhatsApp Watchdog] Página en error de red en carga inicial. Comprobando conexión...');
+          const isOnline = await checkInternetConnectivity();
+          if (isOnline) {
+            console.log('[WhatsApp Watchdog] Conexión detectada. Recargando https://web.whatsapp.com/...');
+            await client.pupPage.goto('https://web.whatsapp.com/', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+          }
+          return;
+        }
+
         const check = await client.pupPage.evaluate(() => {
           const hasChatList = !!document.querySelector('#pane-side') || 
                               !!document.querySelector('[data-testid="chat-list"]') ||
@@ -439,17 +613,25 @@ function startAuthWatchdog() {
           console.log('[WhatsApp Watchdog] ¡Interfaz principal de WhatsApp detectada lista en el navegador! Forzando estado CONNECTED.');
           connectionStatus = 'CONNECTED';
           lastQrCode = '';
+          lastInitError = null;
+          isAutoRetrying = false;
+          autoRetryAttempt = 0;
           clearInterval(authWatchdogTimer);
           authWatchdogTimer = null;
           ensureWWebJSInjected(client);
           return;
         }
 
-        // Si pasan 60 segundos y sigue colgado, recargar el marco para destrabarlo
+        // Si pasan 60 segundos y sigue colgado, verificar conectividad antes de recargar
         if (checksCount >= 20) {
-          console.warn('[WhatsApp Watchdog] Sincronización demorada (>60s). Recargando página para desbloquear...');
+          console.warn('[WhatsApp Watchdog] Sincronización demorada (>60s). Comprobando red y recargando página...');
           checksCount = 0;
-          await client.pupPage.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+          const isOnline = await checkInternetConnectivity();
+          if (isOnline) {
+            await client.pupPage.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+          } else {
+            console.warn('[WhatsApp Watchdog] Sin señal de Internet durante verificación. Esperando auto-recuperación...');
+          }
         }
       }
     } catch (e) {}
@@ -464,6 +646,11 @@ export async function initWhatsAppClient() {
     return;
   }
 
+  if (autoRetryTimer) {
+    clearTimeout(autoRetryTimer);
+    autoRetryTimer = null;
+  }
+
   if (client) {
     try {
       await destroyWhatsAppClient();
@@ -474,7 +661,7 @@ export async function initWhatsAppClient() {
   killOrphanedChrome();
   cleanSessionLocks();
 
-  console.log('[WhatsApp] Inicializando servicio de WhatsApp con protección anti-bloqueo...');
+  console.log('[WhatsApp] Inicializando servicio de WhatsApp con protección anti-bloqueo y auto-recuperación de red...');
   connectionStatus = 'AUTHENTICATING';
   startAuthWatchdog();
 
@@ -528,6 +715,8 @@ export async function initWhatsAppClient() {
         '--disable-blink-features=AutomationControlled',
         '--window-size=1280,800',
         '--disable-web-security',
+        '--dns-result-order=ipv4first',
+        '--enable-async-dns',
         `--user-agent=${userAgentStr}`
       ]
     };
@@ -573,6 +762,9 @@ export async function initWhatsAppClient() {
       console.log('[WhatsApp] ¡Cliente Conectado y Listo!');
       connectionStatus = 'CONNECTED';
       lastQrCode = '';
+      lastInitError = null;
+      isAutoRetrying = false;
+      autoRetryAttempt = 0;
       ensureWWebJSInjected(client);
     });
 
@@ -598,14 +790,14 @@ export async function initWhatsAppClient() {
       const conf = await getWhatsAppConfig();
       if (conf.enabled && reason !== 'LOGOUT' && !isReconnecting) {
         isReconnecting = true;
-        console.log('[WhatsApp] Programando reconexión automática en 4 segundos...');
+        console.log('[WhatsApp] Programando verificación de red y reconexión automática tras desconexión...');
         setTimeout(async () => {
           try {
-            await unlockWhatsAppSession();
+            scheduleNetworkAutoRetry(`Desconexión: ${reason}`);
           } finally {
             isReconnecting = false;
           }
-        }, 4000);
+        }, 3000);
       }
     });
 
@@ -625,16 +817,37 @@ export async function initWhatsAppClient() {
     }
 
     isMockMode = false;
+    isAutoRetrying = false;
+    autoRetryAttempt = 0;
     lastInitError = null;
     startHeartbeat();
 
   } catch (err) {
     const errMsg = err?.message || String(err);
+    console.error('[WhatsApp] Error al inicializar cliente:', errMsg);
+
+    if (isNetworkError(err)) {
+      console.warn('[WhatsApp] Falla transitoria de red o DNS (ERR_NAME_NOT_RESOLVED / timeout) detectada.');
+      lastInitError = `⚠️ Intermitencia en la conexión a Internet o DNS (${errMsg}). Reintentando automáticamente en segundo plano...`;
+
+      // Si Chrome está instalado, ¡NO entrar en modo simulación!
+      if (detectedChromePath) {
+        isMockMode = false;
+        scheduleNetworkAutoRetry('Falla transitoria de red');
+        return;
+      }
+    }
+
     lastInitError = errMsg;
-    console.warn('[WhatsApp] Error al inicializar cliente real. Iniciando en Modo Simulación.');
-    console.error('[WhatsApp] Error detallado al inicializar:', err);
-    isMockMode = true;
-    startMockFlow();
+    if (!detectedChromePath) {
+      console.warn('[WhatsApp] No se encontró Google Chrome en el sistema. Iniciando en Modo Simulación.');
+      isMockMode = true;
+      startMockFlow();
+    } else {
+      console.warn('[WhatsApp] Error de inicio con Chrome instalado. Programando auto-recuperación...');
+      isMockMode = false;
+      scheduleNetworkAutoRetry('Reintento tras error');
+    }
   }
 }
 

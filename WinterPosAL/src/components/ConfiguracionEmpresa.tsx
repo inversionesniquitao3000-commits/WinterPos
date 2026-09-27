@@ -318,6 +318,8 @@ export default function ConfiguracionEmpresa({
     status: 'DISCONNECTED',
     qr: '',
     isMock: false,
+    isAutoRetrying: false,
+    autoRetryAttempt: 0,
     detectedChromePath: '',
     lastError: null
   });
@@ -4345,25 +4347,36 @@ export default function ConfiguracionEmpresa({
                             <span className={`w-3 h-3 rounded-full animate-pulse ${
                               waStatus.status === 'CONNECTED' ? 'bg-emerald-500' :
                               waStatus.status === 'QR_READY' ? 'bg-amber-500' :
+                              waStatus.isAutoRetrying ? 'bg-amber-500' :
                               waStatus.status === 'AUTHENTICATING' ? 'bg-sky-500' : 'bg-rose-500'
                             }`} />
                             <span className="text-xs font-black uppercase font-sans text-slate-800">
                               {waStatus.status === 'CONNECTED' ? '🟢 Conectado' :
                                waStatus.status === 'QR_READY' ? '🟡 Esperando Escaneo' :
+                               waStatus.isAutoRetrying ? '🔄 Reconectando por Red...' :
                                waStatus.status === 'AUTHENTICATING' ? '🔵 Conectando / Iniciando...' : '🔴 Desconectado'}
                             </span>
                           </div>
 
-                          <span className={`text-[9px] font-bold px-2 py-0.5 rounded uppercase ${
-                            waStatus.isMock ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                          <span className={`text-[9px] font-bold px-2 py-0.5 rounded uppercase flex items-center gap-1 ${
+                            waStatus.isMock
+                              ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                              : waStatus.isAutoRetrying
+                              ? 'bg-sky-100 text-sky-800 border border-sky-300 animate-pulse'
+                              : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                           }`}>
-                            {waStatus.isMock ? 'Simulación' : 'Motor Real Chrome'}
+                            {waStatus.isMock
+                              ? 'Simulación'
+                              : waStatus.isAutoRetrying
+                              ? 'Auto-Reconexión'
+                              : 'Motor Real Chrome'}
                           </span>
                         </div>
                         
                         <p className="text-[10.5px] text-slate-600 leading-normal font-sans">
                           {waStatus.status === 'CONNECTED' ? 'El servidor central tiene una sesión activa vinculada. Los reportes y cierres se enviarán de forma automática.' :
                            waStatus.status === 'QR_READY' ? 'Requiere vincular una cuenta. Escanee el código QR de la derecha con la cámara de su WhatsApp.' :
+                           waStatus.isAutoRetrying ? `Conexión a Internet intermitente o lenta. El sistema detectó la falla y se auto-recupera automáticamente (intento #${waStatus.autoRetryAttempt || 1}). No requiere acción manual.` :
                            waStatus.status === 'AUTHENTICATING' ? 'Iniciando navegador y sincronizando con WhatsApp. Por favor espere unos segundos...' : 
                            'La integración está inactiva o requiere habilitarse en el panel.'}
                         </p>
@@ -4380,14 +4393,33 @@ export default function ConfiguracionEmpresa({
 
                         {/* LAST ERROR BANNER */}
                         {waStatus.lastError && (
-                          <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 text-[10px] space-y-1 font-sans">
-                            <div className="font-bold flex items-center gap-1 text-rose-900">
-                              <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
-                              <span>Última advertencia registrada:</span>
+                          <div className={`p-2.5 rounded-lg text-[10px] space-y-1 font-sans ${
+                            waStatus.isAutoRetrying || waStatus.lastError.includes('Intermitencia') || waStatus.lastError.includes('Internet') || waStatus.lastError.includes('ERR_')
+                              ? 'bg-amber-50 border border-amber-200 text-amber-800'
+                              : 'bg-rose-50 border border-rose-200 text-rose-800'
+                          }`}>
+                            <div className={`font-bold flex items-center gap-1 ${
+                              waStatus.isAutoRetrying || waStatus.lastError.includes('Intermitencia') || waStatus.lastError.includes('Internet') || waStatus.lastError.includes('ERR_')
+                                ? 'text-amber-900'
+                                : 'text-rose-900'
+                            }`}>
+                              {waStatus.isAutoRetrying ? (
+                                <RefreshCw className="w-3.5 h-3.5 text-amber-600 animate-spin" />
+                              ) : (
+                                <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+                              )}
+                              <span>
+                                {waStatus.isAutoRetrying ? 'Auto-recuperación activa por intermitencia de red:' : 'Última advertencia registrada:'}
+                              </span>
                             </div>
-                            <p className="font-mono text-[9px] bg-white/80 p-1.5 rounded border border-rose-200 break-all">
+                            <p className="font-mono text-[9px] bg-white/80 p-1.5 rounded border border-amber-200 break-all">
                               {waStatus.lastError}
                             </p>
+                            {waStatus.isAutoRetrying && (
+                              <p className="text-[10px] text-amber-900 font-sans font-medium">
+                                💡 El sistema auto-detecta la señal y reanudará el servicio de WhatsApp automáticamente tan pronto se estabilice el Internet.
+                              </p>
+                            )}
                           </div>
                         )}
                       </div>
@@ -4416,7 +4448,8 @@ export default function ConfiguracionEmpresa({
                         </div>
                       )}
 
-                      {waStatus.isMock && (
+                      {/* BOTÓN INSTALAR CHROME: SÓLO si realmente NO está instalado en el equipo */}
+                      {waStatus.isMock && !waStatus.detectedChromePath && (
                         <button
                           type="button"
                           disabled={isInstallingChrome}
@@ -4444,6 +4477,20 @@ export default function ConfiguracionEmpresa({
                         >
                           <Settings className="w-3.5 h-3.5" />
                           <span>{isInstallingChrome ? '⏳ Instalando Chrome...' : '🔧 Instalar / Reparar Chrome'}</span>
+                        </button>
+                      )}
+
+                      {/* BOTÓN FORZAR RECONEXIÓN: Si Chrome está presente pero hay intermitencia de red o timeout */}
+                      {waStatus.detectedChromePath && (waStatus.isAutoRetrying || (waStatus.status === 'AUTHENTICATING' && waStatus.lastError)) && (
+                        <button
+                          type="button"
+                          disabled={isUnlockingSession}
+                          onClick={handleUnlockSession}
+                          className="w-full text-xs font-bold py-2 px-3 rounded-lg font-sans transition-all bg-sky-600 hover:bg-sky-700 active:scale-95 text-white flex items-center justify-center gap-1.5 shadow-sm"
+                          title="Fuerza una comprobación y reconexión inmediata sin esperar el temporizador automático"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${isUnlockingSession ? 'animate-spin' : ''}`} />
+                          <span>{isUnlockingSession ? 'Reintentando...' : '⚡ Forzar Reconexión Ahora'}</span>
                         </button>
                       )}
                     </div>
