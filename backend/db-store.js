@@ -827,7 +827,12 @@ export const defaultPagoMovilConfig = {
   activeWebhookUrl: '',
   bankName: 'Banco de Venezuela (BDV)',
   bancosHabilitados: ['BDV'],
-  notifyCajaOnPayment: true
+  notifyCajaOnPayment: true,
+  // API Oficial Conciliación BDV (Banco de Venezuela)
+  bdvApiKey: '070597925FCE6DBE6243E4915DD81EB6',
+  bdvAmbiente: 'produccion', // 'produccion' | 'calidad'
+  bdvTelefonosDestino: [], // Array de { telefono: string, alias?: string, esDefault?: boolean } o strings
+  bdvTelefonoDefault: ''
 };
 
 export async function getPagoMovilConfigDb() {
@@ -1682,19 +1687,35 @@ export async function getAbonos() {
   if (usePostgres) {
     try {
       const res = await pool.query(`
-        SELECT a.id, a.cliente_id, a.monto_usd as monto, a.monto_ves, a.metodo_pago, a.banco_emisor, a.numero_referencia as referencia, a.observacion, a.fecha, c.nombre, c.cedula_rif
+        SELECT a.id, a.cliente_id, a.monto_usd, a.monto_ves, a.metodo_pago, a.banco_emisor, a.numero_referencia as referencia, a.observacion, a.fecha, c.nombre, c.cedula_rif
         FROM Abonos a
         LEFT JOIN Clientes c ON a.cliente_id = c.id
         ORDER BY a.id DESC
       `);
       if (res.rows.length > 0) {
-        return res.rows.map(r => ({
-          ...r,
-          monto: parseFloat(r.monto || '0'),
-          monto_ves: parseFloat(r.monto_ves || '0'),
-          metodo_pago: r.metodo_pago || 'Efectivo$',
-          fecha: r.fecha ? getLocalISODateString(r.fecha) : getLocalISODateString()
-        }));
+        let fallbackTasa = 36.30;
+        try {
+          const tRes = await pool.query("SELECT tasa_cobro FROM Tasas_Cambio ORDER BY id DESC LIMIT 1");
+          if (tRes.rowCount > 0 && parseFloat(tRes.rows[0].tasa_cobro || '0') > 0) {
+            fallbackTasa = parseFloat(tRes.rows[0].tasa_cobro);
+          }
+        } catch (_) {}
+
+        return res.rows.map(r => {
+          let mUsd = parseFloat(r.monto_usd || '0');
+          const mVes = parseFloat(r.monto_ves || '0');
+          if (mUsd <= 0.0001 && mVes > 0) {
+            mUsd = parseFloat((mVes / fallbackTasa).toFixed(2));
+          }
+          return {
+            ...r,
+            monto: mUsd,
+            monto_usd: mUsd,
+            monto_ves: mVes,
+            metodo_pago: r.metodo_pago || 'Efectivo$',
+            fecha: r.fecha ? getLocalISODateString(r.fecha) : getLocalISODateString()
+          };
+        });
       }
     } catch (err) {
       console.error('Error en getAbonos (Postgres):', err.message);
@@ -1748,9 +1769,9 @@ export async function registerAbono(clientId, montoUsd, montoVes, metodoPago = '
           await pool.query(
             `INSERT INTO Abonos (cliente_id, usuario_id, caja_id, monto_usd, monto_ves, metodo_pago, numero_referencia, observacion, fecha)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)`,
-            [realClientId, usuarioId || null, abonoCajaId, numUsd, numVes, metodoPago, referencia || null, observacion || null]
+            [realClientId, usuarioId || null, abonoCajaId, amountUSD, numVes, metodoPago, referencia || null, observacion || null]
           );
-          console.log(`✅ [Abonos] Abono registrado en PostgreSQL — Cliente: ${clientNombre} (ID ${realClientId}) | $${numUsd} / Bs ${numVes} | Método: ${metodoPago}`);
+          console.log(`✅ [Abonos] Abono registrado en PostgreSQL — Cliente: ${clientNombre} (ID ${realClientId}) | $${amountUSD} / Bs ${numVes} | Método: ${metodoPago}`);
         } catch (dbErr) {
           console.error('❌ Error al insertar abono en tabla Abonos:', dbErr.message);
         }
@@ -4081,6 +4102,20 @@ export async function saveSale(s) {
           } else {
             throw payErr;
           }
+        }
+
+        // Vincular automáticamente el movimiento bancario BDV a esta venta si tiene referencia
+        const payRef = String(p.referencia || p.numero_referencia || '').trim().replace(/[^a-zA-Z0-9]/g, '');
+        if (payRef && payRef.length >= 4) {
+          try {
+            await clientTarget.query(
+              `UPDATE Movimientos_Bancarios_BDV 
+               SET conciliado = TRUE, venta_id = $1 
+               WHERE (referencia = $2 OR referencia LIKE $3 OR $2 LIKE ('%' || referencia))
+                 AND (conciliado IS FALSE OR conciliado IS NULL)`,
+              [saleId, payRef, `%${payRef}`]
+            );
+          } catch (_) {}
         }
       }
 
@@ -6983,6 +7018,13 @@ function parseDateSafeBdv(dateStr) {
   if (!dateStr) return new Date();
   if (dateStr instanceof Date) return isNaN(dateStr.getTime()) ? new Date() : dateStr;
   const s = String(dateStr).trim();
+  const iso = s.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})/);
+  if (iso) {
+    const y = iso[1];
+    const mo = iso[2].padStart(2, '0');
+    const d = iso[3].padStart(2, '0');
+    return new Date(`${y}-${mo}-${d}T12:00:00`);
+  }
   const m = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
   if (m) {
     const d = m[1].padStart(2, '0');
@@ -7073,23 +7115,45 @@ export async function saveBdvMovements(movements = []) {
   return { success: true, inserted: insertedCount, total: movements.length };
 }
 
-export async function getBdvMovements(limit = 100) {
+export async function getBdvMovements(limit = 100, dateFilter = null, search = '') {
   if (usePostgres) {
     try {
-      const res = await pool.query(
-        `SELECT m.*, v.factura_nro 
-         FROM Movimientos_Bancarios_BDV m
-         LEFT JOIN Ventas v ON v.id = m.venta_id
-         ORDER BY m.fecha DESC LIMIT $1`,
-        [limit]
-      );
+      let query = `
+        SELECT m.*, v.factura_nro 
+        FROM Movimientos_Bancarios_BDV m
+        LEFT JOIN Ventas v ON v.id = m.venta_id
+        WHERE 1=1
+      `;
+      const params = [];
+
+      if (dateFilter) {
+        params.push(dateFilter);
+        query += ` AND (m.fecha::text LIKE $${params.length} || '%' OR m.created_at::date = $${params.length}::date)`;
+      }
+
+      if (search && search.trim()) {
+        params.push(`%${search.trim()}%`);
+        query += ` AND (m.referencia ILIKE $${params.length} OR m.descripcion ILIKE $${params.length} OR m.titular_origen ILIKE $${params.length} OR m.telefono_origen ILIKE $${params.length})`;
+      }
+
+      params.push(limit);
+      query += ` ORDER BY m.id DESC, m.fecha DESC LIMIT $${params.length}`;
+
+      const res = await pool.query(query, params);
       return res.rows;
     } catch (err) {
       console.error('Error obteniendo movimientos BDV:', err.message);
       return [];
     }
   }
-  const movs = readJsonFile('movimientos_bancarios_bdv.json', []);
+  let movs = readJsonFile('movimientos_bancarios_bdv.json', []);
+  if (dateFilter) {
+    movs = movs.filter(m => String(m.fecha).startsWith(dateFilter) || (m.created_at && m.created_at.startsWith(dateFilter)));
+  }
+  if (search && search.trim()) {
+    const s = search.toLowerCase();
+    movs = movs.filter(m => (m.referencia && m.referencia.toLowerCase().includes(s)) || (m.descripcion && m.descripcion.toLowerCase().includes(s)));
+  }
   return movs.slice(0, limit);
 }
 

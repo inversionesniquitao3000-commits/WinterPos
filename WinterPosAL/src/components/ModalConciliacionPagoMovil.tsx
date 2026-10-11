@@ -9,20 +9,81 @@ interface ModalConciliacionPagoMovilProps {
   isOpen: boolean;
   onClose: () => void;
   cajaId?: any;
+  clienteActual?: any;
   defaultMontoVES?: number;
   defaultReferencia?: string;
   onReferenceVerified?: (ref: string, montoVES: number) => void;
 }
 
+export const cleanBdvMessage = (msg: string) => {
+  if (!msg || typeof msg !== 'string') return '';
+  return msg
+    .replace(/Transacci(?:[^\w\s]|[\ufffd\?\¿])+n/gi, 'Transacción')
+    .replace(/Transacci\s*n/gi, 'Transacción')
+    .replace(/operaci(?:[^\w\s]|[\ufffd\?\¿])+n/gi, 'operación')
+    .replace(/conciliaci(?:[^\w\s]|[\ufffd\?\¿])+n/gi, 'conciliación')
+    .replace(/realizaci(?:[^\w\s]|[\ufffd\?\¿])+n/gi, 'realización')
+    .replace(/cr(?:[^\w\s]|[\ufffd\?\¿])+dito/gi, 'crédito')
+    .replace(/d(?:[^\w\s]|[\ufffd\?\¿])+bito/gi, 'débito')
+    .replace(/éxit[^\w\s]*osa/gi, 'exitosa')
+    .replace(/estatus\s*:\s*/gi, 'estatus: ')
+    .trim();
+};
+
+export const getLocalDateStr = (d = new Date()) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+export const getYesterdayDateStr = () => {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return getLocalDateStr(d);
+};
+
+export const formatBdvFecha = (fechaStr: any, createdAtStr?: any) => {
+  // Si tenemos createdAtStr (timestamp real de cuando se registró el movimiento), lo usamos con prioridad
+  const targetStr = createdAtStr || fechaStr;
+  if (!targetStr) return '';
+
+  try {
+    const cleanStr = String(targetStr).replace(' ', 'T');
+    const dt = new Date(cleanStr);
+    if (!isNaN(dt.getTime())) {
+      const fechaLocal = dt.toLocaleDateString('es-VE');
+      const horaLocal = dt.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: true });
+      return `${fechaLocal} (${horaLocal})`;
+    }
+  } catch (_) {}
+
+  // Fallback si no tiene hora pero tiene fecha en formato YYYY-MM-DD
+  const match = String(fechaStr).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) {
+    const [_, y, m, d] = match;
+    return `${parseInt(d, 10)}/${parseInt(m, 10)}/${y}`;
+  }
+
+  const dt = new Date(fechaStr);
+  return isNaN(dt.getTime()) ? String(fechaStr) : dt.toLocaleDateString('es-VE');
+};
+
 export const ModalConciliacionPagoMovil: React.FC<ModalConciliacionPagoMovilProps> = ({
   isOpen,
   onClose,
   cajaId,
+  clienteActual,
   defaultMontoVES,
   defaultReferencia,
   onReferenceVerified,
 }) => {
   const [activeTab, setActiveTab] = useState<'validador' | 'conciliacion' | 'historial' | 'guia'>('validador');
+
+  // Estados de conectividad y configuración BDV
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [bdvConfig, setBdvConfig] = useState<any>(null);
+  const [bancosList, setBancosList] = useState<Array<{ codigo: string; nombre: string }>>([]);
 
   // Webhook State
   const [webhookUrl, setWebhookUrl] = useState('');
@@ -37,9 +98,14 @@ export const ModalConciliacionPagoMovil: React.FC<ModalConciliacionPagoMovilProp
   const [isStartingTunnelInModal, setIsStartingTunnelInModal] = useState(false);
   const [showManualCmd, setShowManualCmd] = useState(false);
 
-  // Tab 1: Validador Rápido
+  // Tab 1: Validador Rápido en Caja
   const [inputRef, setInputRef] = useState('');
   const [inputMonto, setInputMonto] = useState('');
+  const [cedulaPagador, setCedulaPagador] = useState('');
+  const [telefonoPagador, setTelefonoPagador] = useState('');
+  const [bancoOrigen, setBancoOrigen] = useState('0102');
+  const [telefonoDestino, setTelefonoDestino] = useState('TODOS');
+  const [fechaPago, setFechaPago] = useState(() => getLocalDateStr());
   const [isValidating, setIsValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<any>(null);
 
@@ -53,19 +119,41 @@ export const ModalConciliacionPagoMovil: React.FC<ModalConciliacionPagoMovilProp
   // Tab 3: Historial BDV
   const [bdvMovements, setBdvMovements] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [historyDateFilter, setHistoryDateFilter] = useState<'hoy' | 'ayer' | 'todos' | 'custom'>('hoy');
+  const [customHistoryDate, setCustomHistoryDate] = useState(() => getLocalDateStr());
+  const [historySearchTerm, setHistorySearchTerm] = useState('');
 
-  // Listener universal para cerrar modal con tecla Escape (ESC) en Web y Desktop
+  // Detector de conectividad en vivo
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Listener universal para cerrar modal con tecla Escape (ESC) en Web y Desktop (Electron/Navegador)
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' || e.key === 'Esc' || e.code === 'Escape' || e.keyCode === 27) {
         e.preventDefault();
         e.stopPropagation();
+        e.stopImmediatePropagation?.();
         onClose();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    document.addEventListener('keydown', handleKeyDown, true);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+      document.removeEventListener('keydown', handleKeyDown, true);
+    };
   }, [isOpen, onClose]);
 
   useEffect(() => {
@@ -74,7 +162,45 @@ export const ModalConciliacionPagoMovil: React.FC<ModalConciliacionPagoMovilProp
       setInputMonto(defaultMontoVES ? defaultMontoVES.toFixed(2) : '');
       setValidationResult(null);
       setImportSummary(null);
+      setFechaPago(getLocalDateStr());
+
+      // Precargar datos del cliente si existe
+      if (clienteActual) {
+        const doc = (clienteActual.cedula_rif || '').trim();
+        const tel = (clienteActual.telefono || '').trim();
+        if (doc) {
+          const cleanDoc = doc.toUpperCase().replace(/[^A-Z0-9]/g, '');
+          setCedulaPagador(/^[VJEGP]/.test(cleanDoc) ? cleanDoc : `V${cleanDoc}`);
+        } else {
+          setCedulaPagador('');
+        }
+        setTelefonoPagador(tel);
+      }
+
       fetchReconciliationSummary();
+      fetchBdvHistory('hoy');
+
+      // Cargar configuración de BDV y bancos venezolanos
+      fetch('/api/conciliacion/bdv/config')
+        .then(r => r.json())
+        .then(d => {
+          if (d.success) {
+            setBdvConfig(d);
+            if (Array.isArray(d.bancos)) {
+              setBancosList(d.bancos);
+            }
+            if (d.bdvTelefonoDefault) {
+              setTelefonoDestino(d.bdvTelefonoDefault);
+            } else if (Array.isArray(d.bdvTelefonosDestino) && d.bdvTelefonosDestino.length > 0) {
+              const item = d.bdvTelefonosDestino[0];
+              const phone = typeof item === 'object' ? item.telefono : item;
+              setTelefonoDestino(phone || 'TODOS');
+            } else {
+              setTelefonoDestino('TODOS');
+            }
+          }
+        })
+        .catch(() => {});
 
       fetch('/api/conciliacion/webhook-info')
         .then(r => r.json())
@@ -91,7 +217,7 @@ export const ModalConciliacionPagoMovil: React.FC<ModalConciliacionPagoMovilProp
 
       fetchTunnelStatus();
     }
-  }, [isOpen, defaultReferencia, defaultMontoVES]);
+  }, [isOpen, defaultReferencia, defaultMontoVES, clienteActual]);
 
   const fetchTunnelStatus = async () => {
     try {
@@ -157,33 +283,75 @@ export const ModalConciliacionPagoMovil: React.FC<ModalConciliacionPagoMovilProp
 
   if (!isOpen) return null;
 
-  // 1. Validar referencia en tiempo real
+  // 1. Validar referencia en tiempo real contra BDV API o BD local
   const handleValidateReference = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!inputRef.trim() || !inputMonto.trim()) return;
 
+    // Si el navegador reporta sin internet, notificar amigablemente y permitir cobro directo
+    if (!navigator.onLine) {
+      setValidationResult({
+        verified: false,
+        isNetworkError: true,
+        message: 'Dispositivo sin conexión a internet. Puede omitir la validación y facturar de inmediato.'
+      });
+      return;
+    }
+
     setIsValidating(true);
     setValidationResult(null);
     try {
-      const res = await fetch('/api/conciliacion/validar-referencia', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          referencia: inputRef.trim(),
-          monto_ves: parseFloat(inputMonto.replace(',', '.'))
-        })
-      });
-      const data = await res.json();
-      setValidationResult(data);
+      // Si el comercio tiene configurado el API Key de BDV, consultar el Core Bancario oficial
+      if (bdvConfig?.bdvApiKey) {
+        const res = await fetch('/api/conciliacion/validar-bdv-api', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            cedulaPagador: cedulaPagador.trim(),
+            telefonoPagador: telefonoPagador.trim(),
+            telefonoDestino: telefonoDestino || undefined,
+            referencia: inputRef.trim(),
+            fechaPago: fechaPago || new Date().toISOString().split('T')[0],
+            importe: parseFloat(inputMonto.replace(',', '.')),
+            bancoOrigen: bancoOrigen || '0102',
+            cajaId: cajaId || null
+          })
+        });
+        const data = await res.json();
+        setValidationResult(data);
+      } else {
+        // Fallback a validación interna (SMS / Extractos)
+        const res = await fetch('/api/conciliacion/validar-referencia', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            referencia: inputRef.trim(),
+            monto_ves: parseFloat(inputMonto.replace(',', '.'))
+          })
+        });
+        const data = await res.json();
+        setValidationResult(data);
+      }
     } catch (err: any) {
       setValidationResult({
         verified: false,
-        message: 'Error de conexión con el servidor: ' + err.message
+        isNetworkError: true,
+        message: 'No se pudo conectar con el servicio (' + err.message + '). Puede omitir la validación y facturar manualmente de inmediato.'
       });
     } finally {
       setIsValidating(false);
+      fetchBdvHistory();
     }
   };
+
+  // Función de escape offline: permite facturar inmediatamente sin trabas
+  const handleBypassOffline = () => {
+    if (onReferenceVerified && inputRef.trim()) {
+      onReferenceVerified(inputRef.trim(), parseFloat(inputMonto.replace(',', '.') || '0'));
+    }
+    onClose();
+  };
+
 
   // 2. Importar extracto BDV (texto copiado o CSV)
   const handleImportBdvText = async () => {
@@ -234,11 +402,30 @@ export const ModalConciliacionPagoMovil: React.FC<ModalConciliacionPagoMovilProp
     }
   };
 
-  // 4. Cargar historial de movimientos BDV
-  const fetchBdvHistory = async () => {
+  // 4. Cargar historial de movimientos BDV con filtros
+  const fetchBdvHistory = async (
+    datePreset?: 'hoy' | 'ayer' | 'todos' | 'custom',
+    customDate?: string,
+    search?: string
+  ) => {
     setIsLoadingHistory(true);
     try {
-      const res = await fetch('/api/conciliacion/movimientos-bdv?limit=50');
+      const preset = datePreset !== undefined ? datePreset : historyDateFilter;
+      const customD = customDate !== undefined ? customDate : customHistoryDate;
+      const sTerm = search !== undefined ? search : historySearchTerm;
+
+      let dateQuery = '';
+      if (preset === 'hoy') {
+        dateQuery = `&date=${getLocalDateStr()}`;
+      } else if (preset === 'ayer') {
+        dateQuery = `&date=${getYesterdayDateStr()}`;
+      } else if (preset === 'custom' && customD) {
+        dateQuery = `&date=${customD}`;
+      }
+
+      const searchQuery = sTerm && sTerm.trim() ? `&search=${encodeURIComponent(sTerm.trim())}` : '';
+
+      const res = await fetch(`/api/conciliacion/movimientos-bdv?limit=100${dateQuery}${searchQuery}`);
       const data = await res.json();
       if (data.success) {
         setBdvMovements(data.movements || []);
@@ -250,8 +437,13 @@ export const ModalConciliacionPagoMovil: React.FC<ModalConciliacionPagoMovilProp
   };
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-3 font-sans animate-fade-in">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl overflow-hidden flex flex-col max-h-[92vh]">
+    <div 
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-3 font-sans animate-fade-in cursor-default"
+    >
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-5xl xl:max-w-6xl overflow-hidden flex flex-col max-h-[94vh]">
 
         {/* HEADER BDV / SEGURIDAD BANCARIA */}
         <div className="bg-gradient-to-r from-red-700 via-rose-700 to-slate-900 px-6 py-4 text-white flex items-center justify-between shadow-md">
@@ -321,7 +513,7 @@ export const ModalConciliacionPagoMovil: React.FC<ModalConciliacionPagoMovilProp
             }`}
           >
             <FileText className="w-4 h-4 text-indigo-600" />
-            Movimientos BDV ({reconcileData?.conciliadasQty || 0})
+            Movimientos BDV ({bdvMovements.length})
           </button>
 
           <button
@@ -340,25 +532,47 @@ export const ModalConciliacionPagoMovil: React.FC<ModalConciliacionPagoMovilProp
 
         {/* TAB 1: VALIDADOR RÁPIDO EN CAJA */}
         {activeTab === 'validador' && (
-          <div className="p-6 space-y-5 overflow-y-auto flex-1">
-            <form onSubmit={handleValidateReference} className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-4">
-              <span className="text-xs font-bold text-slate-700 uppercase tracking-wide block">
-                Comprobar Acreditación de Pago Móvil en BDV
-              </span>
+          <div className="p-6 space-y-4 overflow-y-auto flex-1">
+            <form onSubmit={handleValidateReference} className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-4 shadow-2xs">
+              <div className="flex items-center justify-between border-b border-slate-200/80 pb-3">
+                <div className="flex items-center gap-2">
+                  <Landmark className="w-4 h-4 text-rose-600" />
+                  <span className="text-xs font-black text-slate-800 uppercase tracking-wide">
+                    Validación Antifraude Banco de Venezuela (BDV)
+                  </span>
+                </div>
+                <div>
+                  {isOnline ? (
+                    <span className="text-[10.5px] text-emerald-800 bg-emerald-100/90 px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1.5 border border-emerald-300">
+                      <Wifi className="w-3 h-3 text-emerald-600" />
+                      BDV En Línea
+                    </span>
+                  ) : (
+                    <span className="text-[10.5px] text-amber-800 bg-amber-100/90 px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1.5 border border-amber-300">
+                      <WifiOff className="w-3 h-3 text-amber-600" />
+                      Modo Fuera de Línea (Sin Internet)
+                    </span>
+                  )}
+                </div>
+              </div>
 
+              {/* FILA 1: REFERENCIA Y MONTO */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-700 block mb-1">
-                    Número de Referencia (últimos 4 a 8 dígitos) *
+                    Número de Referencia Bancaria *
                   </label>
                   <input
                     type="text"
-                    placeholder="Ej: 894512 o 4512"
+                    placeholder="Ej: 3209 (4 dígitos o completa)"
                     value={inputRef}
-                    onChange={(e) => setInputRef(e.target.value)}
-                    className="w-full text-sm font-mono font-bold bg-white border border-slate-300 rounded-xl p-2.5 text-slate-800 outline-none focus:ring-2 focus:ring-rose-500"
+                    onChange={(e) => setInputRef(e.target.value.replace(/[^0-9]/g, ''))}
+                    className="w-full text-sm font-mono font-black bg-white border border-slate-300 rounded-xl p-2.5 text-slate-900 outline-none focus:ring-2 focus:ring-rose-500"
                     autoFocus
                   />
+                  <span className="text-[10px] text-slate-500 block mt-0.5">
+                    Permite ingresar solo los <strong>últimos 4 dígitos</strong> o la referencia completa
+                  </span>
                 </div>
 
                 <div>
@@ -372,30 +586,161 @@ export const ModalConciliacionPagoMovil: React.FC<ModalConciliacionPagoMovilProp
                       placeholder="Ej: 1450.00"
                       value={inputMonto}
                       onChange={(e) => setInputMonto(e.target.value)}
-                      className="w-full text-sm font-bold bg-white border border-slate-300 rounded-xl p-2.5 pl-9 text-slate-800 outline-none focus:ring-2 focus:ring-rose-500"
+                      className="w-full text-sm font-bold bg-white border border-slate-300 rounded-xl p-2.5 pl-9 text-slate-900 outline-none focus:ring-2 focus:ring-rose-500 font-mono"
                     />
                   </div>
+                  <span className="text-[10px] text-slate-400 block mt-0.5">Monto transferido con decimales</span>
                 </div>
               </div>
 
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-[11px] text-slate-500">
-                  Valida si los fondos se encuentran registrados en la cuenta de Banco de Venezuela.
-                </span>
+              {/* FILA 2: BANCO ORIGEN Y FECHA */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                    Banco de Origen (Emisor del Pago) *
+                  </label>
+                  <select
+                    value={bancoOrigen}
+                    onChange={(e) => setBancoOrigen(e.target.value)}
+                    className="w-full text-xs font-bold bg-white border border-slate-300 rounded-xl p-2.5 text-slate-800 outline-none focus:ring-2 focus:ring-rose-500"
+                  >
+                    {bancosList.length > 0 ? (
+                      bancosList.map((b) => (
+                        <option key={b.codigo} value={b.codigo}>
+                          {b.codigo} - {b.nombre}
+                        </option>
+                      ))
+                    ) : (
+                      <>
+                        <option value="0102">0102 - Banco de Venezuela (BDV)</option>
+                        <option value="0134">0134 - Banesco</option>
+                        <option value="0105">0105 - Banco Mercantil</option>
+                        <option value="0108">0108 - Banco Provincial (BBVA)</option>
+                        <option value="0172">0172 - Bancamiga</option>
+                        <option value="0114">0114 - Bancaribe</option>
+                        <option value="0163">0163 - Banco del Tesoro</option>
+                        <option value="0175">0175 - Banco Bicentenario</option>
+                        <option value="0191">0191 - BNC</option>
+                      </>
+                    )}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                    Fecha del Pago (YYYY-MM-DD) *
+                  </label>
+                  <input
+                    type="date"
+                    value={fechaPago}
+                    onChange={(e) => setFechaPago(e.target.value)}
+                    className="w-full text-xs font-mono font-bold bg-white border border-slate-300 rounded-xl p-2.5 text-slate-800 outline-none focus:ring-2 focus:ring-rose-500"
+                  />
+                </div>
+              </div>
+
+              {/* FILA 3: CÉDULA Y TELÉFONO DEL CLIENTE PAGADOR */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                    Cédula / RIF del Pagador (Cliente)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ej: V12345678 o J12345678"
+                    value={cedulaPagador}
+                    onChange={(e) => setCedulaPagador(e.target.value.toUpperCase())}
+                    className="w-full text-xs font-mono font-bold bg-white border border-slate-300 rounded-xl p-2.5 text-slate-800 outline-none focus:ring-2 focus:ring-rose-500"
+                  />
+                  <span className="text-[10px] text-slate-400 block mt-0.5">Precargado del cliente en caja</span>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                    Teléfono del Pagador (11 dígitos)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ej: 04121234567"
+                    value={telefonoPagador}
+                    onChange={(e) => setTelefonoPagador(e.target.value.replace(/[^0-9]/g, ''))}
+                    className="w-full text-xs font-mono font-bold bg-white border border-slate-300 rounded-xl p-2.5 text-slate-800 outline-none focus:ring-2 focus:ring-rose-500"
+                  />
+                  <span className="text-[10px] text-slate-400 block mt-0.5">Celular desde donde pagó el cliente</span>
+                </div>
+              </div>
+
+              {/* FILA 4: TELÉFONO DESTINO DE LA EMPRESA (MULTI-NÚMERO) */}
+              <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-1">
+                <label className="text-xs font-bold text-slate-700 block">
+                  Teléfono Destino (Línea de Cobro del Comercio)
+                </label>
+                {Array.isArray(bdvConfig?.bdvTelefonosDestino) && bdvConfig.bdvTelefonosDestino.length > 1 ? (
+                  <div className="space-y-1">
+                    <select
+                      value={telefonoDestino}
+                      onChange={(e) => setTelefonoDestino(e.target.value)}
+                      className="w-full text-xs font-bold bg-slate-50 border border-slate-300 rounded-lg p-2 text-slate-800 outline-none focus:ring-2 focus:ring-rose-500"
+                    >
+                      <option value="TODOS">🔄 Probar automáticamente en todos mis números autorizados</option>
+                      {bdvConfig.bdvTelefonosDestino.map((item: any, idx: number) => {
+                        const tel = typeof item === 'object' ? item.telefono : item;
+                        const alias = typeof item === 'object' && item.alias ? item.alias : `Línea ${idx + 1}`;
+                        const isDef = typeof item === 'object' ? item.esDefault : tel === bdvConfig.bdvTelefonoDefault;
+                        return (
+                          <option key={tel + idx} value={tel}>
+                            {isDef ? '⭐ ' : ''}{tel} - {alias} {isDef ? '(Principal)' : ''}
+                          </option>
+                        );
+                      })}
+                    </select>
+                    <span className="text-[10px] text-slate-500 block">
+                      Su comercio cuenta con varios números afiliados. Puede elegir la línea específica o probar en todas.
+                    </span>
+                  </div>
+                ) : Array.isArray(bdvConfig?.bdvTelefonosDestino) && bdvConfig.bdvTelefonosDestino.length === 1 ? (
+                  <div className="flex items-center justify-between text-xs bg-slate-50 p-2 rounded-lg border border-slate-200">
+                    <span className="text-slate-600 font-sans">Línea de cobro activa:</span>
+                    <strong className="font-mono text-slate-800">
+                      {typeof bdvConfig.bdvTelefonosDestino[0] === 'object'
+                        ? `${bdvConfig.bdvTelefonosDestino[0].telefono} (${bdvConfig.bdvTelefonosDestino[0].alias || 'Principal'})`
+                        : bdvConfig.bdvTelefonosDestino[0]}
+                    </strong>
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-amber-700 bg-amber-50 p-2 rounded-lg border border-amber-200">
+                    ⚠️ No hay teléfonos destino configurados en Configuración de Empresa. Se utilizará el teléfono del cliente o consulta directa.
+                  </div>
+                )}
+              </div>
+
+              {/* BOTONES DE ACCIÓN: VALIDAR EN BANCO O FACTURAR OFFLINE */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={handleBypassOffline}
+                  disabled={!inputRef.trim() || !inputMonto.trim()}
+                  className="w-full sm:w-auto px-4 py-2.5 bg-slate-200 hover:bg-slate-300 disabled:opacity-40 text-slate-800 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  title="Permite registrar el pago y continuar facturando inmediatamente aunque no haya internet"
+                >
+                  <Check className="w-4 h-4 text-slate-600" />
+                  <span>Cobrar sin Validar Online (Offline)</span>
+                </button>
+
                 <button
                   type="submit"
                   disabled={isValidating || !inputRef.trim() || !inputMonto.trim()}
-                  className="px-5 py-2.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 disabled:bg-slate-300 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-2"
+                  className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 disabled:bg-slate-300 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   {isValidating ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin" />
-                      Consultando BDV...
+                      Consultando Banco de Venezuela...
                     </>
                   ) : (
                     <>
                       <Search className="w-4 h-4" />
-                      Validar en Banco
+                      Validar en Banco de Venezuela
                     </>
                   )}
                 </button>
@@ -403,79 +748,177 @@ export const ModalConciliacionPagoMovil: React.FC<ModalConciliacionPagoMovilProp
             </form>
 
             {/* RESULTADO DE LA VALIDACIÓN */}
-            {validationResult && (
-              <div
-                className={`rounded-2xl p-5 border transition-all ${
-                  validationResult.verified
-                    ? validationResult.alreadyUsed
-                      ? 'bg-amber-50 border-amber-300 text-amber-900'
-                      : 'bg-emerald-50 border-emerald-300 text-emerald-900'
-                    : 'bg-red-50 border-red-300 text-red-900'
-                }`}
-              >
-                <div className="flex items-start gap-3">
-                  {validationResult.verified ? (
-                    validationResult.alreadyUsed ? (
-                      <AlertTriangle className="w-6 h-6 text-amber-600 flex-shrink-0 mt-0.5" />
+            {validationResult && (() => {
+              const isAlreadyUsedInSale = !!validationResult.alreadyUsedInSale;
+              const isVerified = !!validationResult.verified && !isAlreadyUsedInSale;
+              const isNetworkErr = !!validationResult.isNetworkError;
+
+              return (
+                <div
+                  className={`rounded-2xl p-5 border transition-all animate-fade-in ${
+                    isAlreadyUsedInSale
+                      ? 'bg-amber-50 border-amber-300 text-amber-950 shadow-sm'
+                      : isVerified
+                      ? 'bg-emerald-50 border-emerald-300 text-emerald-950 shadow-sm'
+                      : isNetworkErr
+                      ? 'bg-amber-50 border-amber-300 text-amber-950 shadow-sm'
+                      : 'bg-red-50 border-red-300 text-red-950 shadow-sm'
+                  }`}
+                >
+                  <div className="flex items-start gap-3.5">
+                    {isAlreadyUsedInSale ? (
+                      <AlertTriangle className="w-7 h-7 text-amber-600 flex-shrink-0 mt-0.5" />
+                    ) : isVerified ? (
+                      <CheckCircle2 className="w-7 h-7 text-emerald-600 flex-shrink-0 mt-0.5" />
+                    ) : isNetworkErr ? (
+                      <WifiOff className="w-7 h-7 text-amber-600 flex-shrink-0 mt-0.5" />
                     ) : (
-                      <CheckCircle2 className="w-6 h-6 text-emerald-600 flex-shrink-0 mt-0.5" />
-                    )
-                  ) : (
-                    <AlertTriangle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
-                  )}
+                      <AlertTriangle className="w-7 h-7 text-red-600 flex-shrink-0 mt-0.5" />
+                    )}
 
-                  <div className="space-y-1.5 flex-1">
-                    <h4 className="text-sm font-black">
-                      {validationResult.verified
-                        ? validationResult.alreadyUsed
-                          ? 'PAGO DETECTADO - YA UTILIZADO EN OTRA VENTA'
-                          : '¡PAGO 100% VERIFICADO EN BANCO DE VENEZUELA!'
-                        : 'PAGO NO DETECTADO EN BANCO DE VENEZUELA'}
-                    </h4>
-                    <p className="text-xs">{validationResult.message}</p>
-
-                    {validationResult.movement && (
-                      <div className="mt-3 bg-white/80 rounded-xl p-3 text-xs space-y-1 border border-black/5 font-mono">
-                        <div className="flex justify-between">
-                          <span className="text-slate-500 font-sans">Referencia Bancaria:</span>
-                          <span className="font-bold">{validationResult.movement.referencia}</span>
+                    <div className="space-y-2 flex-1">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h4 className="text-sm font-black uppercase tracking-tight">
+                            {isAlreadyUsedInSale
+                              ? `⚠️ PAGO YA VALIDADO Y UTILIZADO EN FACTURA #${validationResult.usedInFactura || ''}`
+                              : isVerified
+                              ? '¡PAGO 100% VERIFICADO Y ACREDITADO EN BDV!'
+                              : isNetworkErr
+                              ? 'SIN CONEXIÓN O RESPUESTA DE BANCO DE VENEZUELA'
+                              : 'PAGO NO DETECTADO EN BANCO DE VENEZUELA'}
+                          </h4>
+                          {isAlreadyUsedInSale ? (
+                            <span className="bg-amber-200 text-amber-900 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">
+                              Duplicado / Ya Facturado
+                            </span>
+                          ) : isVerified && validationResult.alreadyReconciled ? (
+                            <span className="bg-emerald-200 text-emerald-900 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">
+                              Acreditado en Cuenta BDV
+                            </span>
+                          ) : null}
                         </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500 font-sans">Monto Acreditado:</span>
-                          <span className="font-bold text-emerald-700">Bs. {parseFloat(validationResult.movement.monto_ves).toLocaleString('es-VE', { minimumFractionDigits: 2 })}</span>
-                        </div>
-                        {validationResult.movement.telefono_origen && (
-                          <div className="flex justify-between">
-                            <span className="text-slate-500 font-sans">Teléfono Emisor:</span>
-                            <span className="font-bold">{validationResult.movement.telefono_origen}</span>
-                          </div>
-                        )}
-                        <div className="flex justify-between">
-                          <span className="text-slate-500 font-sans">Fecha y Hora:</span>
-                          <span>{new Date(validationResult.movement.fecha).toLocaleString('es-VE')}</span>
-                        </div>
+                        <p className="text-xs text-slate-700 mt-1 font-medium">
+                          {cleanBdvMessage(validationResult.message)}
+                        </p>
                       </div>
-                    )}
 
-                    {validationResult.verified && !validationResult.alreadyUsed && onReferenceVerified && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onReferenceVerified(inputRef, parseFloat(inputMonto.replace(',', '.')));
-                          onClose();
-                        }}
-                        className="mt-3 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl shadow-sm transition-all flex items-center gap-1.5"
-                      >
-                        <Check className="w-4 h-4" />
-                        Aceptar y Aplicar al Cobro Actual
-                      </button>
-                    )}
+                      {/* DETALLE DEL PAGO (SI FUE VERIFICADO O YA CONCILIADO) */}
+                      {(isVerified || isAlreadyUsedInSale) && (
+                        <div className={`rounded-xl p-3 text-xs space-y-2 border font-mono shadow-2xs ${
+                          isAlreadyUsedInSale ? 'bg-white/95 border-amber-200' : 'bg-white/90 border-emerald-200/80'
+                        }`}>
+                          <div className="flex justify-between">
+                            <span className="text-slate-500 font-sans">Referencia Acreditada:</span>
+                            <span className="font-bold text-slate-900">{validationResult.payloadSent?.referencia || inputRef}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-500 font-sans">Monto Verificado:</span>
+                            <span className={`font-bold text-sm ${isAlreadyUsedInSale ? 'text-amber-800' : 'text-emerald-700'}`}>
+                              Bs. {parseFloat(validationResult.data?.amount || inputMonto.replace(',', '.')).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                          {validationResult.telefonoDestinoUsado && (
+                            <div className="flex justify-between">
+                              <span className="text-slate-500 font-sans">Línea que recibió el pago:</span>
+                              <span className="font-bold text-slate-800">{validationResult.telefonoDestinoUsado}</span>
+                            </div>
+                          )}
+                          {validationResult.latencyMs !== undefined && (
+                            <div className="flex justify-between text-[11px] text-slate-400">
+                              <span className="font-sans">Latencia de respuesta:</span>
+                              <span>{validationResult.latencyMs || 0} ms</span>
+                            </div>
+                          )}
+
+                          {isAlreadyUsedInSale && (
+                            <div className="p-2.5 bg-amber-100 rounded-lg text-amber-950 font-sans text-xs border border-amber-300 font-medium">
+                              <strong className="block font-bold">⚠️ Comprobante Ya Facturado:</strong>
+                              Este pago móvil ya fue conciliado y aplicado en la <strong>Factura #{validationResult.usedInFactura}</strong>. Para evitar pagos duplicados, no se permite volver a asociar a otra venta.
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* BOTONES DE ACCIÓN SEGÚN EL CASO */}
+                      <div className="flex flex-wrap items-center gap-2 pt-2">
+                        {isAlreadyUsedInSale ? (
+                          <>
+                            <button
+                              type="button"
+                              disabled
+                              className="px-5 py-2.5 bg-amber-200 text-amber-800 text-xs font-black rounded-xl cursor-not-allowed opacity-80 flex items-center gap-1.5"
+                            >
+                              <AlertTriangle className="w-4 h-4 text-amber-700" />
+                              Pago No Reutilizable (Ya Facturado)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setValidationResult(null)}
+                              className="px-4 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-bold rounded-xl transition-all cursor-pointer"
+                            >
+                              Corregir Referencia
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleBypassOffline}
+                              className="px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer"
+                              title="Permite facturar de emergencia"
+                            >
+                              Cobrar sin Validar (Offline)
+                            </button>
+                          </>
+                        ) : isVerified ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (onReferenceVerified) {
+                                  onReferenceVerified(inputRef.trim(), parseFloat(inputMonto.replace(',', '.')));
+                                }
+                                onClose();
+                              }}
+                              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <Check className="w-4 h-4" />
+                              Aplicar al Cobro y Continuar Facturación
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setValidationResult(null)}
+                              className="px-3 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-bold rounded-xl transition-all cursor-pointer"
+                            >
+                              Corregir Datos
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={handleBypassOffline}
+                              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <Check className="w-4 h-4" />
+                              Facturar de Todas Formas (Omitir Validación)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setValidationResult(null)}
+                              className="px-3 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-bold rounded-xl transition-all cursor-pointer"
+                            >
+                              Corregir Datos y Reintentar
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         )}
+
 
         {/* TAB 2: CONCILIACIÓN DE TURNO & IMPORTAR EXTRACTO */}
         {activeTab === 'conciliacion' && (
@@ -608,52 +1051,162 @@ export const ModalConciliacionPagoMovil: React.FC<ModalConciliacionPagoMovilProp
         {/* TAB 3: HISTORIAL DE MOVIMIENTOS BDV */}
         {activeTab === 'historial' && (
           <div className="p-6 space-y-4 overflow-y-auto flex-1">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-700 uppercase">
-                Movimientos Bancarios Registrados en BDV ({bdvMovements.length})
-              </span>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <span className="text-xs font-bold text-slate-800 uppercase flex items-center gap-2">
+                  Movimientos Bancarios Registrados en BDV
+                  <span className="bg-sky-100 text-sky-800 text-[10px] font-black px-2 py-0.5 rounded-full">
+                    {bdvMovements.length}
+                  </span>
+                </span>
+                <p className="text-[10.5px] text-slate-500">
+                  Consulte pagos móviles recibidos en cuenta y aplíquelos a la venta con 1 solo clic
+                </p>
+              </div>
               <button
                 type="button"
-                onClick={fetchBdvHistory}
-                className="text-xs font-bold text-sky-600 hover:text-sky-700 flex items-center gap-1"
+                onClick={() => fetchBdvHistory()}
+                className="text-xs font-bold text-sky-600 hover:text-sky-700 flex items-center gap-1 self-start sm:self-auto cursor-pointer"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isLoadingHistory ? 'animate-spin' : ''}`} />
                 Recargar
               </button>
             </div>
 
-            <div className="border border-slate-200 rounded-xl overflow-hidden max-h-80 overflow-y-auto">
+            {/* BARRA DE FILTROS POR FECHA Y BÚSQUEDA */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[10px] font-bold text-slate-500 uppercase">Filtrar:</span>
+                
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHistoryDateFilter('hoy');
+                    fetchBdvHistory('hoy', undefined, historySearchTerm);
+                  }}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    historyDateFilter === 'hoy'
+                      ? 'bg-sky-600 text-white shadow-xs'
+                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  Hoy
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHistoryDateFilter('ayer');
+                    fetchBdvHistory('ayer', undefined, historySearchTerm);
+                  }}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    historyDateFilter === 'ayer'
+                      ? 'bg-sky-600 text-white shadow-xs'
+                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  Ayer
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHistoryDateFilter('todos');
+                    fetchBdvHistory('todos', undefined, historySearchTerm);
+                  }}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    historyDateFilter === 'todos'
+                      ? 'bg-sky-600 text-white shadow-xs'
+                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  Todos
+                </button>
+
+                <div className="flex items-center gap-1.5 ml-auto">
+                  <span className="text-[10px] text-slate-500 font-medium">Fecha:</span>
+                  <input
+                    type="date"
+                    value={customHistoryDate}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCustomHistoryDate(val);
+                      setHistoryDateFilter('custom');
+                      fetchBdvHistory('custom', val, historySearchTerm);
+                    }}
+                    className="text-xs bg-white border border-slate-300 rounded-lg px-2 py-1 text-slate-700 outline-none focus:ring-1 focus:ring-sky-500 cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              {/* BUSCADOR RÁPIDO */}
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Buscar por últimos 4 dígitos de referencia, monto, teléfono o emisor..."
+                  value={historySearchTerm}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setHistorySearchTerm(val);
+                    fetchBdvHistory(historyDateFilter, customHistoryDate, val);
+                  }}
+                  className="w-full text-xs bg-white border border-slate-300 rounded-lg pl-8 pr-3 py-1.5 text-slate-700 outline-none focus:ring-2 focus:ring-sky-500"
+                />
+              </div>
+            </div>
+
+            {/* TABLA DE MOVIMIENTOS */}
+            <div className="border border-slate-200 rounded-xl overflow-hidden max-h-[520px] overflow-y-auto">
               <table className="w-full text-left text-xs border-collapse">
-                <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px] sticky top-0">
+                <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-[10px] sticky top-0 z-10 border-b border-slate-200">
                   <tr>
-                    <th className="p-2.5">Fecha</th>
-                    <th className="p-2.5">Referencia</th>
-                    <th className="p-2.5">Monto Bs.</th>
-                    <th className="p-2.5">Concepto / Emisor</th>
-                    <th className="p-2.5 text-center">Uso en Venta</th>
+                    <th className="p-3 w-56">Fecha y Hora</th>
+                    <th className="p-3 w-36">Referencia</th>
+                    <th className="p-3 w-40">Monto Bs.</th>
+                    <th className="p-3">Concepto / Emisor</th>
+                    <th className="p-3 w-44 text-center">Acción / Uso</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {bdvMovements.length > 0 ? (
                     bdvMovements.map((m, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50/80">
-                        <td className="p-2.5 text-slate-500 font-mono text-[11px]">
-                          {new Date(m.fecha).toLocaleDateString('es-VE')}
+                      <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="p-3 text-slate-600 font-mono text-xs whitespace-nowrap">
+                          {formatBdvFecha(m.fecha, m.created_at)}
                         </td>
-                        <td className="p-2.5 font-mono font-bold text-slate-800">{m.referencia}</td>
-                        <td className="p-2.5 font-bold text-emerald-700">
+                        <td className="p-3 font-mono font-black text-slate-900 text-sm">{m.referencia}</td>
+                        <td className="p-3 font-black text-emerald-700 whitespace-nowrap text-sm">
                           Bs. {parseFloat(m.monto_ves).toLocaleString('es-VE', { minimumFractionDigits: 2 })}
                         </td>
-                        <td className="p-2.5 text-slate-600 max-w-xs truncate">{m.descripcion}</td>
-                        <td className="p-2.5 text-center">
+                        <td className="p-3 text-slate-700 max-w-md truncate" title={m.descripcion}>
+                          <div className="font-medium text-slate-800">{m.descripcion}</div>
+                          {m.telefono_origen && (
+                            <span className="text-[11px] text-slate-500 block font-mono mt-0.5">
+                              Telf: {m.telefono_origen}
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 text-center">
                           {m.conciliado ? (
-                            <span className="bg-emerald-100 text-emerald-800 font-bold text-[10px] px-2 py-0.5 rounded-full">
-                              Factura: {m.factura_nro || 'Sí'}
+                            <span className="bg-emerald-100 text-emerald-800 font-bold text-[11px] px-2.5 py-1 rounded-full inline-block">
+                              ✓ Factura: {m.factura_nro || 'Cobrado'}
                             </span>
                           ) : (
-                            <span className="bg-slate-100 text-slate-600 font-bold text-[10px] px-2 py-0.5 rounded-full">
-                              Disponible
-                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (onReferenceVerified) {
+                                  onReferenceVerified(m.referencia, parseFloat(m.monto_ves));
+                                }
+                                onClose();
+                              }}
+                              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs rounded-xl transition-all shadow-sm inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                              title="Cargar esta referencia y monto a la venta actual"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              Aplicar a Venta
+                            </button>
                           )}
                         </td>
                       </tr>
@@ -661,7 +1214,7 @@ export const ModalConciliacionPagoMovil: React.FC<ModalConciliacionPagoMovilProp
                   ) : (
                     <tr>
                       <td colSpan={5} className="p-8 text-center text-slate-400 text-xs">
-                        No hay movimientos registrados. Use la pestaña de Conciliación para cargar su extracto de BDV.
+                        No se encontraron movimientos registrados para este filtro.
                       </td>
                     </tr>
                   )}

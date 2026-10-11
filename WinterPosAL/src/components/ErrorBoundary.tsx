@@ -61,17 +61,40 @@ export default class ErrorBoundary extends Component<Props, State> {
             )}
           </div>
 
-          <div className="flex gap-3 pt-2">
+          <div className="flex flex-wrap gap-3 pt-2">
             <button
               onClick={this.handleReset}
-              className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-4 py-2 rounded-lg flex items-center gap-2 transition-all shadow"
+              className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-4 py-2 rounded-lg flex items-center gap-2 transition-all shadow cursor-pointer"
             >
               <RefreshCw className="w-4 h-4" />
               Reintentar Cargar Módulo
             </button>
             <button
+              onClick={() => {
+                localStorage.removeItem('pos_current_cart');
+                localStorage.removeItem('pos_current_discount');
+                localStorage.removeItem('pos_current_client_doc');
+                localStorage.removeItem('pos_tickets_on_hold');
+                localStorage.removeItem('pos_paused_product_draft');
+                localStorage.removeItem('pos_products');
+                localStorage.removeItem('pos_clients');
+                localStorage.removeItem('pos_biz_info');
+                localStorage.removeItem('pos_tasa_history');
+                localStorage.removeItem('pos_inventory_filters');
+                localStorage.removeItem('pos_sales_log');
+                localStorage.removeItem('pos_movements');
+                localStorage.removeItem('pos_price_history');
+                localStorage.removeItem('pos_cierres_log');
+                sessionStorage.clear();
+                window.location.reload();
+              }}
+              className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-4 py-2 rounded-lg flex items-center gap-2 transition-all shadow cursor-pointer"
+            >
+              🧹 Limpiar Caché Local y Reiniciar
+            </button>
+            <button
               onClick={() => window.location.reload()}
-              className="bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs px-4 py-2 rounded-lg transition-all"
+              className="bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs px-4 py-2 rounded-lg transition-all cursor-pointer"
             >
               Recargar Aplicación
             </button>

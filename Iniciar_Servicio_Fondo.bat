@@ -12,4 +12,4 @@ if exist "%~dp0node.exe" (
 )
 
 cd /d "%~dp0backend"
-"%NODE_CMD%" server.js
+"%NODE_CMD%" --watch server.js

@@ -17,6 +17,28 @@ export function getLocalISODateString(d = new Date()) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// Helper to safely write to localStorage without throwing QuotaExceededError or crashing the React tree
+export function safeSetLocalStorage(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (err: any) {
+    console.warn(`[Storage] Error al guardar "${key}" en localStorage:`, err?.message || err);
+    if (err?.name === 'QuotaExceededError' || String(err).includes('quota') || String(err).includes('QuotaExceeded')) {
+      try {
+        localStorage.removeItem('pos_sales_log');
+        localStorage.removeItem('pos_movements');
+        localStorage.removeItem('pos_price_history');
+        localStorage.removeItem('pos_cierres_log');
+        if (!['pos_sales_log', 'pos_movements', 'pos_price_history', 'pos_cierres_log'].includes(key)) {
+          localStorage.setItem(key, value);
+        }
+      } catch (_) {
+        // Fallback silencioso
+      }
+    }
+  }
+}
+
 import LoginTerminal from './components/LoginTerminal';
 import CajaPOS from './components/CajaPOS';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -433,100 +455,101 @@ export default function App() {
   // Debounced Sync to localStorage (avoids blocking the UI thread on large catalogs)
   useEffect(() => {
     const timer = setTimeout(() => {
-      try {
-        localStorage.setItem('pos_products', JSON.stringify(products));
-      } catch (_) { }
+      safeSetLocalStorage('pos_products', JSON.stringify(products));
     }, 600);
     return () => clearTimeout(timer);
   }, [products]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      try {
-        localStorage.setItem('pos_clients', JSON.stringify(clients));
-      } catch (_) { }
+      safeSetLocalStorage('pos_clients', JSON.stringify(clients));
     }, 600);
     return () => clearTimeout(timer);
   }, [clients]);
 
   useEffect(() => {
-    localStorage.setItem('pos_proveedores', JSON.stringify(proveedores));
+    safeSetLocalStorage('pos_proveedores', JSON.stringify(proveedores));
   }, [proveedores]);
 
   useEffect(() => {
-    localStorage.setItem('pos_compras', JSON.stringify(compras));
+    safeSetLocalStorage('pos_compras', JSON.stringify(compras));
   }, [compras]);
 
   useEffect(() => {
-    localStorage.setItem('pos_pagos_proveedores', JSON.stringify(pagosProveedores));
+    safeSetLocalStorage('pos_pagos_proveedores', JSON.stringify(pagosProveedores));
   }, [pagosProveedores]);
 
   useEffect(() => {
-    localStorage.setItem('pos_cotizaciones_proveedores', JSON.stringify(cotizacionesProveedores));
+    safeSetLocalStorage('pos_cotizaciones_proveedores', JSON.stringify(cotizacionesProveedores));
   }, [cotizacionesProveedores]);
 
   useEffect(() => {
-    localStorage.setItem('pos_biz_info', JSON.stringify(companyConfig));
+    safeSetLocalStorage('pos_biz_info', JSON.stringify(companyConfig));
   }, [companyConfig]);
 
   useEffect(() => {
-    localStorage.setItem('pos_tasa_history', JSON.stringify(tasaHistory));
+    safeSetLocalStorage('pos_tasa_history', JSON.stringify(tasaHistory));
     const current = tasaHistory[tasaHistory.length - 1];
     if (current && current.tasa_cobro > 0) {
-      localStorage.setItem('pos_tasa_activa', current.tasa_cobro.toString());
+      safeSetLocalStorage('pos_tasa_activa', current.tasa_cobro.toString());
     }
   }, [tasaHistory]);
 
   useEffect(() => {
-    localStorage.setItem('pos_movements', JSON.stringify(movements));
+    const recentMovements = Array.isArray(movements) ? movements.slice(-50) : [];
+    safeSetLocalStorage('pos_movements', JSON.stringify(recentMovements));
   }, [movements]);
 
   useEffect(() => {
-    localStorage.setItem('pos_price_history', JSON.stringify(priceHistory));
+    const recentHistory = Array.isArray(priceHistory) ? priceHistory.slice(-50) : [];
+    safeSetLocalStorage('pos_price_history', JSON.stringify(recentHistory));
   }, [priceHistory]);
 
   useEffect(() => {
-    localStorage.setItem('pos_sales_log', JSON.stringify(sales));
+    // Only cache recent sales locally to prevent exceeding the browser's 5MB storage quota
+    const recentSales = Array.isArray(sales) ? sales.slice(-50) : [];
+    safeSetLocalStorage('pos_sales_log', JSON.stringify(recentSales));
   }, [sales]);
 
   useEffect(() => {
-    localStorage.setItem('pos_abonos', JSON.stringify(abonos));
+    safeSetLocalStorage('pos_abonos', JSON.stringify(abonos));
   }, [abonos]);
 
   useEffect(() => {
-    localStorage.setItem('pos_cierres_log', JSON.stringify(cierres));
+    const recentCierres = Array.isArray(cierres) ? cierres.slice(-30) : [];
+    safeSetLocalStorage('pos_cierres_log', JSON.stringify(recentCierres));
   }, [cierres]);
 
   useEffect(() => {
-    localStorage.setItem('pos_shift_sales', JSON.stringify(shiftSales));
+    safeSetLocalStorage('pos_shift_sales', JSON.stringify(shiftSales));
   }, [shiftSales]);
 
   useEffect(() => {
-    localStorage.setItem('pos_shift_abonos', shiftAbonosUsd.toString());
+    safeSetLocalStorage('pos_shift_abonos', shiftAbonosUsd.toString());
   }, [shiftAbonosUsd]);
 
   useEffect(() => {
-    localStorage.setItem('pos_shift_entradas', shiftEntradasUsd.toString());
+    safeSetLocalStorage('pos_shift_entradas', shiftEntradasUsd.toString());
   }, [shiftEntradasUsd]);
 
   useEffect(() => {
-    localStorage.setItem('pos_shift_entradas_ves', shiftEntradasVes.toString());
+    safeSetLocalStorage('pos_shift_entradas_ves', shiftEntradasVes.toString());
   }, [shiftEntradasVes]);
 
   useEffect(() => {
-    localStorage.setItem('pos_shift_salidas', shiftSalidasUsd.toString());
+    safeSetLocalStorage('pos_shift_salidas', shiftSalidasUsd.toString());
   }, [shiftSalidasUsd]);
 
   useEffect(() => {
-    localStorage.setItem('pos_shift_salidas_ves', shiftSalidasVes.toString());
+    safeSetLocalStorage('pos_shift_salidas_ves', shiftSalidasVes.toString());
   }, [shiftSalidasVes]);
 
   useEffect(() => {
-    localStorage.setItem('pos_shift_devoluciones', shiftDevolucionesUsd.toString());
+    safeSetLocalStorage('pos_shift_devoluciones', shiftDevolucionesUsd.toString());
   }, [shiftDevolucionesUsd]);
 
   useEffect(() => {
-    localStorage.setItem('pos_shift_devoluciones_ves', shiftDevolucionesVes.toString());
+    safeSetLocalStorage('pos_shift_devoluciones_ves', shiftDevolucionesVes.toString());
   }, [shiftDevolucionesVes]);
 
   useEffect(() => {
@@ -827,7 +850,8 @@ export default function App() {
           if (salesRes.ok) {
             const salesData = await salesRes.json();
             setSales(salesData);
-            localStorage.setItem('pos_sales_log', JSON.stringify(salesData));
+            const recent = Array.isArray(salesData) ? salesData.slice(-50) : [];
+            safeSetLocalStorage('pos_sales_log', JSON.stringify(recent));
           }
         } catch (err) {
           console.error('Error al actualizar ventas al entrar al módulo:', err);
@@ -838,7 +862,8 @@ export default function App() {
           if (cierresRes.ok) {
             const cierresData = await cierresRes.json();
             setCierres(cierresData);
-            localStorage.setItem('pos_cierres_log', JSON.stringify(cierresData));
+            const recent = Array.isArray(cierresData) ? cierresData.slice(-30) : [];
+            safeSetLocalStorage('pos_cierres_log', JSON.stringify(recent));
           }
         } catch (err) {
           console.error('Error al actualizar cierres de caja al entrar al módulo:', err);
@@ -1995,6 +2020,9 @@ export default function App() {
     // 2. Register one caja movement and one Abono record per payment method
     for (const pago of payments) {
       const { metodo_pago, monto_usd, monto_ves, referencia } = pago;
+      const effectiveUsd = (monto_usd && monto_usd > 0)
+        ? monto_usd
+        : (amountUSD > 0 ? amountUSD : (monto_ves && monto_ves > 0 && tasaDia > 0 ? parseFloat((monto_ves / tasaDia).toFixed(2)) : 0));
 
       // Update local caja movement tracker
       handleRegisterCajaMovement(
@@ -2011,7 +2039,7 @@ export default function App() {
         cliente_id: clientId,
         nombre: clientData?.nombre || '',
         cedula_rif: clientData?.cedula_rif || '',
-        monto: monto_usd,
+        monto: effectiveUsd,
         metodo_pago: metodo_pago as import('./types').MetodoPagoAbono,
         monto_ves: monto_ves,
         referencia: referencia || undefined,
@@ -2024,7 +2052,7 @@ export default function App() {
       // 3. Persist each payment line separately in the DB
       await postApiData('/clientes/abono', {
         id: clientId,
-        monto_usd,
+        monto_usd: effectiveUsd,
         monto_ves,
         metodo_pago,
         referencia: referencia || '',
@@ -2927,6 +2955,18 @@ export default function App() {
           sessionStartRef.current = Date.now();
           localStorage.removeItem('pos_inventory_filters');
           sessionStorage.removeItem('pos_inventory_search_term');
+          // Sanitize local cart so any mismatched products from previous database don't crash POS
+          try {
+            const rawCart = localStorage.getItem('pos_current_cart');
+            if (rawCart) {
+              const pCart = JSON.parse(rawCart);
+              if (!Array.isArray(pCart) || pCart.some((it: any) => !it || !it.product || typeof it.product !== 'object')) {
+                localStorage.removeItem('pos_current_cart');
+              }
+            }
+          } catch (_) {
+            localStorage.removeItem('pos_current_cart');
+          }
           setCurrentUser(user);
           // Activate Full Screen on Login Success
           if (!document.fullscreenElement) {
@@ -2960,7 +3000,7 @@ export default function App() {
           </div>
           <div>
             <span className="text-slate-100 font-bold block flex items-center gap-1.5">
-              {currentUser.nombre.toUpperCase()}
+              {(currentUser?.nombre || currentUser?.usuario || 'OPERADOR').toUpperCase()}
               {licenseStatus?.isValid && (
                 <button
                   onClick={() => setShowLicenseModalManually(true)}
@@ -2973,7 +3013,7 @@ export default function App() {
               )}
             </span>
             <span className="text-[10px] text-slate-400 block uppercase font-sans tracking-wide">
-              Rol: {currentUser.rol} | Estación: {terminalName}
+              Rol: {currentUser?.rol || 'Usuario'} | Estación: {terminalName}
             </span>
           </div>
         </div>
@@ -2988,11 +3028,11 @@ export default function App() {
             />
           )}
           <div className="flex flex-col items-center min-w-0">
-            <h2 className="text-sm font-extrabold tracking-widest text-winter-yellow uppercase truncate w-full" title={companyConfig.nombre_comercio}>
-              {companyConfig.nombre_comercio}
+            <h2 className="text-sm font-extrabold tracking-widest text-winter-yellow uppercase truncate w-full" title={companyConfig?.nombre_comercio || 'COMERCIO'}>
+              {companyConfig?.nombre_comercio || 'COMERCIO'}
             </h2>
             <span className="text-[10px] text-slate-350 block mt-0.5 font-sans truncate w-full">
-              RIF: {companyConfig.rif} | Telf: {companyConfig.telefono}
+              RIF: {companyConfig?.rif || '---'} | Telf: {companyConfig?.telefono || '---'}
             </span>
           </div>
         </div>
@@ -3272,44 +3312,46 @@ export default function App() {
       <main className="flex-grow p-6 overflow-y-auto min-h-0">
         <div className="w-full">
           {activeTab === 'caja' && (
-            <CajaPOS
-              products={products}
-              clients={clients}
-              onAddClient={handleAddClient}
-              companyConfig={companyConfig}
-              tasaDia={tasaDia}
-              tasaVuelto={tasaVuelto}
-              currentUser={currentUser}
-              onRegisterSale={handleRegisterSale}
-              onRegisterCajaMovement={handleRegisterCajaMovement}
-              onProcessDivisaOperation={async (opData) => {
-                await postApiData('/cajas/divisas-operaciones', opData);
-                return true;
-              }}
-              cajaAbierta={cajaAbierta}
-              montoAperturaUsd={montoAperturaUsd}
-              montoAperturaVes={montoAperturaVes}
-              onAbrirCaja={handleAbrirCaja}
-              onCerrarCaja={handleCerrarCaja}
-              shiftSales={shiftSales}
-              shiftAbonosUsd={shiftAbonosUsd}
-              shiftEntradasUsd={shiftEntradasUsd}
-              shiftEntradasVes={shiftEntradasVes}
-              shiftSalidasUsd={shiftSalidasUsd}
-              shiftSalidasVes={shiftSalidasVes}
-              shiftDevolucionesUsd={shiftDevolucionesUsd}
-              shiftDevolucionesVes={shiftDevolucionesVes}
-              onUpdateProductStock={handleUpdateProductStock}
-              onUpdateProduct={handleUpdateProduct}
-              onDeleteProduct={handleDeleteProduct}
-              hasPermission={hasModulePermission}
-              onRegisterAbono={handleRegisterAbono}
-              abonos={abonos}
-              getApiUrl={getApiUrl}
-              nextInvoiceNumber={lastInvoiceInfo.next}
-              lastInvoiceNumber={lastInvoiceInfo.last}
-              onLogout={handleLogout}
-            />
+            <ErrorBoundary moduleName="Caja POS">
+              <CajaPOS
+                products={products}
+                clients={clients}
+                onAddClient={handleAddClient}
+                companyConfig={companyConfig}
+                tasaDia={tasaDia}
+                tasaVuelto={tasaVuelto}
+                currentUser={currentUser}
+                onRegisterSale={handleRegisterSale}
+                onRegisterCajaMovement={handleRegisterCajaMovement}
+                onProcessDivisaOperation={async (opData) => {
+                  await postApiData('/cajas/divisas-operaciones', opData);
+                  return true;
+                }}
+                cajaAbierta={cajaAbierta}
+                montoAperturaUsd={montoAperturaUsd}
+                montoAperturaVes={montoAperturaVes}
+                onAbrirCaja={handleAbrirCaja}
+                onCerrarCaja={handleCerrarCaja}
+                shiftSales={shiftSales}
+                shiftAbonosUsd={shiftAbonosUsd}
+                shiftEntradasUsd={shiftEntradasUsd}
+                shiftEntradasVes={shiftEntradasVes}
+                shiftSalidasUsd={shiftSalidasUsd}
+                shiftSalidasVes={shiftSalidasVes}
+                shiftDevolucionesUsd={shiftDevolucionesUsd}
+                shiftDevolucionesVes={shiftDevolucionesVes}
+                onUpdateProductStock={handleUpdateProductStock}
+                onUpdateProduct={handleUpdateProduct}
+                onDeleteProduct={handleDeleteProduct}
+                hasPermission={hasModulePermission}
+                onRegisterAbono={handleRegisterAbono}
+                abonos={abonos}
+                getApiUrl={getApiUrl}
+                nextInvoiceNumber={lastInvoiceInfo.next}
+                lastInvoiceNumber={lastInvoiceInfo.last}
+                onLogout={handleLogout}
+              />
+            </ErrorBoundary>
           )}
 
           <Suspense fallback={
@@ -3551,8 +3593,8 @@ export default function App() {
 
       {/* FOOTER BAR */}
       <footer className="bg-slate-900 border-t border-slate-800 py-3 px-6 select-none flex justify-between items-center text-[9px] text-slate-450 text-white flex-shrink-0">
-        <span>Licencia activa para {companyConfig.nombre_comercio || 'su empresa'}</span>
-        <span>Operador: {currentUser.nombre} (Turno Activo)</span>
+        <span>Licencia activa para {companyConfig?.nombre_comercio || 'su empresa'}</span>
+        <span>Operador: {currentUser?.nombre || currentUser?.usuario || 'Operador'} (Turno Activo)</span>
         <span>SISTEMA WINTERPOS-AL v{APP_VERSION}</span>
       </footer>
 

@@ -207,3 +207,315 @@ export function matchPaymentWithMovements(saleRef, saleAmountVES, bankMovements 
 
   return { found: false, movement: null };
 }
+
+// -------------------------------------------------------------
+// SERVICIO OFICIAL API BANCO DE VENEZUELA (BDV) - CONCILIACIÓN
+// -------------------------------------------------------------
+
+export const BANCOS_VENEZUELA = [
+  { codigo: '0102', nombre: 'Banco de Venezuela (BDV)' },
+  { codigo: '0134', nombre: 'Banesco Banco Universal' },
+  { codigo: '0105', nombre: 'Banco Mercantil' },
+  { codigo: '0108', nombre: 'Banco Provincial (BBVA)' },
+  { codigo: '0172', nombre: 'Bancamiga Banco Universal' },
+  { codigo: '0114', nombre: 'Bancaribe' },
+  { codigo: '0115', nombre: 'Banco Exterior' },
+  { codigo: '0163', nombre: 'Banco del Tesoro' },
+  { codigo: '0175', nombre: 'Banco Bicentenario' },
+  { codigo: '0191', nombre: 'Banco Nacional de Crédito (BNC)' },
+  { codigo: '0128', nombre: 'Banco Caroní' },
+  { codigo: '0137', nombre: 'Banco Sofitasa' },
+  { codigo: '0138', nombre: 'Banco Plaza' },
+  { codigo: '0151', nombre: 'BFC Banco Fondo Común' },
+  { codigo: '0156', nombre: '100% Banco' },
+  { codigo: '0157', nombre: 'DelSur Banco Universal' },
+  { codigo: '0166', nombre: 'Banco Agrícola de Venezuela' },
+  { codigo: '0168', nombre: 'Bancrecer' },
+  { codigo: '0169', nombre: 'Mi Banco' },
+  { codigo: '0171', nombre: 'Banco Activo' },
+  { codigo: '0174', nombre: 'Banplus' },
+  { codigo: '0177', nombre: 'BANFANB' }
+];
+
+export const BDV_ENDPOINTS = {
+  produccion: 'https://bdvconciliacion.banvenez.com:443/getMovement',
+  calidad: 'http://200.11.243.176:444/getMovement'
+};
+
+/**
+ * Normaliza la cédula del pagador según las reglas de BDV (Ej: V12345678, J123456789, E81234567)
+ */
+export function cleanBdvCedula(cedula) {
+  if (!cedula) return '';
+  let clean = String(cedula).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!clean) return '';
+  // Si no tiene prefijo de nacionalidad, asumir 'V'
+  if (!/^[VJEGP]/.test(clean)) {
+    clean = 'V' + clean;
+  }
+  return clean;
+}
+
+/**
+ * Normaliza número telefónico venezolano a formato estándar de 11 dígitos (Ej: 04121234567)
+ */
+export function cleanBdvPhone(phone) {
+  if (!phone) return '';
+  let digits = String(phone).replace(/\D/g, '');
+  // Si viene con prefijo internacional 58
+  if (digits.startsWith('58') && digits.length >= 12) {
+    digits = '0' + digits.substring(2);
+  }
+  // Si no empieza por 0 y tiene 10 dígitos (ej: 4121234567)
+  if (!digits.startsWith('0') && digits.length === 10) {
+    digits = '0' + digits;
+  }
+  return digits;
+}
+
+/**
+ * Formatea fecha a estándar BDV estricto YYYY-MM-DD
+ */
+export function formatBdvDate(dateInput) {
+  if (!dateInput) {
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const d = String(today.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  if (typeof dateInput === 'string') {
+    // Si ya viene YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput.trim())) {
+      return dateInput.trim();
+    }
+    // Si viene DD/MM/YYYY o DD-MM-YYYY
+    const dmy = dateInput.trim().match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
+    if (dmy) {
+      return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+    }
+  }
+  try {
+    const dObj = new Date(dateInput);
+    if (!isNaN(dObj.getTime())) {
+      const y = dObj.getFullYear();
+      const m = String(dObj.getMonth() + 1).padStart(2, '0');
+      const d = String(dObj.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+  } catch (_) {}
+  return new Date().toISOString().split('T')[0];
+}
+
+/**
+ * Formatea monto a string estricto con dos decimales y punto (Ej: "120.00")
+ */
+export function formatBdvAmount(amount) {
+  let num = typeof amount === 'number' ? amount : parseFloat(String(amount || 0).replace(',', '.'));
+  if (isNaN(num) || num < 0) num = 0;
+  return num.toFixed(2);
+}
+
+/**
+ * Normaliza y limpia textos provenientes de BDV eliminando fallas de codificación (mojibake).
+ * Corrige "Transacci¿¿n", "Transacciï¿½n" -> "Transacción" y otros términos bancarios.
+ */
+export function cleanBdvMessage(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+  let str = String(raw);
+  str = str.replace(/Transacci(?:[^\w\s]|[\ufffd\?\¿])+n/gi, 'Transacción');
+  str = str.replace(/Transacci\s*n/gi, 'Transacción');
+  str = str.replace(/operaci(?:[^\w\s]|[\ufffd\?\¿])+n/gi, 'operación');
+  str = str.replace(/conciliaci(?:[^\w\s]|[\ufffd\?\¿])+n/gi, 'conciliación');
+  str = str.replace(/realizaci(?:[^\w\s]|[\ufffd\?\¿])+n/gi, 'realización');
+  str = str.replace(/cr(?:[^\w\s]|[\ufffd\?\¿])+dito/gi, 'crédito');
+  str = str.replace(/d(?:[^\w\s]|[\ufffd\?\¿])+bito/gi, 'débito');
+  str = str.replace(/éxit[^\w\s]*osa/gi, 'exitosa');
+  str = str.replace(/estatus\s*:\s*/gi, 'estatus: ');
+  return str.trim();
+}
+
+/**
+ * Consulta directa al API de Banco de Venezuela (getMovement)
+ */
+export async function consultarBdvApi({
+  apiKey,
+  ambiente = 'produccion',
+  cedulaPagador,
+  telefonoPagador,
+  telefonoDestino,
+  referencia,
+  fechaPago,
+  importe,
+  bancoOrigen = '0102',
+  timeoutMs = 6000
+}) {
+  const url = BDV_ENDPOINTS[ambiente] || BDV_ENDPOINTS.produccion;
+  const cleanKey = String(apiKey || '').trim();
+
+  if (!cleanKey) {
+    return {
+      success: false,
+      code: 400,
+      message: 'Falta configurar la API Key de Banco de Venezuela (BDV)',
+      data: null
+    };
+  }
+
+  const payload = {
+    cedulaPagador: cleanBdvCedula(cedulaPagador),
+    telefonoPagador: cleanBdvPhone(telefonoPagador),
+    telefonoDestino: cleanBdvPhone(telefonoDestino),
+    referencia: String(referencia || '').trim().replace(/[^0-9]/g, ''),
+    fechaPago: formatBdvDate(fechaPago),
+    importe: formatBdvAmount(importe),
+    bancoOrigen: String(bancoOrigen || '0102').trim().padStart(4, '0')
+  };
+
+  const startTime = Date.now();
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': cleanKey
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+    const latencyMs = Date.now() - startTime;
+
+    if (!response.ok && response.status !== 200) {
+      const errText = await response.text().catch(() => '');
+      return {
+        success: false,
+        code: response.status,
+        latencyMs,
+        message: cleanBdvMessage(`El servidor BDV respondió con código HTTP ${response.status}: ${errText.substring(0, 100)}`),
+        data: null,
+        payloadSent: payload
+      };
+    }
+
+    const json = await response.json();
+    const cleanMsg = cleanBdvMessage(json.message);
+    const hasErrorPhrase = /no coincide|no existe|no se pudo|rechazad|error|fallid|inv[aá]lid/i.test(cleanMsg);
+    const isAlreadyReconciled = !hasErrorPhrase && /conciliado anteriormente|ya fue conciliado|consulta realizada es exitosa/i.test(cleanMsg);
+    const isApproved = (json.code === 1000 && !hasErrorPhrase) || isAlreadyReconciled;
+
+    return {
+      success: true,
+      verified: isApproved,
+      alreadyReconciled: isAlreadyReconciled,
+      code: json.code,
+      message: cleanMsg || (isApproved ? 'Transacción acreditada con éxito' : 'No encontrado'),
+      data: json.data || null,
+      latencyMs,
+      payloadSent: payload,
+      ambiente
+    };
+  } catch (err) {
+    const latencyMs = Date.now() - startTime;
+    const isTimeout = err.name === 'AbortError' || /abort|timeout/i.test(err.message);
+    return {
+      success: false,
+      isNetworkError: true,
+      isTimeout,
+      code: isTimeout ? 408 : 503,
+      message: isTimeout
+        ? 'Tiempo de espera agotado con BDV (Timeout). El servidor del banco tardó más de lo esperado.'
+        : `Error de conexión con Banco de Venezuela: ${err.message || 'Sin conexión a internet'}`,
+      latencyMs,
+      data: null,
+      payloadSent: payload
+    };
+  }
+}
+
+/**
+ * Consulta inteligente multi-destino:
+ * Si el comercio tiene múltiples teléfonos autorizados, prueba en cada uno hasta encontrar la transacción aprobada.
+ */
+export async function consultarBdvApiMultiDestino({
+  apiKey,
+  ambiente = 'produccion',
+  cedulaPagador,
+  telefonoPagador,
+  telefonosDestino = [],
+  referencia,
+  fechaPago,
+  importe,
+  bancoOrigen = '0102',
+  timeoutMs = 6000
+}) {
+  const phoneList = Array.isArray(telefonosDestino) ? telefonosDestino.filter(Boolean) : [telefonosDestino].filter(Boolean);
+
+  if (phoneList.length === 0) {
+    return {
+      success: false,
+      code: 400,
+      message: 'No hay teléfonos destino del comercio configurados para recibir pagos móviles',
+      data: null
+    };
+  }
+
+  // Si solo hay un número, consulta directa
+  if (phoneList.length === 1) {
+    const singleResult = await consultarBdvApi({
+      apiKey,
+      ambiente,
+      cedulaPagador,
+      telefonoPagador,
+      telefonoDestino: phoneList[0],
+      referencia,
+      fechaPago,
+      importe,
+      bancoOrigen,
+      timeoutMs
+    });
+    return {
+      ...singleResult,
+      telefonoDestinoUsado: phoneList[0]
+    };
+  }
+
+  // Si hay múltiples números, probar ordenadamente
+  let lastResult = null;
+  for (const tel of phoneList) {
+    const res = await consultarBdvApi({
+      apiKey,
+      ambiente,
+      cedulaPagador,
+      telefonoPagador,
+      telefonoDestino: tel,
+      referencia,
+      fechaPago,
+      importe,
+      bancoOrigen,
+      timeoutMs
+    });
+
+    if (res.verified) {
+      return {
+        ...res,
+        telefonoDestinoUsado: tel,
+        matchedMultiNumber: true
+      };
+    }
+
+    lastResult = { ...res, telefonoDestinoUsado: tel };
+
+    // Si es error de red o timeout, no insistir en los demás para no demorar la caja
+    if (res.isNetworkError) {
+      break;
+    }
+  }
+
+  return lastResult;
+}

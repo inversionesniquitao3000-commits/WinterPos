@@ -6,7 +6,8 @@ import {
   Settings, CheckSquare, Square, Globe, ShieldCheck, Printer, FileText,
   LogOut, Unplug, KeyRound, Lock, Eye, EyeOff, DollarSign,
   RefreshCw, Unlock, RotateCcw, AlertTriangle, Cloud, Tag, Layers, Percent, Calendar,
-  Smartphone, Copy, Play, Terminal, QrCode, Check, Send, Sparkles, HelpCircle, ExternalLink
+  Smartphone, Copy, Play, Terminal, QrCode, Check, Send, Sparkles, HelpCircle, ExternalLink,
+  Landmark, Star
 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr, formatBs } from '../utils';
@@ -117,7 +118,8 @@ const MODULE_GUIDES_MAP: Record<string, { title: string; ver: string; crear: str
 
 const DEFAULT_WA_TEMPLATE = `📊 *REPORTE DE ARQUEO Y CIERRE DE CAJA*
 
-📅 *Fecha:* {fecha}
+🗓️ *Apertura:* {fechaApertura}
+🔒 *Cierre:* {fechaCierre}
 👤 *Cajero:* {usuario}
 🖥️ *Terminal:* {terminal}
 🧾 *Tickets Emitidos:* {totalTickets}
@@ -369,6 +371,135 @@ export default function ConfiguracionEmpresa({
   const [showPmTokenGuide, setShowPmTokenGuide] = useState(false);
   const [showTokenText, setShowTokenText] = useState(false);
 
+  // Estados para API Oficial BDV Conciliación
+  const [pmSubSection, setPmSubSection] = useState<'bdv_api' | 'sms_tunnel'>('bdv_api');
+  const [bdvApiKey, setBdvApiKey] = useState('070597925FCE6DBE6243E4915DD81EB6');
+  const [showBdvKeyText, setShowBdvKeyText] = useState(false);
+  const [bdvAmbiente, setBdvAmbiente] = useState<'produccion' | 'calidad'>('produccion');
+  const [bdvTelefonos, setBdvTelefonos] = useState<Array<{ telefono: string; alias: string; esDefault: boolean }>>([]);
+  const [nuevoBdvTel, setNuevoBdvTel] = useState('');
+  const [nuevoBdvAlias, setNuevoBdvAlias] = useState('');
+  const [isTestingBdv, setIsTestingBdv] = useState(false);
+  const [bdvTestStatus, setBdvTestStatus] = useState<any>(null);
+  const [isSavingBdv, setIsSavingBdv] = useState(false);
+
+  const fetchBdvConfig = async () => {
+    try {
+      const res = await fetch(getApiUrl('/conciliacion/bdv/config'));
+      if (res.ok) {
+        const d = await res.json();
+        if (d.success) {
+          if (d.bdvApiKey) setBdvApiKey(d.bdvApiKey);
+          if (d.bdvAmbiente) setBdvAmbiente(d.bdvAmbiente);
+          if (Array.isArray(d.bdvTelefonosDestino)) {
+            const list = d.bdvTelefonosDestino.map((item: any, idx: number) => {
+              if (typeof item === 'string') {
+                return { telefono: item, alias: `Línea ${idx + 1}`, esDefault: item === d.bdvTelefonoDefault || idx === 0 };
+              }
+              return {
+                telefono: item.telefono || '',
+                alias: item.alias || `Línea ${idx + 1}`,
+                esDefault: !!item.esDefault || item.telefono === d.bdvTelefonoDefault
+              };
+            }).filter((x: any) => x.telefono);
+            setBdvTelefonos(list);
+          }
+        }
+      }
+    } catch (_) {}
+  };
+
+  const handleSaveBdvConfig = async () => {
+    setIsSavingBdv(true);
+    try {
+      const def = bdvTelefonos.find(t => t.esDefault)?.telefono || bdvTelefonos[0]?.telefono || '';
+      const res = await fetch(getApiUrl('/conciliacion/bdv/config'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bdvApiKey: bdvApiKey.trim(),
+          bdvAmbiente,
+          bdvTelefonosDestino: bdvTelefonos,
+          bdvTelefonoDefault: def
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSuccessMsg('✅ Configuración del API BDV guardada exitosamente.');
+        setTimeout(() => setSuccessMsg(''), 4000);
+      } else {
+        showAlert(data.message || 'Error al guardar configuración BDV', 'Error', 'error');
+      }
+    } catch (err: any) {
+      showAlert('Error de conexión con el servidor: ' + err.message, 'Error', 'error');
+    } finally {
+      setIsSavingBdv(false);
+    }
+  };
+
+  const handleTestBdvConn = async () => {
+    setIsTestingBdv(true);
+    setBdvTestStatus(null);
+    try {
+      const res = await fetch(getApiUrl('/conciliacion/bdv/probar-conexion'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          apiKey: bdvApiKey.trim(),
+          ambiente: bdvAmbiente
+        })
+      });
+      const data = await res.json();
+      setBdvTestStatus(data);
+    } catch (err: any) {
+      setBdvTestStatus({ success: false, message: 'Error de conexión: ' + err.message });
+    } finally {
+      setIsTestingBdv(false);
+    }
+  };
+
+  const handleAddBdvPhone = () => {
+    const clean = nuevoBdvTel.replace(/\D/g, '');
+    if (clean.length < 10 || clean.length > 12) {
+      showAlert('Por favor ingrese un número de teléfono válido (ej: 04121234567).', 'Número Inválido', 'warning');
+      return;
+    }
+    const finalTel = clean.startsWith('58') ? '0' + clean.substring(2) : clean.startsWith('0') ? clean : '0' + clean;
+    if (bdvTelefonos.some(t => t.telefono === finalTel)) {
+      showAlert('Este número ya está en la lista de teléfonos autorizados.', 'Número Duplicado', 'warning');
+      return;
+    }
+    const isFirst = bdvTelefonos.length === 0;
+    setBdvTelefonos(prev => [
+      ...prev,
+      {
+        telefono: finalTel,
+        alias: nuevoBdvAlias.trim() || `Línea ${prev.length + 1}`,
+        esDefault: isFirst
+      }
+    ]);
+    setNuevoBdvTel('');
+    setNuevoBdvAlias('');
+  };
+
+  const handleRemoveBdvPhone = (index: number) => {
+    setBdvTelefonos(prev => {
+      const updated = prev.filter((_, i) => i !== index);
+      if (updated.length > 0 && !updated.some(t => t.esDefault)) {
+        updated[0].esDefault = true;
+      }
+      return updated;
+    });
+  };
+
+  const handleSetDefaultBdvPhone = (index: number) => {
+    setBdvTelefonos(prev => prev.map((t, i) => ({
+      ...t,
+      esDefault: i === index
+    })));
+  };
+
+
   const fetchPmTunnelStatus = async (forceLoadInputs = false) => {
     try {
       const res = await fetch(getApiUrl('/conciliacion/tunnel/status'));
@@ -425,6 +556,7 @@ export default function ConfiguracionEmpresa({
 
   useEffect(() => {
     if (activeTab === 'pagomovil') {
+      fetchBdvConfig();
       fetchPmTunnelStatus(false);
       const interval = setInterval(() => {
         fetchPmTunnelStatus(false);
@@ -807,12 +939,15 @@ export default function ConfiguracionEmpresa({
         const data = await res.json();
         setWaStatus(data);
         if (data.config) {
-          const currentTmpl = data.config.messageTemplate;
+          let currentTmpl = data.config.messageTemplate;
           const isOldDefault = !currentTmpl || (
             currentTmpl.includes('EFECTIVO ESPERADO EN GAVETA') &&
             !currentTmpl.includes('{totalTickets}') &&
             !currentTmpl.includes('{desglosePagos}')
           );
+          if (currentTmpl && !currentTmpl.includes('{fechaApertura}') && currentTmpl.includes('{fecha}')) {
+            currentTmpl = currentTmpl.replace(/(?:🗓️|📅)?\s*\*Fecha:\*\s*\{fecha\}/g, '🗓️ *Apertura:* {fechaApertura}\n🔒 *Cierre:* {fechaCierre}');
+          }
           setWaConfig({
             ...data.config,
             messageTemplate: isOldDefault ? DEFAULT_WA_TEMPLATE : currentTmpl,
@@ -1206,7 +1341,7 @@ export default function ConfiguracionEmpresa({
       showAlert('El usuario principal "admin" es el administrador del sistema y está protegido contra eliminación.', 'Operación Protegida', 'warning');
       return;
     }
-    if (id === currentUser.id) {
+    if (id === currentUser?.id) {
       showAlert('No puedes eliminar tu propio usuario activo en sesión.', 'Operación No Permitida', 'warning');
       return;
     }
@@ -1241,7 +1376,7 @@ export default function ConfiguracionEmpresa({
 
   const handleOpenEditRole = (r: Role) => {
     const isRoleAdmin = r.nombre?.trim().toUpperCase() === 'ADMINISTRADOR';
-    if (isRoleAdmin && currentUser.usuario?.toLowerCase() !== 'admin' && currentUser.rol?.toUpperCase() !== 'ADMINISTRADOR') {
+    if (isRoleAdmin && currentUser?.usuario?.toLowerCase() !== 'admin' && currentUser?.rol?.toUpperCase() !== 'ADMINISTRADOR') {
       showAlert('Sólo el usuario Administrador principal del sistema puede modificar la plantilla del perfil Administrador.', 'Operación Protegida', 'warning');
       return;
     }
@@ -1777,8 +1912,24 @@ export default function ConfiguracionEmpresa({
         });
 
         if (res.ok) {
+          // Limpiar caché local y borradores obsoletos para evitar desajustes con la base restaurada
+          localStorage.removeItem('pos_current_cart');
+          localStorage.removeItem('pos_current_discount');
+          localStorage.removeItem('pos_current_client_doc');
+          localStorage.removeItem('pos_tickets_on_hold');
+          localStorage.removeItem('pos_paused_product_draft');
+          localStorage.removeItem('pos_products');
+          localStorage.removeItem('pos_clients');
+          localStorage.removeItem('pos_biz_info');
+          localStorage.removeItem('pos_tasa_history');
+          localStorage.removeItem('pos_inventory_filters');
+          localStorage.removeItem('pos_sales_log');
+          localStorage.removeItem('pos_movements');
+          localStorage.removeItem('pos_price_history');
+          localStorage.removeItem('pos_cierres_log');
+          sessionStorage.clear();
           showToast('Base de datos restaurada correctamente. Recargando sistema...');
-          setTimeout(() => window.location.reload(), 1500);
+          setTimeout(() => window.location.reload(), 1200);
         } else {
           const errData = await res.json().catch(() => ({}));
           showAlert(`Error del servidor al restaurar: ${errData.error || 'No se pudo procesar la restauración.'}`, 'Error de Importación', 'error');
@@ -1862,7 +2013,9 @@ export default function ConfiguracionEmpresa({
 
     return template
       .replace(/{empresa}/g, config?.nombre_comercio || 'INVERSIONES NIQUITAO 3000 C.A.')
-      .replace(/{fecha}/g, new Date().toLocaleDateString())
+      .replace(/{fechaApertura}/g, `${new Date().toLocaleDateString('es-VE')} 08:30 AM`)
+      .replace(/{fechaCierre}/g, `${new Date().toLocaleDateString('es-VE')} 07:15 PM`)
+      .replace(/{fecha}/g, `${new Date().toLocaleDateString('es-VE')} 07:15 PM`)
       .replace(/{tasaBcv}/g, '87.00')
       .replace(/{totalTickets}/g, '24')
       .replace(/{cantTickets}/g, '24')
@@ -1916,7 +2069,7 @@ export default function ConfiguracionEmpresa({
     return html;
   };
 
-  const isAdmin = currentUser.rol.toLowerCase() === 'administrador';
+  const isAdmin = (currentUser?.rol || '').toLowerCase() === 'administrador';
 
   return (
     <div className="space-y-6 text-slate-800 font-mono text-xs">
@@ -2926,7 +3079,7 @@ export default function ConfiguracionEmpresa({
                           <label className="text-[11px] font-bold text-slate-700 block mb-2">
                             📐 Tamaño de la Miniatura en el Buscador:
                           </label>
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 max-w-3xl">
+                          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 max-w-4xl">
                             {/* Tamaño Pequeño */}
                             <button
                               type="button"
@@ -3014,12 +3167,60 @@ export default function ConfiguracionEmpresa({
                                   : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100 font-medium'
                               }`}
                             >
-                              <div className="w-11 h-11 rounded-lg bg-slate-100 border border-slate-300 flex items-center justify-center text-[10px] text-slate-500 font-mono font-bold flex-shrink-0">
+                              <div className="w-10 h-10 rounded-lg bg-slate-100 border border-slate-300 flex items-center justify-center text-[10px] text-slate-500 font-mono font-bold flex-shrink-0">
                                 72px
                               </div>
                               <div>
                                 <div className="text-xs font-semibold">Extra Grande</div>
                                 <div className="text-[10px] text-slate-500 font-normal">Ultra detalle</div>
+                              </div>
+                            </button>
+
+                            {/* Tamaño Gigante */}
+                            <button
+                              type="button"
+                              disabled={!isAdmin}
+                              onClick={() => {
+                                const updated = { ...formData, tamano_foto_buscador_pos: 'gigante' as const };
+                                setFormData(updated);
+                                handleSavePoliticasDirect(updated);
+                              }}
+                              className={`p-2.5 rounded-lg border text-left transition-all flex items-center gap-2 ${
+                                (formData.tamano_foto_buscador_pos === 'gigante')
+                                  ? 'bg-blue-50 border-blue-400 text-blue-900 shadow-xs font-bold ring-2 ring-blue-300/50'
+                                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100 font-medium'
+                              }`}
+                            >
+                              <div className="w-11 h-11 rounded-lg bg-slate-100 border border-slate-300 flex items-center justify-center text-[10px] text-slate-500 font-mono font-bold flex-shrink-0">
+                                96px
+                              </div>
+                              <div>
+                                <div className="text-xs font-semibold">Gigante</div>
+                                <div className="text-[10px] text-slate-500 font-normal">Máxima vista</div>
+                              </div>
+                            </button>
+
+                            {/* Tamaño Enorme */}
+                            <button
+                              type="button"
+                              disabled={!isAdmin}
+                              onClick={() => {
+                                const updated = { ...formData, tamano_foto_buscador_pos: 'enorme' as const };
+                                setFormData(updated);
+                                handleSavePoliticasDirect(updated);
+                              }}
+                              className={`p-2.5 rounded-lg border text-left transition-all flex items-center gap-2 ${
+                                (formData.tamano_foto_buscador_pos === 'enorme')
+                                  ? 'bg-blue-50 border-blue-400 text-blue-900 shadow-xs font-bold ring-2 ring-blue-300/50'
+                                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100 font-medium'
+                              }`}
+                            >
+                              <div className="w-12 h-12 rounded-lg bg-slate-100 border border-slate-300 flex items-center justify-center text-[10px] text-slate-500 font-mono font-bold flex-shrink-0">
+                                120px
+                              </div>
+                              <div>
+                                <div className="text-xs font-semibold">Enorme</div>
+                                <div className="text-[10px] text-slate-500 font-normal">Gran formato HD</div>
                               </div>
                             </button>
                           </div>
@@ -4780,7 +4981,9 @@ export default function ConfiguracionEmpresa({
                         <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
                           <span className="text-[9px] font-bold text-slate-600 uppercase font-sans tracking-wide block">Variables Disponibles (Arqueo y Cierre)</span>
                           <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[9.5px] font-sans text-slate-500">
-                            <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{fecha}'}</code>: Fecha y hora</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{fechaApertura}'}</code>: Fecha y hora de apertura</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{fechaCierre}'}</code>: Fecha y hora de cierre</div>
+                            <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{fecha}'}</code>: Fecha del reporte</div>
                             <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{usuario}'}</code>: Nombre del cajero</div>
                             <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{terminal}'}</code>: Nombre de la terminal</div>
                             <div><code className="bg-white border px-1 py-0.5 rounded text-indigo-700 font-mono font-bold">{'{totalTickets}'}</code>: Total de tickets del turno</div>
@@ -4924,25 +5127,365 @@ export default function ConfiguracionEmpresa({
         {activeTab === 'pagomovil' && (
           <div className="space-y-6 w-full px-2 lg:px-4 mx-auto animate-fade-in font-sans">
             
-            {/* HERO HEADER */}
-            <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white rounded-2xl p-6 shadow-md border border-emerald-700/40 relative overflow-hidden">
-              <div className="relative z-10 space-y-2">
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2 bg-emerald-500/20 rounded-xl border border-emerald-400/30">
-                    <Smartphone className="w-5 h-5 text-emerald-400" />
-                  </div>
-                  <h2 className="text-base font-extrabold tracking-wide uppercase">
-                    Integración y Conciliación de Pago Móvil BDV en Segundo Plano
-                  </h2>
-                </div>
-                <p className="text-xs text-emerald-100/80 max-w-3xl leading-relaxed">
-                  Conecte el reenvío de SMS de su Banco de Venezuela a WinterPos. Al activar el modo automático, el servidor levantará silenciosamente el túnel de internet en segundo plano <strong>sin ventanas de CMD</strong> y <strong>sin que el cajero tenga que ejecutar nada</strong>.
-                </p>
-              </div>
+            {/* SUB-SECTION SWITCHER */}
+            <div className="flex flex-wrap items-center gap-2.5 border-b border-slate-200 pb-3">
+              <button
+                type="button"
+                onClick={() => setPmSubSection('bdv_api')}
+                className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                  pmSubSection === 'bdv_api'
+                    ? 'bg-gradient-to-r from-red-700 to-rose-700 text-white shadow-md border border-red-800'
+                    : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                <Landmark className="w-4 h-4 text-yellow-300" />
+                <span>API Oficial BDV (Core Bancario Directo)</span>
+                <span className="bg-yellow-400 text-red-950 text-[9px] px-2 py-0.5 rounded-full font-black uppercase">
+                  Recomendado
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPmSubSection('sms_tunnel')}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                  pmSubSection === 'sms_tunnel'
+                    ? 'bg-emerald-800 text-white shadow-md border border-emerald-900'
+                    : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                <Smartphone className="w-4 h-4 text-emerald-500" />
+                <span>Túnel SMS & Webhook en Segundo Plano</span>
+              </button>
             </div>
 
-            {/* MAIN 2-COLUMN GRID */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* SECCIÓN 1: API OFICIAL BANCO DE VENEZUELA (BDV) */}
+            {pmSubSection === 'bdv_api' && (
+              <div className="space-y-6 animate-fade-in font-sans">
+                {/* HERO BANNER BDV */}
+                <div className="bg-gradient-to-r from-red-700 via-rose-800 to-slate-900 text-white rounded-2xl p-6 shadow-md border border-red-600/40 relative overflow-hidden">
+                  <div className="relative z-10 space-y-2">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-2 bg-white/15 rounded-xl border border-white/20">
+                        <Landmark className="w-6 h-6 text-yellow-300" />
+                      </div>
+                      <div>
+                        <h2 className="text-base font-extrabold tracking-wide uppercase">
+                          API Oficial Banco de Venezuela (BDV) - Conciliación en Vivo
+                        </h2>
+                        <span className="text-[11px] text-rose-200 font-medium">
+                          Validación directa contra el Core Bancario con autenticación X-API-Key
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-rose-100/90 max-w-3xl leading-relaxed">
+                      Configure sus credenciales del BDV y registre los números de teléfono autorizados a recibir pagos móviles en su negocio. Cuando un cliente pague en caja, WinterPOS verificará al instante si los fondos fueron realmente acreditados en su cuenta bancaria. Si el equipo no tiene internet o el banco no responde, el sistema le permitirá facturar de todas formas sin bloquear la venta.
+                    </p>
+                  </div>
+                </div>
+
+                {/* 2-COLUMN GRID */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                  
+                  {/* COLUMNA IZQUIERDA: CREDENCIALES & AMBIENTE & DIAGNÓSTICO */}
+                  <div className="lg:col-span-6 space-y-6">
+                    <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-5">
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                        <h3 className="text-xs font-bold text-slate-800 uppercase flex items-center gap-2">
+                          <KeyRound className="w-4 h-4 text-rose-600" />
+                          Credenciales & Entorno de Conexión
+                        </h3>
+                        <span className="text-[10px] bg-rose-50 text-rose-700 px-2 py-0.5 rounded-full font-bold">
+                          Parámetros del Comercio
+                        </span>
+                      </div>
+
+                      {/* API KEY INPUT */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold text-slate-700">
+                            Código KEY Asignado (X-API-Key) *
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setShowBdvKeyText(!showBdvKeyText)}
+                            className="text-[10.5px] text-rose-600 hover:text-rose-800 font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            {showBdvKeyText ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                            <span>{showBdvKeyText ? 'Ocultar Key' : 'Ver Key'}</span>
+                          </button>
+                        </div>
+                        <input
+                          type={showBdvKeyText ? 'text' : 'password'}
+                          value={bdvApiKey}
+                          onChange={(e) => setBdvApiKey(e.target.value.trim())}
+                          placeholder="Pegue aquí su clave API de BDV (ej: 070597925FCE6DBE6243E4915DD81EB6)"
+                          className="w-full font-mono text-xs font-bold bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-slate-900 focus:bg-white focus:border-rose-500 focus:ring-2 focus:ring-rose-500/20 outline-none"
+                        />
+                        <span className="text-[10px] text-slate-400 block">
+                          Clave asignada a su comercio desde el canal BDVenLínea Empresa.
+                        </span>
+                      </div>
+
+                      {/* AMBIENTE SELECTOR */}
+                      <div className="space-y-2 pt-2 border-t border-slate-100">
+                        <label className="text-xs font-bold text-slate-700 block">
+                          Ambiente de Operación del BDV
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setBdvAmbiente('produccion')}
+                            className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                              bdvAmbiente === 'produccion'
+                                ? 'bg-rose-50/80 border-rose-500 text-rose-950 ring-2 ring-rose-500/20'
+                                : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-black uppercase">Producción (En Vivo)</span>
+                              {bdvAmbiente === 'produccion' && <Check className="w-4 h-4 text-rose-600" />}
+                            </div>
+                            <span className="text-[10px] text-slate-500 block font-mono mt-1 truncate">
+                              bdvconciliacion.banvenez.com
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setBdvAmbiente('calidad')}
+                            className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                              bdvAmbiente === 'calidad'
+                                ? 'bg-amber-50/80 border-amber-500 text-amber-950 ring-2 ring-amber-500/20'
+                                : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-black uppercase">Calidad / Sandbox</span>
+                              {bdvAmbiente === 'calidad' && <Check className="w-4 h-4 text-amber-600" />}
+                            </div>
+                            <span className="text-[10px] text-slate-500 block font-mono mt-1 truncate">
+                              200.11.243.176:444 (Pruebas)
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* DIAGNOSTIC TEST BUTTON */}
+                      <div className="pt-2 border-t border-slate-100 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-700">Comprobación en Vivo:</span>
+                          <button
+                            type="button"
+                            disabled={isTestingBdv || !bdvApiKey.trim()}
+                            onClick={handleTestBdvConn}
+                            className="px-4 py-2 bg-slate-800 hover:bg-slate-900 disabled:bg-slate-300 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                          >
+                            {isTestingBdv ? (
+                              <>
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                <span>Verificando con BDV...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
+                                <span>Probar Conexión con BDV</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+
+                        {bdvTestStatus && (
+                          <div
+                            className={`p-3.5 rounded-xl text-xs font-mono border ${
+                              bdvTestStatus.success
+                                ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                                : 'bg-rose-50 border-rose-300 text-rose-900'
+                            }`}
+                          >
+                            <div className="flex items-start gap-2">
+                              {bdvTestStatus.success ? (
+                                <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+                              ) : (
+                                <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+                              )}
+                              <div className="space-y-0.5 font-sans">
+                                <span className="font-bold block">{bdvTestStatus.message}</span>
+                                {bdvTestStatus.latencyMs && (
+                                  <span className="text-[10.5px] text-slate-500 block font-mono">
+                                    Tiempo de respuesta del banco: {bdvTestStatus.latencyMs} ms
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* COLUMNA DERECHA: TELÉFONOS DESTINO AUTORIZADOS DE LA EMPRESA */}
+                  <div className="lg:col-span-6 space-y-6">
+                    <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-5">
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                        <h3 className="text-xs font-bold text-slate-800 uppercase flex items-center gap-2">
+                          <Smartphone className="w-4 h-4 text-indigo-600" />
+                          Líneas Autorizadas (Teléfonos Destino BDV)
+                        </h3>
+                        <span className="text-[10.5px] font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-full font-mono">
+                          {bdvTelefonos.length} {bdvTelefonos.length === 1 ? 'Línea' : 'Líneas'}
+                        </span>
+                      </div>
+
+                      <p className="text-[11px] text-slate-600 leading-relaxed">
+                        Registre los números de teléfono afiliados al Pago Móvil BDV de su empresa. Si tiene varias líneas de cobro (por ejemplo varias cajas o dueños), puede agregarlas todas aquí y marcar cuál es la principal.
+                      </p>
+
+                      {/* AGREGAR NUEVO TELÉFONO */}
+                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3">
+                        <span className="text-[11px] font-bold text-slate-700 uppercase block">
+                          Agregar Nuevo Número de Cobro
+                        </span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div>
+                            <input
+                              type="text"
+                              value={nuevoBdvTel}
+                              onChange={(e) => setNuevoBdvTel(e.target.value.replace(/[^0-9]/g, ''))}
+                              placeholder="Ej: 04121234567"
+                              className="w-full text-xs font-mono font-bold bg-white border border-slate-300 rounded-lg p-2 text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                            <span className="text-[9.5px] text-slate-400 block mt-0.5">11 dígitos (0412, 0414, etc.)</span>
+                          </div>
+                          <div>
+                            <input
+                              type="text"
+                              value={nuevoBdvAlias}
+                              onChange={(e) => setNuevoBdvAlias(e.target.value)}
+                              placeholder="Alias: Caja 1, Principal..."
+                              className="w-full text-xs font-bold bg-white border border-slate-300 rounded-lg p-2 text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                            <span className="text-[9.5px] text-slate-400 block mt-0.5">Identificador opcional</span>
+                          </div>
+                        </div>
+
+                        <div className="flex justify-end pt-1">
+                          <button
+                            type="button"
+                            onClick={handleAddBdvPhone}
+                            disabled={!nuevoBdvTel.trim()}
+                            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-bold text-xs rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Agregar Número</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* LISTA DE TELÉFONOS CONFIGURADOS */}
+                      <div className="space-y-2">
+                        <span className="text-[11px] font-bold text-slate-700 uppercase block">
+                          Líneas de Pago Móvil Registradas:
+                        </span>
+
+                        {bdvTelefonos.length === 0 ? (
+                          <div className="text-center py-6 border border-dashed border-slate-300 rounded-xl bg-slate-50/50 text-slate-500 text-xs">
+                            No hay números autorizados registrados. Ingrese al menos un número arriba.
+                          </div>
+                        ) : (
+                          <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                            {bdvTelefonos.map((item, idx) => (
+                              <div
+                                key={item.telefono + idx}
+                                className={`p-3 rounded-xl border flex items-center justify-between gap-3 transition-all ${
+                                  item.esDefault
+                                    ? 'bg-amber-50/60 border-amber-300 shadow-2xs'
+                                    : 'bg-white border-slate-200'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetDefaultBdvPhone(idx)}
+                                    title={item.esDefault ? 'Línea Principal' : 'Hacer línea principal'}
+                                    className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                                      item.esDefault
+                                        ? 'bg-amber-400 text-amber-950 font-black'
+                                        : 'bg-slate-100 text-slate-400 hover:text-amber-600 hover:bg-amber-50'
+                                    }`}
+                                  >
+                                    <Star className={`w-3.5 h-3.5 ${item.esDefault ? 'fill-current' : ''}`} />
+                                  </button>
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs font-mono font-black text-slate-900">{item.telefono}</span>
+                                      {item.esDefault && (
+                                        <span className="bg-amber-200 text-amber-900 text-[9.5px] px-2 py-0.2 rounded-full font-black uppercase">
+                                          Principal
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span className="text-[11px] text-slate-500">{item.alias}</span>
+                                  </div>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveBdvPhone(idx)}
+                                  className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition-all cursor-pointer"
+                                  title="Eliminar número"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* BOTÓN GENERAL DE GUARDADO BDV */}
+                <div className="flex justify-end gap-3 pt-3 border-t border-slate-200">
+                  <button
+                    type="button"
+                    disabled={isSavingBdv}
+                    onClick={handleSaveBdvConfig}
+                    className="px-6 py-2.5 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 disabled:bg-slate-300 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>{isSavingBdv ? 'Guardando Configuración...' : 'Guardar Configuración BDV'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* SECCIÓN 2: TÚNEL SMS & WEBHOOK EXISTENTE */}
+            {pmSubSection === 'sms_tunnel' && (
+              <div className="space-y-6 animate-fade-in font-sans">
+                {/* HERO HEADER */}
+                <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white rounded-2xl p-6 shadow-md border border-emerald-700/40 relative overflow-hidden">
+                  <div className="relative z-10 space-y-2">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-2 bg-emerald-500/20 rounded-xl border border-emerald-400/30">
+                        <Smartphone className="w-5 h-5 text-emerald-400" />
+                      </div>
+                      <h2 className="text-base font-extrabold tracking-wide uppercase">
+                        Integración y Conciliación de Pago Móvil BDV en Segundo Plano
+                      </h2>
+                    </div>
+                    <p className="text-xs text-emerald-100/80 max-w-3xl leading-relaxed">
+                      Conecte el reenvío de SMS de su Banco de Venezuela a WinterPos. Al activar el modo automático, el servidor levantará silenciosamente el túnel de internet en segundo plano <strong>sin ventanas de CMD</strong> y <strong>sin que el cajero tenga que ejecutar nada</strong>.
+                    </p>
+                  </div>
+                </div>
+
+                {/* MAIN 2-COLUMN GRID */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+
               
               {/* LEFT COLUMN: ESTADO, AUTOMATIZACIÓN Y SERVICIO */}
               <div className="lg:col-span-6 space-y-6">
@@ -5774,6 +6317,8 @@ export default function ConfiguracionEmpresa({
               </div>
 
             </div>
+          </div>
+        )}
 
           </div>
         )}

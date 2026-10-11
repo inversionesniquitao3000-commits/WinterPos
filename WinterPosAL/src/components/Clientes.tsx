@@ -53,6 +53,10 @@ const fmtUSD = (val: any): string => {
   return safeNum(val).toFixed(2);
 };
 
+const fmtVES = (val: any): string => {
+  return safeNum(val).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+
 const DEFAULT_COBRO_CLIENTES_WA_TEMPLATE = `👤 *RECORDATORIO DE PAGO DE CUENTA*
 
 🏬 *{empresa}*
@@ -499,6 +503,7 @@ export default function Clientes({
       nombre: string;
       cedula_rif: string;
       monto: number;
+      monto_ves?: number;
       metodo: string;
       metodoRaw: string;
       referencia?: string;
@@ -516,6 +521,7 @@ export default function Clientes({
           ? (creditPayment as any).montoUSD
           : creditPayment.monto;
         const isDev = (s.factura_nro || '').startsWith('DEV-') || rawMonto < 0;
+        const totalVes = s.totalVES ? Math.abs(s.totalVES) : undefined;
         list.push({
           tipo: isDev ? 'Devolución' : 'Crédito',
           fecha: s.fecha || '',
@@ -523,6 +529,7 @@ export default function Clientes({
           nombre: s.client?.nombre || 'CLIENTE',
           cedula_rif: s.client?.cedula_rif || 'V-00000000',
           monto: Math.abs(rawMonto || 0),
+          monto_ves: totalVes,
           metodo: isDev ? 'Devolución / Nota Crédito' : 'Crédito',
           metodoRaw: isDev ? 'Devolucion' : 'Credito'
         });
@@ -537,14 +544,30 @@ export default function Clientes({
       else if (a.metodo_pago === 'TarjetaBs') metodoLabel = 'Tarjeta / Punto Bs';
       else if (a.metodo_pago === 'PagoMovil') metodoLabel = 'Pago Móvil Bs';
       else if (a.metodo_pago === 'Biopago') metodoLabel = 'Biopago Bs';
+      else if (a.metodo_pago === 'Tarjeta$') metodoLabel = 'Tarjeta $';
+      else if (a.metodo_pago === 'Binance') metodoLabel = 'Binance';
+      else if (a.metodo_pago === 'PayPal') metodoLabel = 'PayPal';
+      else if (a.metodo_pago === 'Zelle') metodoLabel = 'Zelle';
+
+      // Effective USD amount: ensure it's never 0 if monto_ves has value
+      let effectiveUSD = parseFloat(String(a.monto ?? (a as any).monto_usd ?? 0));
+      const montoVES = parseFloat(String(a.monto_ves ?? 0));
+      if (effectiveUSD <= 0.0001 && montoVES > 0 && tasaDia > 0) {
+        effectiveUSD = parseFloat((montoVES / tasaDia).toFixed(2));
+      }
+
+      // Format clean reference (e.g. ABO-000013 instead of ABO-)
+      const idStr = String(a.id || '').replace(/^0+/, '');
+      const cleanRef = idStr ? `ABO-${idStr.padStart(6, '0')}` : 'ABO-000001';
 
       list.push({
         tipo: 'Abono',
         fecha: a.fecha || '',
-        ref: `ABO-${(a.id || '').toString().substring(7)}`,
+        ref: cleanRef,
         nombre: a.nombre || 'CLIENTE',
         cedula_rif: a.cedula_rif || 'V-00000000',
-        monto: a.monto || 0,
+        monto: effectiveUSD,
+        monto_ves: montoVES,
         metodo: metodoLabel,
         metodoRaw: a.metodo_pago || 'Efectivo$',
         referencia: a.referencia
@@ -552,7 +575,7 @@ export default function Clientes({
     });
 
     return list.sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
-  }, [sales, abonos]);
+  }, [sales, abonos, tasaDia]);
 
   // Filter credit & abonos by selected client, search term, and apply interactive sorting
   const filteredCreditAbonoList = useMemo(() => {
@@ -909,7 +932,10 @@ export default function Clientes({
                 <td>${item.ref}</td>
                 <td style="text-transform: uppercase;">${item.nombre}</td>
                 <td>${item.cedula_rif}</td>
-                <td class="text-right font-bold ${item.tipo === 'Crédito' ? 'text-credit' : (item.tipo === 'Devolución' ? 'text-dev' : 'text-abono')}">${item.tipo === 'Crédito' ? '+' : '-'}$${item.monto.toFixed(2)}</td>
+                <td class="text-right font-bold ${item.tipo === 'Crédito' ? 'text-credit' : (item.tipo === 'Devolución' ? 'text-dev' : 'text-abono')}">
+                  ${item.tipo === 'Crédito' ? '+' : '-'}$${item.monto.toFixed(2)}
+                  ${item.monto_ves && item.monto_ves > 0 ? `<br><small style="color: #0f766e; font-weight: bold;">(Bs ${item.monto_ves.toLocaleString('es-VE', { minimumFractionDigits: 2 })})</small>` : ''}
+                </td>
               </tr>
             `).join('')}
           </tbody>
@@ -1127,7 +1153,8 @@ export default function Clientes({
           'Cliente': ev.nombre,
           'Cédula / RIF': ev.cedula_rif,
           'Forma de Pago': ev.metodo || 'N/A',
-          'Monto ($ USD)': ev.monto
+          'Monto ($ USD)': ev.monto,
+          'Monto (Bs VES)': ev.monto_ves && ev.monto_ves > 0 ? ev.monto_ves : Number((ev.monto * tasaDia).toFixed(2))
         }));
         filename = `Movimientos_Creditos_Abonos_${new Date().toISOString().substring(0, 10)}.xlsx`;
       } else if (activeSubTab === 'historial') {
@@ -1839,7 +1866,7 @@ export default function Clientes({
                       </th>
                       <th className="sticky top-0 z-10 bg-slate-100 px-4 py-2.5 text-right font-sans uppercase cursor-pointer select-none" onClick={() => handleCreditSort('monto')}>
                         <div className="flex items-center justify-end gap-1">
-                          <span>Monto ($ USD)</span>
+                          <span>Monto Total ($ USD / Bs)</span>
                           <CreditSortIcon field="monto" />
                         </div>
                       </th>
@@ -1915,7 +1942,26 @@ export default function Clientes({
                             </td>
                             <td className={`px-4 py-2.5 text-right font-mono font-extrabold ${isCredit ? 'text-orange-600' : isDev ? 'text-purple-600' : 'text-emerald-600'
                               }`}>
-                              {isCredit ? '+' : '-'}${fmtUSD(item.monto)}
+                              <div className="flex flex-col items-end justify-center">
+                                <span className="text-[12px] font-black tracking-tight">
+                                  {isCredit ? '+' : '-'}${fmtUSD(item.monto)}
+                                </span>
+                                {item.monto_ves && item.monto_ves > 0 ? (
+                                  <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded mt-0.5 border ${
+                                    isCredit
+                                      ? 'bg-orange-50 text-orange-700 border-orange-200'
+                                      : isDev
+                                        ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                        : 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                  }`}>
+                                    Bs {fmtVES(item.monto_ves)}
+                                  </span>
+                                ) : (
+                                  <span className="text-[9.5px] text-slate-400 font-normal">
+                                    ~ Bs {fmtVES(item.monto * tasaDia)}
+                                  </span>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         );
@@ -2994,6 +3040,7 @@ export default function Clientes({
                     <span className={`text-[9.5px] font-mono font-extrabold block mt-0.5 ${isCredit ? 'text-orange-400' : isDev ? 'text-purple-400' : 'text-emerald-400'
                       }`}>
                       {isCredit ? '+' : '-'}${item.monto.toFixed(2)} USD
+                      {item.monto_ves && item.monto_ves > 0 ? ` • Bs ${fmtVES(item.monto_ves)}` : ''}
                     </span>
                   </div>
                 </div>

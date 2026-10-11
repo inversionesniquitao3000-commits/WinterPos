@@ -275,7 +275,8 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
       const imageBase64 = await captureCierrePNG(c);
       
       // 2. Format detailed text summary
-      const fecha = c.fechaCierre || c.fecha || new Date().toLocaleDateString('es-VE');
+      const fechaApertura = c.fechaApertura || c.fecha || 'N/A';
+      const fechaCierre = c.fechaCierre || c.fecha || new Date().toLocaleDateString('es-VE');
       const usuario = (c.usuario || 'N/A').toUpperCase();
       const terminal = c.terminal || 'CAJA_01';
       const dineroEnCajaExpected = (c.dineroEnCajaExpected ?? (c as any).expectedUsd ?? 0);
@@ -289,7 +290,8 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
       const utilidadUsd = c.utilidadUsd ?? (ventaTotalUsd - (c.costoTotalUsd ?? 0));
 
       let textSummary = `📊 *COMPROBANTE DE CIERRE DE CAJA (REENVÍO)*\n\n`;
-      textSummary += `📅 *Fecha:* ${fecha}\n`;
+      textSummary += `🗓️ *Apertura:* ${fechaApertura}\n`;
+      textSummary += `🔒 *Cierre:* ${fechaCierre}\n`;
       textSummary += `👤 *Cajero:* ${usuario}\n`;
       textSummary += `🖥️ *Terminal:* ${terminal}\n`;
       if (c.totalTickets != null && c.totalTickets > 0) {
@@ -381,7 +383,8 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
       setSendingProgressMsg(`Procesando envío ${i + 1} de ${selectedCierres.length} por WhatsApp... (${c.usuario})`);
 
       const imageBase64 = await captureCierrePNG(c);
-      const fecha = c.fechaCierre || c.fecha || new Date().toLocaleDateString('es-VE');
+      const fechaApertura = c.fechaApertura || c.fecha || 'N/A';
+      const fechaCierre = c.fechaCierre || c.fecha || new Date().toLocaleDateString('es-VE');
       const usuario = c.usuario || 'N/A';
       const terminal = c.terminal || 'LOCAL';
       const dineroEnCajaExpected = (c.dineroEnCajaExpected ?? (c as any).expectedUsd ?? 0).toFixed(2);
@@ -394,7 +397,8 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
       const descuentosUsd = (c.descuentosUsd ?? 0).toFixed(2);
 
       let textSummary = `📊 *REPORTE DE CIERRE DE CAJA (${i + 1}/${selectedCierres.length})*\n\n`;
-      textSummary += `📅 *Fecha Cierre:* ${fecha}\n`;
+      textSummary += `🗓️ *Apertura:* ${fechaApertura}\n`;
+      textSummary += `🔒 *Cierre:* ${fechaCierre}\n`;
       textSummary += `👤 *Cajero:* ${usuario}\n`;
       textSummary += `🖥️ *Terminal:* ${terminal}\n`;
       if (c.totalTickets != null && c.totalTickets > 0) {
@@ -490,6 +494,100 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
     return cierresSortDir === 'asc'
       ? <ChevronUp className="inline w-3 h-3 ml-0.5 text-blue-500" />
       : <ChevronDown className="inline w-3 h-3 ml-0.5 text-blue-500" />;
+  };
+
+  interface PaginationBarProps {
+    currentPage: number;
+    totalPages: number;
+    pageSize: number;
+    totalItems: number;
+    onPageChange: (page: number) => void;
+    onPageSizeChange: (size: number) => void;
+    itemLabel?: string;
+    isBottom?: boolean;
+  }
+
+  const PaginationBar = ({
+    currentPage,
+    totalPages,
+    pageSize,
+    totalItems,
+    onPageChange,
+    onPageSizeChange,
+    itemLabel = 'registros',
+    isBottom = false
+  }: PaginationBarProps) => {
+    if (totalItems === 0) return null;
+    const startIdx = Math.min((currentPage - 1) * pageSize + 1, totalItems);
+    const endIdx = Math.min(currentPage * pageSize, totalItems);
+
+    return (
+      <div className={`flex flex-col sm:flex-row justify-between items-center gap-2 bg-slate-50/95 px-3 py-1.5 text-xs font-sans flex-shrink-0 select-none ${
+        isBottom ? 'border-t border-slate-200' : 'border-b border-slate-200'
+      }`}>
+        <div className="flex items-center gap-2">
+          <span className="text-slate-500 font-semibold text-[11px]">Mostrar:</span>
+          <select
+            value={pageSize}
+            onChange={(e) => {
+              onPageSizeChange(Number(e.target.value));
+            }}
+            className="bg-white border border-slate-300 rounded px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-sky-500 font-sans font-bold text-slate-700 cursor-pointer shadow-2xs"
+          >
+            <option value={25}>25 por página</option>
+            <option value={50}>50 por página</option>
+            <option value={100}>100 por página</option>
+            <option value={250}>250 por página</option>
+            <option value={totalItems}>Mostrar Todos ({totalItems})</option>
+          </select>
+          <span className="text-slate-500 text-[11px]">
+            Mostrando <strong className="font-mono text-slate-800 font-bold">{startIdx} - {endIdx}</strong> de <strong className="font-mono text-slate-800 font-bold">{totalItems}</strong> {itemLabel}
+          </span>
+        </div>
+
+        {totalPages > 1 && (
+          <div className="flex items-center gap-1 font-bold text-xs">
+            <button
+              type="button"
+              onClick={() => onPageChange(1)}
+              disabled={currentPage === 1}
+              className="px-2 py-0.5 bg-white border border-slate-300 rounded disabled:opacity-40 hover:bg-slate-100 transition-all cursor-pointer disabled:cursor-not-allowed shadow-2xs text-slate-700"
+              title="Primera página"
+            >
+              «
+            </button>
+            <button
+              type="button"
+              onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+              disabled={currentPage === 1}
+              className="px-2.5 py-0.5 bg-white border border-slate-300 rounded disabled:opacity-40 hover:bg-slate-100 transition-all cursor-pointer disabled:cursor-not-allowed shadow-2xs text-slate-700"
+            >
+              Anterior
+            </button>
+            <span className="px-2.5 py-0.5 bg-sky-100 text-sky-800 rounded font-mono font-bold border border-sky-200/80">
+              Pág {currentPage} / {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+              disabled={currentPage === totalPages}
+              className="px-2.5 py-0.5 bg-white border border-slate-300 rounded disabled:opacity-40 hover:bg-slate-100 transition-all cursor-pointer disabled:cursor-not-allowed shadow-2xs text-slate-700"
+            >
+              Siguiente
+            </button>
+            <button
+              type="button"
+              onClick={() => onPageChange(totalPages)}
+              disabled={currentPage === totalPages}
+              className="px-2 py-0.5 bg-white border border-slate-300 rounded disabled:opacity-40 hover:bg-slate-100 transition-all cursor-pointer disabled:cursor-not-allowed shadow-2xs text-slate-700"
+              title="Última página"
+            >
+              »
+            </button>
+          </div>
+        )}
+      </div>
+    );
   };
 
   // Filter sales list by date range and document type if enabled
@@ -887,6 +985,40 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
       totalUtilidadConIVA
     };
   }, [finalFilteredCierres, sales]);
+
+  // Pagination states for Ventas
+  const [salesPageSize, setSalesPageSize] = useState<number>(50);
+  const [salesCurrentPage, setSalesCurrentPage] = useState<number>(1);
+
+  // Reset sales page when search, filters, or sorting changes
+  useEffect(() => {
+    setSalesCurrentPage(1);
+  }, [salesSearchTerm, startDate, endDate, filterEnabled, filterDocType, salesSortField, salesSortDir]);
+
+  const totalSalesCount = finalFilteredSales.length;
+  const salesTotalPages = Math.max(1, Math.ceil(totalSalesCount / salesPageSize));
+  const safeSalesPage = Math.min(Math.max(1, salesCurrentPage), salesTotalPages);
+  const paginatedSales = useMemo(() => {
+    const start = (safeSalesPage - 1) * salesPageSize;
+    return finalFilteredSales.slice(start, start + salesPageSize);
+  }, [finalFilteredSales, safeSalesPage, salesPageSize]);
+
+  // Pagination states for Cierres
+  const [cierresPageSize, setCierresPageSize] = useState<number>(50);
+  const [cierresCurrentPage, setCierresCurrentPage] = useState<number>(1);
+
+  // Reset cierres page when search, filters, or sorting changes
+  useEffect(() => {
+    setCierresCurrentPage(1);
+  }, [cierresSearchTerm, startDate, endDate, filterEnabled, cierresSortField, cierresSortDir]);
+
+  const totalCierresCount = finalFilteredCierres.length;
+  const cierresTotalPages = Math.max(1, Math.ceil(totalCierresCount / cierresPageSize));
+  const safeCierresPage = Math.min(Math.max(1, cierresCurrentPage), cierresTotalPages);
+  const paginatedCierres = useMemo(() => {
+    const start = (safeCierresPage - 1) * cierresPageSize;
+    return finalFilteredCierres.slice(start, start + cierresPageSize);
+  }, [finalFilteredCierres, safeCierresPage, cierresPageSize]);
 
   // Escape key listener to close details modal
   useEffect(() => {
@@ -2038,9 +2170,9 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
       </div>
 
       {activeSubTab === 'ventas' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-[520px]">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-[580px]">
           {/* LEFT COLUMN: Clean Sales Table */}
-          <div className="lg:col-span-9 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col h-[520px]">
+          <div className="lg:col-span-9 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col h-[580px]">
             <div className="bg-slate-50 border-b border-slate-200 px-4 py-2 flex flex-wrap justify-between items-center gap-3 flex-shrink-0">
               <div className="flex items-center gap-4 flex-grow">
                 <span className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5 font-sans whitespace-nowrap">
@@ -2078,6 +2210,20 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                 </span>
               </div>
             </div>
+
+            {/* TOP PAGINATION BAR */}
+            <PaginationBar
+              currentPage={safeSalesPage}
+              totalPages={salesTotalPages}
+              pageSize={salesPageSize}
+              totalItems={totalSalesCount}
+              onPageChange={setSalesCurrentPage}
+              onPageSizeChange={(newSize) => {
+                setSalesPageSize(newSize);
+                setSalesCurrentPage(1);
+              }}
+              itemLabel="facturas"
+            />
 
             <div className="flex-grow overflow-y-auto">
               <table className="w-full border-collapse text-left">
@@ -2182,7 +2328,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                       </td>
                     </tr>
                   ) : (
-                    finalFilteredSales.map(sale => {
+                    paginatedSales.map(sale => {
                       const isDev = sale.factura_nro.startsWith('DEV-');
                       const isChecked = selectedSaleIds.includes(sale.factura_nro);
                       const isRowActive = activeSelectedSale?.factura_nro === sale.factura_nro;
@@ -2331,10 +2477,25 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                 </tbody>
               </table>
             </div>
+
+            {/* BOTTOM PAGINATION BAR */}
+            <PaginationBar
+              currentPage={safeSalesPage}
+              totalPages={salesTotalPages}
+              pageSize={salesPageSize}
+              totalItems={totalSalesCount}
+              onPageChange={setSalesCurrentPage}
+              onPageSizeChange={(newSize) => {
+                setSalesPageSize(newSize);
+                setSalesCurrentPage(1);
+              }}
+              itemLabel="facturas"
+              isBottom
+            />
           </div>
 
           {/* RIGHT COLUMN: OPERACIONES DE VENTA Panel */}
-          <div className="lg:col-span-3 bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between h-[520px]">
+          <div className="lg:col-span-3 bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between h-[580px]">
             <div className="space-y-4">
               <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-700 uppercase tracking-wider font-sans border-b border-slate-100 pb-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />
@@ -2433,9 +2594,9 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
       )}
 
       {activeSubTab === 'cierres' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-[520px]">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-[580px]">
           {/* LEFT COLUMN: Clean Cierres Table */}
-          <div className="lg:col-span-9 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col h-[520px]">
+          <div className="lg:col-span-9 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col h-[580px]">
             <div className="bg-slate-50 border-b border-slate-200 px-4 py-2 flex flex-wrap justify-between items-center gap-3 flex-shrink-0">
               <div className="flex items-center gap-4 flex-grow">
                 <span className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5 font-sans whitespace-nowrap">
@@ -2467,6 +2628,20 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                 </span>
               </div>
             </div>
+
+            {/* TOP PAGINATION BAR */}
+            <PaginationBar
+              currentPage={safeCierresPage}
+              totalPages={cierresTotalPages}
+              pageSize={cierresPageSize}
+              totalItems={totalCierresCount}
+              onPageChange={setCierresCurrentPage}
+              onPageSizeChange={(newSize) => {
+                setCierresPageSize(newSize);
+                setCierresCurrentPage(1);
+              }}
+              itemLabel="cierres"
+            />
 
             <div className="flex-grow overflow-y-auto">
               <table className="w-full border-collapse text-left">
@@ -2552,7 +2727,7 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                       </td>
                     </tr>
                   ) : (
-                    finalFilteredCierres.map(c => {
+                    paginatedCierres.map(c => {
                       const isOpen = c.status === 'Abierta' || !c.fechaCierre;
                       const aperturaUsd = c.aperturaUsd ?? 0;
                       const aperturaVes = c.aperturaVes ?? 0;
@@ -2752,10 +2927,25 @@ export default function VentasHistorico({ sales, cierres, onReprintTicket, curre
                 </tbody>
               </table>
             </div>
+
+            {/* BOTTOM PAGINATION BAR */}
+            <PaginationBar
+              currentPage={safeCierresPage}
+              totalPages={cierresTotalPages}
+              pageSize={cierresPageSize}
+              totalItems={totalCierresCount}
+              onPageChange={setCierresCurrentPage}
+              onPageSizeChange={(newSize) => {
+                setCierresPageSize(newSize);
+                setCierresCurrentPage(1);
+              }}
+              itemLabel="cierres"
+              isBottom
+            />
           </div>
 
           {/* RIGHT COLUMN: Operations & Actions Panel (Like Inventory) */}
-          <div className="lg:col-span-3 bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between h-[520px] font-sans">
+          <div className="lg:col-span-3 bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col justify-between h-[580px] font-sans">
             <div className="space-y-4">
               <h3 className="text-xs font-black text-slate-700 uppercase tracking-wider border-b border-slate-100 pb-2.5 flex items-center gap-1.5">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />

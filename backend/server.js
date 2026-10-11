@@ -27,8 +27,15 @@ import {
   unpackBultoToDetal, getCombos, saveCombo, deleteCombo, saveBultoVinculo, getInventoryAbcReport
 } from './db-store.js';
 
-import { calculateCasheaBreakdown, CASHEA_LEVELS } from './cashea-service.js';
-import { parseBdvStatementText, parseBdvSmsNotification, matchPaymentWithMovements } from './bdv-conciliacion-service.js';
+import { 
+  parseBdvStatementText, 
+  parseBdvSmsNotification, 
+  matchPaymentWithMovements,
+  BANCOS_VENEZUELA,
+  consultarBdvApi,
+  consultarBdvApiMultiDestino,
+  cleanBdvMessage
+} from './bdv-conciliacion-service.js';
 import {
   startPagoMovilTunnel,
   stopPagoMovilTunnel,
@@ -264,11 +271,211 @@ app.post('/api/conciliacion/validar-referencia', async (req, res) => {
   try {
     const { referencia, monto_ves } = req.body || {};
     const result = await validateBdvPayment(referencia, monto_ves);
-    res.json({ success: true, ...result });
+    res.json({
+      success: true,
+      ...result,
+      alreadyReconciled: !!result.alreadyUsed,
+      alreadyUsedInSale: !!result.alreadyUsed,
+      message: cleanBdvMessage(result.message)
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+// GET Configuración del API BDV oficial (Key, ambiente, teléfonos destino autorizados)
+app.get('/api/conciliacion/bdv/config', async (req, res) => {
+  try {
+    const config = await getPagoMovilConfigDb();
+    res.json({
+      success: true,
+      bdvApiKey: config.bdvApiKey || '',
+      bdvAmbiente: config.bdvAmbiente || 'produccion',
+      bdvTelefonosDestino: Array.isArray(config.bdvTelefonosDestino) ? config.bdvTelefonosDestino : [],
+      bdvTelefonoDefault: config.bdvTelefonoDefault || '',
+      bancos: BANCOS_VENEZUELA
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST Guardar Configuración del API BDV oficial
+app.post('/api/conciliacion/bdv/config', async (req, res) => {
+  try {
+    const { bdvApiKey, bdvAmbiente, bdvTelefonosDestino, bdvTelefonoDefault } = req.body || {};
+    const toSave = {};
+    if (bdvApiKey !== undefined) toSave.bdvApiKey = String(bdvApiKey).trim();
+    if (bdvAmbiente !== undefined) toSave.bdvAmbiente = bdvAmbiente === 'calidad' ? 'calidad' : 'produccion';
+    if (bdvTelefonosDestino !== undefined) toSave.bdvTelefonosDestino = bdvTelefonosDestino;
+    if (bdvTelefonoDefault !== undefined) toSave.bdvTelefonoDefault = String(bdvTelefonoDefault).trim();
+
+    const updated = await savePagoMovilConfigDb(toSave);
+    res.json({ success: true, config: updated });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST Probar Conectividad con API BDV
+app.post('/api/conciliacion/bdv/probar-conexion', async (req, res) => {
+  try {
+    const storedConfig = await getPagoMovilConfigDb();
+    const apiKey = (req.body?.apiKey || storedConfig.bdvApiKey || '').trim();
+    const ambiente = req.body?.ambiente || storedConfig.bdvAmbiente || 'produccion';
+
+    if (!apiKey) {
+      return res.json({ success: false, message: 'No hay ninguna API Key de BDV configurada para probar.' });
+    }
+
+    const testResult = await consultarBdvApi({
+      apiKey,
+      ambiente,
+      cedulaPagador: 'V10000000',
+      telefonoPagador: '04120000000',
+      telefonoDestino: '04120000000',
+      referencia: '999999',
+      fechaPago: new Date().toISOString().split('T')[0],
+      importe: '1.00',
+      bancoOrigen: '0102',
+      timeoutMs: 5000
+    });
+
+    if (testResult.isNetworkError) {
+      return res.json({
+        success: false,
+        isNetworkError: true,
+        message: testResult.message,
+        latencyMs: testResult.latencyMs
+      });
+    }
+
+    const isKeyValid = testResult.code === 1010 || testResult.code === 1000;
+    res.json({
+      success: isKeyValid,
+      code: testResult.code,
+      latencyMs: testResult.latencyMs,
+      message: isKeyValid
+        ? `✅ Conexión con BDV establecida con éxito en ${testResult.latencyMs}ms. API Key y credenciales verificadas.`
+        : `⚠️ Respuesta de BDV (Código ${testResult.code}): ${testResult.message}`,
+      ambiente
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST Validación antifraude de Pago Móvil en Vivo contra el Core BDV
+app.post('/api/conciliacion/validar-bdv-api', async (req, res) => {
+  try {
+    const {
+      cedulaPagador,
+      telefonoPagador,
+      telefonoDestino,
+      referencia,
+      fechaPago,
+      importe,
+      bancoOrigen,
+      cajaId
+    } = req.body || {};
+
+    const cleanAmt = parseFloat(String(importe || 0).replace(',', '.'));
+    const cleanRef = String(referencia || '').trim();
+
+    // 1. Verificación previa en base de datos local: ¿Ya este pago fue utilizado en una venta previa?
+    const preCheck = await validateBdvPayment(cleanRef, cleanAmt);
+    if (preCheck && preCheck.verified && preCheck.alreadyUsed) {
+      return res.json({
+        success: true,
+        verified: true,
+        alreadyReconciled: true,
+        alreadyUsedInSale: true,
+        usedInFactura: preCheck.usedInFactura || null,
+        message: cleanBdvMessage(`Este comprobante de Pago Móvil ya fue validado y utilizado previamente en la Factura #${preCheck.usedInFactura || 'anterior'}. No se puede reutilizar en otra venta para evitar pagos duplicados.`),
+        data: {
+          amount: cleanAmt,
+          reference: cleanRef
+        }
+      });
+    }
+
+    const storedConfig = await getPagoMovilConfigDb();
+    const apiKey = storedConfig.bdvApiKey || '';
+    const ambiente = storedConfig.bdvAmbiente || 'produccion';
+
+    if (!apiKey) {
+      return res.json({
+        success: false,
+        verified: false,
+        sinApiKey: true,
+        message: 'No se ha configurado la API Key de BDV en la configuración del comercio.'
+      });
+    }
+
+    // Determinar qué teléfonos destino probar
+    let phonesToTest = [];
+    if (telefonoDestino && telefonoDestino !== 'TODOS') {
+      phonesToTest = [telefonoDestino];
+    } else {
+      const list = Array.isArray(storedConfig.bdvTelefonosDestino) ? storedConfig.bdvTelefonosDestino : [];
+      phonesToTest = list.map(item => typeof item === 'object' ? item.telefono : item).filter(Boolean);
+      if (phonesToTest.length === 0 && storedConfig.bdvTelefonoDefault) {
+        phonesToTest = [storedConfig.bdvTelefonoDefault];
+      }
+    }
+
+    if (phonesToTest.length === 0) {
+      return res.json({
+        success: false,
+        verified: false,
+        message: 'No hay ningún teléfono destino del comercio configurado para validar este pago.'
+      });
+    }
+
+    const apiResult = await consultarBdvApiMultiDestino({
+      apiKey,
+      ambiente,
+      cedulaPagador,
+      telefonoPagador,
+      telefonosDestino: phonesToTest,
+      referencia: cleanRef,
+      fechaPago,
+      importe: cleanAmt,
+      bancoOrigen: bancoOrigen || '0102',
+      timeoutMs: 6000
+    });
+
+    if (apiResult.verified) {
+      await saveBdvMovements([{
+        fecha: fechaPago || new Date().toISOString().split('T')[0],
+        referencia: cleanRef,
+        monto_ves: cleanAmt,
+        telefono_origen: telefonoPagador || '',
+        titular_origen: cedulaPagador || '',
+        banco_origen: bancoOrigen || '0102',
+        descripcion: `VALIDADO BDV API (${apiResult.telefonoDestinoUsado || 'Comercio'})`,
+        caja_id: cajaId || null
+      }]);
+    }
+
+    // Comprobar si el movimiento guardado o existente está ya asociado a una venta previa
+    const postCheck = await validateBdvPayment(cleanRef, cleanAmt);
+    const isUsedInSale = !!(postCheck && postCheck.alreadyUsed);
+    const usedFactura = postCheck?.usedInFactura || null;
+
+    res.json({
+      success: true,
+      ...apiResult,
+      alreadyReconciled: !!(apiResult.alreadyReconciled || isUsedInSale),
+      alreadyUsedInSale: isUsedInSale,
+      usedInFactura: usedFactura,
+      message: cleanBdvMessage(apiResult.message)
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 
 app.post('/api/conciliacion/importar-extracto-bdv', async (req, res) => {
   try {
@@ -295,7 +502,9 @@ app.post('/api/conciliacion/importar-extracto-bdv', async (req, res) => {
 app.get('/api/conciliacion/movimientos-bdv', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit || '100');
-    const movements = await getBdvMovements(limit);
+    const date = req.query.date || null;
+    const search = req.query.search || '';
+    const movements = await getBdvMovements(limit, date, search);
     res.json({ success: true, movements });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

@@ -266,8 +266,12 @@ export default function CajaPOS({
   const allCategories = useMemo(() => {
     const set = new Set<string>();
     set.add('GENERAL');
-    products.forEach(p => { if (p.category) set.add(p.category.toUpperCase()); });
-    customCategories.forEach(c => set.add(c.toUpperCase()));
+    (Array.isArray(products) ? products : []).forEach(p => { 
+      if (p && p.category) set.add(String(p.category).toUpperCase()); 
+    });
+    (Array.isArray(customCategories) ? customCategories : []).forEach(c => {
+      if (c) set.add(String(c).toUpperCase());
+    });
     return Array.from(set);
   }, [products, customCategories]);
 
@@ -465,6 +469,10 @@ export default function CajaPOS({
     if (!currentUser) return false;
     return isAdmin || Boolean(currentUser.permisos?.caja?.ver_todas_facturas) || Boolean(currentUser.permisos?.caja?.admin);
   }, [currentUser, isAdmin]);
+
+  const isPaymentMethodActive = (method: string): boolean => {
+    return Array.isArray(companyConfig?.metodos_pago_activos) && companyConfig.metodos_pago_activos.includes(method);
+  };
 
   const [showCierreModal, setShowCierreModal] = useState(false);
   const [cierreRealUsd, setCierreRealUsd] = useState('0');
@@ -680,13 +688,14 @@ export default function CajaPOS({
   };
 
   const filteredDevSales = useMemo(() => {
-    const listToUse = allSalesList.length > 0 ? allSalesList : shiftSales;
+    const safeShiftSales = Array.isArray(shiftSales) ? shiftSales : [];
+    const listToUse = Array.isArray(allSalesList) && allSalesList.length > 0 ? allSalesList : safeShiftSales;
 
     let sourceSales: Sale[] = [];
     if (canViewAllSales) {
       // Administrator or authorized users can view all sales across dates, filtered by date selector if active
       sourceSales = listToUse.filter(s => {
-        if (!s || !s.factura_nro || s.factura_nro.startsWith('DEV-')) return false;
+        if (!s || !s.factura_nro || String(s.factura_nro).startsWith('DEV-')) return false;
         if (devDateFilter.trim() !== '') {
           const saleDateStr = (s.fecha || '').substring(0, 10);
           return saleDateStr === devDateFilter.trim();
@@ -695,22 +704,24 @@ export default function CajaPOS({
       });
     } else {
       // Non-authorized users can ONLY view and return invoices from their current active open session
-      sourceSales = shiftSales.filter(s => s && s.factura_nro && !s.factura_nro.startsWith('DEV-'));
+      sourceSales = safeShiftSales.filter(s => s && s.factura_nro && !String(s.factura_nro).startsWith('DEV-'));
     }
 
     const sortedSales = [...sourceSales].sort((a, b) => {
-      const idA = typeof a.id === 'number' ? a.id : 0;
-      const idB = typeof b.id === 'number' ? b.id : 0;
+      const idA = typeof a.id === 'number' ? a.id : (parseInt(a.id as any, 10) || 0);
+      const idB = typeof b.id === 'number' ? b.id : (parseInt(b.id as any, 10) || 0);
       if (idA !== idB) return idB - idA;
-      return (b.factura_nro || '').localeCompare(a.factura_nro || '');
+      return String(b.factura_nro || '').localeCompare(String(a.factura_nro || ''));
     });
 
     if (devSearchTerm.trim() === '') return sortedSales;
     const term = devSearchTerm.toLowerCase();
     return sortedSales.filter(sale =>
-      sale.factura_nro?.toLowerCase().includes(term) ||
-      sale.client?.nombre?.toLowerCase().includes(term) ||
-      sale.client?.cedula_rif?.toLowerCase().includes(term)
+      sale && (
+        String(sale.factura_nro || '').toLowerCase().includes(term) ||
+        (sale.client?.nombre || '').toLowerCase().includes(term) ||
+        (sale.client?.cedula_rif || '').toLowerCase().includes(term)
+      )
     );
   }, [devSearchTerm, devDateFilter, allSalesList, shiftSales, canViewAllSales]);
 
@@ -1065,34 +1076,36 @@ export default function CajaPOS({
 
   // Helper to find generic / default client (Consumidor Final / Publico General)
   const defaultClient: Client = useMemo(() => {
-    if (!clients || clients.length === 0) {
-      return {
-        id: 1,
-        cedula_rif: 'V-00000000',
-        nombre: 'CONSUMIDOR FINAL',
-        telefono: '',
-        direccion: 'LOCAL',
-        limite_credito: 0,
-        credito_disponible: 0,
-        porcentaje_descuento: 0,
-        estado: 'Activo' as const,
-        saldo_pendiente: 0
-      };
+    const fallback: Client = {
+      id: 1,
+      cedula_rif: 'V-00000000',
+      nombre: 'CONSUMIDOR FINAL',
+      telefono: '',
+      direccion: 'LOCAL',
+      limite_credito: 0,
+      credito_disponible: 0,
+      porcentaje_descuento: 0,
+      estado: 'Activo' as const,
+      saldo_pendiente: 0
+    };
+    if (!clients || !Array.isArray(clients) || clients.length === 0) {
+      return fallback;
     }
     const found = clients.find(c => {
+      if (!c) return false;
       const doc = (c.cedula_rif || '').trim().toUpperCase();
       const nom = (c.nombre || '').trim().toLowerCase();
       return doc === 'V-00000000' || doc === 'V-0' || doc === '00000000' || /consumidor\s*final|publico\s*general|público\s*general|cliente\s*ocasional/i.test(nom);
     });
-    return found || clients[0];
+    return found || clients[0] || fallback;
   }, [clients]);
 
   // POS State
   const [selectedClient, setSelectedClient] = useState<Client>(() => {
     try {
       const savedDoc = localStorage.getItem('pos_current_client_doc');
-      if (savedDoc) {
-        const match = clients.find(c => c.cedula_rif === savedDoc);
+      if (savedDoc && Array.isArray(clients)) {
+        const match = clients.find(c => c && c.cedula_rif === savedDoc);
         if (match) return match;
       }
     } catch (e) {
@@ -1103,9 +1116,9 @@ export default function CajaPOS({
 
   // Whenever clients list updates, ensure selectedClient is synchronized if it became invalid
   useEffect(() => {
-    if (clients && clients.length > 0) {
+    if (clients && Array.isArray(clients) && clients.length > 0) {
       setSelectedClient(prev => {
-        if (!prev || !clients.some(c => c.id === prev.id)) {
+        if (!prev || !clients.some(c => c && String(c.id) === String(prev.id))) {
           return defaultClient;
         }
         return prev;
@@ -1122,11 +1135,14 @@ export default function CajaPOS({
 
   const filteredClients = useMemo(() => {
     const term = clientSearchTerm.trim().toLowerCase();
-    if (!term) return clients;
-    return clients.filter(c =>
-      c.nombre.toLowerCase().includes(term) ||
-      c.cedula_rif.toLowerCase().includes(term) ||
-      (c.telefono && c.telefono.toLowerCase().includes(term))
+    const list = Array.isArray(clients) ? clients : [];
+    if (!term) return list;
+    return list.filter(c =>
+      c && (
+        (c.nombre || '').toLowerCase().includes(term) ||
+        (c.cedula_rif || '').toLowerCase().includes(term) ||
+        (c.telefono && String(c.telefono).toLowerCase().includes(term))
+      )
     );
   }, [clients, clientSearchTerm]);
 
@@ -1229,7 +1245,7 @@ export default function CajaPOS({
         return item;
       }
 
-      const { priceUSD, priceType } = determinePriceAndType(prod, targetQty, !!selectedClient.aplica_precio_costo);
+      const { priceUSD, priceType } = determinePriceAndType(prod, targetQty, !!selectedClient?.aplica_precio_costo);
       showToast(`Cantidad ajustada a ${targetQty} uds (${priceType})`, 'info');
 
       return {
@@ -1242,7 +1258,7 @@ export default function CajaPOS({
     }));
   };
 
-  const [selectedSeller, setSelectedSeller] = useState<string>(currentUser.nombre);
+  const [selectedSeller, setSelectedSeller] = useState<string>(currentUser?.nombre || currentUser?.usuario || 'SISTEMA');
 
   const [searchProdTerm, setSearchProdTerm] = useState<string>(() => {
     return sessionStorage.getItem('pos_caja_search_term') || '';
@@ -1260,14 +1276,15 @@ export default function CajaPOS({
 
   const productsByBarcodeMap = useMemo(() => {
     const map = new Map<string, Product>();
-    for (let i = 0; i < products.length; i++) {
-      const p = products[i];
-      if (p.estado === 'Inactivo') continue;
+    const prods = Array.isArray(products) ? products : [];
+    for (let i = 0; i < prods.length; i++) {
+      const p = prods[i];
+      if (!p || p.estado === 'Inactivo') continue;
       if (p.barcode) {
-        map.set(p.barcode.toUpperCase().trim(), p);
+        map.set(String(p.barcode).toUpperCase().trim(), p);
       }
-      if (p.id) {
-        map.set(p.id.toString(), p);
+      if (p.id !== undefined && p.id !== null) {
+        map.set(String(p.id), p);
       }
     }
     return map;
@@ -1283,11 +1300,12 @@ export default function CajaPOS({
       return [exact];
     }
 
+    const prods = Array.isArray(products) ? products : [];
     const matches: Product[] = [];
-    for (let i = 0; i < products.length; i++) {
-      const p = products[i];
-      if (p.estado === 'Inactivo') continue;
-      const desc = p.description.toLowerCase();
+    for (let i = 0; i < prods.length; i++) {
+      const p = prods[i];
+      if (!p || p.estado === 'Inactivo') continue;
+      const desc = (p.description || '').toLowerCase();
       const code = (p.barcode || '').toLowerCase();
       if (code.startsWith(term) || desc.includes(term) || code.includes(term)) {
         matches.push(p);
@@ -1315,7 +1333,7 @@ export default function CajaPOS({
       if (aDescStarts !== bDescStarts) return bDescStarts - aDescStarts;
 
       // 4. Comparación rápida alfabética
-      return a.description < b.description ? -1 : 1;
+      return (a.description || '').localeCompare(b.description || '');
     }).slice(0, 35); // Límite de 35 resultados navegables con scroll y teclado
   }, [products, searchProdTerm, productsByBarcodeMap]);
 
@@ -1331,7 +1349,13 @@ export default function CajaPOS({
   const [saleItems, setSaleItems] = useState<SaleItem[]>(() => {
     try {
       const saved = localStorage.getItem('pos_current_cart');
-      return saved ? JSON.parse(saved) : [];
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(item => item && item.product && typeof item.product === 'object');
+        }
+      }
+      return [];
     } catch (e) {
       console.error(e);
       return [];
@@ -1352,7 +1376,11 @@ export default function CajaPOS({
   const [ticketsOnHold, setTicketsOnHold] = useState<any[]>(() => {
     try {
       const saved = localStorage.getItem('pos_tickets_on_hold');
-      return saved ? JSON.parse(saved) : [];
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return Array.isArray(parsed) ? parsed : [];
+      }
+      return [];
     } catch (e) {
       console.error(e);
       return [];
@@ -1373,25 +1401,29 @@ export default function CajaPOS({
   const showEntradaDropdown = entradaBarcode.trim() !== "" && (!matchedProduct || matchedProduct.barcode !== entradaBarcode);
 
   const filteredSearchProducts = useMemo(() => {
-    if (entradaBarcode.trim() === "") return [];
-    return products.filter(
-      p => p.estado !== 'Inactivo' && (
-        p.description.toLowerCase().includes(entradaBarcode.toLowerCase()) ||
-        p.barcode.toLowerCase().includes(entradaBarcode.toLowerCase())
+    if (!entradaBarcode || entradaBarcode.trim() === "") return [];
+    const term = entradaBarcode.toLowerCase();
+    const prods = Array.isArray(products) ? products : [];
+    return prods.filter(
+      p => p && p.estado !== 'Inactivo' && (
+        (p.description || '').toLowerCase().includes(term) ||
+        (p.barcode || '').toLowerCase().includes(term)
       )
     );
   }, [entradaBarcode, products]);
 
   // Automatically match if the entered text is an exact match for a barcode or id
   useEffect(() => {
-    if (entradaBarcode.trim() === "") {
+    if (!entradaBarcode || entradaBarcode.trim() === "") {
       setMatchedProduct(null);
       return;
     }
-    const exactMatch = products.find(
-      p => p.estado !== 'Inactivo' && (
-        p.barcode.toUpperCase() === entradaBarcode.trim().toUpperCase() ||
-        p.id.toString() === entradaBarcode.trim()
+    const cleanEntry = entradaBarcode.trim().toUpperCase();
+    const prods = Array.isArray(products) ? products : [];
+    const exactMatch = prods.find(
+      p => p && p.estado !== 'Inactivo' && (
+        String(p.barcode || '').toUpperCase() === cleanEntry ||
+        String(p.id) === cleanEntry
       )
     );
     if (exactMatch) {
@@ -1438,7 +1470,7 @@ export default function CajaPOS({
   }, [discountPct]);
 
   useEffect(() => {
-    if (selectedClient) {
+    if (selectedClient?.cedula_rif) {
       localStorage.setItem('pos_current_client_doc', selectedClient.cedula_rif);
     }
   }, [selectedClient]);
@@ -1449,13 +1481,13 @@ export default function CajaPOS({
 
   const handlePutOnHold = () => {
     if (saleItems.length === 0) return;
-    const defaultTag = `Ticket ${ticketsOnHold.length + 1} - ${selectedClient.nombre}`;
+    const defaultTag = `Ticket ${ticketsOnHold.length + 1} - ${selectedClient?.nombre || 'CONSUMIDOR FINAL'}`;
     setHoldTag(defaultTag);
     setShowHoldModal(true);
   };
 
   const handleConfirmHold = () => {
-    const finalTag = holdTag.trim() || `Ticket ${ticketsOnHold.length + 1} - ${selectedClient.nombre}`;
+    const finalTag = holdTag.trim() || `Ticket ${ticketsOnHold.length + 1} - ${selectedClient?.nombre || 'CONSUMIDOR FINAL'}`;
 
     const newHold = {
       id: Date.now(),
@@ -1849,6 +1881,10 @@ export default function CajaPOS({
         e.preventDefault();
         searchInputRef.current?.focus();
       } else if (e.key === 'Escape') {
+        if (showConciliacionModal) {
+          setShowConciliacionModal(false);
+          return;
+        }
         if (showQuickAddCatModal) {
           setShowQuickAddCatModal(false);
           return;
@@ -1885,7 +1921,7 @@ export default function CajaPOS({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [editingProduct, showQuickAddCatModal, imageManagerProduct, zoomedProduct]);
+  }, [editingProduct, showQuickAddCatModal, imageManagerProduct, zoomedProduct, showConciliacionModal]);
 
   // Focus Trap for Caja Abono Modal
   useEffect(() => {
@@ -2090,7 +2126,7 @@ export default function CajaPOS({
 
   // Sync selected seller with currentUser
   useEffect(() => {
-    setSelectedSeller(currentUser.nombre);
+    setSelectedSeller(currentUser?.nombre || currentUser?.usuario || 'SISTEMA');
   }, [currentUser]);
 
   // Auto-focus opening modal if closed
@@ -2099,14 +2135,18 @@ export default function CajaPOS({
   }, [cajaAbierta]);
 
   // Compute Totals
-  const subtotalUSD = Math.round(saleItems.reduce((acc, item) => acc + item.totalUSD, 0) * 100) / 100;
+  const validSaleItems = useMemo(() => {
+    return Array.isArray(saleItems) ? saleItems.filter(item => item && item.product && typeof item.product === 'object') : [];
+  }, [saleItems]);
+
+  const subtotalUSD = Math.round(validSaleItems.reduce((acc, item) => acc + (item.totalUSD || 0), 0) * 100) / 100;
   const discountAmountUSD = Math.round((subtotalUSD * (discountPct / 100)) * 100) / 100;
   const discountFactor = (1 - discountPct / 100);
 
   // Tax calculations (Venezuelan standard: shelf prices are tax-inclusive for taxable items)
-  const grossTaxableUSD = Math.round(saleItems.reduce((acc, item) => {
+  const grossTaxableUSD = Math.round(validSaleItems.reduce((acc, item) => {
     const isExempt = item.product.exento_impuesto === true || (item.product.porcentaje_impuesto !== undefined && item.product.porcentaje_impuesto === 0);
-    return acc + (isExempt ? 0 : item.totalUSD);
+    return acc + (isExempt ? 0 : (item.totalUSD || 0));
   }, 0) * 100) / 100;
 
   const grossExemptUSD = Math.round((subtotalUSD - grossTaxableUSD) * 100) / 100;
@@ -2127,7 +2167,7 @@ export default function CajaPOS({
       const formattedQty = prod.a_granel ? finalQty.toFixed(3) : finalQty.toString();
 
       // Determine price based on client's aplica_precio_costo flag
-      const useCostPrice = !!selectedClient.aplica_precio_costo;
+      const useCostPrice = !!selectedClient?.aplica_precio_costo;
 
       if (existing) {
         const nextQty = existing.qty + finalQty;
@@ -2339,7 +2379,7 @@ export default function CajaPOS({
     setSaleItems(prev =>
       prev.map(item => {
         if (item.product.id !== prodId) return item;
-        const { priceUSD, priceType } = determinePriceAndType(item.product, nextQty, !!selectedClient.aplica_precio_costo);
+        const { priceUSD, priceType } = determinePriceAndType(item.product, nextQty, !!selectedClient?.aplica_precio_costo);
         return {
           ...item,
           qty: nextQty,
@@ -2426,7 +2466,7 @@ export default function CajaPOS({
 
   const isPagoMovilValid = pagoMovilVESVal === 0 || (refPagoMovil.trim().length >= 4 && bankPagoMovil !== '');
   const isBiopagoValid = true;
-  const isCreditValid = creditUSDVal === 0 || creditUSDVal <= selectedClient.credito_disponible;
+  const isCreditValid = creditUSDVal === 0 || creditUSDVal <= (selectedClient?.credito_disponible || 0);
   const isCasheaValid = casheaUSDVal === 0 || refCashea.trim().length >= 3;
 
   const canConfirmCheckout = totalPaidUSD >= totalUSD && isPagoMovilValid && isBiopagoValid && isCreditValid && isCasheaValid;
@@ -2620,8 +2660,9 @@ export default function CajaPOS({
 
       // Limit credit validations
       if (!customPagos && creditUSDVal > 0) {
-        if (creditUSDVal > selectedClient.credito_disponible) {
-          showAlert(`Crédito insuficiente. Límite disponible del cliente: $${selectedClient.credito_disponible.toFixed(2)} USD.`, 'Crédito Insuficiente', 'warning');
+        const clientCredit = selectedClient?.credito_disponible || 0;
+        if (creditUSDVal > clientCredit) {
+          showAlert(`Crédito insuficiente. Límite disponible del cliente: $${clientCredit.toFixed(2)} USD.`, 'Crédito Insuficiente', 'warning');
           return;
         }
       }
@@ -2873,8 +2914,8 @@ export default function CajaPOS({
     }
 
     // Si el cliente en Cashea fue ingresado, intentar asociarlo
-    if (data.cedulaCliente && selectedClient.cedula_rif === 'V-00000000') {
-      const matchCli = clients.find(c => c.cedula_rif.toLowerCase() === data.cedulaCliente?.toLowerCase());
+    if (data.cedulaCliente && selectedClient?.cedula_rif === 'V-00000000') {
+      const matchCli = clients.find(c => (c.cedula_rif || '').toLowerCase() === data.cedulaCliente?.toLowerCase());
       if (matchCli) {
         setSelectedClient(matchCli);
       }
@@ -3627,7 +3668,8 @@ export default function CajaPOS({
     const diffVes = realVes - cierreResult.expectedVes;
 
     const defaultFullTemplate = `📊 *REPORTE DE ARQUEO Y CIERRE DE CAJA*\n\n` +
-      `📅 *Fecha:* {fecha}\n` +
+      `🗓️ *Apertura:* {fechaApertura}\n` +
+      `🔒 *Cierre:* {fechaCierre}\n` +
       `👤 *Cajero:* {usuario}\n` +
       `🖥️ *Terminal:* {terminal}\n` +
       `🧾 *Tickets Emitidos:* {totalTickets}\n\n` +
@@ -3651,6 +3693,9 @@ export default function CajaPOS({
     if (template.includes('EFECTIVO ESPERADO EN GAVETA') && !template.includes('{desglosePagos}') && !template.includes('{totalTickets}')) {
       template = defaultFullTemplate;
     }
+    if (template.includes('{fecha}') && !template.includes('{fechaApertura}')) {
+      template = template.replace(/(?:🗓️|📅)?\s*\*Fecha:\*\s*\{fecha\}/g, '🗓️ *Apertura:* {fechaApertura}\n🔒 *Cierre:* {fechaCierre}');
+    }
 
     const totalTicketsCount = cierreResult.totalTickets != null ? cierreResult.totalTickets : (Array.isArray(shiftSales) ? shiftSales.filter(s => !s.factura_nro?.startsWith('DEV-')).length : 0);
     const desglosePagosFormatted = generateMetodosPagoDesglose(cierreResult, tasaDia);
@@ -3658,8 +3703,17 @@ export default function CajaPOS({
     const utilidadNetaUsdStr = utilidadNetaVal.toFixed(2);
     const utilidadNetaVesStr = (utilidadNetaVal * (tasaDia || 1)).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+    const userKey = currentUser?.id || currentUser?.usuario || 'default';
+    const savedApertura = localStorage.getItem(`pos_apertura_fecha_${userKey}`) || '';
+    const fApertura = cierreResult.fechaApertura || savedApertura || cierreResult.fecha || '';
+    const nowD = new Date();
+    const padD = (n: number) => String(n).padStart(2, '0');
+    const fCierre = cierreResult.fechaCierre || cierreResult.fecha || `${nowD.getFullYear()}-${padD(nowD.getMonth() + 1)}-${padD(nowD.getDate())} ${padD(nowD.getHours())}:${padD(nowD.getMinutes())}`;
+
     const summaryText = template
-      .replace(/{fecha}/g, cierreResult.fechaCierre || cierreResult.fecha || '')
+      .replace(/{fechaApertura}/g, fApertura)
+      .replace(/{fechaCierre}/g, fCierre)
+      .replace(/{fecha}/g, fCierre)
       .replace(/{usuario}/g, cierreResult.usuario.toUpperCase())
       .replace(/{terminal}/g, localStorage.getItem('pos_terminal_name') || 'CAJA_01')
       .replace(/{totalTickets}/g, String(totalTicketsCount))
@@ -3980,6 +4034,28 @@ export default function CajaPOS({
                     stockClass: 'text-[12.5px]',
                     barcodeClass: 'text-[12px]',
                     itemHeightPx: 100
+                  },
+                  gigante: {
+                    imgBox: 'w-24 h-24 rounded-2xl',
+                    icon: 'w-10 h-10',
+                    btnPad: 'p-3 gap-4',
+                    titleClass: 'text-[15.5px] font-bold',
+                    priceUSDClass: 'text-[18px]',
+                    priceVESClass: 'text-[14px]',
+                    stockClass: 'text-[13px]',
+                    barcodeClass: 'text-[12px]',
+                    itemHeightPx: 124
+                  },
+                  enorme: {
+                    imgBox: 'w-[120px] h-[120px] rounded-2xl',
+                    icon: 'w-12 h-12',
+                    btnPad: 'p-3.5 gap-4.5',
+                    titleClass: 'text-[17px] font-extrabold',
+                    priceUSDClass: 'text-[20px]',
+                    priceVESClass: 'text-[15px]',
+                    stockClass: 'text-[13.5px]',
+                    barcodeClass: 'text-[12.5px]',
+                    itemHeightPx: 152
                   }
                 }[photoSize] || {
                   imgBox: 'w-11 h-11 rounded-lg',
@@ -4003,7 +4079,9 @@ export default function CajaPOS({
                     ref={searchDropdownRef}
                     style={{ maxHeight: dynamicMaxHeight }}
                     className={`absolute left-0 top-11 bg-white border border-slate-250 rounded-xl overflow-y-auto z-40 shadow-2xl divide-y divide-slate-100 ${showPhotos
-                        ? 'w-full min-w-[380px] sm:min-w-[530px] md:min-w-[645px]'
+                        ? (photoSize === 'gigante' || photoSize === 'enorme'
+                            ? 'w-full min-w-[420px] sm:min-w-[580px] md:min-w-[720px]'
+                            : 'w-full min-w-[380px] sm:min-w-[530px] md:min-w-[645px]')
                         : 'w-full'
                       }`}
                   >
@@ -4207,7 +4285,7 @@ export default function CajaPOS({
                 <input
                   type="text"
                   placeholder="Buscar por Nombre o Cédula/RIF..."
-                  value={isClientDropdownOpen ? clientSearchTerm : `${selectedClient.nombre} (${selectedClient.cedula_rif})${selectedClient.aplica_precio_costo ? ' ★ P.COSTO' : ''}${selectedClient.porcentaje_descuento > 0 ? ` [Desc ${selectedClient.porcentaje_descuento}%]` : ''}`}
+                  value={isClientDropdownOpen ? clientSearchTerm : `${selectedClient?.nombre || 'CONSUMIDOR FINAL'} (${selectedClient?.cedula_rif || 'V-00000000'})${selectedClient?.aplica_precio_costo ? ' ★ P.COSTO' : ''}${(selectedClient?.porcentaje_descuento || 0) > 0 ? ` [Desc ${selectedClient?.porcentaje_descuento}%]` : ''}`}
                   onFocus={() => {
                     setIsClientDropdownOpen(true);
                     setClientSearchTerm('');
@@ -4246,7 +4324,7 @@ export default function CajaPOS({
                       setClientSelectedIndex(-1);
                     }
                   }}
-                  className={`w-full h-[38px] border rounded-lg p-2 pr-7 text-slate-800 text-xs font-sans font-bold outline-none focus:bg-white focus:border-winter-blueBtn transition-all ${selectedClient.aplica_precio_costo ? 'bg-amber-50 border-amber-400 text-amber-900' : 'bg-slate-50 border-slate-350'
+                  className={`w-full h-[38px] border rounded-lg p-2 pr-7 text-slate-800 text-xs font-sans font-bold outline-none focus:bg-white focus:border-winter-blueBtn transition-all ${selectedClient?.aplica_precio_costo ? 'bg-amber-50 border-amber-400 text-amber-900' : 'bg-slate-50 border-slate-350'
                     }`}
                 />
 
@@ -4272,7 +4350,7 @@ export default function CajaPOS({
                   >
                     {filteredClients.length > 0 ? (
                       filteredClients.map((c, idx) => {
-                        const isSelected = c.id === selectedClient.id;
+                        const isSelected = selectedClient ? (String(c.id) === String(selectedClient.id)) : false;
                         const isHighlighted = idx === clientSelectedIndex;
                         return (
                           <button
@@ -4334,7 +4412,7 @@ export default function CajaPOS({
                 +
               </button>
             </div>
-            {selectedClient.aplica_precio_costo && (
+            {selectedClient?.aplica_precio_costo && (
               <div className="flex items-center gap-1.5 bg-amber-100 border border-amber-300 rounded px-2 py-0.5 mt-1">
                 <span className="text-amber-700 text-[9.5px] font-bold font-sans">⚠ CLIENTE A PRECIO COSTO — Facturación al costo</span>
               </div>
@@ -4728,15 +4806,15 @@ export default function CajaPOS({
                     if (!canApplyDiscounts) return;
                     setDiscountPct(Math.min(100, Math.max(0, parseInt(e.target.value) || 0)));
                   }}
-                  disabled={!canApplyDiscounts || (selectedClient && selectedClient.porcentaje_descuento > 0)}
-                  className={`w-12 text-center rounded p-0.5 font-bold font-mono text-[10px] transition-all ${!canApplyDiscounts || (selectedClient && selectedClient.porcentaje_descuento > 0)
+                  disabled={!canApplyDiscounts || ((selectedClient?.porcentaje_descuento || 0) > 0)}
+                  className={`w-12 text-center rounded p-0.5 font-bold font-mono text-[10px] transition-all ${!canApplyDiscounts || ((selectedClient?.porcentaje_descuento || 0) > 0)
                       ? 'bg-slate-200/80 border-slate-300 text-slate-500 cursor-not-allowed opacity-90 select-none'
                       : 'bg-slate-50 border-slate-300 text-emerald-700 hover:border-emerald-500 focus:border-emerald-600'
                     }`}
                   title={
                     !canApplyDiscounts
                       ? "🔒 Requiere permiso de Descuentos en Caja otorgado por el Administrador"
-                      : (selectedClient && selectedClient.porcentaje_descuento > 0)
+                      : ((selectedClient?.porcentaje_descuento || 0) > 0)
                         ? "Descuento fijado automáticamente desde la ficha del cliente"
                         : "Porcentaje de descuento manual"
                   }
@@ -5222,7 +5300,7 @@ export default function CajaPOS({
 
                 {/* ROW 1: EFECTIVO (USD & VES Side by Side) */}
                 <div className="grid grid-cols-2 gap-3">
-                  {companyConfig.metodos_pago_activos.includes('efectivo_usd') && (
+                  {isPaymentMethodActive('efectivo_usd') && (
                     <div className={isPaymentSettled && cashUSDVal <= 0 ? 'opacity-50' : ''}>
                       <label className={`text-[11.5px] mb-1 font-sans flex items-center justify-between gap-1 leading-none ${cashUSDVal > 0 ? 'text-emerald-800 font-black' : 'text-slate-700 font-bold'}`}>
                         <span className="flex items-center gap-1.5 min-w-0">
@@ -5252,7 +5330,7 @@ export default function CajaPOS({
                     </div>
                   )}
 
-                  {companyConfig.metodos_pago_activos.includes('efectivo_ves') && (
+                  {isPaymentMethodActive('efectivo_ves') && (
                     <div className={isPaymentSettled && cashVESVal <= 0 ? 'opacity-50' : ''}>
                       <label className={`text-[11.5px] mb-1 font-sans flex items-center justify-between gap-1 leading-none ${cashVESVal > 0 ? 'text-purple-900 font-black' : 'text-slate-700 font-bold'}`}>
                         <span className="flex items-center gap-1.5 min-w-0">
@@ -5285,7 +5363,7 @@ export default function CajaPOS({
 
                 {/* ROW 2: PAGO MÓVIL & BIOPAGO (Side by Side) */}
                 <div className="grid grid-cols-2 gap-3 border-t border-slate-200 pt-2">
-                  {companyConfig.metodos_pago_activos.includes('pago_movil') && (
+                  {isPaymentMethodActive('pago_movil') && (
                     <div className={`space-y-1 ${isPaymentSettled && pagoMovilVESVal <= 0 ? 'opacity-50' : ''}`}>
                       <label className={`text-[11.5px] font-sans flex items-center justify-between gap-1 leading-none ${pagoMovilVESVal > 0 ? 'text-emerald-800 font-black' : 'text-emerald-700 font-bold'}`}>
                         <span className="flex items-center gap-1.5 min-w-0">
@@ -5315,7 +5393,7 @@ export default function CajaPOS({
                     </div>
                   )}
 
-                  {companyConfig.metodos_pago_activos.includes('biopago') && (
+                  {isPaymentMethodActive('biopago') && (
                     <div className={`space-y-1 ${isPaymentSettled && biopagoVESVal <= 0 ? 'opacity-50' : ''}`}>
                       <label className={`text-[11.5px] font-sans flex items-center justify-between gap-1 leading-none ${biopagoVESVal > 0 ? 'text-purple-900 font-black' : 'text-purple-800 font-bold'}`}>
                         <span className="flex items-center gap-1.5 min-w-0">
@@ -5347,7 +5425,7 @@ export default function CajaPOS({
                 </div>
 
                 {/* Pago Movil Bank & Reference details expansion */}
-                {pagoMovilVESVal > 0 && companyConfig.metodos_pago_activos.includes('pago_movil') && (
+                {pagoMovilVESVal > 0 && isPaymentMethodActive('pago_movil') && (
                   <div className="bg-emerald-50/70 border border-emerald-200 p-2.5 rounded-lg space-y-1.5 animate-fade-in">
                     <span className="text-[10px] font-black text-emerald-800 uppercase block font-sans">Datos de Pago Móvil:</span>
                     <div className="grid grid-cols-2 gap-2">
@@ -5377,7 +5455,7 @@ export default function CajaPOS({
 
                 {/* ROW 3: DEBIT CARD & CARDS/OTHER (Side by Side) */}
                 <div className="grid grid-cols-2 gap-3 border-t border-slate-200 pt-2">
-                  {companyConfig.metodos_pago_activos.includes('tarjeta_ves') && (
+                  {isPaymentMethodActive('tarjeta_ves') && (
                     <div className={isPaymentSettled && cardVESVal <= 0 ? 'opacity-50' : ''}>
                       <label className={`text-[11.5px] mb-1 font-sans flex items-center justify-between gap-1 leading-none ${cardVESVal > 0 ? 'text-slate-900 font-black' : 'text-slate-700 font-bold'}`}>
                         <span className="flex items-center gap-1.5 min-w-0">
@@ -5407,7 +5485,7 @@ export default function CajaPOS({
                     </div>
                   )}
 
-                  {companyConfig.metodos_pago_activos.includes('tarjeta_usd') && (
+                  {isPaymentMethodActive('tarjeta_usd') && (
                     <div className={isPaymentSettled && cardUSDVal <= 0 ? 'opacity-50' : ''}>
                       <label className={`text-[11.5px] mb-1 font-sans flex items-center justify-between gap-1 leading-none ${cardUSDVal > 0 ? 'text-blue-900 font-black' : 'text-blue-800 font-bold'}`}>
                         <span className="flex items-center gap-1.5 min-w-0">
@@ -5439,9 +5517,9 @@ export default function CajaPOS({
                 </div>
 
                 {/* Binance & PayPal side by side if active */}
-                {(companyConfig.metodos_pago_activos.includes('binance') || companyConfig.metodos_pago_activos.includes('paypal')) && (
+                {(isPaymentMethodActive('binance') || isPaymentMethodActive('paypal')) && (
                   <div className="grid grid-cols-2 gap-3 border-t border-slate-200 pt-2">
-                    {companyConfig.metodos_pago_activos.includes('binance') && (
+                    {isPaymentMethodActive('binance') && (
                       <div className={isPaymentSettled && binanceUSDVal <= 0 ? 'opacity-50' : ''}>
                         <label className={`text-[11.5px] mb-1 font-sans flex items-center justify-between gap-1 leading-none ${binanceUSDVal > 0 ? 'text-yellow-900 font-black' : 'text-yellow-800 font-bold'}`}>
                           <span className="flex items-center gap-1.5 min-w-0">
@@ -5471,7 +5549,7 @@ export default function CajaPOS({
                       </div>
                     )}
 
-                    {companyConfig.metodos_pago_activos.includes('paypal') && (
+                    {isPaymentMethodActive('paypal') && (
                       <div className={isPaymentSettled && paypalUSDVal <= 0 ? 'opacity-50' : ''}>
                         <label className={`text-[11.5px] mb-1 font-sans flex items-center justify-between gap-1 leading-none ${paypalUSDVal > 0 ? 'text-indigo-900 font-black' : 'text-indigo-800 font-bold'}`}>
                           <span className="flex items-center gap-1.5 min-w-0">
@@ -5504,7 +5582,7 @@ export default function CajaPOS({
                 )}
 
                 {/* Client Credit limit option */}
-                {companyConfig.metodos_pago_activos.includes('credito') && selectedClient && selectedClient.limite_credito > 0 && (
+                {isPaymentMethodActive('credito') && selectedClient && (selectedClient.limite_credito || 0) > 0 && (
                   <div className={`border-t border-slate-200 pt-2 space-y-1 ${isPaymentSettled && creditUSDVal <= 0 ? 'opacity-50' : ''}`}>
                     <label className={`text-[11.5px] font-sans flex items-center justify-between gap-1 leading-none ${creditUSDVal > 0 ? 'text-red-900 font-black' : 'text-red-700 font-bold'}`}>
                       <span className="flex items-center gap-1.5 min-w-0">
@@ -5517,7 +5595,7 @@ export default function CajaPOS({
                       <input
                         type="text"
                         inputMode="decimal"
-                        placeholder={`Máx $${selectedClient.credito_disponible.toFixed(2)}`}
+                        placeholder={`Máx $${(selectedClient?.credito_disponible || 0).toFixed(2)}`}
                         value={payCreditUSD}
                         disabled={isPaymentSettled && creditUSDVal <= 0}
                         onChange={(e) => {
@@ -5565,7 +5643,7 @@ export default function CajaPOS({
                     </div>
                     {!isCreditValid && (
                       <span className="text-[9.5px] text-red-550 font-bold block mt-1 font-sans">
-                        * Límite de crédito excedido (máx: ${selectedClient.credito_disponible.toFixed(2)} USD)
+                        * Límite de crédito excedido (máx: ${(selectedClient?.credito_disponible || 0).toFixed(2)} USD)
                       </span>
                     )}
                     <span className="text-[9px] text-slate-500 block font-sans">
@@ -5575,7 +5653,7 @@ export default function CajaPOS({
                 )}
 
                 {/* CASHEA BNPL PAYMENT METHOD */}
-                {companyConfig.metodos_pago_activos.includes('cashea') && (
+                {isPaymentMethodActive('cashea') && (
                   <div className={`border-t border-slate-200 pt-2 space-y-1.5 ${isPaymentSettled && casheaUSDVal <= 0 ? 'opacity-50' : ''}`}>
                     <label className={`text-[11.5px] font-sans flex items-center justify-between gap-1 leading-none ${casheaUSDVal > 0 ? 'text-indigo-950 font-black' : 'text-indigo-800 font-bold'}`}>
                       <span className="flex items-center gap-1.5 min-w-0">
@@ -5691,8 +5769,8 @@ export default function CajaPOS({
                   {/* CLIENT INFO BANNER FOR OPERATOR CHECK */}
                   <div className="bg-sky-50 border border-sky-100 py-1.5 px-3 rounded-lg flex flex-col font-sans text-xs leading-tight">
                     <span className="text-[9px] text-sky-800 font-bold uppercase tracking-wider mb-0.5">Cliente Facturación</span>
-                    <span className="font-black text-slate-850 uppercase">{selectedClient.nombre}</span>
-                    <span className="font-mono font-bold text-slate-550 text-[10px] mt-0.5">{selectedClient.cedula_rif}</span>
+                    <span className="font-black text-slate-850 uppercase">{selectedClient?.nombre || 'CONSUMIDOR FINAL'}</span>
+                    <span className="font-mono font-bold text-slate-550 text-[10px] mt-0.5">{selectedClient?.cedula_rif || 'V-00000000'}</span>
                   </div>
 
                   <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest border-b border-slate-200 pb-1.5 font-sans">
@@ -6030,15 +6108,15 @@ export default function CajaPOS({
         const filteredAbonoClients = clients.filter(c => {
           if (c.cedula_rif === 'V-00000000') return false;
           if ((c.saldo_pendiente || 0) <= 0.001) return false; // Mostrar únicamente clientes con deuda activa
-          return c.nombre.toLowerCase().includes(abonoSearchTerm.toLowerCase()) ||
-            c.cedula_rif.toLowerCase().includes(abonoSearchTerm.toLowerCase());
+          return (c.nombre || '').toLowerCase().includes(abonoSearchTerm.toLowerCase()) ||
+            (c.cedula_rif || '').toLowerCase().includes(abonoSearchTerm.toLowerCase());
         }).sort((a, b) => {
           const debtA = a.saldo_pendiente || 0;
           const debtB = b.saldo_pendiente || 0;
           if (debtB !== debtA) {
             return debtB - debtA; // Mayor deuda primero
           }
-          return a.nombre.localeCompare(b.nombre);
+          return (a.nombre || '').localeCompare(b.nombre || '');
         });
 
         const USD_METHODS: import('../types').MetodoPagoAbono[] = ['Efectivo$', 'Tarjeta$', 'Binance', 'PayPal', 'Zelle'];
@@ -6489,23 +6567,23 @@ export default function CajaPOS({
 
                   {/* Commerce info */}
                   <div className="text-center">
-                    <h4 className="font-extrabold text-sm uppercase">{companyConfig.nombre_comercio}</h4>
-                    <p className="font-bold">RIF: {companyConfig.rif}</p>
-                    <p className="text-[9px] mt-0.5">{companyConfig.direccion}</p>
-                    <p>Telf: {companyConfig.telefono}</p>
+                    <h4 className="font-extrabold text-sm uppercase">{companyConfig?.nombre_comercio || 'COMERCIO'}</h4>
+                    <p className="font-bold">RIF: {companyConfig?.rif || '---'}</p>
+                    <p className="text-[9px] mt-0.5">{companyConfig?.direccion || '---'}</p>
+                    <p>Telf: {companyConfig?.telefono || '---'}</p>
                   </div>
 
                   <p className="text-center select-none text-slate-400">----------------------------------------</p>
 
                   {/* Metadata */}
                   <div className="space-y-0.5">
-                    <div>FACTURA: {printedTicketData.factura_nro}</div>
+                    <div>FACTURA: {printedTicketData?.factura_nro || '---'}</div>
                     <div>FECHA: {new Date().toLocaleDateString()}</div>
                     <div>HORA: {new Date().toLocaleTimeString()}</div>
-                    <div>CAJERO: {currentUser.nombre.toUpperCase()}</div>
-                    <div>VENDEDOR: {selectedSeller.toUpperCase()}</div>
-                    <div>CLIENTE: {printedTicketData.client.nombre.toUpperCase()}</div>
-                    <div>ID/RIF: {printedTicketData.client.cedula_rif}</div>
+                    <div>CAJERO: {(currentUser?.nombre || currentUser?.usuario || 'CAJERO').toUpperCase()}</div>
+                    <div>VENDEDOR: {(selectedSeller || 'SISTEMA').toUpperCase()}</div>
+                    <div>CLIENTE: {(printedTicketData?.client?.nombre || 'CONSUMIDOR FINAL').toUpperCase()}</div>
+                    <div>ID/RIF: {printedTicketData?.client?.cedula_rif || 'V-00000000'}</div>
                   </div>
 
                   <p className="text-center select-none text-slate-400">----------------------------------------</p>
@@ -6675,7 +6753,7 @@ export default function CajaPOS({
                   <p className="text-center select-none text-slate-400">----------------------------------------</p>
 
                   <div className="text-center text-[9px] italic leading-relaxed text-slate-500 font-sans">
-                    {companyConfig.mensaje_pie_ticket}
+                    {companyConfig?.mensaje_pie_ticket || '¡Gracias por su compra!'}
                   </div>
 
                   <div className="text-center text-[7px] text-slate-400 font-sans">
@@ -7042,7 +7120,7 @@ export default function CajaPOS({
                           <div>
                             <span className="text-slate-500 font-sans block text-[10px] font-extrabold uppercase">Operador Responsable</span>
                             <strong className="text-slate-900 text-xs sm:text-sm font-black uppercase">
-                              {currentUser.usuario.toUpperCase()} - {currentUser.nombre}
+                              {(currentUser?.usuario || '').toUpperCase()} - {currentUser?.nombre || ''}
                             </strong>
                           </div>
                           <span className="bg-blue-100 text-blue-800 text-[10px] font-black px-2 py-0.5 rounded-md border border-blue-200">
@@ -8229,12 +8307,12 @@ export default function CajaPOS({
                             {devExchangeSearch.trim() !== '' && (
                               <div className="absolute top-full left-0 right-0 z-20 bg-white border border-slate-200 rounded-lg shadow-xl max-h-48 overflow-y-auto mt-1 divide-y divide-slate-100">
                                 {products
-                                  .filter(p => p.description.toLowerCase().includes(devExchangeSearch.toLowerCase()) || p.barcode.toLowerCase().includes(devExchangeSearch.toLowerCase()))
+                                  .filter(p => (p.description || '').toLowerCase().includes(devExchangeSearch.toLowerCase()) || (p.barcode || '').toLowerCase().includes(devExchangeSearch.toLowerCase()))
                                   .sort((a, b) => {
                                     const aStock = (parseFloat(a.stock_actual as any) || 0) > 0 ? 1 : 0;
                                     const bStock = (parseFloat(b.stock_actual as any) || 0) > 0 ? 1 : 0;
                                     if (aStock !== bStock) return bStock - aStock;
-                                    return a.description.localeCompare(b.description, 'es', { sensitivity: 'base' });
+                                    return (a.description || '').localeCompare(b.description || '', 'es', { sensitivity: 'base' });
                                   })
                                   .slice(0, 8)
                                   .map(p => (
@@ -9704,13 +9782,23 @@ export default function CajaPOS({
       <ModalConciliacionPagoMovil
         isOpen={showConciliacionModal}
         onClose={() => setShowConciliacionModal(false)}
-        defaultMontoVES={pagoMovilVESVal > 0 ? pagoMovilVESVal : undefined}
+        clienteActual={selectedClient}
+        defaultMontoVES={
+          pagoMovilVESVal > 0
+            ? pagoMovilVESVal
+            : (remainingUSD > 0
+                ? Math.round(getRemainingUSDForMethod('pagoMovilVES') * tasaDia * 100) / 100
+                : (totalVES > 0 ? totalVES : undefined))
+        }
         defaultReferencia={refPagoMovil || undefined}
         onReferenceVerified={(ref, amtVES) => {
           setRefPagoMovil(ref);
           setPayPagoMovilVES(amtVES.toFixed(2));
           if (!bankPagoMovil) setBankPagoMovil('Banco de Venezuela');
           showToast('✅ Pago Móvil verificado en BDV y aplicado al cobro.', 'success');
+          if (!showCheckoutModal) {
+            setShowCheckoutModal(true);
+          }
         }}
       />
 
