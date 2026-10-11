@@ -1769,17 +1769,38 @@ app.delete('/api/documentos-empresa/:id', async (req, res) => {
 
 
 app.get('/api/cajas/estado', async (req, res) => {
-  const terminal = req.query.terminal || req.query.estacion_nombre;
-  const usuarioId = req.query.usuarioId || req.query.usuario_id;
-  const usuarioNombre = req.query.usuarioNombre || req.query.usuario;
-  const state = await getCajaEstado(terminal, usuarioId, usuarioNombre);
-  res.json(state);
+  try {
+    const terminal = req.query.terminal || req.query.estacion_nombre;
+    const usuarioId = req.query.usuarioId || req.query.usuario_id;
+    const usuarioNombre = req.query.usuarioNombre || req.query.usuario;
+    const state = await getCajaEstado(terminal, usuarioId, usuarioNombre);
+    res.json(state);
+  } catch (err) {
+    console.error('Error en /api/cajas/estado:', err.message);
+    res.json({ abierta: false, error: err.message });
+  }
 });
 
 app.post('/api/cajas/abrir', async (req, res) => {
-  const { usd, ves, usuarioId, usuarioNombre, terminal } = req.body;
-  const id = await abrirCaja(usd, ves, usuarioId, terminal, usuarioNombre);
-  res.json({ success: true, id });
+  try {
+    const { usd, ves, usuarioId, usuarioNombre, terminal } = req.body;
+    const id = await abrirCaja(usd, ves, usuarioId, terminal, usuarioNombre);
+
+    // Clear any past shift closure eviction events in memory for this user so pollSync does not evict
+    if (usuarioId) {
+      userShiftClosureEvents.delete(`id_${usuarioId}`);
+      userShiftClosureEvents.delete(`id_${parseInt(usuarioId)}`);
+    }
+    if (usuarioNombre) {
+      const uClean = String(usuarioNombre).toLowerCase().trim();
+      userShiftClosureEvents.delete(`name_${uClean}`);
+    }
+
+    res.json({ success: true, id });
+  } catch (err) {
+    console.error('Error en /api/cajas/abrir:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.post('/api/cajas/cerrar', async (req, res) => {

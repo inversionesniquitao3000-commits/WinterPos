@@ -1054,16 +1054,35 @@ export default function App() {
                   setShiftEntradasUsd(cajaData.shiftEntradasUsd || 0);
                   setShiftSalidasUsd(cajaData.shiftSalidasUsd || 0);
 
+                  const fechaAp = cajaData.fechaApertura ? String(cajaData.fechaApertura) : (localStorage.getItem('pos_apertura_fecha') || getLocalISODateString());
                   localStorage.setItem(`pos_caja_abierta_${uKey}`, 'true');
+                  localStorage.setItem(`pos_caja_abierta_${u.id}`, 'true');
+                  localStorage.setItem('pos_caja_abierta', 'true');
                   localStorage.setItem(`pos_apertura_usd_${uKey}`, openUsd.toString());
+                  localStorage.setItem(`pos_apertura_usd_${u.id}`, openUsd.toString());
+                  localStorage.setItem('pos_apertura_usd', openUsd.toString());
                   localStorage.setItem(`pos_apertura_ves_${uKey}`, openVes.toString());
+                  localStorage.setItem(`pos_apertura_ves_${u.id}`, openVes.toString());
+                  localStorage.setItem('pos_apertura_ves', openVes.toString());
+                  localStorage.setItem(`pos_apertura_fecha_${uKey}`, fechaAp);
+                  localStorage.setItem(`pos_apertura_fecha_${u.id}`, fechaAp);
+                  localStorage.setItem('pos_apertura_fecha', fechaAp);
                 } else {
                   setCajaAbierta(false);
                   setMontoAperturaUsd(0);
                   setMontoAperturaVes(0);
                   localStorage.removeItem(`pos_caja_abierta_${uKey}`);
+                  localStorage.removeItem(`pos_caja_abierta_${u.id}`);
+                  localStorage.removeItem('pos_caja_abierta');
                   localStorage.removeItem(`pos_apertura_usd_${uKey}`);
+                  localStorage.removeItem(`pos_apertura_usd_${u.id}`);
+                  localStorage.removeItem('pos_apertura_usd');
                   localStorage.removeItem(`pos_apertura_ves_${uKey}`);
+                  localStorage.removeItem(`pos_apertura_ves_${u.id}`);
+                  localStorage.removeItem('pos_apertura_ves');
+                  localStorage.removeItem(`pos_apertura_fecha_${uKey}`);
+                  localStorage.removeItem(`pos_apertura_fecha_${u.id}`);
+                  localStorage.removeItem('pos_apertura_fecha');
                 }
               }
             })
@@ -2155,19 +2174,27 @@ export default function App() {
       localStorage.removeItem('pos_movimientos_usd');
       localStorage.removeItem('pos_movimientos_ves');
 
+      const openIso = getLocalISODateString();
       localStorage.setItem(`pos_caja_abierta_${uKey}`, 'true');
+      if (currentUser?.id) {
+        localStorage.setItem(`pos_caja_abierta_${currentUser.id}`, 'true');
+        localStorage.setItem(`pos_caja_abierta_u_${currentUser.id}`, 'true');
+        localStorage.setItem(`pos_apertura_usd_${currentUser.id}`, usd.toString());
+        localStorage.setItem(`pos_apertura_ves_${currentUser.id}`, ves.toString());
+        localStorage.setItem(`pos_apertura_fecha_${currentUser.id}`, openIso);
+        localStorage.setItem(`pos_apertura_fecha_u_${currentUser.id}`, openIso);
+      }
+      localStorage.setItem('pos_caja_abierta', 'true');
       localStorage.setItem(`pos_apertura_usd_${uKey}`, usd.toString());
+      localStorage.setItem('pos_apertura_usd', usd.toString());
       localStorage.setItem(`pos_apertura_ves_${uKey}`, ves.toString());
+      localStorage.setItem('pos_apertura_ves', ves.toString());
       localStorage.setItem(`pos_ventas_usd_${uKey}`, '0');
       localStorage.setItem(`pos_ventas_ves_${uKey}`, '0');
       localStorage.setItem(`pos_movimientos_usd_${uKey}`, '0');
       localStorage.setItem(`pos_movimientos_ves_${uKey}`, '0');
-      localStorage.setItem(`pos_apertura_fecha_${uKey}`, getLocalISODateString());
-
-      // Clean up legacy global keys
-      localStorage.removeItem('pos_caja_abierta');
-      localStorage.removeItem('pos_apertura_usd');
-      localStorage.removeItem('pos_apertura_ves');
+      localStorage.setItem(`pos_apertura_fecha_${uKey}`, openIso);
+      localStorage.setItem('pos_apertura_fecha', openIso);
     } catch (err) {
       console.error('Error al aperturar caja:', err);
     }
@@ -2191,12 +2218,20 @@ export default function App() {
     const ventaTotalUsd = details?.ventaTotalUsd ?? shiftSales.reduce((acc, s) => acc + s.totalUSD, 0);
     const utilidadUsd = Math.max(0, ventaTotalUsd - costoTotalUsd);
 
+    const resolvedApertura = details?.fechaApertura ||
+      (currentUser?.id ? localStorage.getItem(`pos_apertura_fecha_u_${currentUser.id}`) : null) ||
+      (currentUser?.id ? localStorage.getItem(`pos_apertura_fecha_${currentUser.id}`) : null) ||
+      localStorage.getItem(`pos_apertura_fecha_${uKey}`) ||
+      localStorage.getItem('pos_apertura_fecha') ||
+      getLocalISODateString();
+    const resolvedCierre = details?.fechaCierre || getLocalISODateString();
+
     const newCierre: CierreCaja = {
       ...details,
       id: Date.now(),
-      fecha: getLocalISODateString(),
-      fechaCierre: getLocalISODateString(),
-      fechaApertura: localStorage.getItem(`pos_apertura_fecha_${uKey}`) || localStorage.getItem('pos_apertura_fecha') || getLocalISODateString(),
+      fecha: resolvedCierre,
+      fechaCierre: resolvedCierre,
+      fechaApertura: resolvedApertura,
       usuario: currentUser?.nombre || 'SISTEMA',
       usuarioId: currentUser?.id,
       terminal: terminalName,
@@ -2283,6 +2318,15 @@ export default function App() {
     localStorage.removeItem(`pos_movimientos_usd_${uKey}`);
     localStorage.removeItem(`pos_movimientos_ves_${uKey}`);
     localStorage.removeItem(`pos_apertura_fecha_${uKey}`);
+
+    if (currentUser?.id) {
+      localStorage.removeItem(`pos_caja_abierta_${currentUser.id}`);
+      localStorage.removeItem(`pos_caja_abierta_u_${currentUser.id}`);
+      localStorage.removeItem(`pos_apertura_usd_${currentUser.id}`);
+      localStorage.removeItem(`pos_apertura_ves_${currentUser.id}`);
+      localStorage.removeItem(`pos_apertura_fecha_${currentUser.id}`);
+      localStorage.removeItem(`pos_apertura_fecha_u_${currentUser.id}`);
+    }
 
     // Clear legacy global keys
     localStorage.removeItem('pos_caja_abierta');

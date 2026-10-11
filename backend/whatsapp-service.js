@@ -195,7 +195,8 @@ const defaultConfig = {
   groupName: 'Grupo de Cierres POS',
   messageTemplate: `📊 *REPORTE DE ARQUEO Y CIERRE DE CAJA*
 
-📅 *Fecha:* {fecha}
+🗓️ *Apertura:* {fechaApertura}
+🔒 *Cierre:* {fechaCierre}
 👤 *Cajero:* {usuario}
 🖥️ *Terminal:* {terminal}
 🧾 *Tickets Emitidos:* {totalTickets}

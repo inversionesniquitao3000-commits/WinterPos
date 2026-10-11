@@ -718,7 +718,8 @@ const defaultWhatsAppConfig = {
   groupName: 'Grupo de Cierres POS',
   messageTemplate: `📊 *REPORTE DE ARQUEO Y CIERRE DE CAJA*
 
-📅 *Fecha:* {fecha}
+🗓️ *Apertura:* {fechaApertura}
+🔒 *Cierre:* {fechaCierre}
 👤 *Cajero:* {usuario}
 🖥️ *Terminal:* {terminal}
 🧾 *Tickets Emitidos:* {totalTickets}
@@ -4519,14 +4520,24 @@ export async function abrirCaja(usd, ves, usuarioId, terminal, usuarioNombre) {
         userId = anyUser.rowCount > 0 ? anyUser.rows[0].id : 1;
       }
 
-      const termName = terminal || 'CAJA_PRINCIPAL';
+      const termName = terminal || 'CAJA_01';
       const nowStr = getLocalISODateString();
 
-      // Cerrar cualquier apertura anterior huérfana exclusivamente de ESTE MISMO usuario
-      await pool.query(
-        "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = $2 WHERE usuario_id = $1 AND estatus = 'Abierta'",
-        [userId, nowStr]
-      ).catch(() => { });
+      const sysConfig = await getCompanyConfig();
+      const compartirApertura = sysConfig.compartir_apertura_caja !== false;
+
+      // Cerrar cualquier apertura anterior abierta según política
+      if (compartirApertura) {
+        await pool.query(
+          "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = $2 WHERE (usuario_id = $1 OR estacion_nombre = $3) AND estatus = 'Abierta'",
+          [userId, nowStr, termName]
+        ).catch(() => { });
+      } else {
+        await pool.query(
+          "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = $2 WHERE usuario_id = $1 AND estacion_nombre = $3 AND estatus = 'Abierta'",
+          [userId, nowStr, termName]
+        ).catch(() => { });
+      }
 
       const res = await pool.query(
         `INSERT INTO Cajas_Apertura_Cierre (usuario_id, estacion_nombre, monto_apertura_usd, monto_apertura_ves, estatus, fecha_apertura)
@@ -4558,11 +4569,11 @@ export async function abrirCaja(usd, ves, usuarioId, terminal, usuarioNombre) {
 export async function cerrarCaja(cierre) {
   if (usePostgres) {
     try {
-      const termName = cierre.terminal || cierre.estacion_nombre || 'CAJA_PRINCIPAL';
+      const termName = cierre.terminal || cierre.estacion_nombre || 'CAJA_01';
       let userId = parseInt(cierre.usuarioId || cierre.usuario_id);
       if (isNaN(userId) || userId <= 0) {
         if (cierre.usuario) {
-          const uRes = await pool.query('SELECT id FROM Usuarios WHERE nombre = $1 OR usuario = $2 LIMIT 1', [cierre.usuario, cierre.usuario]);
+          const uRes = await pool.query('SELECT id FROM Usuarios WHERE LOWER(nombre) = LOWER($1) OR LOWER(usuario) = LOWER($1) LIMIT 1', [cierre.usuario]);
           if (uRes.rowCount > 0) userId = uRes.rows[0].id;
         }
       }
@@ -4580,6 +4591,16 @@ export async function cerrarCaja(cierre) {
             "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY id DESC LIMIT 1",
             [userId]
           );
+        }
+        // 3. Si no tiene y compartirApertura está activo, buscar la caja abierta activa general de la tienda
+        if (activeCaja.rowCount === 0) {
+          const sysConfig = await getCompanyConfig();
+          if (sysConfig.compartir_apertura_caja !== false) {
+            activeCaja = await pool.query(
+              "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY (estacion_nombre = $1) DESC, id DESC LIMIT 1",
+              [termName]
+            );
+          }
         }
       } else {
         // Si no se proporcionó usuario, buscar por terminal
@@ -4757,11 +4778,11 @@ export async function deleteCierre(id) {
 export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
   if (usePostgres) {
     try {
-      const myTerminal = terminal || 'CAJA_PRINCIPAL';
+      const myTerminal = terminal || 'CAJA_01';
       let userId = parseInt(usuarioId);
       if (isNaN(userId) || userId <= 0) {
         if (usuarioNombre) {
-          const uRes = await pool.query('SELECT id FROM Usuarios WHERE nombre = $1 OR usuario = $2 LIMIT 1', [usuarioNombre, usuarioNombre]);
+          const uRes = await pool.query('SELECT id FROM Usuarios WHERE LOWER(nombre) = LOWER($1) OR LOWER(usuario) = LOWER($1) LIMIT 1', [usuarioNombre]);
           if (uRes.rowCount > 0) userId = uRes.rows[0].id;
         }
       }
@@ -4771,22 +4792,47 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
 
       let activeRes;
       if (!isNaN(userId) && userId > 0) {
-        if (compartirApertura) {
-          activeRes = await pool.query(
-            "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY (estacion_nombre = $2) DESC, id DESC LIMIT 1",
-            [userId, myTerminal]
-          );
-        } else {
-          activeRes = await pool.query(
-            "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 AND usuario_id = $2 ORDER BY id DESC LIMIT 1",
-            [myTerminal, userId]
-          );
+        // 1. Prioridad: Caja abierta de este usuario específico en esta terminal
+        activeRes = await pool.query(
+          "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 AND usuario_id = $2 ORDER BY id DESC LIMIT 1",
+          [myTerminal, userId]
+        );
+
+        // 2. Si no tiene en esta terminal específica:
+        if (activeRes.rowCount === 0) {
+          if (compartirApertura) {
+            // Modo compartido: buscar cualquier caja abierta del mismo usuario en otra terminal
+            activeRes = await pool.query(
+              "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY (estacion_nombre = $2) DESC, id DESC LIMIT 1",
+              [userId, myTerminal]
+            );
+
+            // Si este usuario no la abrió, pero la tienda tiene una caja compartida abierta (ej: abierta por Administrador u otro cajero de turno):
+            if (activeRes.rowCount === 0) {
+              activeRes = await pool.query(
+                "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY (estacion_nombre = $1) DESC, id DESC LIMIT 1",
+                [myTerminal]
+              );
+            }
+          } else {
+            // Modo independiente por terminal: si la terminal ya está abierta por otro operador del mismo turno
+            activeRes = await pool.query(
+              "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",
+              [myTerminal]
+            );
+          }
         }
       } else {
+        // Sin usuario específico, consultar por terminal o tienda
         activeRes = await pool.query(
           "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",
           [myTerminal]
         );
+        if (activeRes.rowCount === 0 && compartirApertura) {
+          activeRes = await pool.query(
+            "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1"
+          );
+        }
       }
       if (activeRes.rowCount === 0) {
         return { abierta: false };

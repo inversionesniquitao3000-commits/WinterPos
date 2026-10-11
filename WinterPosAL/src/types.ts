@@ -250,6 +250,9 @@ export interface Sale {
 }
 
 export interface CierreDetails {
+  fechaApertura?: string;
+  fechaCierre?: string;
+  fecha?: string;
   aperturaUsd?: number;
   aperturaVes?: number;
   expectedVes?: number;

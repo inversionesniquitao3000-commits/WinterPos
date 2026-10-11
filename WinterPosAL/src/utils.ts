@@ -456,7 +456,10 @@ export function printCierreTicketReport(
   const cajero = (cierreData.usuario || currentUser?.nombre || currentUser?.usuario || 'OPERADOR').toUpperCase();
   const isOpenShift = cierreData.status === 'Abierta' || cierreData.estatus === 'Abierta' || !cierreData.fechaCierre;
   const fechaOperacion = isOpenShift ? new Date().toLocaleString('es-VE') : (cierreData.fechaCierre || cierreData.fecha || new Date().toLocaleString('es-VE'));
-  const fechaApertura = cierreData.fechaApertura || localStorage.getItem('pos_apertura_fecha') || '';
+  const fechaApertura = cierreData.fechaApertura ||
+    (currentUser?.id ? localStorage.getItem(`pos_apertura_fecha_u_${currentUser.id}`) : null) ||
+    (currentUser?.id ? localStorage.getItem(`pos_apertura_fecha_${currentUser.id}`) : null) ||
+    localStorage.getItem('pos_apertura_fecha') || '';
 
   const hideZeros = hideZeroLines || !!cierreData?.hideZeroLines;
   // Filtrar facturas del turno

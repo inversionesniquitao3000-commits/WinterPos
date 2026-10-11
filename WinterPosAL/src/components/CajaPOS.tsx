@@ -3024,6 +3024,22 @@ export default function CajaPOS({
     setShowAperturaModal(false);
   };
 
+  const formatReportDateTime = (dVal: any): string => {
+    if (!dVal) return '';
+    if (typeof dVal === 'string' && /^\d{2}\/\d{2}\/\d{4},\s*\d{2}:\d{2}/.test(dVal)) {
+      return dVal;
+    }
+    let d = new Date(dVal);
+    if (isNaN(d.getTime()) && typeof dVal === 'string') {
+      d = new Date(dVal.replace(' ', 'T'));
+    }
+    if (!isNaN(d.getTime())) {
+      const pad = (n: number) => String(n).padStart(2, '0');
+      return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+    return String(dVal);
+  };
+
   const handleSaveCierre = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -3052,7 +3068,11 @@ export default function CajaPOS({
       let serverTransferenciaVes = 0;
 
       const uKey = currentUser?.id || currentUser?.usuario || 'default';
-      let fetchedFechaApertura = localStorage.getItem(`pos_apertura_fecha_${uKey}`) || localStorage.getItem(`pos_apertura_fecha_${currentUser?.usuario}`) || localStorage.getItem('pos_apertura_fecha') || '';
+      let fetchedFechaApertura = localStorage.getItem(`pos_apertura_fecha_u_${currentUser?.id}`) ||
+        localStorage.getItem(`pos_apertura_fecha_${currentUser?.id}`) ||
+        localStorage.getItem(`pos_apertura_fecha_${uKey}`) ||
+        localStorage.getItem(`pos_apertura_fecha_${currentUser?.usuario}`) ||
+        localStorage.getItem('pos_apertura_fecha') || '';
       // Fetch fresh unified caja estado from server before generating final cierre card
       try {
         const termName = localStorage.getItem('pos_terminal_name') || 'CAJA_01';
@@ -3060,7 +3080,15 @@ export default function CajaPOS({
         if (res.ok) {
           const cajaData = await res.json();
           if (cajaData && cajaData.abierta) {
-            if (cajaData.fechaApertura) fetchedFechaApertura = cajaData.fechaApertura;
+            if (cajaData.fechaApertura) {
+              fetchedFechaApertura = cajaData.fechaApertura;
+              const formattedApertura = formatReportDateTime(cajaData.fechaApertura);
+              localStorage.setItem('pos_apertura_fecha', formattedApertura);
+              if (currentUser?.id) {
+                localStorage.setItem(`pos_apertura_fecha_u_${currentUser.id}`, formattedApertura);
+                localStorage.setItem(`pos_apertura_fecha_${currentUser.id}`, formattedApertura);
+              }
+            }
             if (Array.isArray(cajaData.shiftSales)) targetShiftSales = cajaData.shiftSales;
             if (Array.isArray(cajaData.shiftAbonosList)) targetShiftAbonos = cajaData.shiftAbonosList;
             if (typeof cajaData.aperturaUsd === 'number') targetAperturaUsd = cajaData.aperturaUsd;
@@ -3574,11 +3602,22 @@ export default function CajaPOS({
         return acc + (sale.pagos || []).reduce((a, p) => p.metodo === 'PayPal' ? a + getPayUsd(p) : a, 0);
       }, 0);
 
+      const nowClose = new Date();
+      const closeDateTimeFormatted = formatReportDateTime(nowClose);
+      const openDateTimeFormatted = formatReportDateTime(
+        fetchedFechaApertura ||
+        (currentUser?.id ? localStorage.getItem(`pos_apertura_fecha_u_${currentUser.id}`) : null) ||
+        (currentUser?.id ? localStorage.getItem(`pos_apertura_fecha_${currentUser.id}`) : null) ||
+        localStorage.getItem(`pos_apertura_fecha_${uKey}`) ||
+        localStorage.getItem('pos_apertura_fecha') ||
+        nowClose
+      );
+
       const localCierreResult: CierreCaja = {
         id: Date.now(),
-        fecha: new Date().toLocaleString(),
-        fechaCierre: new Date().toLocaleString(),
-        fechaApertura: localStorage.getItem('pos_apertura_fecha') || new Date().toLocaleString(),
+        fecha: closeDateTimeFormatted,
+        fechaCierre: closeDateTimeFormatted,
+        fechaApertura: openDateTimeFormatted,
         usuario: currentUser?.nombre || 'SISTEMA',
         aperturaUsd,
         aperturaVes,
@@ -3704,11 +3743,12 @@ export default function CajaPOS({
     const utilidadNetaVesStr = (utilidadNetaVal * (tasaDia || 1)).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
     const userKey = currentUser?.id || currentUser?.usuario || 'default';
-    const savedApertura = localStorage.getItem(`pos_apertura_fecha_${userKey}`) || '';
-    const fApertura = cierreResult.fechaApertura || savedApertura || cierreResult.fecha || '';
-    const nowD = new Date();
-    const padD = (n: number) => String(n).padStart(2, '0');
-    const fCierre = cierreResult.fechaCierre || cierreResult.fecha || `${nowD.getFullYear()}-${padD(nowD.getMonth() + 1)}-${padD(nowD.getDate())} ${padD(nowD.getHours())}:${padD(nowD.getMinutes())}`;
+    const savedApertura = (currentUser?.id ? localStorage.getItem(`pos_apertura_fecha_u_${currentUser.id}`) : null) ||
+      (currentUser?.id ? localStorage.getItem(`pos_apertura_fecha_${currentUser.id}`) : null) ||
+      localStorage.getItem(`pos_apertura_fecha_${userKey}`) ||
+      localStorage.getItem('pos_apertura_fecha') || '';
+    const fApertura = formatReportDateTime(cierreResult.fechaApertura || savedApertura || cierreResult.fecha || '');
+    const fCierre = formatReportDateTime(cierreResult.fechaCierre || cierreResult.fecha || new Date());
 
     const summaryText = template
       .replace(/{fechaApertura}/g, fApertura)
@@ -7105,10 +7145,13 @@ export default function CajaPOS({
                           </span>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <span className="text-xs font-black font-mono bg-slate-800 border border-slate-700 px-2.5 py-1 rounded-lg">
-                          {new Date().toLocaleDateString('es-VE')} {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
+                      <div className="text-right text-[11px] font-mono leading-tight space-y-0.5">
+                        <div className="text-emerald-400">
+                          Apertura: <strong>{cierreResult.fechaApertura || 'N/A'}</strong>
+                        </div>
+                        <div className="text-slate-300">
+                          Cierre: <strong>{cierreResult.fechaCierre || formatReportDateTime(new Date())}</strong>
+                        </div>
                       </div>
                     </div>
 
