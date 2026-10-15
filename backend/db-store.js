@@ -82,7 +82,7 @@ try {
     host: process.env.DB_HOST || 'localhost',
     port: parseInt(process.env.DB_PORT || '5432'),
     database: process.env.DB_DATABASE || 'Winter',
-    max: 25,
+    max: 50,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
     statement_timeout: 30000
@@ -918,11 +918,9 @@ export async function getSyncSummary() {
           (SELECT COUNT(*) FROM Clientes) as clients_count,
           (SELECT COALESCE(ROUND(SUM(COALESCE(id, 0) + COALESCE(limite_credito, 0) + COALESCE(saldo_pendiente, 0)) * 100) / 100, 0) FROM Clientes) as clients_sig,
           (SELECT COUNT(*) FROM Productos) as products_count,
-          (SELECT COALESCE(ROUND(SUM(COALESCE(id, 0) + COALESCE(stock_actual, 0) + COALESCE(precio_detalle_usd, 0)) * 100) / 100, 0) FROM Productos) as products_sig,
+          (SELECT COALESCE(ROUND(SUM(COALESCE(id, 0) + COALESCE(precio_detalle_usd, 0) + COALESCE(precio_costo_usd, 0)) * 100) / 100, 0) FROM Productos) as products_sig,
           (SELECT COUNT(*) FROM Abonos) as abonos_count,
-          (SELECT COALESCE(ROUND(SUM(COALESCE(id, 0) + COALESCE(monto_usd, 0) + COALESCE(monto_ves, 0)) * 100) / 100, 0) FROM Abonos) as abonos_sig,
-          (SELECT COUNT(*) FROM Movimientos_Inventario) as movements_count,
-          (SELECT COALESCE(MAX(id), 0) FROM Movimientos_Inventario) as last_movement_id
+          (SELECT COALESCE(ROUND(SUM(COALESCE(id, 0) + COALESCE(monto_usd, 0) + COALESCE(monto_ves, 0)) * 100) / 100, 0) FROM Abonos) as abonos_sig
       `);
       if (res.rowCount > 0) {
         const row = res.rows[0];
@@ -939,9 +937,7 @@ export async function getSyncSummary() {
           productsCount: parseInt(row.products_count || 0, 10),
           productsSig: parseFloat(row.products_sig || 0),
           abonosCount: parseInt(row.abonos_count || 0, 10),
-          abonosSig: parseFloat(row.abonos_sig || 0),
-          movementsCount: parseInt(row.movements_count || 0, 10),
-          lastMovementId: parseInt(row.last_movement_id || 0, 10)
+          abonosSig: parseFloat(row.abonos_sig || 0)
         };
       }
     } catch (err) {
@@ -4526,18 +4522,11 @@ export async function abrirCaja(usd, ves, usuarioId, terminal, usuarioNombre) {
       const sysConfig = await getCompanyConfig();
       const compartirApertura = sysConfig.compartir_apertura_caja !== false;
 
-      // Cerrar cualquier apertura anterior abierta según política
-      if (compartirApertura) {
-        await pool.query(
-          "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = $2 WHERE (usuario_id = $1 OR estacion_nombre = $3) AND estatus = 'Abierta'",
-          [userId, nowStr, termName]
-        ).catch(() => { });
-      } else {
-        await pool.query(
-          "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = $2 WHERE usuario_id = $1 AND estacion_nombre = $3 AND estatus = 'Abierta'",
-          [userId, nowStr, termName]
-        ).catch(() => { });
-      }
+      // Cerrar únicamente cualquier apertura previa sin cerrar en ESTA MISMA terminal
+      await pool.query(
+        "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = $2 WHERE estacion_nombre = $1 AND estatus = 'Abierta'",
+        [termName, nowStr]
+      ).catch(() => { });
 
       const res = await pool.query(
         `INSERT INTO Cajas_Apertura_Cierre (usuario_id, estacion_nombre, monto_apertura_usd, monto_apertura_ves, estatus, fecha_apertura)
@@ -4670,6 +4659,17 @@ export async function cerrarCaja(cierre) {
             cierre.devolucionEfectivoVes ?? 0
           ]
         );
+
+        // Si este mismo usuario tenía cajas abiertas en otras terminales, cerrarlas todas para este usuario
+        if (!isNaN(userId) && userId > 0) {
+          await pool.query(
+            "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = $2 WHERE usuario_id = $1 AND estatus = 'Abierta' AND id != $3",
+            [userId, nowStr, cajaId]
+          ).catch((e) => {
+            console.warn('[cerrarCaja] Aviso cerrando otras cajas del mismo usuario:', e.message);
+          });
+        }
+
         return true;
       }
     } catch (err) {

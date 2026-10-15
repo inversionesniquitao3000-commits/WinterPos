@@ -287,6 +287,7 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
     localStorage.setItem('pos_lan_port', targetPort);
     localStorage.setItem('pos_db_mode', dbMode);
     localStorage.setItem('pos_terminal_name', finalTerminal);
+    window.dispatchEvent(new Event('pos_terminal_changed'));
     setTerminalNameState(finalTerminal);
     setShowConfig(false);
     

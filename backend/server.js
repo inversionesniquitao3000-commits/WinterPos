@@ -181,8 +181,11 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Log incoming requests
+// Log incoming requests (skip frequent polling heartbeats to prevent Windows console blocking)
 app.use((req, res, next) => {
+  if (req.url.startsWith('/api/sync/poll') || req.url.startsWith('/api/users/heartbeat') || req.url.startsWith('/api/status') || req.url.startsWith('/api/license/status')) {
+    return next();
+  }
   console.log(`[${new Date().toLocaleTimeString()}] ${req.method} ${req.url}`);
   next();
 });
@@ -350,13 +353,14 @@ app.post('/api/conciliacion/bdv/probar-conexion', async (req, res) => {
       });
     }
 
-    const isKeyValid = testResult.code === 1010 || testResult.code === 1000;
+    // Código 1010 o 1000 del banco confirma que la API Key fue autenticada por BDV
+    const isKeyValid = testResult.code === 1010 || testResult.code === 1000 || (testResult.message && String(testResult.message).includes('1010'));
     res.json({
       success: isKeyValid,
       code: testResult.code,
       latencyMs: testResult.latencyMs,
       message: isKeyValid
-        ? `✅ Conexión con BDV establecida con éxito en ${testResult.latencyMs}ms. API Key y credenciales verificadas.`
+        ? `✅ Conexión con BDV establecida con éxito en ${testResult.latencyMs}ms. API Key y credenciales verificadas por el Banco.`
         : `⚠️ Respuesta de BDV (Código ${testResult.code}): ${testResult.message}`,
       ambiente
     });
@@ -695,17 +699,21 @@ app.get('/api/make-ico', (req, res) => {
   return res.status(500).json({ error: 'Source PNG not found' });
 });
 
-// Serve static frontend build if dist directory exists with no-cache headers for instant updates
+// Serve static frontend build if dist directory exists with optimized caching headers
 const distPath = path.resolve(__dirname, '../WinterPosAL/dist');
 if (fs.existsSync(distPath)) {
   console.log(`Serving static frontend build from: ${distPath}`);
   app.use(express.static(distPath, {
-    etag: false,
-    maxAge: 0,
+    etag: true,
     setHeaders: (res, filePath) => {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
-      res.setHeader('Pragma', 'no-cache');
-      res.setHeader('Expires', '0');
+      if (filePath.endsWith('index.html')) {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+      } else {
+        // Cache hashed JS/CSS assets to prevent white screens and unnecessary network load
+        res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+      }
     }
   }));
 }
@@ -1176,9 +1184,8 @@ app.get('/api/sync/poll', async (req, res) => {
         result.abonos = await getAbonos();
       }
 
-      // 7. Movements / Kardex sync: compare count and last movement id
-      if (summary.movementsCount !== clientMovementsCount ||
-        summary.lastMovementId !== clientLastMovementId) {
+      // 7. Movements / Kardex sync: only send if explicitly requested by Inventario view
+      if (req.query.include_movements === 'true' && (summary.movementsCount !== clientMovementsCount || summary.lastMovementId !== clientLastMovementId)) {
         result.movements = await getMovements();
       }
     } else {
@@ -1213,7 +1220,7 @@ app.get('/api/sync/poll', async (req, res) => {
       }
 
       const products = await getProducts();
-      const serverProductsSig = Math.round(products.reduce((acc, p) => acc + (p.id || 0) + (p.stock_actual || 0) + (p.precio_detalle_usd || 0), 0) * 100) / 100;
+      const serverProductsSig = Math.round(products.reduce((acc, p) => acc + (p.id || 0) + (p.precio_detalle_usd || 0) + (p.precio_costo_usd || 0), 0) * 100) / 100;
       if (products.length !== clientProductsCount || serverProductsSig !== roundedClientProductsSig) {
         result.products = products;
       }
@@ -1224,10 +1231,12 @@ app.get('/api/sync/poll', async (req, res) => {
         result.abonos = abonosList;
       }
 
-      const movementsList = await getMovements();
-      const maxMovId = movementsList.length > 0 ? Math.max(...movementsList.map(m => m.id || 0)) : 0;
-      if (movementsList.length !== clientMovementsCount || maxMovId !== clientLastMovementId) {
-        result.movements = movementsList;
+      if (req.query.include_movements === 'true') {
+        const movementsList = await getMovements();
+        const maxMovId = movementsList.length > 0 ? Math.max(...movementsList.map(m => m.id || 0)) : 0;
+        if (movementsList.length !== clientMovementsCount || maxMovId !== clientLastMovementId) {
+          result.movements = movementsList;
+        }
       }
     }
 
@@ -1239,14 +1248,19 @@ app.get('/api/sync/poll', async (req, res) => {
       result.config = companyConfig;
     }
 
-    // Session closure detection
+    // Session closure detection: Closes ALL terminals belonging to THIS user who closed shift,
+    // while NEVER affecting other users, and passes the closing terminal name.
     if ((usuario || usuarioId) && sessionSince) {
-      const uKeyId = usuarioId ? userShiftClosureEvents.get(`id_${usuarioId}`) : 0;
-      const uKeyName = usuario ? userShiftClosureEvents.get(`name_${String(usuario).toLowerCase().trim()}`) : 0;
       let sessionTimeMs = parseInt(sessionSince) || 0;
+      const evId = usuarioId ? (userShiftClosureEvents.get(`user_${usuarioId}`) || userShiftClosureEvents.get(`id_${usuarioId}`) || userShiftClosureEvents.get(`user_${parseInt(usuarioId)}`)) : null;
+      const evName = usuario ? userShiftClosureEvents.get(`name_${String(usuario).toLowerCase().trim()}`) : null;
+      const activeEv = evId || evName;
+      const evTime = activeEv ? (typeof activeEv === 'object' ? (activeEv.time || 0) : activeEv) : 0;
+      const evTerm = activeEv && typeof activeEv === 'object' ? (activeEv.terminal || 'otra estación') : 'otra estación';
 
-      if (sessionTimeMs > 0 && ((uKeyId && sessionTimeMs < uKeyId) || (uKeyName && sessionTimeMs < uKeyName))) {
+      if (sessionTimeMs > 0 && evTime > 0 && sessionTimeMs < evTime) {
         result.sessionClosed = true;
+        result.closingTerminal = evTerm;
       }
     }
 
@@ -1786,8 +1800,10 @@ app.post('/api/cajas/abrir', async (req, res) => {
     const { usd, ves, usuarioId, usuarioNombre, terminal } = req.body;
     const id = await abrirCaja(usd, ves, usuarioId, terminal, usuarioNombre);
 
-    // Clear any past shift closure eviction events in memory for this user so pollSync does not evict
+    // Clear any past shift closure eviction events in memory for this user so pollSync does not evict new session
     if (usuarioId) {
+      userShiftClosureEvents.delete(`user_${usuarioId}`);
+      userShiftClosureEvents.delete(`user_${parseInt(usuarioId)}`);
       userShiftClosureEvents.delete(`id_${usuarioId}`);
       userShiftClosureEvents.delete(`id_${parseInt(usuarioId)}`);
     }
@@ -1808,22 +1824,31 @@ app.post('/api/cajas/cerrar', async (req, res) => {
   const success = await cerrarCaja(cierreData);
   if (success && cierreData) {
     const closureTime = Date.now();
-    if (cierreData.usuarioId) {
-      userShiftClosureEvents.set(`id_${cierreData.usuarioId}`, closureTime);
-      activeSessions.delete(cierreData.usuarioId);
-      activeSessions.delete(String(cierreData.usuarioId));
-      activeSessions.delete(parseInt(cierreData.usuarioId));
+    const term = cierreData.terminal || 'CAJA_01';
+    const uId = cierreData.usuarioId;
+    const uName = cierreData.usuario ? String(cierreData.usuario).toLowerCase().trim() : '';
+    const closureObj = { time: closureTime, terminal: term };
+
+    // Register shift closure event scoped to this USER (closes all terminals where this user is active)
+    if (uId) {
+      userShiftClosureEvents.set(`user_${uId}`, closureObj);
+      userShiftClosureEvents.set(`user_${parseInt(uId)}`, closureObj);
+      userShiftClosureEvents.set(`id_${uId}`, closureObj);
+      userShiftClosureEvents.set(`id_${parseInt(uId)}`, closureObj);
     }
-    if (cierreData.usuario) {
-      const uName = String(cierreData.usuario).toLowerCase().trim();
-      userShiftClosureEvents.set(`name_${uName}`, closureTime);
-      for (const [sId, sess] of activeSessions.entries()) {
-        if (sess.username && sess.username.toLowerCase().trim() === uName) {
-          activeSessions.delete(sId);
-        }
+    if (uName) {
+      userShiftClosureEvents.set(`name_${uName}`, closureObj);
+    }
+
+    // Invalidate active sessions for this user across ALL terminals
+    for (const [sId, sess] of activeSessions.entries()) {
+      const matchId = uId && String(sess.userId) === String(uId);
+      const matchName = uName && sess.username && sess.username.toLowerCase().trim() === uName;
+      if (matchId || matchName) {
+        activeSessions.delete(sId);
       }
     }
-    console.log(`[Shift Closure] 🔒 Cierre registrado para usuario ${cierreData.usuario} (ID: ${cierreData.usuarioId}). Evicción de sesiones activas completada.`);
+    console.log(`[Shift Closure] 🔒 Cierre registrado desde "${term}" para usuario "${cierreData.usuario}" (ID: ${uId}). Sus terminales activas se cerrarán sin afectar a otros usuarios.`);
   }
   res.json({ success });
 });
@@ -1856,7 +1881,11 @@ app.post('/api/cajas/forzar-cierre', async (req, res) => {
     if (result && result.success) {
       const closureTime = Date.now();
       if (result.usuarioId) {
-        userShiftClosureEvents.set(`id_${result.usuarioId}`, closureTime);
+        const closureObj = { time: closureTime, terminal: 'ADMINISTRADOR (Forzado)' };
+        userShiftClosureEvents.set(`user_${result.usuarioId}`, closureObj);
+        userShiftClosureEvents.set(`user_${parseInt(result.usuarioId)}`, closureObj);
+        userShiftClosureEvents.set(`id_${result.usuarioId}`, closureObj);
+        userShiftClosureEvents.set(`id_${parseInt(result.usuarioId)}`, closureObj);
         activeSessions.delete(result.usuarioId);
         activeSessions.delete(String(result.usuarioId));
         activeSessions.delete(parseInt(result.usuarioId));
@@ -1976,7 +2005,10 @@ app.post('/api/users/login-check', async (req, res) => {
 
     // Clear previous shift closure eviction & forced logout events for this user so new session can run cleanly
     if (user.id) {
+      userShiftClosureEvents.delete(`user_${user.id}`);
+      userShiftClosureEvents.delete(`user_${parseInt(user.id)}`);
       userShiftClosureEvents.delete(`id_${user.id}`);
+      userShiftClosureEvents.delete(`id_${parseInt(user.id)}`);
       forcedLogoutUsers.delete(String(user.id));
     }
     if (user.usuario) {
@@ -2053,13 +2085,18 @@ app.post('/api/users/heartbeat', async (req, res) => {
         (username && u.usuario && u.usuario.toLowerCase().trim() === String(username).toLowerCase().trim())
       );
 
-      const isAdmin = userObj && userObj.rol && userObj.rol.toLowerCase() === 'administrador';
-      if (!isAdmin) {
-        const cById = userId ? userShiftClosureEvents.get(`id_${userId}`) : null;
-        const cByName = username ? userShiftClosureEvents.get(`name_${String(username).toLowerCase().trim()}`) : null;
-        if (cById || cByName) {
-          return res.json({ success: false, sessionClosed: true, message: 'Shift closed' });
-        }
+      // Verificación de cierre de turno para este usuario (sin excepción de rol, enviando directo a login)
+      const evId = userId ? (userShiftClosureEvents.get(`user_${userId}`) || userShiftClosureEvents.get(`id_${userId}`) || userShiftClosureEvents.get(`user_${parseInt(userId)}`)) : null;
+      const evName = username ? userShiftClosureEvents.get(`name_${String(username).toLowerCase().trim()}`) : null;
+      const activeEv = evId || evName;
+      if (activeEv) {
+        const fromTerm = (typeof activeEv === 'object' && activeEv.terminal) ? activeEv.terminal : 'otra estación';
+        return res.json({
+          success: false,
+          sessionClosed: true,
+          closingTerminal: fromTerm,
+          message: `⚠️ Su turno de caja ha sido cerrado desde la estación "${fromTerm}". Su sesión fue finalizada en todas las terminales.`
+        });
       }
     } catch (_) { }
   }

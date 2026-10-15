@@ -393,12 +393,21 @@ export async function consultarBdvApi({
 
     if (!response.ok && response.status !== 200) {
       const errText = await response.text().catch(() => '');
+      let jsonErr = null;
+      try {
+        jsonErr = JSON.parse(errText);
+      } catch (_) {}
+
+      const bdvCode = jsonErr && jsonErr.code ? jsonErr.code : response.status;
+      const bdvMsg = jsonErr && jsonErr.message ? jsonErr.message : `El servidor BDV respondió con código HTTP ${response.status}: ${errText.substring(0, 100)}`;
+
       return {
         success: false,
-        code: response.status,
+        code: bdvCode,
+        httpStatus: response.status,
         latencyMs,
-        message: cleanBdvMessage(`El servidor BDV respondió con código HTTP ${response.status}: ${errText.substring(0, 100)}`),
-        data: null,
+        message: cleanBdvMessage(bdvMsg),
+        data: jsonErr?.data || null,
         payloadSent: payload
       };
     }

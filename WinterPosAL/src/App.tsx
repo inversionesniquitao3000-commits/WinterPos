@@ -135,14 +135,37 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  const [terminalName] = useState<string>(() => {
+  const [terminalName, setTerminalName] = useState<string>(() => {
     const saved = localStorage.getItem('pos_terminal_name');
-    if (saved) return saved;
+    if (saved && saved.trim() && !saved.startsWith('CAJA_192_') && !saved.startsWith('CAJA_127_') && !saved.startsWith('CAJA_localhost')) {
+      return saved.trim();
+    }
     const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const name = isLocal ? 'CAJA_01' : `CAJA_${window.location.hostname.replace(/\./g, '_')}`;
-    localStorage.setItem('pos_terminal_name', name);
-    return name;
+    if (isLocal) {
+      localStorage.setItem('pos_terminal_name', 'CAJA_01');
+      return 'CAJA_01';
+    }
+    // Remote terminal: assign a persistent unique ID if not already cleanly set
+    let devId = localStorage.getItem('pos_device_unique_id');
+    if (!devId) {
+      devId = Math.random().toString(36).substring(2, 6).toUpperCase();
+      localStorage.setItem('pos_device_unique_id', devId);
+    }
+    const defaultRemote = `CAJA_${devId}`;
+    localStorage.setItem('pos_terminal_name', defaultRemote);
+    return defaultRemote;
   });
+
+  useEffect(() => {
+    const handleTermChange = () => {
+      const current = localStorage.getItem('pos_terminal_name');
+      if (current && current !== terminalName) {
+        setTerminalName(current);
+      }
+    };
+    window.addEventListener('pos_terminal_changed', handleTermChange);
+    return () => window.removeEventListener('pos_terminal_changed', handleTermChange);
+  }, [terminalName]);
 
   // App States populated from local storage / backend API
   const [products, setProducts] = useState<Product[]>(() => {
@@ -978,11 +1001,6 @@ export default function App() {
         const abonosCount = safeAbonos.length;
         const abonosSig = safeAbonos.reduce((acc, a) => acc + (a?.id || 0) + (a?.monto || 0) + (a?.monto_ves || 0), 0);
 
-        // Calculate movements / Kardex parameters
-        const safeMovementsList = Array.isArray(movements) ? movements : [];
-        const movementsCount = safeMovementsList.length;
-        const maxMovementId = safeMovementsList.reduce((max, m) => Math.max(max, m?.id || 0), 0);
-
         const params = new URLSearchParams({
           since_id: String(maxSaleId),
           last_tasa_cobro: String(lastTasaCobro),
@@ -997,8 +1015,6 @@ export default function App() {
           products_sig: String(productsSig),
           abonos_count: String(abonosCount),
           abonos_sig: String(abonosSig),
-          movements_count: String(movementsCount),
-          last_movement_id: String(maxMovementId),
           config_name: companyConfigRef.current?.nombre_comercio || '',
           config_rif: companyConfigRef.current?.rif || '',
           config_sig: `${companyConfigRef.current?.nombre_comercio || ''}_${companyConfigRef.current?.rif || ''}_${companyConfigRef.current?.tamano_foto_buscador_pos || 'mediana'}_${companyConfigRef.current?.mostrar_fotos_en_buscador_pos !== false}_${companyConfigRef.current?.limite_productos_buscador_pos || 5}`,
@@ -1016,7 +1032,7 @@ export default function App() {
         if (data.config) {
           console.log('[Sync] Configuración de empresa actualizada desde el servidor central.');
           setCompanyConfig(data.config);
-          localStorage.setItem('pos_biz_info', JSON.stringify(data.config));
+          safeSetLocalStorage('pos_biz_info', JSON.stringify(data.config));
         }
 
         // 2. New sales from other terminals
@@ -1031,59 +1047,62 @@ export default function App() {
           fetchLastInvoice();
         }
 
-        // Always sync active caja state for the current logged in user across all terminals
+        // Always sync active caja state for the current logged in user across all terminals (con protección contra micro-cortes)
         if (currentUserRef.current) {
           const u = currentUserRef.current;
           fetch(getApiUrl(`/cajas/estado?terminal=${encodeURIComponent(myTerminal)}&usuarioId=${u.id}&usuarioNombre=${encodeURIComponent(u.nombre)}`))
             .then(r => r.ok ? r.json() : null)
             .then(cajaData => {
-              if (cajaData) {
-                const uKey = `u_${u.id}`;
-                if (cajaData.abierta) {
-                  setCajaAbierta(true);
-                  const openUsd = cajaData.aperturaUsd || 0;
-                  const openVes = cajaData.aperturaVes || 0;
-                  setMontoAperturaUsd(openUsd);
-                  setMontoAperturaVes(openVes);
-                  setCajaVentasUsd(cajaData.ventasUsd || 0);
-                  setCajaVentasVes(cajaData.ventasVes || 0);
-                  setCajaMovimientosUsd(cajaData.movimientosUsd || 0);
-                  setCajaMovimientosVes(cajaData.movimientosVes || 0);
-                  setShiftSales(cajaData.shiftSales || []);
-                  setShiftAbonosUsd(cajaData.shiftAbonosUsd || 0);
-                  setShiftEntradasUsd(cajaData.shiftEntradasUsd || 0);
-                  setShiftSalidasUsd(cajaData.shiftSalidasUsd || 0);
+              // 🛡️ PROTECCIÓN CRÍTICA: Si el servidor responde con error o está ocupado, NUNCA cerrar la caja activa
+              if (!cajaData || cajaData.error) {
+                return;
+              }
+              const uKey = `u_${u.id}`;
+              if (cajaData.abierta) {
+                setCajaAbierta(true);
+                const openUsd = cajaData.aperturaUsd || 0;
+                const openVes = cajaData.aperturaVes || 0;
+                setMontoAperturaUsd(openUsd);
+                setMontoAperturaVes(openVes);
+                setCajaVentasUsd(cajaData.ventasUsd || 0);
+                setCajaVentasVes(cajaData.ventasVes || 0);
+                setCajaMovimientosUsd(cajaData.movimientosUsd || 0);
+                setCajaMovimientosVes(cajaData.movimientosVes || 0);
+                setShiftSales(cajaData.shiftSales || []);
+                setShiftAbonosUsd(cajaData.shiftAbonosUsd || 0);
+                setShiftEntradasUsd(cajaData.shiftEntradasUsd || 0);
+                setShiftSalidasUsd(cajaData.shiftSalidasUsd || 0);
 
-                  const fechaAp = cajaData.fechaApertura ? String(cajaData.fechaApertura) : (localStorage.getItem('pos_apertura_fecha') || getLocalISODateString());
-                  localStorage.setItem(`pos_caja_abierta_${uKey}`, 'true');
-                  localStorage.setItem(`pos_caja_abierta_${u.id}`, 'true');
-                  localStorage.setItem('pos_caja_abierta', 'true');
-                  localStorage.setItem(`pos_apertura_usd_${uKey}`, openUsd.toString());
-                  localStorage.setItem(`pos_apertura_usd_${u.id}`, openUsd.toString());
-                  localStorage.setItem('pos_apertura_usd', openUsd.toString());
-                  localStorage.setItem(`pos_apertura_ves_${uKey}`, openVes.toString());
-                  localStorage.setItem(`pos_apertura_ves_${u.id}`, openVes.toString());
-                  localStorage.setItem('pos_apertura_ves', openVes.toString());
-                  localStorage.setItem(`pos_apertura_fecha_${uKey}`, fechaAp);
-                  localStorage.setItem(`pos_apertura_fecha_${u.id}`, fechaAp);
-                  localStorage.setItem('pos_apertura_fecha', fechaAp);
-                } else {
-                  setCajaAbierta(false);
-                  setMontoAperturaUsd(0);
-                  setMontoAperturaVes(0);
-                  localStorage.removeItem(`pos_caja_abierta_${uKey}`);
-                  localStorage.removeItem(`pos_caja_abierta_${u.id}`);
-                  localStorage.removeItem('pos_caja_abierta');
-                  localStorage.removeItem(`pos_apertura_usd_${uKey}`);
-                  localStorage.removeItem(`pos_apertura_usd_${u.id}`);
-                  localStorage.removeItem('pos_apertura_usd');
-                  localStorage.removeItem(`pos_apertura_ves_${uKey}`);
-                  localStorage.removeItem(`pos_apertura_ves_${u.id}`);
-                  localStorage.removeItem('pos_apertura_ves');
-                  localStorage.removeItem(`pos_apertura_fecha_${uKey}`);
-                  localStorage.removeItem(`pos_apertura_fecha_${u.id}`);
-                  localStorage.removeItem('pos_apertura_fecha');
-                }
+                const fechaAp = cajaData.fechaApertura ? String(cajaData.fechaApertura) : (localStorage.getItem('pos_apertura_fecha') || getLocalISODateString());
+                safeSetLocalStorage(`pos_caja_abierta_${uKey}`, 'true');
+                safeSetLocalStorage(`pos_caja_abierta_${u.id}`, 'true');
+                safeSetLocalStorage('pos_caja_abierta', 'true');
+                safeSetLocalStorage(`pos_apertura_usd_${uKey}`, openUsd.toString());
+                safeSetLocalStorage(`pos_apertura_usd_${u.id}`, openUsd.toString());
+                safeSetLocalStorage('pos_apertura_usd', openUsd.toString());
+                safeSetLocalStorage(`pos_apertura_ves_${uKey}`, openVes.toString());
+                safeSetLocalStorage(`pos_apertura_ves_${u.id}`, openVes.toString());
+                safeSetLocalStorage('pos_apertura_ves', openVes.toString());
+                safeSetLocalStorage(`pos_apertura_fecha_${uKey}`, fechaAp);
+                safeSetLocalStorage(`pos_apertura_fecha_${u.id}`, fechaAp);
+                safeSetLocalStorage('pos_apertura_fecha', fechaAp);
+              } else if (cajaData.abierta === false && !cajaData.error) {
+                // Solo si el servidor confirmó explícitamente sin errores que la caja está cerrada
+                setCajaAbierta(false);
+                setMontoAperturaUsd(0);
+                setMontoAperturaVes(0);
+                localStorage.removeItem(`pos_caja_abierta_${uKey}`);
+                localStorage.removeItem(`pos_caja_abierta_${u.id}`);
+                localStorage.removeItem('pos_caja_abierta');
+                localStorage.removeItem(`pos_apertura_usd_${uKey}`);
+                localStorage.removeItem(`pos_apertura_usd_${u.id}`);
+                localStorage.removeItem('pos_apertura_usd');
+                localStorage.removeItem(`pos_apertura_ves_${uKey}`);
+                localStorage.removeItem(`pos_apertura_ves_${u.id}`);
+                localStorage.removeItem('pos_apertura_ves');
+                localStorage.removeItem(`pos_apertura_fecha_${uKey}`);
+                localStorage.removeItem(`pos_apertura_fecha_${u.id}`);
+                localStorage.removeItem('pos_apertura_fecha');
               }
             })
             .catch(() => { });
@@ -1107,10 +1126,10 @@ export default function App() {
           setClients(data.clients);
         }
 
-        // 6. Products catalog updated from another terminal
-        if (data.products) {
+        // 6. Products catalog updated from another terminal (con sanitización segura cleanProductObject)
+        if (data.products && Array.isArray(data.products)) {
           console.log('[Sync] Catálogo de productos actualizado desde otra terminal.');
-          setProducts(data.products);
+          setProducts(data.products.map(cleanProductObject));
         }
 
         // 7. Abonos history updated from another terminal
@@ -1119,16 +1138,17 @@ export default function App() {
           setAbonos(data.abonos);
         }
 
-        // 8. Kardex movements updated in real time from mobile or another station
+        // 8. Kardex movements updated (almacenamiento seguro acotado para evitar QuotaExceededError)
         if (data.movements && Array.isArray(data.movements)) {
-          console.log(`[Sync] Kardex actualizado en tiempo real (${data.movements.length} movimientos).`);
           setMovements(data.movements);
-          localStorage.setItem('pos_movements', JSON.stringify(data.movements));
+          const recentMovements = data.movements.slice(-50);
+          safeSetLocalStorage('pos_movements', JSON.stringify(recentMovements));
         }
 
-        // 7. Session closure detection for non-administrators
-        if (data.sessionClosed && user && user.rol.toLowerCase() !== 'administrador') {
-          console.warn('[Sync] Cierre de caja detectado para el usuario actual. Finalizando sesión en la red local.');
+        // 7. Session closure detection: Envía al usuario DIRECTO AL LOGIN indicando la estación donde se cerró
+        if (data.sessionClosed && user) {
+          const fromTerm = data.closingTerminal ? `desde la estación "${data.closingTerminal}"` : 'desde otra estación';
+          console.warn(`[Sync] Cierre de caja detectado para el usuario actual ${fromTerm}. Finalizando sesión en la red local.`);
 
           const uKey = `u_${user.id}`;
           localStorage.removeItem(`pos_caja_abierta_${uKey}`);
@@ -1139,6 +1159,16 @@ export default function App() {
           localStorage.removeItem(`pos_movimientos_usd_${uKey}`);
           localStorage.removeItem(`pos_movimientos_ves_${uKey}`);
           localStorage.removeItem(`pos_apertura_fecha_${uKey}`);
+          localStorage.removeItem('pos_caja_abierta');
+          localStorage.removeItem('pos_apertura_usd');
+          localStorage.removeItem('pos_apertura_ves');
+          localStorage.removeItem('pos_ventas_usd');
+          localStorage.removeItem('pos_ventas_ves');
+          localStorage.removeItem('pos_movimientos_usd');
+          localStorage.removeItem('pos_movimientos_ves');
+          localStorage.removeItem('pos_apertura_fecha');
+          localStorage.removeItem('pos_inventory_filters');
+          sessionStorage.removeItem('pos_inventory_search_term');
 
           setCajaAbierta(false);
           setMontoAperturaUsd(0);
@@ -1149,9 +1179,7 @@ export default function App() {
           setCajaMovimientosVes(0);
           setShiftSales([]);
 
-          setSessionNotice('⚠️ Su turno de caja ha sido cerrado desde la red local. Su sesión fue finalizada. Inicie sesión nuevamente para realizar una nueva apertura.');
-          localStorage.removeItem('pos_inventory_filters');
-          sessionStorage.removeItem('pos_inventory_search_term');
+          setSessionNotice(`⚠️ Su turno de caja ha sido cerrado ${fromTerm}. Su sesión fue finalizada. Inicie sesión nuevamente.`);
           setCurrentUser(null);
         }
       } catch (pollErr) {
@@ -1160,7 +1188,7 @@ export default function App() {
     };
 
     pollSync();
-    const interval = setInterval(pollSync, 2500);
+    const interval = setInterval(pollSync, 4000);
     return () => clearInterval(interval);
   }, [currentUser?.id, lanIP, dbMode]);
 
@@ -1437,9 +1465,14 @@ export default function App() {
     return false;
   };
 
-  // Engine de sincronización y validación automática de tasa BCV parametrizable
+  // Engine de sincronización y validación automática de tasa BCV parametrizable (solo corre en el servidor)
   useEffect(() => {
     if (!currentUser) return;
+    const isServerMachine = terminalName === 'CAJA_01' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    if (!isServerMachine) {
+      // Las cajas secundarias reciben la tasa pasivamente del servidor central sin saturar la red
+      return;
+    }
 
     let timer: any = null;
 
