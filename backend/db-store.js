@@ -1754,15 +1754,28 @@ export async function registerAbono(clientId, montoUsd, montoVes, metodoPago = '
         }
 
         try {
-          // Determine active caja_id for this abono
+          // Determine active caja_id for this abono strictly for this user
           let abonoCajaId = null;
           try {
-            const abonoCajaRes = await pool.query(
-              "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY id DESC LIMIT 1",
-              [usuarioId || null]
-            );
-            if (abonoCajaRes.rowCount > 0) abonoCajaId = abonoCajaRes.rows[0].id;
+            if (usuarioId && usuarioId > 0) {
+              const sysConfig = await getCompanyConfig();
+              const compartirApertura = sysConfig.compartir_apertura_caja !== false;
+              let abonoCajaRes;
+              if (compartirApertura) {
+                abonoCajaRes = await pool.query(
+                  "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY id DESC LIMIT 1",
+                  [usuarioId]
+                );
+              } else {
+                abonoCajaRes = await pool.query(
+                  "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 AND (estacion_nombre = $2 OR $2 IS NULL) ORDER BY id DESC LIMIT 1",
+                  [usuarioId, terminal || null]
+                );
+              }
+              if (abonoCajaRes && abonoCajaRes.rowCount > 0) abonoCajaId = abonoCajaRes.rows[0].id;
+            }
           } catch (_) { }
+
           await pool.query(
             `INSERT INTO Abonos (cliente_id, usuario_id, caja_id, monto_usd, monto_ves, metodo_pago, numero_referencia, observacion, fecha)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)`,
@@ -1774,15 +1787,11 @@ export async function registerAbono(clientId, montoUsd, montoVes, metodoPago = '
         }
 
         try {
-          const activeCajaRes = await pool.query(
-            "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1"
-          );
-          if (activeCajaRes.rowCount > 0) {
-            const cajaId = activeCajaRes.rows[0].id;
+          if (abonoCajaId) {
             await pool.query(
               `INSERT INTO Movimientos_Caja (caja_id, tipo, descripcion, monto_usd, monto_ves, fecha)
                VALUES ($1, 'Entrada', $2, $3, $4, CURRENT_TIMESTAMP)`,
-              [cajaId, `Abono de Crédito Cliente: ${clientNombre} (${metodoPago})`, numUsd, numVes]
+              [abonoCajaId, `Abono de Crédito Cliente: ${clientNombre} (${metodoPago})`, numUsd, numVes]
             );
           }
         } catch (movErr) {
@@ -3823,22 +3832,16 @@ export async function saveSale(s) {
         }
       }
 
-      if (!activeCaja || activeCaja.rowCount === 0) {
-        activeCaja = await clientTarget.query(
-          "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND (estacion_nombre = $1 OR estacion_nombre = 'CAJA_PRINCIPAL' OR estacion_nombre = 'LOCAL') ORDER BY id DESC LIMIT 1",
-          [myTerminal]
-        );
-      }
-      if (!activeCaja || activeCaja.rowCount === 0) {
-        activeCaja = await clientTarget.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
-      }
-
       let cajaId = null;
       if (activeCaja && activeCaja.rowCount > 0) {
         cajaId = activeCaja.rows[0].id;
-      } else {
-        const anyCaja = await clientTarget.query("SELECT id FROM Cajas_Apertura_Cierre ORDER BY id DESC LIMIT 1");
-        cajaId = anyCaja.rowCount > 0 ? anyCaja.rows[0].id : null;
+      } else if (!userId || userId <= 0) {
+        // Fallback únicamente si la llamada de venta no especificó usuario
+        const termCaja = await clientTarget.query(
+          "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",
+          [myTerminal]
+        );
+        if (termCaja.rowCount > 0) cajaId = termCaja.rows[0].id;
       }
 
       // Safe sequence generator for invoice numbers (auto-creates seq_factura if missing)
@@ -4522,11 +4525,18 @@ export async function abrirCaja(usd, ves, usuarioId, terminal, usuarioNombre) {
       const sysConfig = await getCompanyConfig();
       const compartirApertura = sysConfig.compartir_apertura_caja !== false;
 
-      // Cerrar únicamente cualquier apertura previa sin cerrar en ESTA MISMA terminal
-      await pool.query(
-        "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = $2 WHERE estacion_nombre = $1 AND estatus = 'Abierta'",
-        [termName, nowStr]
-      ).catch(() => { });
+      // Cerrar únicamente cualquier apertura previa sin cerrar de ESTE MISMO usuario
+      if (compartirApertura) {
+        await pool.query(
+          "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = $2 WHERE usuario_id = $1 AND estatus = 'Abierta'",
+          [userId, nowStr]
+        ).catch(() => { });
+      } else {
+        await pool.query(
+          "UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada', fecha_cierre = $3 WHERE usuario_id = $1 AND estacion_nombre = $2 AND estatus = 'Abierta'",
+          [userId, termName, nowStr]
+        ).catch(() => { });
+      }
 
       const res = await pool.query(
         `INSERT INTO Cajas_Apertura_Cierre (usuario_id, estacion_nombre, monto_apertura_usd, monto_apertura_ves, estatus, fecha_apertura)
@@ -4576,18 +4586,11 @@ export async function cerrarCaja(cierre) {
         );
         // 2. Si no tiene en esta terminal (caja compartida en red), buscar cualquier caja abierta de ESTE MISMO usuario
         if (activeCaja.rowCount === 0) {
-          activeCaja = await pool.query(
-            "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY id DESC LIMIT 1",
-            [userId]
-          );
-        }
-        // 3. Si no tiene y compartirApertura está activo, buscar la caja abierta activa general de la tienda
-        if (activeCaja.rowCount === 0) {
           const sysConfig = await getCompanyConfig();
           if (sysConfig.compartir_apertura_caja !== false) {
             activeCaja = await pool.query(
-              "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY (estacion_nombre = $1) DESC, id DESC LIMIT 1",
-              [termName]
+              "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY id DESC LIMIT 1",
+              [userId]
             );
           }
         }
@@ -4597,11 +4600,6 @@ export async function cerrarCaja(cierre) {
           "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",
           [termName]
         );
-        if (activeCaja.rowCount === 0) {
-          activeCaja = await pool.query(
-            "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1"
-          );
-        }
       }
       if (activeCaja.rowCount > 0) {
         const cajaId = activeCaja.rows[0].id;
@@ -4801,40 +4799,21 @@ export async function getCajaEstado(terminal, usuarioId, usuarioNombre) {
         // 2. Si no tiene en esta terminal específica:
         if (activeRes.rowCount === 0) {
           if (compartirApertura) {
-            // Modo compartido: buscar cualquier caja abierta del mismo usuario en otra terminal
+            // Modo compartido: buscar cualquier caja abierta del MISMO usuario en otra terminal
             activeRes = await pool.query(
               "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY (estacion_nombre = $2) DESC, id DESC LIMIT 1",
               [userId, myTerminal]
             );
-
-            // Si este usuario no la abrió, pero la tienda tiene una caja compartida abierta (ej: abierta por Administrador u otro cajero de turno):
-            if (activeRes.rowCount === 0) {
-              activeRes = await pool.query(
-                "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY (estacion_nombre = $1) DESC, id DESC LIMIT 1",
-                [myTerminal]
-              );
-            }
-          } else {
-            // Modo independiente por terminal: si la terminal ya está abierta por otro operador del mismo turno
-            activeRes = await pool.query(
-              "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",
-              [myTerminal]
-            );
           }
         }
       } else {
-        // Sin usuario específico, consultar por terminal o tienda
+        // Sin usuario específico, consultar estrictamente por terminal
         activeRes = await pool.query(
           "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",
           [myTerminal]
         );
-        if (activeRes.rowCount === 0 && compartirApertura) {
-          activeRes = await pool.query(
-            "SELECT * FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1"
-          );
-        }
       }
-      if (activeRes.rowCount === 0) {
+      if (!activeRes || activeRes.rowCount === 0) {
         return { abierta: false };
       }
       const caja = activeRes.rows[0];
@@ -5259,20 +5238,23 @@ export async function registrarCajaMovimiento(tipo, descripcion, usd, ves, termi
       }
 
       let activeCaja;
-      if (!isNaN(userId) && userId > 0 && compartirApertura) {
+      if (!isNaN(userId) && userId > 0) {
+        if (compartirApertura) {
+          activeCaja = await pool.query(
+            "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY (estacion_nombre = $2) DESC, id DESC LIMIT 1",
+            [userId, termName]
+          );
+        } else {
+          activeCaja = await pool.query(
+            "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 AND usuario_id = $2 ORDER BY id DESC LIMIT 1",
+            [termName, userId]
+          );
+        }
+      } else {
         activeCaja = await pool.query(
-          "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY (estacion_nombre = $2) DESC, id DESC LIMIT 1",
-          [userId, termName]
-        );
-      }
-      if (!activeCaja || activeCaja.rowCount === 0) {
-        activeCaja = await pool.query(
-          "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND (estacion_nombre = $1 OR estacion_nombre = 'CAJA_PRINCIPAL' OR estacion_nombre = 'LOCAL') ORDER BY id DESC LIMIT 1",
+          "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND estacion_nombre = $1 ORDER BY id DESC LIMIT 1",
           [termName]
         );
-      }
-      if (!activeCaja || activeCaja.rowCount === 0) {
-        activeCaja = await pool.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
       }
 
       if (activeCaja.rowCount > 0) {
@@ -6183,16 +6165,13 @@ export async function saveCompra(compraData) {
         // If cash out from active cashier station is requested
         if (afecto_caja_efectivo) {
           let targetCajaId = caja_id;
-          if (!targetCajaId) {
+          if (!targetCajaId && usuario_id) {
             const openCajaRes = await client.query(
-              "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND (usuario_id = $1 OR $1 IS NULL) ORDER BY id DESC LIMIT 1",
-              [usuario_id || null]
+              "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY id DESC LIMIT 1",
+              [usuario_id]
             );
             if (openCajaRes.rowCount > 0) {
               targetCajaId = openCajaRes.rows[0].id;
-            } else {
-              const anyOpen = await client.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
-              if (anyOpen.rowCount > 0) targetCajaId = anyOpen.rows[0].id;
             }
           }
 
@@ -6427,16 +6406,13 @@ export async function savePagoProveedor(pagoData) {
       // 4. If cash out from active cashier station is requested
       if (afecto_caja_efectivo) {
         let targetCajaId = caja_id;
-        if (!targetCajaId) {
+        if (!targetCajaId && usuario_id) {
           const openCajaRes = await client.query(
-            "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND (usuario_id = $1 OR $1 IS NULL) ORDER BY id DESC LIMIT 1",
-            [usuario_id || null]
+            "SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' AND usuario_id = $1 ORDER BY id DESC LIMIT 1",
+            [usuario_id]
           );
           if (openCajaRes.rowCount > 0) {
             targetCajaId = openCajaRes.rows[0].id;
-          } else {
-            const anyOpen = await client.query("SELECT id FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' ORDER BY id DESC LIMIT 1");
-            if (anyOpen.rowCount > 0) targetCajaId = anyOpen.rows[0].id;
           }
         }
 

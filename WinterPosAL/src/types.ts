@@ -135,6 +135,8 @@ export interface SaleItem {
   total_fila_usd?: number;
   description?: string;
   isManualPriceType?: boolean;
+  exento_impuesto?: boolean;
+  porcentaje_impuesto?: number;
 }
 
 export interface Payment {

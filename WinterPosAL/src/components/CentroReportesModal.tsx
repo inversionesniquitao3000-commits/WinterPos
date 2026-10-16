@@ -4,7 +4,8 @@ import { Sale, CierreCaja, CompanyConfig } from '../types';
 import { 
   BarChart3, FileText, DollarSign, PieChart, TrendingUp, ShieldAlert, 
   Calendar, Printer, FileSpreadsheet,
-  Receipt, ArrowRightLeft, Building2, UserCheck
+  Receipt, ArrowRightLeft, Building2, UserCheck,
+  Package, Layers
 } from 'lucide-react';
 import { getLocalDateStr } from '../utils';
 
@@ -24,6 +25,8 @@ type ReportType =
   | 'igtf_divisas'
   | 'resumen_iva_f30'
   | 'retenciones_iva'
+  | 'notas_entrega'
+  | 'todas_transacciones'
   | 'cuadre_multimoneda'
   | 'ventas_categorias'
   | 'top_productos'
@@ -1119,6 +1122,536 @@ export default function CentroReportesModal({
     printReportHtml('AUDITORÍA DE DESCUENTOS, ANULACIONES Y DEVOLUCIONES', tableHtml);
   };
 
+  // -------------------------------------------------------------
+  // HELPERS: IDENTIFICACIÓN DE DOCUMENTO Y CÁLCULO GRAVABLE / EXENTO
+  // -------------------------------------------------------------
+  const getTipoDocumento = (sale: Sale): 'FACTURA_FISCAL' | 'NOTA_ENTREGA' | 'DEVOLUCION' => {
+    if (sale.factura_nro && sale.factura_nro.startsWith('DEV-')) return 'DEVOLUCION';
+    if (sale.tipo_documento === 'NOTA_ENTREGA' || (sale.factura_nro && sale.factura_nro.startsWith('NE-'))) {
+      return 'NOTA_ENTREGA';
+    }
+    if (sale.tipo_documento === 'FACTURA_FISCAL' || sale.nro_fiscal) {
+      return 'FACTURA_FISCAL';
+    }
+    if (sale.estatus_fiscal === 'NO_APLICA' && !sale.nro_fiscal) {
+      return 'NOTA_ENTREGA';
+    }
+    return 'FACTURA_FISCAL';
+  };
+
+  const getSaleTaxBreakdown = (sale: Sale) => {
+    const isDev = (sale.factura_nro || '').startsWith('DEV-');
+    const sign = isDev ? -1 : 1;
+    const totalVentaUSD = (sale.totalUSD || 0) * sign;
+
+    let calcExempt = 0;
+    let calcTaxableGross = 0;
+
+    if (Array.isArray(sale.items) && sale.items.length > 0) {
+      sale.items.forEach(it => {
+        const isEx = it.product?.exento_impuesto === true || 
+                     (it as any).exento_impuesto === true || 
+                     (it.product?.porcentaje_impuesto !== undefined && it.product?.porcentaje_impuesto === 0) ||
+                     ((it as any).porcentaje_impuesto !== undefined && (it as any).porcentaje_impuesto === 0);
+        const rowTotal = parseFloat(
+          String(it.total_fila_usd ?? it.totalUSD ?? ((it.precio_unitario_usd ?? it.priceUSD ?? 0) * (it.cantidad ?? it.qty ?? 1)) ?? 0)
+        ) || 0;
+        if (isEx) {
+          calcExempt += rowTotal;
+        } else {
+          calcTaxableGross += rowTotal;
+        }
+      });
+    }
+
+    let exentoUSD = 0;
+    let baseImponibleUSD = 0;
+    let ivaUSD = 0;
+
+    if (sale.exento_usd !== undefined && sale.base_imponible_usd !== undefined) {
+      exentoUSD = (sale.exento_usd || 0) * sign;
+      baseImponibleUSD = (sale.base_imponible_usd || 0) * sign;
+      ivaUSD = (sale.iva_usd || 0) * sign;
+    } else if (calcExempt > 0 || calcTaxableGross > 0) {
+      exentoUSD = calcExempt * sign;
+      baseImponibleUSD = (calcTaxableGross / 1.16) * sign;
+      ivaUSD = (calcTaxableGross - (calcTaxableGross / 1.16)) * sign;
+    } else {
+      if (sale.iva_usd && sale.iva_usd > 0) {
+        ivaUSD = (sale.iva_usd || 0) * sign;
+        baseImponibleUSD = (sale.base_imponible_usd || (totalVentaUSD - ivaUSD)) * sign;
+        exentoUSD = Math.max(0, totalVentaUSD - baseImponibleUSD - ivaUSD);
+      } else {
+        exentoUSD = totalVentaUSD;
+        baseImponibleUSD = 0;
+        ivaUSD = 0;
+      }
+    }
+
+    const effectiveRate = (sale as any).tasa_cambio || tasaDia || 1;
+    const totalVentaVES = totalVentaUSD * effectiveRate;
+    const baseVES = baseImponibleUSD * effectiveRate;
+    const exentoVES = exentoUSD * effectiveRate;
+    const ivaVES = ivaUSD * effectiveRate;
+
+    const metodosList = (sale.pagos || []).map(p => {
+      const raw = String(p.metodo || 'Efectivo').trim();
+      const low = raw.toLowerCase();
+      if (low === 'efectivo$' || low === 'dolares') return 'Efectivo $';
+      if (low === 'efectivobs' || low === 'bolivares') return 'Efectivo Bs';
+      if (low === 'tarjetabs' || low === 'punto de venta') return 'Punto Bs';
+      if (low === 'pagomovil' || low === 'pago movil') return 'Pago Móvil';
+      if (low === 'biopago') return 'Biopago';
+      return raw;
+    }).join(', ') || 'Efectivo';
+
+    return {
+      isDev,
+      sign,
+      totalVentaUSD,
+      totalVentaVES,
+      baseImponibleUSD,
+      baseVES,
+      exentoUSD,
+      exentoVES,
+      ivaUSD,
+      ivaVES,
+      effectiveRate,
+      metodosList
+    };
+  };
+
+  // -------------------------------------------------------------
+  // REPORTE: RESUMEN DE FACTURAS FISCALES EMITIDAS
+  // -------------------------------------------------------------
+  const generateResumenFacturasFiscales = (exportType: 'pdf' | 'excel') => {
+    const fiscalSales = filteredSales.filter(s => getTipoDocumento(s) === 'FACTURA_FISCAL');
+
+    let totalVentasUSD = 0;
+    let totalBaseUSD = 0;
+    let totalExentoUSD = 0;
+    let totalIvaUSD = 0;
+
+    const dataRows = fiscalSales.map((sale, idx) => {
+      const b = getSaleTaxBreakdown(sale);
+      totalVentasUSD += b.totalVentaUSD;
+      totalBaseUSD += b.baseImponibleUSD;
+      totalExentoUSD += b.exentoUSD;
+      totalIvaUSD += b.ivaUSD;
+
+      return {
+        num: idx + 1,
+        fecha: (sale.fecha || '').substring(0, 16),
+        factura: sale.nro_fiscal || sale.factura_nro,
+        serial: sale.serial_fiscal || 'Z3C0000000',
+        z: sale.nro_z || 'Z-0001',
+        rif: sale.client?.cedula_rif || 'V-00000000',
+        cliente: sale.client?.nombre || 'CLIENTE CONTADO',
+        totalUSD: b.totalVentaUSD,
+        baseUSD: b.baseImponibleUSD,
+        exentoUSD: b.exentoUSD,
+        ivaUSD: b.ivaUSD,
+        metodos: b.metodosList,
+        estatusFiscal: sale.estatus_fiscal || 'EMITIDA'
+      };
+    });
+
+    if (exportType === 'excel') {
+      const wsData = [
+        ['RESUMEN DE FACTURAS FISCALES EMITIDAS (CONTROL DE COMPROBANTES)'],
+        [`EMPRESA: ${companyName}`, `RIF: ${companyRif}`, periodText],
+        [],
+        ['N°', 'FECHA', 'N° FACTURA FISCAL', 'SERIAL IMPRESORA', 'N° Z', 'RIF / CI CLIENTE', 'CLIENTE / RAZÓN SOCIAL', 'BASE GRAVABLE 16% ($)', 'EXENTO ($)', 'IVA 16% ($)', 'TOTAL FACTURA ($)', 'MÉTODO DE PAGO', 'ESTATUS FISCAL'],
+        ...dataRows.map(r => [
+          r.num, r.fecha, r.factura, r.serial, r.z, r.rif, r.cliente,
+          r.baseUSD, r.exentoUSD, r.ivaUSD, r.totalUSD, r.metodos, r.estatusFiscal
+        ]),
+        [],
+        ['TOTALES:', '', '', '', '', '', '', totalBaseUSD, totalExentoUSD, totalIvaUSD, totalVentasUSD, '', '']
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'FacturasFiscales');
+      XLSX.writeFile(wb, `Facturas_Fiscales_Emitidas_${startDate}_al_${endDate}.xlsx`);
+      return;
+    }
+
+    const rowsHtml = dataRows.map(r => `
+      <tr>
+        <td class="text-center font-mono">${r.num}</td>
+        <td class="text-center font-mono" style="font-size: 8.5px;">${r.fecha}</td>
+        <td class="text-center font-bold font-mono text-indigo">${r.factura}</td>
+        <td class="text-center font-mono" style="font-size: 8px;">${r.serial}</td>
+        <td class="text-center font-mono" style="font-size: 8px;">${r.z}</td>
+        <td style="font-family: monospace; font-size: 8.5px;">${r.rif}</td>
+        <td style="text-transform: uppercase;">${r.cliente}</td>
+        <td class="text-right font-bold text-indigo font-mono">$${r.baseUSD.toFixed(2)}</td>
+        <td class="text-right font-mono">$${r.exentoUSD.toFixed(2)}</td>
+        <td class="text-right font-mono font-bold text-emerald">$${r.ivaUSD.toFixed(2)}</td>
+        <td class="text-right font-bold font-mono">$${r.totalUSD.toFixed(2)}</td>
+        <td style="font-size: 8.5px;">${r.metodos}</td>
+      </tr>
+    `).join('');
+
+    const tableHtml = `
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th style="width: 3%;">N°</th>
+            <th style="width: 10%;">FECHA</th>
+            <th style="width: 11%;">N° FACTURA</th>
+            <th style="width: 9%;">SERIAL</th>
+            <th style="width: 6%;">N° Z</th>
+            <th style="width: 9%;">RIF / CI</th>
+            <th style="width: 18%;">CLIENTE</th>
+            <th class="text-right" style="width: 9%;">BASE 16% ($)</th>
+            <th class="text-right" style="width: 8%;">EXENTO ($)</th>
+            <th class="text-right" style="width: 8%;">IVA 16% ($)</th>
+            <th class="text-right" style="width: 9%;">TOTAL ($)</th>
+            <th style="width: 10%;">PAGO</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${dataRows.length === 0 ? '<tr><td colspan="12" class="text-center" style="padding: 20px;">Sin facturas fiscales emitidas en el rango seleccionado.</td></tr>' : rowsHtml}
+        </tbody>
+        <tfoot>
+          <tr style="background: #0f172a; color: #fff; font-weight: bold; font-family: monospace;">
+            <td colspan="7" class="text-right" style="padding: 7px;">TOTALES GENERALES FACTURAS FISCALES:</td>
+            <td class="text-right" style="padding: 7px; color: #818cf8;">$${totalBaseUSD.toFixed(2)}</td>
+            <td class="text-right" style="padding: 7px;">$${totalExentoUSD.toFixed(2)}</td>
+            <td class="text-right text-emerald" style="padding: 7px; color: #4ade80;">$${totalIvaUSD.toFixed(2)}</td>
+            <td class="text-right" style="padding: 7px;">$${totalVentasUSD.toFixed(2)}</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    `;
+
+    const summaryHtml = `
+      <div class="report-summary-grid">
+        <div class="summary-card">
+          <h4>RESUMEN DOCUMENTOS FISCALES</h4>
+          <p><strong>Total Facturas Emitidas:</strong> ${fiscalSales.length}</p>
+          <p><strong>Total Facturado (USD):</strong> $${totalVentasUSD.toFixed(2)} USD</p>
+          <p><strong>Base Imponible Total (16%):</strong> $${totalBaseUSD.toFixed(2)} USD</p>
+          <p><strong>IVA Total Débito Fiscal:</strong> $${totalIvaUSD.toFixed(2)} USD</p>
+          <p><strong>Total Exento (0% IVA):</strong> $${totalExentoUSD.toFixed(2)} USD</p>
+        </div>
+      </div>
+    `;
+
+    printReportHtml('RESUMEN DE FACTURAS FISCALES EMITIDAS', tableHtml, summaryHtml, 'landscape');
+  };
+
+  // -------------------------------------------------------------
+  // REPORTE: VENTAS POR NOTAS DE ENTREGA (GRAVABLE Y NO GRAVABLE)
+  // -------------------------------------------------------------
+  const generateReporteNotasEntrega = (exportType: 'pdf' | 'excel') => {
+    const neSales = filteredSales.filter(s => getTipoDocumento(s) === 'NOTA_ENTREGA');
+
+    let totalVentasUSD = 0;
+    let totalVentasVES = 0;
+    let totalBaseUSD = 0;
+    let totalBaseVES = 0;
+    let totalExentoUSD = 0;
+    let totalExentoVES = 0;
+    let totalIvaUSD = 0;
+    let totalIvaVES = 0;
+
+    const dataRows = neSales.map((sale, idx) => {
+      const b = getSaleTaxBreakdown(sale);
+      totalVentasUSD += b.totalVentaUSD;
+      totalVentasVES += b.totalVentaVES;
+      totalBaseUSD += b.baseImponibleUSD;
+      totalBaseVES += b.baseVES;
+      totalExentoUSD += b.exentoUSD;
+      totalExentoVES += b.exentoVES;
+      totalIvaUSD += b.ivaUSD;
+      totalIvaVES += b.ivaVES;
+
+      return {
+        num: idx + 1,
+        fecha: (sale.fecha || '').substring(0, 16),
+        documento: sale.factura_nro || `NE-${String(sale.id || idx + 1).padStart(6, '0')}`,
+        rif: sale.client?.cedula_rif || 'V-00000000',
+        cliente: sale.client?.nombre || 'CLIENTE CONTADO',
+        terminal: sale.terminal || 'CAJA_01',
+        usuario: sale.usuario || 'CAJERO',
+        totalUSD: b.totalVentaUSD,
+        totalVES: b.totalVentaVES,
+        baseUSD: b.baseImponibleUSD,
+        baseVES: b.baseVES,
+        exentoUSD: b.exentoUSD,
+        exentoVES: b.exentoVES,
+        ivaUSD: b.ivaUSD,
+        metodos: b.metodosList
+      };
+    });
+
+    if (exportType === 'excel') {
+      const wsData = [
+        ['REPORTE DE VENTAS POR NOTAS DE ENTREGA (CONTROL INTERNO Y DISCRIMINACIÓN IMPOSITIVA)'],
+        [`EMPRESA: ${companyName}`, `RIF: ${companyRif}`, periodText],
+        [`Tasa de Referencia: Bs ${tasaDia ? tasaDia.toFixed(2) : 'N/A'}`],
+        [],
+        ['N°', 'FECHA / HORA', 'N° NOTA ENTREGA', 'RIF / CI CLIENTE', 'CLIENTE / RAZÓN SOCIAL', 'TERMINAL', 'CAJERO', 'BASE GRAVABLE 16% ($)', 'EXENTO / NO GRAVABLE ($)', 'IVA ESTIMADO 16% ($)', 'TOTAL VENTA ($)', 'TOTAL EN BS (VES)', 'FORMA DE PAGO'],
+        ...dataRows.map(r => [
+          r.num, r.fecha, r.documento, r.rif, r.cliente, r.terminal, r.usuario,
+          r.baseUSD, r.exentoUSD, r.ivaUSD, r.totalUSD, r.totalVES, r.metodos
+        ]),
+        [],
+        ['TOTALES:', '', '', '', '', '', '', totalBaseUSD, totalExentoUSD, totalIvaUSD, totalVentasUSD, totalVentasVES, '']
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'NotasDeEntrega');
+      XLSX.writeFile(wb, `Ventas_Notas_Entrega_${startDate}_al_${endDate}.xlsx`);
+      return;
+    }
+
+    // PDF HTML Print
+    const rowsHtml = dataRows.map(r => `
+      <tr>
+        <td class="text-center font-mono">${r.num}</td>
+        <td class="text-center font-mono" style="font-size: 8.5px;">${r.fecha}</td>
+        <td class="text-center font-bold font-mono text-amber-700" style="color: #b45309;">${r.documento}</td>
+        <td style="font-family: monospace; font-size: 8.5px;">${r.rif}</td>
+        <td style="text-transform: uppercase;">${r.cliente}</td>
+        <td class="text-center font-mono" style="font-size: 8.5px;">${r.terminal}</td>
+        <td class="text-right font-bold text-indigo font-mono">$${r.baseUSD.toFixed(2)}</td>
+        <td class="text-right font-mono">$${r.exentoUSD.toFixed(2)}</td>
+        <td class="text-right font-mono font-bold text-emerald">$${r.ivaUSD.toFixed(2)}</td>
+        <td class="text-right font-bold font-mono">$${r.totalUSD.toFixed(2)}</td>
+        <td class="text-right font-mono">Bs ${r.totalVES.toFixed(2)}</td>
+        <td style="font-size: 8.5px;">${r.metodos}</td>
+      </tr>
+    `).join('');
+
+    const tableHtml = `
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th style="width: 3%;">N°</th>
+            <th style="width: 10%;">FECHA</th>
+            <th style="width: 11%;">N° NOTA ENTREGA</th>
+            <th style="width: 9%;">RIF / CI</th>
+            <th style="width: 18%;">CLIENTE / RAZÓN SOCIAL</th>
+            <th style="width: 7%;">ESTACIÓN</th>
+            <th class="text-right" style="width: 9%;">GRAVABLE 16% ($)</th>
+            <th class="text-right" style="width: 9%;">NO GRAVABLE ($)</th>
+            <th class="text-right" style="width: 7%;">IVA 16% ($)</th>
+            <th class="text-right" style="width: 8%;">TOTAL ($)</th>
+            <th class="text-right" style="width: 9%;">TOTAL (BS)</th>
+            <th style="width: 10%;">MEDIO PAGO</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${dataRows.length === 0 ? '<tr><td colspan="12" class="text-center" style="padding: 20px;">Sin transacciones por Nota de Entrega en el rango seleccionado.</td></tr>' : rowsHtml}
+        </tbody>
+        <tfoot>
+          <tr style="background: #0f172a; color: #fff; font-weight: bold; font-family: monospace;">
+            <td colspan="6" class="text-right" style="padding: 7px;">TOTALES GENERALES NOTAS DE ENTREGA:</td>
+            <td class="text-right" style="padding: 7px; color: #818cf8;">$${totalBaseUSD.toFixed(2)}</td>
+            <td class="text-right" style="padding: 7px;">$${totalExentoUSD.toFixed(2)}</td>
+            <td class="text-right text-emerald" style="padding: 7px; color: #4ade80;">$${totalIvaUSD.toFixed(2)}</td>
+            <td class="text-right" style="padding: 7px;">$${totalVentasUSD.toFixed(2)}</td>
+            <td class="text-right" style="padding: 7px;">Bs ${totalVentasVES.toFixed(2)}</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    `;
+
+    const pctGravable = totalVentasUSD > 0 ? ((totalBaseUSD / totalVentasUSD) * 100).toFixed(1) : '0.0';
+    const pctExento = totalVentasUSD > 0 ? ((totalExentoUSD / totalVentasUSD) * 100).toFixed(1) : '0.0';
+
+    const summaryHtml = `
+      <div class="report-summary-grid">
+        <div class="summary-card">
+          <h4>RESUMEN DE NOTAS DE ENTREGA</h4>
+          <p><strong>Comprobantes Emitidos:</strong> ${neSales.length} notas de entrega</p>
+          <p><strong>Total Facturación (USD):</strong> $${totalVentasUSD.toFixed(2)} USD</p>
+          <p><strong>Total Facturación en Bolívares:</strong> Bs ${totalVentasVES.toFixed(2)} VES</p>
+          <p><strong>Ticket Promedio por Nota:</strong> $${neSales.length > 0 ? (totalVentasUSD / neSales.length).toFixed(2) : '0.00'} USD</p>
+        </div>
+        <div class="summary-card">
+          <h4>DISCRIMINACIÓN IMPOSITIVA</h4>
+          <p><strong>Monto Gravable (Base Imponible 16%):</strong> $${totalBaseUSD.toFixed(2)} USD (${pctGravable}%)</p>
+          <p><strong>Monto No Gravable (Exento / Exonerado 0%):</strong> $${totalExentoUSD.toFixed(2)} USD (${pctExento}%)</p>
+          <p><strong>Débito / IVA 16% Estimado:</strong> $${totalIvaUSD.toFixed(2)} USD (Bs ${totalIvaVES.toFixed(2)})</p>
+          <p><strong>Base Imponible en Bolívares:</strong> Bs ${totalBaseVES.toFixed(2)} VES</p>
+        </div>
+        <div class="summary-card">
+          <h4>CONTROL DE AUDITORÍA Y DESPACHO</h4>
+          <p>Documento de control interno no fiscal para cotejo de mercancía entregada y conciliación de inventario con caja.</p>
+          <p style="margin-top: 20px; border-top: 1px dashed #94a3b8; padding-top: 8px;">
+            <strong>Firma Auditor / Despacho:</strong> ___________________________
+          </p>
+        </div>
+      </div>
+    `;
+
+    printReportHtml('REPORTE DE VENTAS POR NOTAS DE ENTREGA (CONTROL GRAVABLE / NO GRAVABLE)', tableHtml, summaryHtml, 'landscape');
+  };
+
+  // -------------------------------------------------------------
+  // REPORTE: AUDITORÍA INTEGRAL DE TODAS LAS TRANSACCIONES (FISCALES + NOTAS DE ENTREGA)
+  // -------------------------------------------------------------
+  const generateReporteTodasTransacciones = (exportType: 'pdf' | 'excel') => {
+    let totalGeneralUSD = 0;
+    let totalGeneralVES = 0;
+    let totalBaseUSD = 0;
+    let totalExentoUSD = 0;
+    let totalIvaUSD = 0;
+    let countFiscal = 0;
+    let totalFiscalUSD = 0;
+    let countNE = 0;
+    let totalNEUSD = 0;
+
+    const dataRows = filteredSales.map((sale, idx) => {
+      const docType = getTipoDocumento(sale);
+      const b = getSaleTaxBreakdown(sale);
+      totalGeneralUSD += b.totalVentaUSD;
+      totalGeneralVES += b.totalVentaVES;
+      totalBaseUSD += b.baseImponibleUSD;
+      totalExentoUSD += b.exentoUSD;
+      totalIvaUSD += b.ivaUSD;
+
+      if (docType === 'FACTURA_FISCAL') {
+        countFiscal++;
+        totalFiscalUSD += b.totalVentaUSD;
+      } else if (docType === 'NOTA_ENTREGA') {
+        countNE++;
+        totalNEUSD += b.totalVentaUSD;
+      }
+
+      return {
+        num: idx + 1,
+        fecha: (sale.fecha || '').substring(0, 16),
+        tipoDoc: docType === 'FACTURA_FISCAL' ? 'FACTURA FISCAL' : (docType === 'NOTA_ENTREGA' ? 'NOTA ENTREGA' : 'DEVOLUCIÓN'),
+        documento: sale.nro_fiscal || sale.factura_nro || `TXN-${sale.id}`,
+        rif: sale.client?.cedula_rif || 'V-00000000',
+        cliente: sale.client?.nombre || 'CLIENTE CONTADO',
+        terminal: sale.terminal || 'CAJA_01',
+        totalUSD: b.totalVentaUSD,
+        totalVES: b.totalVentaVES,
+        baseUSD: b.baseImponibleUSD,
+        exentoUSD: b.exentoUSD,
+        ivaUSD: b.ivaUSD,
+        metodos: b.metodosList
+      };
+    });
+
+    if (exportType === 'excel') {
+      const wsData = [
+        ['REPORTE CONSOLIDADO DE TODAS LAS TRANSACCIONES (FACTURAS FISCALES Y NOTAS DE ENTREGA)'],
+        [`EMPRESA: ${companyName}`, `RIF: ${companyRif}`, periodText],
+        [`Tasa de Referencia: Bs ${tasaDia ? tasaDia.toFixed(2) : 'N/A'}`],
+        [],
+        ['N°', 'TIPO DOCUMENTO', 'FECHA / HORA', 'N° COMPROBANTE', 'RIF / CI CLIENTE', 'CLIENTE / RAZÓN SOCIAL', 'TERMINAL', 'BASE GRAVABLE 16% ($)', 'EXENTO / NO GRAVABLE ($)', 'IVA 16% ($)', 'TOTAL VENTA ($)', 'TOTAL EN BS (VES)', 'FORMA DE PAGO'],
+        ...dataRows.map(r => [
+          r.num, r.tipoDoc, r.fecha, r.documento, r.rif, r.cliente, r.terminal,
+          r.baseUSD, r.exentoUSD, r.ivaUSD, r.totalUSD, r.totalVES, r.metodos
+        ]),
+        [],
+        ['TOTALES:', '', '', '', '', '', '', totalBaseUSD, totalExentoUSD, totalIvaUSD, totalGeneralUSD, totalGeneralVES, '']
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'TodasTransacciones');
+      XLSX.writeFile(wb, `Consolidado_Todas_Transacciones_${startDate}_al_${endDate}.xlsx`);
+      return;
+    }
+
+    // PDF HTML Print
+    const rowsHtml = dataRows.map(r => {
+      const isFiscal = r.tipoDoc === 'FACTURA FISCAL';
+      const badgeStyle = isFiscal 
+        ? 'background: #dbeafe; color: #1e40af; border: 1px solid #bfdbfe;' 
+        : 'background: #fef3c7; color: #92400e; border: 1px solid #fde68a;';
+      return `
+        <tr>
+          <td class="text-center font-mono">${r.num}</td>
+          <td class="text-center font-bold" style="font-size: 8px;"><span style="padding: 2px 5px; border-radius: 4px; ${badgeStyle}">${r.tipoDoc}</span></td>
+          <td class="text-center font-mono" style="font-size: 8.5px;">${r.fecha}</td>
+          <td class="text-center font-bold font-mono">${r.documento}</td>
+          <td style="font-family: monospace; font-size: 8.5px;">${r.rif}</td>
+          <td style="text-transform: uppercase;">${r.cliente}</td>
+          <td class="text-right font-bold text-indigo font-mono">$${r.baseUSD.toFixed(2)}</td>
+          <td class="text-right font-mono">$${r.exentoUSD.toFixed(2)}</td>
+          <td class="text-right font-mono font-bold text-emerald">$${r.ivaUSD.toFixed(2)}</td>
+          <td class="text-right font-bold font-mono">$${r.totalUSD.toFixed(2)}</td>
+          <td class="text-right font-mono">Bs ${r.totalVES.toFixed(2)}</td>
+          <td style="font-size: 8px;">${r.metodos}</td>
+        </tr>
+      `;
+    }).join('');
+
+    const tableHtml = `
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th style="width: 3%;">N°</th>
+            <th style="width: 10%;">TIPO DOC</th>
+            <th style="width: 9%;">FECHA</th>
+            <th style="width: 10%;">COMPROBANTE</th>
+            <th style="width: 8%;">RIF / CI</th>
+            <th style="width: 18%;">CLIENTE</th>
+            <th class="text-right" style="width: 9%;">GRAVABLE ($)</th>
+            <th class="text-right" style="width: 8%;">EXENTO ($)</th>
+            <th class="text-right" style="width: 7%;">IVA ($)</th>
+            <th class="text-right" style="width: 8%;">TOTAL ($)</th>
+            <th class="text-right" style="width: 9%;">TOTAL (BS)</th>
+            <th style="width: 9%;">PAGO</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${dataRows.length === 0 ? '<tr><td colspan="12" class="text-center" style="padding: 20px;">Sin transacciones registradas en el período seleccionado.</td></tr>' : rowsHtml}
+        </tbody>
+        <tfoot>
+          <tr style="background: #0f172a; color: #fff; font-weight: bold; font-family: monospace;">
+            <td colspan="6" class="text-right" style="padding: 7px;">TOTAL GENERAL DEL NEGOCIO (FISCALES + NOTAS DE ENTREGA):</td>
+            <td class="text-right" style="padding: 7px; color: #818cf8;">$${totalBaseUSD.toFixed(2)}</td>
+            <td class="text-right" style="padding: 7px;">$${totalExentoUSD.toFixed(2)}</td>
+            <td class="text-right text-emerald" style="padding: 7px; color: #4ade80;">$${totalIvaUSD.toFixed(2)}</td>
+            <td class="text-right" style="padding: 7px;">$${totalGeneralUSD.toFixed(2)}</td>
+            <td class="text-right" style="padding: 7px;">Bs ${totalGeneralVES.toFixed(2)}</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    `;
+
+    const summaryHtml = `
+      <div class="report-summary-grid">
+        <div class="summary-card">
+          <h4>VOLUMEN GLOBAL DE TRANSACCIONES</h4>
+          <p><strong>Total Operaciones Registradas:</strong> ${dataRows.length} comprobantes</p>
+          <p><strong>Facturas Fiscales:</strong> ${countFiscal} docs ($${totalFiscalUSD.toFixed(2)} USD)</p>
+          <p><strong>Notas de Entrega:</strong> ${countNE} docs ($${totalNEUSD.toFixed(2)} USD)</p>
+          <p><strong>Total Facturado (USD):</strong> $${totalGeneralUSD.toFixed(2)} USD</p>
+          <p><strong>Total Facturado en Bolívares:</strong> Bs ${totalGeneralVES.toFixed(2)} VES</p>
+        </div>
+        <div class="summary-card">
+          <h4>CONSOLIDADO TRIBUTARIO (GRAVABLE / EXENTO)</h4>
+          <p><strong>Total Base Gravable (16%):</strong> $${totalBaseUSD.toFixed(2)} USD</p>
+          <p><strong>Total Monto No Gravable (Exento 0%):</strong> $${totalExentoUSD.toFixed(2)} USD</p>
+          <p><strong>Total IVA Recaudado / Estimado:</strong> $${totalIvaUSD.toFixed(2)} USD</p>
+          <p><strong>Proporción Fiscal vs Nota de Entrega:</strong> ${totalGeneralUSD > 0 ? ((totalFiscalUSD / totalGeneralUSD) * 100).toFixed(1) : '0'}% Fiscal / ${totalGeneralUSD > 0 ? ((totalNEUSD / totalGeneralUSD) * 100).toFixed(1) : '0'}% Notas</p>
+        </div>
+        <div class="summary-card">
+          <h4>AUDITORÍA GENERAL Y GESTIÓN</h4>
+          <p>Consolidado completo para conciliación de ingresos totales de caja con inventario y declaraciones fiscales.</p>
+          <p style="margin-top: 20px; border-top: 1px dashed #94a3b8; padding-top: 8px;">
+            <strong>Revisado y Conforme:</strong> ___________________________
+          </p>
+        </div>
+      </div>
+    `;
+
+    printReportHtml('CONSOLIDADO TOTAL DE TRANSACCIONES (FISCALES Y NOTAS DE ENTREGA)', tableHtml, summaryHtml, 'landscape');
+  };
+
   return (
     <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5 z-50 text-slate-800 animate-in fade-in duration-200 font-sans">
       <div className="bg-white border border-indigo-200 rounded-2xl overflow-hidden w-full max-w-5xl shadow-2xl flex flex-col max-h-[90vh]">
@@ -1412,7 +1945,7 @@ export default function CentroReportesModal({
                   <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-150">
                     <button
                       type="button"
-                      onClick={(e) => { e.stopPropagation(); generateLibroVentas('pdf'); }}
+                      onClick={(e) => { e.stopPropagation(); generateResumenFacturasFiscales('pdf'); }}
                       className="bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
                     >
                       <Printer className="w-3.5 h-3.5" />
@@ -1420,7 +1953,103 @@ export default function CentroReportesModal({
                     </button>
                     <button
                       type="button"
-                      onClick={(e) => { e.stopPropagation(); generateLibroVentas('excel'); }}
+                      onClick={(e) => { e.stopPropagation(); generateResumenFacturasFiscales('excel'); }}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      Excel (.xlsx)
+                    </button>
+                  </div>
+                </div>
+
+                {/* 5. Ventas por Notas de Entrega */}
+                <div 
+                  onClick={() => setSelectedReport('notas_entrega')}
+                  className={`p-4 rounded-xl border transition-all cursor-pointer flex flex-col justify-between space-y-3 ${
+                    selectedReport === 'notas_entrega'
+                      ? 'bg-indigo-50/70 border-indigo-500 shadow-md ring-1 ring-indigo-500'
+                      : 'bg-white border-slate-200 hover:border-amber-400 hover:bg-amber-50/20'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700 shrink-0">
+                      <Package className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-black uppercase text-slate-900 flex items-center gap-1.5">
+                          📦 Ventas por Notas de Entrega (Gravable / Exento)
+                        </h4>
+                        <span className="text-[9px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded">
+                          Control No Fiscal
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                        Desglose exhaustivo de transacciones por Nota de Entrega: montos gravables (16%), no gravables (exentos), IVA estimado y formas de cobro.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-150">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); generateReporteNotasEntrega('pdf'); }}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      Imprimir / PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); generateReporteNotasEntrega('excel'); }}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      Excel (.xlsx)
+                    </button>
+                  </div>
+                </div>
+
+                {/* 6. Consolidado Todas las Transacciones */}
+                <div 
+                  onClick={() => setSelectedReport('todas_transacciones')}
+                  className={`p-4 rounded-xl border transition-all cursor-pointer flex flex-col justify-between space-y-3 ${
+                    selectedReport === 'todas_transacciones'
+                      ? 'bg-indigo-50/70 border-indigo-500 shadow-md ring-1 ring-indigo-500'
+                      : 'bg-white border-slate-200 hover:border-indigo-300 hover:bg-slate-50/50'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-teal-100 flex items-center justify-center text-teal-700 shrink-0">
+                      <Layers className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-black uppercase text-slate-900 flex items-center gap-1.5">
+                          📑 Consolidado Global de Todas las Transacciones
+                        </h4>
+                        <span className="text-[9px] bg-indigo-100 text-indigo-800 font-bold px-1.5 py-0.5 rounded">
+                          Universo Total
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                        Auditoría global del 100% de operaciones del negocio discriminando Facturas Fiscales vs Notas de Entrega, bases imponibles y formas de cobro.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-150">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); generateReporteTodasTransacciones('pdf'); }}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      Imprimir / PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); generateReporteTodasTransacciones('excel'); }}
                       className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
                     >
                       <FileSpreadsheet className="w-3.5 h-3.5" />
@@ -1602,6 +2231,102 @@ export default function CentroReportesModal({
                     </button>
                   </div>
                 </div>
+
+                {/* 9. Ventas por Notas de Entrega (en pestaña de Gestión) */}
+                <div 
+                  onClick={() => setSelectedReport('notas_entrega')}
+                  className={`p-4 rounded-xl border transition-all cursor-pointer flex flex-col justify-between space-y-3 ${
+                    selectedReport === 'notas_entrega'
+                      ? 'bg-indigo-50/70 border-indigo-500 shadow-md ring-1 ring-indigo-500'
+                      : 'bg-white border-slate-200 hover:border-amber-400 hover:bg-amber-50/20'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700 shrink-0">
+                      <Package className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-black uppercase text-slate-900 flex items-center gap-1.5">
+                          📦 Ventas por Notas de Entrega (Gravable / Exento)
+                        </h4>
+                        <span className="text-[9px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded">
+                          Control No Fiscal
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                        Desglose exhaustivo de transacciones por Nota de Entrega: montos gravables (16%), no gravables (exentos), IVA estimado y formas de cobro.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-150">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); generateReporteNotasEntrega('pdf'); }}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      Imprimir / PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); generateReporteNotasEntrega('excel'); }}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      Excel (.xlsx)
+                    </button>
+                  </div>
+                </div>
+
+                {/* 10. Consolidado Todas las Transacciones (en pestaña de Gestión) */}
+                <div 
+                  onClick={() => setSelectedReport('todas_transacciones')}
+                  className={`p-4 rounded-xl border transition-all cursor-pointer flex flex-col justify-between space-y-3 ${
+                    selectedReport === 'todas_transacciones'
+                      ? 'bg-indigo-50/70 border-indigo-500 shadow-md ring-1 ring-indigo-500'
+                      : 'bg-white border-slate-200 hover:border-indigo-300 hover:bg-slate-50/50'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-teal-100 flex items-center justify-center text-teal-700 shrink-0">
+                      <Layers className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-black uppercase text-slate-900 flex items-center gap-1.5">
+                          📑 Consolidado Global de Todas las Transacciones
+                        </h4>
+                        <span className="text-[9px] bg-indigo-100 text-indigo-800 font-bold px-1.5 py-0.5 rounded">
+                          Universo Total
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                        Auditoría global del 100% de operaciones del negocio discriminando Facturas Fiscales vs Notas de Entrega, bases imponibles y formas de cobro.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-150">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); generateReporteTodasTransacciones('pdf'); }}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      Imprimir / PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); generateReporteTodasTransacciones('excel'); }}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      Excel (.xlsx)
+                    </button>
+                  </div>
+                </div>
               </>
             )}
 
@@ -1611,8 +2336,8 @@ export default function CentroReportesModal({
 
         {/* FOOTER */}
         <div className="bg-slate-100 px-6 py-3.5 border-t border-slate-200 flex justify-between items-center shrink-0 text-xs">
-          <span className="text-slate-500">
-            {filteredSales.length} facturas encontradas en el rango seleccionado
+          <span className="text-slate-600 font-medium">
+            <strong>{filteredSales.length}</strong> transacciones en el rango: <strong className="text-slate-800">{filteredSales.filter(s => getTipoDocumento(s) === 'FACTURA_FISCAL').length} fiscales</strong>, <strong className="text-amber-800">{filteredSales.filter(s => getTipoDocumento(s) === 'NOTA_ENTREGA').length} notas de entrega</strong>.
           </span>
 
           <button
