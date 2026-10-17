@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS Configuracion_Empresa (
     moneda_ticket_default VARCHAR(10) DEFAULT 'USD',
     mostrar_fotos_en_buscador_pos BOOLEAN DEFAULT TRUE,
     tamano_foto_buscador_pos VARCHAR(20) DEFAULT 'mediana',
-    limite_productos_buscador_pos INT DEFAULT 5
+    limite_productos_buscador_pos INT DEFAULT 5,
+    biometrico_config TEXT
 );
 
 -- ==========================================
@@ -48,6 +49,9 @@ CREATE TABLE IF NOT EXISTS Usuarios (
     nombre VARCHAR(100) NOT NULL,
     rol VARCHAR(100) NOT NULL,
     permisos TEXT,
+    huella_template TEXT,
+    huella_dedo VARCHAR(50),
+    huella_fecha VARCHAR(50),
     estado VARCHAR(10) DEFAULT 'Activo' CHECK (estado IN ('Activo', 'Inactivo')),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

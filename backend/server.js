@@ -60,7 +60,7 @@ import path from 'path';
 import fs from 'fs';
 import zlib from 'zlib';
 import net from 'net';
-import { execSync } from 'child_process';
+import { execSync, execFile } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -2038,6 +2038,343 @@ app.post('/api/users/login-check', async (req, res) => {
   }
 });
 
+// Cross-correlation ridge orientation matcher for FPE1 biometric templates (0 - 100)
+function matchFingerprintTemplates(tpl1Str, tpl2Str) {
+  if (!tpl1Str || !tpl2Str) return 0;
+  const clean1 = String(tpl1Str).trim();
+  const clean2 = String(tpl2Str).trim();
+
+  if (clean1 === clean2) return 100;
+  if (!clean1.startsWith('FPE1_') || !clean2.startsWith('FPE1_')) {
+    if (clean1.length > 50 && clean2.length > 50 && clean1.substring(10, 80) === clean2.substring(10, 80)) return 95;
+    return 0;
+  }
+
+  try {
+    const decodeB64 = (s) => {
+      const b64 = s.substring(5).replace(/_/g, '/').replace(/-/g, '+');
+      return Buffer.from(b64, 'base64');
+    };
+
+    const b1 = decodeB64(clean1);
+    const b2 = decodeB64(clean2);
+    if (b1.length < 1204 || b2.length < 1204) return 0;
+
+    const COLS = 20, ROWS = 30;
+    const cx1 = b1[2], cy1 = b1[3];
+    const cx2 = b2[2], cy2 = b2[3];
+    const baseDx = cx1 - cx2;
+    const baseDy = cy1 - cy2;
+
+    let maxScore = 0;
+    for (let dy = baseDy - 3; dy <= baseDy + 3; dy++) {
+      for (let dx = baseDx - 3; dx <= baseDx + 3; dx++) {
+        let sumSim = 0, totalW = 0, count = 0;
+        for (let r1 = 0; r1 < ROWS; r1++) {
+          const r2 = r1 - dy;
+          if (r2 < 0 || r2 >= ROWS) continue;
+          for (let c1 = 0; c1 < COLS; c1++) {
+            const c2 = c1 - dx;
+            if (c2 < 0 || c2 >= COLS) continue;
+            const idx1 = r1 * COLS + c1;
+            const idx2 = r2 * COLS + c2;
+            const o1 = b1[4 + idx1];
+            const o2 = b2[4 + idx2];
+            if (o1 >= 250 || o2 >= 250) continue;
+
+            const th1 = (o1 / 250) * Math.PI;
+            const th2 = (o2 / 250) * Math.PI;
+            let dTh = Math.abs(th1 - th2);
+            if (dTh > Math.PI * 0.5) dTh = Math.PI - dTh;
+
+            const sim = Math.cos(2 * dTh);
+            const w = (b1[604 + idx1] + b2[604 + idx2]) / 200;
+            sumSim += sim * w;
+            totalW += w;
+            count++;
+          }
+        }
+        if (count >= 25 && totalW > 0) {
+          const score = (sumSim / totalW) * 100;
+          if (score > maxScore) maxScore = score;
+        }
+      }
+    }
+    return Math.round(maxScore);
+  } catch (_) {
+    return 0;
+  }
+}
+
+// Biometric login endpoint (Futronic FS88 & Multi-Vendor Biometric Scanner)
+app.post('/api/users/login-biometric', async (req, res) => {
+  try {
+    const { template, matchedUserId, terminal } = req.body;
+    cleanExpiredSessions();
+
+    const users = await getUsers();
+    let user = null;
+
+    if (matchedUserId) {
+      user = users.find(u => String(u.id) === String(matchedUserId));
+    }
+    
+    if (!user && template) {
+      // 1:N Biometric Search across all enrolled active users
+      let bestUser = null;
+      let bestScore = 0;
+      for (const u of users) {
+        if (!u.huella_template || u.estado === 'Inactivo') continue;
+        const score = matchFingerprintTemplates(template, u.huella_template);
+        if (score > bestScore) {
+          bestScore = score;
+          bestUser = u;
+        }
+      }
+      if (bestUser && bestScore >= 58) {
+        user = bestUser;
+      }
+    }
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Huella dactilar no reconocida. Coloque su huella nuevamente o ingrese con su clave.'
+      });
+    }
+
+    if (user.estado === 'Inactivo') {
+      return res.status(403).json({
+        success: false,
+        message: 'Su usuario se encuentra inactivo. Consulte al Administrador.'
+      });
+    }
+
+    const isAdmin = user.rol && user.rol.toLowerCase() === 'administrador';
+    const activeTerm = terminal || 'LOCAL';
+
+    // Check company configuration for multi-session policy
+    const companyConfig = await getCompanyConfig();
+    const permitirMultisesion = companyConfig.permitir_multisesion !== false;
+
+    if (!permitirMultisesion && !isAdmin) {
+      for (const [key, existing] of activeSessions.entries()) {
+        const isSameUser = String(existing.userId) === String(user.id) || (existing.username && existing.username.toLowerCase() === user.usuario.toLowerCase());
+        const isDifferentTerminal = existing.terminal && existing.terminal !== activeTerm;
+        const isHeartbeatFresh = (Date.now() - existing.lastHeartbeat) < 45000;
+
+        if (isSameUser && isDifferentTerminal && isHeartbeatFresh) {
+          return res.status(403).json({
+            success: false,
+            isBlocked: true,
+            message: 'Usuario conectado actualmente en otro equipo (Multisesión deshabilitada en Configuración).'
+          });
+        }
+      }
+    }
+
+    // Clear previous shift closure eviction & forced logout events
+    if (user.id) {
+      userShiftClosureEvents.delete(`user_${user.id}`);
+      userShiftClosureEvents.delete(`user_${parseInt(user.id)}`);
+      userShiftClosureEvents.delete(`id_${user.id}`);
+      userShiftClosureEvents.delete(`id_${parseInt(user.id)}`);
+      forcedLogoutUsers.delete(String(user.id));
+    }
+    if (user.usuario) {
+      userShiftClosureEvents.delete(`name_${user.usuario.toLowerCase().trim()}`);
+      forcedLogoutUsers.delete(String(user.usuario).toLowerCase().trim());
+    }
+    if (user.nombre) {
+      userShiftClosureEvents.delete(`name_${user.nombre.toLowerCase().trim()}`);
+    }
+
+    const sessionKey = `${user.id}_${activeTerm}`;
+    activeSessions.set(sessionKey, {
+      userId: user.id,
+      username: user.usuario,
+      nombre: user.nombre || user.usuario,
+      rol: user.rol,
+      terminal: activeTerm,
+      loginTime: new Date().toISOString(),
+      lastHeartbeat: Date.now()
+    });
+
+    res.json({ success: true, user, method: 'BIOMETRIC' });
+  } catch (err) {
+    console.error('Error en /api/users/login-biometric:', err.message);
+    res.status(500).json({ success: false, message: 'Error interno del servidor en autenticación biométrica.' });
+  }
+});
+
+// Master Pass Biometric Authorization endpoint
+app.post('/api/config/verify-master-biometric', async (req, res) => {
+  try {
+    const { template, matchedUserId } = req.body;
+    const users = await getUsers();
+    let adminUser = null;
+
+    if (matchedUserId) {
+      adminUser = users.find(u => String(u.id) === String(matchedUserId));
+    }
+
+    if (!adminUser && template) {
+      let bestAdm = null;
+      let bestScore = 0;
+      const admins = users.filter(u => ((u.rol || '').toLowerCase() === 'administrador' || (u.usuario || '').toLowerCase() === 'admin') && u.estado !== 'Inactivo' && u.huella_template);
+      for (const adm of admins) {
+        const score = matchFingerprintTemplates(template, adm.huella_template);
+        if (score > bestScore) {
+          bestScore = score;
+          bestAdm = adm;
+        }
+      }
+      if (bestAdm && bestScore >= 58) {
+        adminUser = bestAdm;
+      }
+    }
+
+    if (!adminUser) {
+      return res.status(401).json({ success: false, message: 'Huella no corresponde a ningún supervisor o administrador autorizado.' });
+    }
+
+    const isAdmin = (adminUser.rol || '').toLowerCase() === 'administrador' || (adminUser.usuario || '').toLowerCase() === 'admin';
+    if (!isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: `El usuario "${adminUser.nombre || adminUser.usuario}" no tiene rango de Administrador para autorizar esta acción.`
+      });
+    }
+
+    if (adminUser.estado === 'Inactivo') {
+      return res.status(403).json({ success: false, message: 'El usuario Administrador se encuentra inactivo.' });
+    }
+
+    res.json({
+      success: true,
+      message: `Autorizado exitosamente por huella de ${adminUser.nombre || adminUser.usuario}.`,
+      user: { id: adminUser.id, usuario: adminUser.usuario, nombre: adminUser.nombre, rol: adminUser.rol }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message || 'Error al validar huella Master Pass.' });
+  }
+});
+
+function isBiometricUsbDeviceConnected() {
+  if (process.platform !== 'win32') return false;
+  try {
+    const out = execSync('reg query "HKLM\\SYSTEM\\CurrentControlSet\\Enum\\USB" /s /f "Futronic"', { timeout: 1200 }).toString();
+    if (out.includes('Futronic')) return true;
+  } catch (_) { }
+
+  try {
+    const out = execSync('powershell -NoProfile -Command "Get-PnpDevice -FriendlyName \'*Futronic*\' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Status"', { timeout: 3500 }).toString();
+    return out.includes('OK');
+  } catch (_) {
+    return false;
+  }
+}
+
+// Device status endpoint
+app.get('/api/biometric/device-status', async (req, res) => {
+  try {
+    const companyConfig = await getCompanyConfig();
+    const bioCfg = companyConfig.biometrico || {
+      habilitado: false,
+      proveedor: 'FUTRONIC',
+      puertoServicio: 8088,
+      urlServicio: 'http://127.0.0.1:8088'
+    };
+
+    let serviceOnline = false;
+    let detectionMethod = 'NONE';
+
+    // 1. First check if physical USB scanner is detected in Windows PnP system
+    const usbConnected = isBiometricUsbDeviceConnected();
+    if (usbConnected) {
+      serviceOnline = true;
+      detectionMethod = 'WINDOWS_USB_NATIVE';
+    }
+
+    // 2. Also check if local vendor bridge service is listening on port (e.g. 8088)
+    if (!serviceOnline) {
+      try {
+        const port = bioCfg.puertoServicio || 8088;
+        const tester = new Promise((resolve) => {
+          const s = new net.Socket();
+          s.setTimeout(350);
+          s.once('connect', () => { s.destroy(); resolve(true); });
+          s.once('timeout', () => { s.destroy(); resolve(false); });
+          s.once('error', () => { s.destroy(); resolve(false); });
+          s.connect(port, '127.0.0.1');
+        });
+        serviceOnline = await tester;
+        if (serviceOnline) detectionMethod = 'LOCAL_PORT_SERVICE';
+      } catch (_) { }
+    }
+
+    res.json({
+      success: true,
+      enabled: !!bioCfg.habilitado,
+      config: bioCfg,
+      serviceOnline,
+      detectionMethod,
+      message: serviceOnline
+        ? `Lector ${bioCfg.proveedor || 'Futronic FS88'} conectado y operativo en Windows.`
+        : `Lector biométrico no detectado. Verifique la conexión USB o ingrese con clave.`
+    });
+  } catch (err) {
+    res.json({ success: false, enabled: false, serviceOnline: false, error: err.message });
+  }
+});
+
+// Hardware Biometric Fingerprint Capture endpoint
+let activeCaptureChild = null;
+
+app.post('/api/biometric/capture', async (req, res) => {
+  try {
+    const { timeout = 7 } = req.body;
+    const exePath = path.join(__dirname, 'futronic_capture.exe');
+    if (!fs.existsSync(exePath)) {
+      return res.status(500).json({ success: false, error: 'Controlador de captura nativo futronic_capture.exe no encontrado.' });
+    }
+
+    // Terminate any previous in-flight capture cleanly so USB device is immediately free
+    if (activeCaptureChild && !activeCaptureChild.killed) {
+      try {
+        activeCaptureChild.kill();
+      } catch (_) {}
+      activeCaptureChild = null;
+      await new Promise(r => setTimeout(r, 150));
+    }
+
+    const child = execFile(exePath, [String(timeout)], { cwd: __dirname, timeout: (timeout + 5) * 1000 }, (error, stdout, stderr) => {
+      if (activeCaptureChild === child) activeCaptureChild = null;
+      const output = (stdout || '').trim();
+      if (!output) {
+        return res.json({ success: false, error: error?.message || 'Error durante la captura biométrica.' });
+      }
+      try {
+        const json = JSON.parse(output);
+        return res.json(json);
+      } catch (parseErr) {
+        return res.json({ success: false, error: output });
+      }
+    });
+
+    activeCaptureChild = child;
+
+    res.on('close', () => {
+      if (!res.writableEnded && child && !child.killed) {
+        try { child.kill(); } catch (_) {}
+      }
+      if (activeCaptureChild === child) activeCaptureChild = null;
+    });
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
+});
+
 // Logout endpoint
 app.post('/api/users/logout', (req, res) => {
   const { userId, username, terminal } = req.body;
@@ -2179,6 +2516,19 @@ app.post('/api/users/force-logout/:target', (req, res) => {
 
 app.post('/api/users', async (req, res) => {
   try {
+    const { huella_template } = req.body;
+    if (huella_template && typeof huella_template === 'string' && huella_template.trim().length > 0) {
+      const allUsers = await getUsers();
+      for (const u of allUsers) {
+        if (!u.huella_template) continue;
+        const score = matchFingerprintTemplates(huella_template, u.huella_template);
+        if (score >= 58) {
+          return res.status(400).json({
+            error: `Conflicto biométrico: Esta huella dactilar ya se encuentra asignada al usuario "${u.nombre}" (@${u.usuario}). No se permite duplicidad de huellas.`
+          });
+        }
+      }
+    }
     const saved = await saveUser(req.body);
     res.json(saved);
   } catch (err) {
@@ -2188,6 +2538,20 @@ app.post('/api/users', async (req, res) => {
 
 app.put('/api/users/:id', async (req, res) => {
   try {
+    const { huella_template } = req.body;
+    const targetId = String(req.params.id);
+    if (huella_template && typeof huella_template === 'string' && huella_template.trim().length > 0) {
+      const allUsers = await getUsers();
+      for (const u of allUsers) {
+        if (String(u.id) === targetId || !u.huella_template) continue;
+        const score = matchFingerprintTemplates(huella_template, u.huella_template);
+        if (score >= 58) {
+          return res.status(400).json({
+            error: `Conflicto biométrico: Esta huella dactilar ya se encuentra asignada al usuario "${u.nombre}" (@${u.usuario}). No se permite duplicidad de huellas.`
+          });
+        }
+      }
+    }
     const updated = await updateUser(req.params.id, req.body);
     res.json(updated);
   } catch (err) {

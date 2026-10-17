@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { CompanyConfig, User, Role, PrinterConfig, ScaleConfig } from '../types';
+import { CompanyConfig, User, Role, PrinterConfig, ScaleConfig, BiometricConfig } from '../types';
 import { 
   Save, CheckCircle2, Users, HardDrive, Cpu, 
   Trash2, Edit, Plus, Download, Upload, ShieldAlert,
@@ -7,11 +7,12 @@ import {
   LogOut, Unplug, KeyRound, Lock, Eye, EyeOff, DollarSign,
   RefreshCw, Unlock, RotateCcw, AlertTriangle, Cloud, Tag, Layers, Percent, Calendar,
   Smartphone, Copy, Play, Terminal, QrCode, Check, Send, Sparkles, HelpCircle, ExternalLink,
-  Landmark, Star
+  Landmark, Star, Fingerprint
 } from 'lucide-react';
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr, formatBs } from '../utils';
 import { MasterPassModal } from './MasterPassModal';
+import { checkBiometricReaderStatus, captureBiometricFingerprint, matchFingerprintTemplates } from '../biometricHelper';
 
 interface ConfiguracionEmpresaProps {
   config: CompanyConfig;
@@ -746,6 +747,9 @@ export default function ConfiguracionEmpresa({
     rol: 'vendedor',
     clave: 'admin*',
     estado: 'Activo' as 'Activo' | 'Inactivo',
+    huella_template: undefined as string | undefined,
+    huella_dedo: 'Índice Derecho' as string,
+    huella_fecha: undefined as string | undefined,
     permisos: {} as any
   });
 
@@ -842,6 +846,30 @@ export default function ConfiguracionEmpresa({
       rangoControlHasta: '00-00005000'
     };
   });
+
+  // 3.1 Biometric Fingerprint Reader (Futronic FS88 & Multi-Reader)
+  const [biometricConfig, setBiometricConfig] = useState<BiometricConfig>(() => {
+    const fromCompany = config?.biometrico;
+    const fromLocal = localStorage.getItem('pos_biometric_config');
+    const parsedLocal = fromLocal ? JSON.parse(fromLocal) : null;
+    return parsedLocal || fromCompany || {
+      habilitado: false,
+      proveedor: 'FUTRONIC',
+      modoAutenticacion: '1_A_N',
+      puertoServicio: 8088,
+      urlServicio: 'http://127.0.0.1:8088',
+      umbralSeguridad: 'NORMAL',
+      permitirFallbackClave: true,
+      autorizarMasterPass: true,
+      autoEscanearEnLogin: true
+    };
+  });
+  const [bioTesting, setBioTesting] = useState(false);
+  const [bioTestResult, setBioTestResult] = useState<{ online: boolean; message: string; device?: string } | null>(null);
+  const [bioScanning, setBioScanning] = useState(false);
+  const [bioScanFeedback, setBioScanFeedback] = useState<string>('');
+  const [userBioScanning, setUserBioScanning] = useState(false);
+  const [userBioFeedback, setUserBioFeedback] = useState<string>('');
 
   // 4. Tab Base de Datos - States & Google Drive Cloud Backup
   const [dbConfirmWord, setDbConfirmWord] = useState('');
@@ -1260,6 +1288,9 @@ export default function ConfiguracionEmpresa({
       rol: initialRol,
       clave: '',
       estado: 'Activo',
+      huella_template: undefined,
+      huella_dedo: 'Índice Derecho',
+      huella_fecha: undefined,
       permisos: initialPerms
     });
     setShowUserModal(true);
@@ -1279,6 +1310,9 @@ export default function ConfiguracionEmpresa({
       rol: u.rol?.toUpperCase() || 'ADMINISTRADOR',
       clave: u.clave || '',
       estado: u.estado,
+      huella_template: u.huella_template || undefined,
+      huella_dedo: u.huella_dedo || 'Índice Derecho',
+      huella_fecha: u.huella_fecha || undefined,
       permisos: isUserAdmin ? getFullAdminPermissions() : (u.permisos || getEmptyPerms())
     });
     setShowUserModal(true);
@@ -1304,8 +1338,29 @@ export default function ConfiguracionEmpresa({
         rol: userForm.rol?.toUpperCase(),
         clave: userForm.clave,
         estado: userForm.estado,
+        huella_template: userForm.huella_template || null,
+        huella_dedo: userForm.huella_dedo || null,
+        huella_fecha: userForm.huella_fecha || null,
         permisos: isUserAdmin ? getFullAdminPermissions() : userForm.permisos
       };
+
+      // Validación de duplicidad biométrica previa al envío
+      if (body.huella_template) {
+        const duplicateUser = userList.find(u => {
+          if (!u.huella_template) return false;
+          if (editingUser && String(u.id) === String(editingUser.id)) return false;
+          return matchFingerprintTemplates(body.huella_template, u.huella_template) >= 58;
+        });
+        if (duplicateUser) {
+          setErrorMsg(`Conflicto biométrico: Esta huella ya está asignada a "${duplicateUser.nombre}" (@${duplicateUser.usuario}).`);
+          showAlert(
+            `⛔ No se puede guardar el usuario:\n\nLa huella dactilar seleccionada coincide con la del usuario:\n👤 ${duplicateUser.nombre} (@${duplicateUser.usuario})\n\nCada operador debe poseer una huella única para fines de auditoría y cuadre de caja.`,
+            'Conflicto Biométrico',
+            'error'
+          );
+          return;
+        }
+      }
 
       const url = editingUser ? getApiUrl(`/users/${editingUser.id}`) : getApiUrl('/users');
       const method = editingUser ? 'PUT' : 'POST';
@@ -1617,6 +1672,135 @@ export default function ConfiguracionEmpresa({
     localStorage.setItem('pos_printer_config', JSON.stringify(printerConfig));
     localStorage.setItem('pos_scale_config', JSON.stringify(scaleConfig));
     showToast('Configuraciones de periféricos (básculas/impresoras) guardadas con éxito.');
+  };
+
+  const handleSaveBiometricConfig = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    localStorage.setItem('pos_biometric_config', JSON.stringify(biometricConfig));
+    const updatedCompanyConfig = {
+      ...config,
+      biometrico: biometricConfig
+    };
+    onSaveConfig(updatedCompanyConfig);
+    try {
+      await fetch(getApiUrl('/config'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedCompanyConfig)
+      });
+    } catch (_) {}
+    showToast('✅ Configuración del Lector Biométrico guardada exitosamente.');
+  };
+
+  const handleTestBiometricConnection = async () => {
+    setBioTesting(true);
+    setBioTestResult(null);
+    try {
+      const res = await checkBiometricReaderStatus(biometricConfig, true);
+      setBioTestResult(res);
+      if (res.online) {
+        if (!biometricConfig.habilitado) {
+          setBiometricConfig(prev => ({ ...prev, habilitado: true }));
+        }
+        showToast('🟢 Lector biométrico detectado y en línea.');
+        showAlert(
+          `🟢 ¡Lector Detectado Exitosamente!\n\nDispositivo: ${res.device || 'Futronic FS88 USB'}\nEstado: Operativo en Windows (USB PnP Plug & Play)\n\nEl sensor óptico está listo para capturar huellas en vivo. Recuerde pulsar el botón "GUARDAR CONFIGURACIÓN BIOMÉTRICA".`,
+          'Lector Biométrico Operativo',
+          'success'
+        );
+      } else {
+        showAlert(res.message, 'Diagnóstico Lector Biométrico', 'warning');
+      }
+    } catch (err: any) {
+      setBioTestResult({ online: false, message: err.message || 'Error al conectar' });
+      showAlert('Error comprobando servicio biométrico: ' + err.message, 'Fallo de Conexión', 'error');
+    } finally {
+      setBioTesting(false);
+    }
+  };
+
+  const handleTestBiometricScan = async () => {
+    setBioScanning(true);
+    setBioScanFeedback('☝️ Coloque su huella dactilar sobre el cristal del lector...');
+    try {
+      const result = await captureBiometricFingerprint(biometricConfig, 6000);
+      if (result.success && result.template) {
+        setBioScanFeedback(`✅ ¡Huella capturada con éxito! Calidad: ${result.quality || 95}%`);
+        showAlert(`✅ Huella dactilar leída exitosamente por el sensor.\n\nCalidad de imagen: ${result.quality || 95}%\nTamaño template: ${Math.round(result.template.length)} caracteres ANSI-378.`, 'Sensor Operativo', 'success');
+      } else {
+        setBioScanFeedback(`⚠️ ${result.error || 'No se detectó huella en el sensor'}`);
+        showAlert(result.error || 'No se pudo leer la huella. Asegúrese de colocar el dedo plano sobre el cristal.', 'Lectura no completada', 'warning');
+      }
+    } catch (err: any) {
+      setBioScanFeedback(`❌ Error: ${err.message}`);
+      showAlert(err.message, 'Error de Captura', 'error');
+    } finally {
+      setBioScanning(false);
+    }
+  };
+
+  const handleCaptureUserFingerprint = async () => {
+    setUserBioScanning(true);
+    setUserBioFeedback('☝️ Coloque el dedo seleccionado sobre el lector de huellas...');
+    try {
+      const result = await captureBiometricFingerprint(biometricConfig, 7000);
+      if (result.success && result.template) {
+        // Validación de huella duplicada contra usuarios ya registrados
+        const duplicateUser = userList.find(u => {
+          if (!u.huella_template) return false;
+          if (editingUser && String(u.id) === String(editingUser.id)) return false;
+          const score = matchFingerprintTemplates(result.template, u.huella_template);
+          return score >= 58;
+        });
+
+        if (duplicateUser) {
+          setUserBioFeedback(`⛔ Huella duplicada: Ya asignada a "${duplicateUser.nombre}" (@${duplicateUser.usuario})`);
+          showAlert(
+            `⛔ CONFLICTO BIOMÉTRICO DETECTADO\n\nEsta huella dactilar ya se encuentra registrada en el sistema y asignada al usuario:\n\n👤 ${duplicateUser.nombre} (@${duplicateUser.usuario})\nRol: ${duplicateUser.rol || 'Operador'}\n\nPor políticas de seguridad, trazabilidad de caja y auditoría fiscal, NO se permite que dos operadores compartan la misma huella dactilar. Por favor verifique el usuario o utilice otro dedo.`,
+            'Huella Ya Asignada',
+            'error'
+          );
+          return;
+        }
+
+        setUserForm(prev => ({
+          ...prev,
+          huella_template: result.template,
+          huella_fecha: new Date().toLocaleDateString('es-VE')
+        }));
+        setUserBioFeedback(`✅ ¡Huella capturada exitosamente! Calidad: ${result.quality || 95}%`);
+        showToast('✅ Huella dactilar capturada y asociada al usuario.');
+      } else {
+        setUserBioFeedback(`⚠️ ${result.error || 'No se detectó huella en el lector.'}`);
+        showAlert(result.error || 'No se pudo leer la huella. Asegúrese de que el lector esté conectado y el dedo limpio.', 'Captura No Completada', 'warning');
+      }
+    } catch (err: any) {
+      setUserBioFeedback(`❌ ${err.message}`);
+      showAlert(err.message, 'Error de Captura Biométrica', 'error');
+    } finally {
+      setUserBioScanning(false);
+    }
+  };
+
+  const handleClearUserFingerprint = () => {
+    setUserForm(prev => ({
+      ...prev,
+      huella_template: undefined,
+      huella_fecha: undefined
+    }));
+    setUserBioFeedback('');
+    showToast('Huella dactilar desvinculada del usuario.');
+  };
+
+  const handleSimulateUserFingerprint = () => {
+    const mockTpl = `ANSI378_SAMPLE_${userForm.usuario || 'USER'}_${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+    setUserForm(prev => ({
+      ...prev,
+      huella_template: mockTpl,
+      huella_fecha: new Date().toLocaleDateString('es-VE') + ' (Simulada)'
+    }));
+    setUserBioFeedback('ℹ️ Huella simulada asignada correctamente para pruebas de laboratorio.');
+    showToast('Huella de prueba asignada al usuario.');
   };
 
   const handleSaveFiscalPrinter = (e: React.FormEvent) => {
@@ -2639,6 +2823,7 @@ export default function ConfiguracionEmpresa({
                         <th className="py-2.5 px-3">Nombre Completo</th>
                         <th className="py-2.5 px-3">Rol / Perfil</th>
                         <th className="py-2.5 px-3">Estado</th>
+                        <th className="py-2.5 px-3">Huella / Biometría</th>
                         <th className="py-2.5 px-3 text-right">Acciones</th>
                       </tr>
                     </thead>
@@ -2654,6 +2839,18 @@ export default function ConfiguracionEmpresa({
                             }`}>
                               {u.estado}
                             </span>
+                          </td>
+                          <td className="py-3 px-3">
+                            {u.huella_template ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-teal-100 text-teal-800 border border-teal-200" title={`Huella registrada: ${u.huella_dedo || 'Dedo'} (${u.huella_fecha || 'Registrada'})`}>
+                                <Fingerprint className="w-3 h-3 text-teal-600" />
+                                <span>{u.huella_dedo || 'Registrada'}</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-medium bg-slate-100 text-slate-400">
+                                <span>Sin Huella</span>
+                              </span>
+                            )}
                           </td>
                           <td className="py-3 px-3 text-right flex justify-end gap-2">
                             {(!isAdmin && (u.usuario?.toLowerCase() === 'admin' || u.rol?.toUpperCase() === 'ADMINISTRADOR')) ? (
@@ -3982,6 +4179,254 @@ export default function ConfiguracionEmpresa({
                 </button>
               </div>
             </form>
+
+            {/* THIRD CARD: MULTI-VENDOR BIOMETRIC FINGERPRINT SCANNER (FUTRONIC FS88 & COMPATIBLE) */}
+            <div className="col-span-1 lg:col-span-2 bg-white border border-slate-200 p-6 rounded-2xl shadow-sm space-y-6 text-slate-800">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-150 pb-4 gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-xl bg-teal-50 border border-teal-200 flex items-center justify-center text-teal-600 shadow-sm flex-shrink-0">
+                    <Fingerprint className="w-6 h-6 animate-pulse" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
+                      <span>Lector Biométrico de Huellas Dactilares</span>
+                      <span className="bg-teal-100 text-teal-800 text-[10px] font-black px-2 py-0.5 rounded font-mono">
+                        FUTRONIC FS88 / MULTI-MARCA
+                      </span>
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Permite a los operadores y supervisores iniciar sesión y autorizar ventas colocando su huella en el sensor USB.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-600">Servicio Biométrico:</span>
+                  <button
+                    type="button"
+                    onClick={() => setBiometricConfig(prev => ({ ...prev, habilitado: !prev.habilitado }))}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                      biometricConfig.habilitado
+                        ? 'bg-emerald-600 text-white shadow-sm hover:bg-emerald-700'
+                        : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                    }`}
+                  >
+                    <Fingerprint className="w-4 h-4" />
+                    <span>{biometricConfig.habilitado ? 'HABILITADO' : 'DESACTIVADO'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Informative alert banner about zero-lag and multi-terminal LAN */}
+              <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-xl text-xs space-y-1.5">
+                <div className="font-bold text-slate-700 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-teal-600" />
+                  <span>Arquitectura Desacoplada y Contingencia Automática:</span>
+                </div>
+                <p className="text-slate-600 leading-relaxed text-[11.5px]">
+                  Si el lector está conectado por USB en esta terminal, el cajero puede tocar el cristal para ingresar al instante. Si la estación de cobro (o caja secundaria en red LAN) <strong>no posee lector físico conectado</strong>, el sistema opera con normalidad permitiendo el acceso tradicional mediante <strong>Usuario y Contraseña</strong> sin demoras ni bloqueos.
+                </p>
+              </div>
+
+              {/* Grid of Settings */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {/* 1. Proveedor */}
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Marca / Proveedor del Lector
+                  </label>
+                  <select
+                    value={biometricConfig.proveedor}
+                    onChange={(e) => setBiometricConfig(prev => ({ ...prev, proveedor: e.target.value as any }))}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 font-bold focus:bg-white focus:border-teal-600 focus:outline-none"
+                  >
+                    <option value="FUTRONIC">Futronic FS88 / FS80 USB (Recomendado)</option>
+                    <option value="DIGITAL_PERSONA">DigitalPersona U.are.U (4500 / 5160 / 5300)</option>
+                    <option value="SECUGEN">SecuGen Hamster (Pro 20 / Plus / IV)</option>
+                    <option value="ZKTECO">ZKTeco USB (Live20R / SLK20R)</option>
+                    <option value="UNIVERSAL_REST">Universal REST / WebSocket Bridge</option>
+                  </select>
+                </div>
+
+                {/* 2. Modo de Autenticación */}
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Modo de Autenticación en Caja
+                  </label>
+                  <select
+                    value={biometricConfig.modoAutenticacion}
+                    onChange={(e) => setBiometricConfig(prev => ({ ...prev, modoAutenticacion: e.target.value as any }))}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 font-bold focus:bg-white focus:border-teal-600 focus:outline-none"
+                  >
+                    <option value="1_A_N">Identificación 1:N (Automática: solo poner huella)</option>
+                    <option value="1_A_1">Verificación 1:1 (Ingresar usuario y confirmar con huella)</option>
+                  </select>
+                </div>
+
+                {/* 3. Umbral de Seguridad */}
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Umbral de Minucias / Tolerancia
+                  </label>
+                  <select
+                    value={biometricConfig.umbralSeguridad}
+                    onChange={(e) => setBiometricConfig(prev => ({ ...prev, umbralSeguridad: e.target.value as any }))}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 font-bold focus:bg-white focus:border-teal-600 focus:outline-none"
+                  >
+                    <option value="NORMAL">Normal (Recomendado para cajas de cobro rápido)</option>
+                    <option value="ALTO">Alto (Mayor rigurosidad)</option>
+                    <option value="ESTRICTO">Estricto (Máxima precisión biométrica)</option>
+                  </select>
+                </div>
+
+                {/* 4. Puerto de Servicio Local */}
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    Puerto del Servicio / Driver Local
+                  </label>
+                  <input
+                    type="number"
+                    value={biometricConfig.puertoServicio}
+                    onChange={(e) => setBiometricConfig(prev => ({ ...prev, puertoServicio: parseInt(e.target.value) || 8088 }))}
+                    placeholder="8088"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 font-mono font-bold focus:bg-white focus:border-teal-600 focus:outline-none"
+                  />
+                </div>
+
+                {/* 5. URL Servicio Local */}
+                <div className="md:col-span-2">
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
+                    URL Puente del Servicio Local (Bridge SDK)
+                  </label>
+                  <input
+                    type="text"
+                    value={biometricConfig.urlServicio}
+                    onChange={(e) => setBiometricConfig(prev => ({ ...prev, urlServicio: e.target.value }))}
+                    placeholder="http://127.0.0.1:8088"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-xs text-slate-800 font-mono font-bold focus:bg-white focus:border-teal-600 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Switches de Políticas Biométricas */}
+              <div className="border-t border-slate-150 pt-4 space-y-3">
+                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Políticas de Autenticación</h3>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Fallback Clave */}
+                  <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl flex items-center justify-between">
+                    <div>
+                      <span className="text-xs text-slate-800 font-bold block">Fallback a Clave</span>
+                      <span className="text-[10px] text-slate-500 block">Permitir clave tradicional</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setBiometricConfig(prev => ({ ...prev, permitirFallbackClave: !prev.permitirFallbackClave }))}
+                      className={`px-3 py-1 text-xs font-black rounded-lg transition-all ${
+                        biometricConfig.permitirFallbackClave
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-rose-500 text-white'
+                      }`}
+                    >
+                      {biometricConfig.permitirFallbackClave ? 'SÍ' : 'NO'}
+                    </button>
+                  </div>
+
+                  {/* MasterPass */}
+                  <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl flex items-center justify-between">
+                    <div>
+                      <span className="text-xs text-slate-800 font-bold block">Huella MasterPass</span>
+                      <span className="text-[10px] text-slate-500 block">Autorizar con huella supervisor</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setBiometricConfig(prev => ({ ...prev, autorizarMasterPass: !prev.autorizarMasterPass }))}
+                      className={`px-3 py-1 text-xs font-black rounded-lg transition-all ${
+                        biometricConfig.autorizarMasterPass
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-rose-500 text-white'
+                      }`}
+                    >
+                      {biometricConfig.autorizarMasterPass ? 'SÍ' : 'NO'}
+                    </button>
+                  </div>
+
+                  {/* Auto-escanear en Login */}
+                  <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl flex items-center justify-between">
+                    <div>
+                      <span className="text-xs text-slate-800 font-bold block">Auto-Escanear Login</span>
+                      <span className="text-[10px] text-slate-500 block">Sensor listo al iniciar</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setBiometricConfig(prev => ({ ...prev, autoEscanearEnLogin: !prev.autoEscanearEnLogin }))}
+                      className={`px-3 py-1 text-xs font-black rounded-lg transition-all ${
+                        biometricConfig.autoEscanearEnLogin
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-rose-500 text-white'
+                      }`}
+                    >
+                      {biometricConfig.autoEscanearEnLogin ? 'SÍ' : 'NO'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Status and Diagnostics Box */}
+              {(bioTestResult || bioScanFeedback) && (
+                <div className={`p-4 rounded-xl border text-xs font-sans space-y-1 ${
+                  bioTestResult?.online || bioScanFeedback.includes('✅')
+                    ? 'bg-teal-50 border-teal-200 text-teal-850'
+                    : 'bg-amber-50 border-amber-250 text-amber-900'
+                }`}>
+                  {bioTestResult && (
+                    <div className="font-bold flex items-center gap-1.5">
+                      <span className={`w-2.5 h-2.5 rounded-full ${bioTestResult.online ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`}></span>
+                      <span>Diagnóstico de Conexión: {bioTestResult.message}</span>
+                    </div>
+                  )}
+                  {bioScanFeedback && (
+                    <div className="font-mono text-[11px] mt-1">
+                      {bioScanFeedback}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="pt-2 flex flex-col sm:flex-row items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleTestBiometricConnection}
+                  disabled={bioTesting}
+                  className="w-full sm:w-auto bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-2.5 px-4 rounded-xl text-xs transition-all border border-slate-300 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  title="Verifica si el servicio local del lector está respondiendo en el puerto configurado"
+                >
+                  <RefreshCw className={`w-4 h-4 text-slate-600 ${bioTesting ? 'animate-spin' : ''}`} />
+                  <span>{bioTesting ? 'Verificando...' : 'PROBAR COMUNICACIÓN'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleTestBiometricScan}
+                  disabled={bioScanning}
+                  className="w-full sm:w-auto bg-teal-50 hover:bg-teal-100 text-teal-800 font-bold py-2.5 px-4 rounded-xl text-xs transition-all border border-teal-250 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  title="Activa el sensor del lector para realizar una lectura de prueba"
+                >
+                  <Fingerprint className={`w-4 h-4 text-teal-600 ${bioScanning ? 'animate-pulse' : ''}`} />
+                  <span>{bioScanning ? 'Leyendo sensor...' : 'PROBAR CAPTURA EN VIVO'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSaveBiometricConfig}
+                  className="w-full sm:w-auto bg-teal-700 hover:bg-teal-800 text-white font-bold py-2.5 px-5 rounded-xl text-xs transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>GUARDAR CONFIGURACIÓN BIOMETRÍA</span>
+                </button>
+              </div>
+            </div>
 
           </div>
         )}
@@ -6450,6 +6895,102 @@ export default function ConfiguracionEmpresa({
                         ))
                       }
                     </select>
+                  </div>
+                </div>
+
+                {/* BIOMETRIC FINGERPRINT ENROLLMENT FOR THIS USER */}
+                <div className="bg-gradient-to-br from-teal-50/70 via-emerald-50/40 to-slate-50 border border-teal-200/80 rounded-xl p-3.5 space-y-3 font-sans">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-extrabold text-teal-900 uppercase flex items-center gap-1.5">
+                      <Fingerprint className="w-4 h-4 text-teal-600" />
+                      <span>Huella Dactilar del Operador</span>
+                    </span>
+                    {userForm.huella_template ? (
+                      <span className="bg-emerald-100 text-emerald-800 text-[9.5px] font-black px-2 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1">
+                        <Check className="w-3 h-3 text-emerald-600" /> ENROLADA
+                      </span>
+                    ) : (
+                      <span className="bg-slate-100 text-slate-500 text-[9.5px] font-medium px-2 py-0.5 rounded-full">
+                        NO REGISTRADA
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-[10px] text-slate-600 leading-tight">
+                    Asocie la huella dactilar de este usuario usando el lector <strong>{biometricConfig.proveedor || 'Futronic FS88'}</strong> para permitirle iniciar sesión con un toque.
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-700 block mb-1 uppercase">Dedo Registrado</label>
+                      <select
+                        value={userForm.huella_dedo || 'Índice Derecho'}
+                        onChange={(e) => setUserForm(prev => ({ ...prev, huella_dedo: e.target.value }))}
+                        className="w-full bg-white border border-teal-200 rounded-lg p-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-teal-500"
+                      >
+                        <option value="Índice Derecho">Índice Derecho</option>
+                        <option value="Pulgar Derecho">Pulgar Derecho</option>
+                        <option value="Medio Derecho">Medio Derecho</option>
+                        <option value="Índice Izquierdo">Índice Izquierdo</option>
+                        <option value="Pulgar Izquierdo">Pulgar Izquierdo</option>
+                        <option value="Otro">Otro Dedo</option>
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col justify-end">
+                      {userForm.huella_template ? (
+                        <div className="text-[10.5px] font-mono text-emerald-800 bg-white/80 p-2 rounded-lg border border-emerald-200 truncate">
+                          <span className="font-bold">Registrada:</span> {userForm.huella_fecha || 'Activa'}
+                        </div>
+                      ) : (
+                        <div className="text-[10.5px] text-slate-400 italic bg-white/60 p-2 rounded-lg border border-slate-200 text-center">
+                          Sensor en espera
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {userBioFeedback && (
+                    <div className={`p-2.5 rounded-lg text-[11px] font-mono ${
+                      userBioFeedback.includes('✅')
+                        ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                        : 'bg-amber-50 text-amber-800 border border-amber-200'
+                    }`}>
+                      {userBioFeedback}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleCaptureUserFingerprint}
+                      disabled={userBioScanning}
+                      className="bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                    >
+                      <Fingerprint className={`w-3.5 h-3.5 ${userBioScanning ? 'animate-pulse' : ''}`} />
+                      <span>{userBioScanning ? 'Escaneando...' : (userForm.huella_template ? 'Recapturar Huella' : 'Capturar Huella')}</span>
+                    </button>
+
+                    {userForm.huella_template ? (
+                      <button
+                        type="button"
+                        onClick={handleClearUserFingerprint}
+                        className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-250 px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                        <span>Desvincular</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleSimulateUserFingerprint}
+                        className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
+                        title="Asigna una plantilla de prueba para verificar el flujo biométrico sin conectar el lector USB"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-slate-500" />
+                        <span>Simular Huella</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 

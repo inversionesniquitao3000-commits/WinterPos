@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Lock, Eye, EyeOff, ShieldCheck, X, KeyRound } from 'lucide-react';
+import { Lock, Eye, EyeOff, ShieldCheck, X, KeyRound, Fingerprint } from 'lucide-react';
 import { getApiBaseUrl } from '../utils';
+import { checkBiometricReaderStatus, captureBiometricFingerprint } from '../biometricHelper';
 
 interface MasterPassModalProps {
   isOpen: boolean;
@@ -17,11 +18,25 @@ export const MasterPassModal: React.FC<MasterPassModalProps> = ({
   const [showPass, setShowPass] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
+  const [bioOnline, setBioOnline] = useState(false);
+  const [bioLoading, setBioLoading] = useState(false);
+  const [bioFeedback, setBioFeedback] = useState('');
 
   useEffect(() => {
     if (isOpen) {
       setPass('');
       setErrorMsg('');
+      setBioFeedback('');
+      // Check if biometric reader is active on this terminal
+      try {
+        const savedConfig = localStorage.getItem('pos_biometric_config');
+        const bioCfg = savedConfig ? JSON.parse(savedConfig) : undefined;
+        checkBiometricReaderStatus(bioCfg).then(res => {
+          setBioOnline(res.online);
+        }).catch(() => setBioOnline(false));
+      } catch (_) {
+        setBioOnline(false);
+      }
     }
   }, [isOpen]);
 
@@ -66,6 +81,45 @@ export const MasterPassModal: React.FC<MasterPassModalProps> = ({
       setErrorMsg('Error de conexión con el servidor.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleBiometricAuth = async () => {
+    setBioLoading(true);
+    setBioFeedback('☝️ Coloque su huella de Administrador en el sensor...');
+    setErrorMsg('');
+
+    try {
+      const savedConfig = localStorage.getItem('pos_biometric_config');
+      const bioCfg = savedConfig ? JSON.parse(savedConfig) : undefined;
+      const scanRes = await captureBiometricFingerprint(bioCfg, 6500);
+
+      if (!scanRes.success || !scanRes.template) {
+        setBioFeedback('');
+        setErrorMsg(scanRes.error || 'No se detectó huella en el sensor.');
+        return;
+      }
+
+      setBioFeedback('🔍 Validando privilegios de Administrador...');
+      const res = await fetch(`${getApiBaseUrl()}/config/verify-master-biometric`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ template: scanRes.template })
+      });
+
+      const data = await res.json().catch(() => ({ success: false, message: 'Error del servidor.' }));
+      if (res.ok && data.success) {
+        setBioFeedback('✅ Autorización concedida');
+        onSuccess();
+      } else {
+        setBioFeedback('');
+        setErrorMsg(data.message || 'Huella no autorizada para funciones de Administrador.');
+      }
+    } catch (err: any) {
+      setBioFeedback('');
+      setErrorMsg('Error de comunicación con el lector o servidor.');
+    } finally {
+      setBioLoading(false);
     }
   };
 
@@ -159,6 +213,26 @@ export const MasterPassModal: React.FC<MasterPassModalProps> = ({
               )}
             </button>
           </div>
+
+          {/* Alternativa de Autorización con Huella Dactilar */}
+          {bioOnline && (
+            <div className="pt-3 border-t border-slate-800 space-y-2">
+              <button
+                type="button"
+                onClick={handleBiometricAuth}
+                disabled={loading || bioLoading}
+                className="w-full bg-gradient-to-r from-teal-700 via-emerald-600 to-teal-800 hover:from-teal-600 hover:to-emerald-500 active:scale-[0.99] text-white py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider font-sans transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Fingerprint className={`w-4 h-4 text-teal-200 ${bioLoading ? 'animate-pulse' : ''}`} />
+                <span>{bioLoading ? 'Leyendo Huella...' : 'Autorizar con Huella de Admin'}</span>
+              </button>
+              {bioFeedback && (
+                <p className="text-[10.5px] text-teal-300 font-sans text-center animate-pulse">
+                  {bioFeedback}
+                </p>
+              )}
+            </div>
+          )}
         </form>
 
         {/* Footer ESC hint */}

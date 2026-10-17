@@ -54,6 +54,18 @@ export interface Client {
   aplica_precio_costo?: boolean;
 }
 
+export interface BiometricConfig {
+  habilitado: boolean;
+  proveedor: 'FUTRONIC' | 'DIGITAL_PERSONA' | 'SECUGEN' | 'ZKTECO' | 'UNIVERSAL_REST';
+  modoAutenticacion: '1_A_N' | '1_A_1';
+  puertoServicio: number;
+  urlServicio: string;
+  umbralSeguridad: 'NORMAL' | 'ALTO' | 'ESTRICTO';
+  permitirFallbackClave: boolean;
+  autorizarMasterPass: boolean;
+  autoEscanearEnLogin: boolean;
+}
+
 export interface User {
   id: number;
   usuario: string;
@@ -61,6 +73,9 @@ export interface User {
   rol: string; // custom role name or core roles
   estado: 'Activo' | 'Inactivo';
   clave?: string;
+  huella_template?: string;
+  huella_dedo?: string;
+  huella_fecha?: string;
   permisos?: {
     [modulo: string]: {
       ver: boolean;
@@ -199,6 +214,7 @@ export interface CompanyConfig {
   providenciaSeniat?: string;
   rangoControlDesde?: string;
   rangoControlHasta?: string;
+  biometrico?: BiometricConfig;
 }
 
 export interface CompanyDocument {

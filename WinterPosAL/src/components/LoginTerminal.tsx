@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
-import { Shield, Network, Eye, EyeOff, ShieldCheck, Headphones, MessageCircle, Mail, Copy, Check, ExternalLink, X, LifeBuoy } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { Shield, Network, Eye, EyeOff, ShieldCheck, Headphones, MessageCircle, Mail, Copy, Check, ExternalLink, X, LifeBuoy, Fingerprint } from 'lucide-react';
 import { User, CompanyConfig } from '../types';
 import { useDialog } from '../hooks/useDialog';
 import { getApiBaseUrl } from '../utils';
 import { APP_VERSION } from '../version';
+import { checkBiometricReaderStatus, captureBiometricFingerprint, matchFingerprintAgainstUsers } from '../biometricHelper';
 
 interface LoginTerminalProps {
   onLoginSuccess: (user: User) => void;
@@ -52,6 +53,139 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
   const [isLoading, setIsLoading] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
   const [copiedType, setCopiedType] = useState<'whatsapp' | 'email' | null>(null);
+
+  // Biometric Fingerprint states (Futronic FS88 & Multi-Vendor)
+  const bioConfig = useMemo(() => {
+    if (companyConfig?.biometrico) return companyConfig.biometrico;
+    try {
+      const saved = localStorage.getItem('pos_biometric_config');
+      return saved ? JSON.parse(saved) : undefined;
+    } catch (_) { return undefined; }
+  }, [JSON.stringify(companyConfig?.biometrico)]);
+
+  const [bioStatus, setBioStatus] = useState<{ available: boolean; online: boolean; device: string; message: string }>({
+    available: true,
+    online: true,
+    device: 'Futronic FS88 USB',
+    message: 'Lector biométrico en línea'
+  });
+  const [isBioScanning, setIsBioScanning] = useState(false);
+  const [bioFeedback, setBioFeedback] = useState('');
+
+  const isAutoWatchingRef = useRef(false);
+  const isMountedRef = useRef(true);
+  const loginCompletedRef = useRef(false);
+
+  // Auto-scan Live Touch Watcher: listens for finger touch on sensor without needing to click the button
+  const startLiveBiometricWatcher = async () => {
+    if (isAutoWatchingRef.current) return;
+    isAutoWatchingRef.current = true;
+
+    // Small initial delay so inputs can focus smoothly first
+    await new Promise(r => setTimeout(r, 600));
+
+    while (isMountedRef.current && !loginCompletedRef.current) {
+      let scanSuccess = false;
+      try {
+        const result = await captureBiometricFingerprint(bioConfig, 15000);
+        scanSuccess = !!result.success;
+
+        if (!isMountedRef.current || loginCompletedRef.current) break;
+
+        if (result.success && result.template) {
+          setBioFeedback('🔍 Verificando identidad biométrica...');
+
+          // Match against enrolled users
+          const matchedLocal = matchFingerprintAgainstUsers(result.template, systemUsers);
+
+          // Call backend
+          const terminalSaved = localStorage.getItem('pos_terminal_name') || 'LOCAL';
+          try {
+            const res = await fetch(`${getApiBaseUrl()}/users/login-biometric`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                template: result.template,
+                matchedUserId: matchedLocal.user?.id,
+                terminal: terminalSaved
+              })
+            });
+
+            if (res.ok) {
+              const data = await res.json();
+              if (data.success && data.user) {
+                loginCompletedRef.current = true;
+                setBioFeedback(`✅ Bienvenido, ${data.user.nombre || data.user.usuario}`);
+                onLoginSuccess(data.user);
+                break;
+              }
+            } else {
+              const errData = await res.json().catch(() => ({}));
+              if (errData.message) {
+                setErrorMsg(errData.message);
+                setBioFeedback('');
+              }
+            }
+          } catch (backendErr) {
+            console.warn('Backend login-biometric unreachable, testing local match:', backendErr);
+          }
+
+          // Fallback to local match if server was unreachable
+          if (matchedLocal.user && !loginCompletedRef.current) {
+            if (matchedLocal.user.estado === 'Inactivo') {
+              setErrorMsg('Su usuario se encuentra inactivo. Consulte al Administrador.');
+              setBioFeedback('');
+            } else {
+              loginCompletedRef.current = true;
+              setBioFeedback(`✅ Bienvenido, ${matchedLocal.user.nombre || matchedLocal.user.usuario}`);
+              onLoginSuccess(matchedLocal.user);
+              break;
+            }
+          } else if (!loginCompletedRef.current) {
+            setErrorMsg('Huella no reconocida en el sistema. Intente de nuevo o use su clave.');
+            setBioFeedback('');
+          }
+        }
+      } catch (_) {
+        // Sensor timeout pass, continue
+      }
+
+      // Rest between sensing passes (fast if success, backoff if sensor offline/timeout)
+      const restMs = scanSuccess ? 300 : 2500;
+      if (isMountedRef.current && !loginCompletedRef.current) {
+        await new Promise(r => setTimeout(r, restMs));
+      }
+    }
+
+    isAutoWatchingRef.current = false;
+  };
+
+  // Silent non-blocking probe of local biometric reader on terminal mount (runs ONCE on mount)
+  useEffect(() => {
+    isMountedRef.current = true;
+    loginCompletedRef.current = false;
+
+    const probeBiometrics = async () => {
+      try {
+        const res = await checkBiometricReaderStatus(bioConfig, true);
+        if (isMountedRef.current) {
+          setBioStatus(res);
+          if (res.online) {
+            setErrorMsg(prev => (prev.includes('lector') || prev.includes('huella') ? '' : prev));
+            if (bioConfig?.autoEscanearEnLogin !== false) {
+              startLiveBiometricWatcher();
+            }
+          }
+        }
+      } catch (_) {
+        // Fails silently, absolutely zero impact on normal startup
+      }
+    };
+    probeBiometrics();
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const handleCopy = (text: string, type: 'whatsapp' | 'email') => {
     if (navigator.clipboard) {
@@ -308,6 +442,7 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
       return;
     }
 
+    loginCompletedRef.current = true;
     setIsLoading(true);
 
     try {
@@ -355,6 +490,82 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
       }
     } else {
       setErrorMsg('Usuario o contraseña incorrectos. Verifique sus credenciales.');
+    }
+  };
+
+  const handleBiometricLogin = async () => {
+    if (isBioScanning) return;
+    setIsBioScanning(true);
+    setBioFeedback('☝️ Coloque su huella dactilar sobre el sensor del lector...');
+    setErrorMsg('');
+
+    try {
+      const result = await captureBiometricFingerprint(bioConfig, 6500);
+      if (!result.success || !result.template) {
+        setBioFeedback('');
+        setErrorMsg(result.error || 'No se detectó huella dactilar en el sensor. Puede ingresar con usuario y contraseña.');
+        setTimeout(() => setErrorMsg(prev => prev.includes('huella') || prev.includes('lector') ? '' : prev), 5000);
+        return;
+      }
+
+      setBioFeedback('🔍 Verificando identidad biométrica...');
+
+      // 1. First attempt fast local match against enrolled systemUsers
+      const matchedLocal = matchFingerprintAgainstUsers(result.template, systemUsers);
+
+      // 2. Call backend login-biometric
+      const terminalSaved = localStorage.getItem('pos_terminal_name') || 'LOCAL';
+      try {
+        const res = await fetch(`${getApiBaseUrl()}/users/login-biometric`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            template: result.template,
+            matchedUserId: matchedLocal.user?.id,
+            terminal: terminalSaved
+          })
+        });
+
+            if (res.ok) {
+              const data = await res.json();
+              if (data.success && data.user) {
+                loginCompletedRef.current = true;
+                setBioFeedback('✅ Acceso biométrico concedido');
+                onLoginSuccess(data.user);
+                return;
+              }
+            } else {
+          const errData = await res.json().catch(() => ({}));
+          if (errData.message) {
+            setErrorMsg(errData.message);
+            setBioFeedback('');
+            return;
+          }
+        }
+      } catch (backendErr) {
+        console.warn('Backend login-biometric unreachable, testing local match:', backendErr);
+      }
+
+      // 3. Fallback to local match if server endpoint was unreachable
+      if (matchedLocal.user) {
+        if (matchedLocal.user.estado === 'Inactivo') {
+          setErrorMsg('Su usuario se encuentra inactivo. Consulte al Administrador.');
+          setBioFeedback('');
+          return;
+        }
+        setBioFeedback('✅ Acceso biométrico concedido');
+        onLoginSuccess(matchedLocal.user);
+        return;
+      }
+
+      setErrorMsg('Huella no reconocida en el sistema. Ingrese con usuario y contraseña.');
+      setBioFeedback('');
+    } catch (err: any) {
+      console.error('Error durante autenticación biométrica:', err);
+      setErrorMsg('Fallo de comunicación con el sensor biométrico. Ingrese con clave.');
+      setBioFeedback('');
+    } finally {
+      setIsBioScanning(false);
     }
   };
 
@@ -514,6 +725,34 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
                     'Iniciar sesión'
                   )}
                 </button>
+
+                {/* BIOMETRIC LOGIN BUTTON (FUTRONIC FS88 / MULTI-VENDOR) */}
+                {bioConfig?.habilitado && (
+                  <div className="pt-2 border-t border-white/10 space-y-1.5">
+                    <button
+                      type="button"
+                      onClick={handleBiometricLogin}
+                      disabled={isBioScanning || isLoading}
+                      className="w-full bg-gradient-to-r from-teal-700 via-emerald-600 to-teal-800 hover:from-teal-600 hover:to-emerald-500 active:scale-[0.99] text-white py-2.5 rounded text-xs font-black tracking-wider transition-all duration-200 border border-teal-400/40 flex items-center justify-center gap-2 font-sans shadow-lg cursor-pointer"
+                    >
+                      <Fingerprint className={`w-4 h-4 text-teal-200 ${isBioScanning ? 'animate-pulse' : ''}`} />
+                      <span>{isBioScanning ? 'Leyendo huella...' : 'Ingresar con Huella Dactilar'}</span>
+                    </button>
+                    {bioFeedback && (
+                      <p className="text-[10px] text-teal-300 font-sans text-center animate-pulse">
+                        {bioFeedback}
+                      </p>
+                    )}
+                    <div className="flex items-center justify-center gap-1.5 text-[10px] font-mono">
+                      <span className={`w-2 h-2 rounded-full ${bioStatus.online ? 'bg-emerald-400 shadow-sm shadow-emerald-400/80' : 'bg-slate-400'}`}></span>
+                      <span className={bioStatus.online ? 'text-emerald-300 font-bold' : 'text-slate-400'}>
+                        {bioStatus.online 
+                          ? `${bioStatus.device || 'Futronic FS88 USB'} en línea • Toque el sensor para ingresar` 
+                          : 'Lector biométrico no detectado (Use usuario y contraseña)'}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <form className="space-y-3 bg-[#0a2f58] p-4 rounded border border-yellow-500/20" onSubmit={handleSaveConfig}>
@@ -796,6 +1035,34 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
                   'Iniciar sesión'
                 )}
               </button>
+
+              {/* BIOMETRIC LOGIN BUTTON (DESKTOP MODE) */}
+              {bioConfig?.habilitado && (
+                <div className="pt-1.5 border-t border-white/10 space-y-1">
+                  <button
+                    type="button"
+                    onClick={handleBiometricLogin}
+                    disabled={isBioScanning || isLoading}
+                    className="w-full bg-gradient-to-r from-teal-700 via-emerald-600 to-teal-800 hover:from-teal-600 hover:to-emerald-500 active:scale-[0.99] text-white py-2 rounded text-xs font-black tracking-wider transition-all duration-200 border border-teal-400/40 flex items-center justify-center gap-2 font-sans shadow-md cursor-pointer"
+                  >
+                    <Fingerprint className={`w-3.5 h-3.5 text-teal-200 ${isBioScanning ? 'animate-pulse' : ''}`} />
+                    <span>{isBioScanning ? 'Leyendo huella...' : 'Ingresar con Huella'}</span>
+                  </button>
+                  {bioFeedback && (
+                    <p className="text-[9.5px] text-teal-300 font-sans text-center animate-pulse">
+                      {bioFeedback}
+                    </p>
+                  )}
+                  <div className="flex items-center justify-center gap-1.5 text-[9.5px] font-mono">
+                    <span className={`w-1.5 h-1.5 rounded-full ${bioStatus.online ? 'bg-emerald-400 shadow-sm shadow-emerald-400/80' : 'bg-slate-400'}`}></span>
+                    <span className={bioStatus.online ? 'text-emerald-300 font-bold' : 'text-slate-400'}>
+                      {bioStatus.online 
+                        ? `${bioStatus.device || 'Futronic'} listo (Toque el sensor)` 
+                        : 'Lector no detectado (Use clave)'}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <form className="space-y-2 bg-[#0d345e] p-3 rounded border border-yellow-500/30 shadow-inner" onSubmit={handleSaveConfig}>

@@ -187,6 +187,9 @@ try {
     ALTER TABLE IF EXISTS Abonos DROP CONSTRAINT IF EXISTS abonos_metodo_pago_check;
     ALTER TABLE IF EXISTS Abonos ADD COLUMN IF NOT EXISTS caja_id INT REFERENCES Cajas_Apertura_Cierre(id) ON DELETE SET NULL;
     ALTER TABLE IF EXISTS Usuarios ADD COLUMN IF NOT EXISTS clave VARCHAR(100) DEFAULT 'admin*';
+    ALTER TABLE IF EXISTS Usuarios ADD COLUMN IF NOT EXISTS huella_template TEXT;
+    ALTER TABLE IF EXISTS Usuarios ADD COLUMN IF NOT EXISTS huella_dedo VARCHAR(50);
+    ALTER TABLE IF EXISTS Usuarios ADD COLUMN IF NOT EXISTS huella_fecha VARCHAR(50);
     ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS tasa_cambio NUMERIC(12, 4) DEFAULT 1.00;
     ALTER TABLE IF EXISTS Ventas ALTER COLUMN tasa_cambio DROP NOT NULL;
     ALTER TABLE IF EXISTS Ventas ALTER COLUMN tasa_cambio SET DEFAULT 1.00;
@@ -239,6 +242,7 @@ try {
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS mostrar_fotos_en_buscador_pos BOOLEAN DEFAULT TRUE;
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS tamano_foto_buscador_pos VARCHAR(20) DEFAULT 'mediana';
     ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS limite_productos_buscador_pos INT DEFAULT 5;
+    ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS biometrico_config TEXT;
     ALTER TABLE IF EXISTS Tasas_Cambio ADD COLUMN IF NOT EXISTS fecha_actualizacion VARCHAR(50);
     ALTER TABLE IF EXISTS Tasas_Cambio ADD COLUMN IF NOT EXISTS tasa_vuelto NUMERIC(12, 4) DEFAULT 0;
     ALTER TABLE IF EXISTS Tasas_Cambio ADD COLUMN IF NOT EXISTS tasa_oficial NUMERIC(12, 4) DEFAULT 0;
@@ -574,6 +578,12 @@ export async function getCompanyConfig() {
       const res = await pool.query('SELECT * FROM Configuracion_Empresa ORDER BY id DESC LIMIT 1');
       if (res.rowCount > 0) {
         const row = res.rows[0];
+        let bioCfg = null;
+        if (row.biometrico_config) {
+          try {
+            bioCfg = typeof row.biometrico_config === 'string' ? JSON.parse(row.biometrico_config) : row.biometrico_config;
+          } catch (_) { }
+        }
         _cachedCompanyConfig = {
           rif: row.rif,
           nombre_comercio: row.nombre_comercio,
@@ -589,7 +599,8 @@ export async function getCompanyConfig() {
           tamano_foto_buscador_pos: row.tamano_foto_buscador_pos || 'mediana',
           limite_productos_buscador_pos: parseInt(row.limite_productos_buscador_pos, 10) || 5,
           logo_url: row.logo_url || '',
-          moneda_ticket_default: row.moneda_ticket_default || 'USD'
+          moneda_ticket_default: row.moneda_ticket_default || 'USD',
+          biometrico: bioCfg
         };
         _cachedCompanyConfigTimestamp = now;
         return _cachedCompanyConfig;
@@ -617,7 +628,8 @@ export async function getCompanyConfig() {
     tamano_foto_buscador_pos: c.tamano_foto_buscador_pos || 'mediana',
     limite_productos_buscador_pos: parseInt(c.limite_productos_buscador_pos, 10) || 5,
     logo_url: c.logo_url || '',
-    moneda_ticket_default: c.moneda_ticket_default || 'USD'
+    moneda_ticket_default: c.moneda_ticket_default || 'USD',
+    biometrico: c.biometrico || null
   };
   _cachedCompanyConfigTimestamp = now;
   return _cachedCompanyConfig;
@@ -634,21 +646,23 @@ export async function saveCompanyConfig(config) {
       const tFotoPos = config.tamano_foto_buscador_pos || 'mediana';
       const lProdPos = parseInt(config.limite_productos_buscador_pos, 10) || 5;
       const mTicket = config.moneda_ticket_default || 'USD';
+      const bioStr = config.biometrico ? JSON.stringify(config.biometrico) : null;
       if (existing.rowCount > 0) {
         await pool.query(
           `UPDATE Configuracion_Empresa SET 
             rif = $1, nombre_comercio = $2, direccion = $3, telefono = $4, 
             correo = $5, moneda_base = $6, mensaje_pie_ticket = $7, metodos_pago_activos = $8,
             permitir_multisesion = $9, compartir_apertura_caja = $10, logo_url = $11, moneda_ticket_default = $12,
-            mostrar_fotos_en_buscador_pos = $13, tamano_foto_buscador_pos = $14, limite_productos_buscador_pos = $15
-           WHERE id = $16`,
-          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura, config.logo_url || '', mTicket, mFotosPos, tFotoPos, lProdPos, existing.rows[0].id]
+            mostrar_fotos_en_buscador_pos = $13, tamano_foto_buscador_pos = $14, limite_productos_buscador_pos = $15,
+            biometrico_config = $16
+           WHERE id = $17`,
+          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura, config.logo_url || '', mTicket, mFotosPos, tFotoPos, lProdPos, bioStr, existing.rows[0].id]
         );
       } else {
         await pool.query(
-          `INSERT INTO Configuracion_Empresa (rif, nombre_comercio, direccion, telefono, correo, moneda_base, mensaje_pie_ticket, metodos_pago_activos, permitir_multisesion, compartir_apertura_caja, logo_url, moneda_ticket_default, mostrar_fotos_en_buscador_pos, tamano_foto_buscador_pos, limite_productos_buscador_pos)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura, config.logo_url || '', mTicket, mFotosPos, tFotoPos, lProdPos]
+          `INSERT INTO Configuracion_Empresa (rif, nombre_comercio, direccion, telefono, correo, moneda_base, mensaje_pie_ticket, metodos_pago_activos, permitir_multisesion, compartir_apertura_caja, logo_url, moneda_ticket_default, mostrar_fotos_en_buscador_pos, tamano_foto_buscador_pos, limite_productos_buscador_pos, biometrico_config)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+          [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura, config.logo_url || '', mTicket, mFotosPos, tFotoPos, lProdPos, bioStr]
         );
       }
       return config;
@@ -963,7 +977,7 @@ export async function getUsers() {
 
   if (usePostgres) {
     try {
-      const res = await pool.query('SELECT id, usuario, nombre, rol, estado, clave, permisos FROM Usuarios ORDER BY id ASC');
+      const res = await pool.query('SELECT id, usuario, nombre, rol, estado, clave, permisos, huella_template, huella_dedo, huella_fecha FROM Usuarios ORDER BY id ASC');
       if (res.rowCount > 0) {
         return res.rows.map(r => ({
           id: r.id,
@@ -972,6 +986,9 @@ export async function getUsers() {
           rol: r.rol,
           estado: r.estado,
           clave: r.clave || 'admin*',
+          huella_template: r.huella_template || null,
+          huella_dedo: r.huella_dedo || null,
+          huella_fecha: r.huella_fecha || null,
           permisos: r.permisos ? (typeof r.permisos === 'string' ? JSON.parse(r.permisos) : r.permisos) : defaultPermsAdmin
         }));
       } else {
@@ -981,7 +998,7 @@ export async function getUsers() {
            VALUES ($1, $2, $3, $4, $5, $6)`,
           ['admin', 'admin*', 'Administrador', 'ADMINISTRADOR', 'Activo', JSON.stringify(defaultPermsAdmin)]
         );
-        const res2 = await pool.query('SELECT id, usuario, nombre, rol, estado, clave, permisos FROM Usuarios ORDER BY id ASC');
+        const res2 = await pool.query('SELECT id, usuario, nombre, rol, estado, clave, permisos, huella_template, huella_dedo, huella_fecha FROM Usuarios ORDER BY id ASC');
         return res2.rows.map(r => ({
           id: r.id,
           usuario: r.usuario,
@@ -989,6 +1006,9 @@ export async function getUsers() {
           rol: r.rol,
           estado: r.estado,
           clave: r.clave || 'admin*',
+          huella_template: r.huella_template || null,
+          huella_dedo: r.huella_dedo || null,
+          huella_fecha: r.huella_fecha || null,
           permisos: r.permisos ? (typeof r.permisos === 'string' ? JSON.parse(r.permisos) : r.permisos) : defaultPermsAdmin
         }));
       }
@@ -1005,6 +1025,9 @@ export async function getUsers() {
       rol: 'ADMINISTRADOR',
       estado: 'Activo',
       clave: 'admin*',
+      huella_template: null,
+      huella_dedo: null,
+      huella_fecha: null,
       permisos: defaultPermsAdmin
     }];
   }
@@ -2001,8 +2024,8 @@ export async function saveUser(u) {
     try {
       await pool.query("SELECT setval(pg_get_serial_sequence('Usuarios', 'id'), COALESCE((SELECT MAX(id) FROM Usuarios), 1))");
       const res = await pool.query(
-        'INSERT INTO Usuarios (usuario, nombre, rol, estado, clave, permisos) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-        [u.usuario, u.nombre, u.rol, u.estado || 'Activo', u.clave || '', permsStr]
+        'INSERT INTO Usuarios (usuario, nombre, rol, estado, clave, permisos, huella_template, huella_dedo, huella_fecha) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
+        [u.usuario, u.nombre, u.rol, u.estado || 'Activo', u.clave || '', permsStr, u.huella_template || null, u.huella_dedo || null, u.huella_fecha || null]
       );
       if (res.rowCount > 0) {
         const r = res.rows[0];
@@ -2013,6 +2036,9 @@ export async function saveUser(u) {
           rol: r.rol,
           estado: r.estado,
           clave: r.clave,
+          huella_template: r.huella_template || null,
+          huella_dedo: r.huella_dedo || null,
+          huella_fecha: r.huella_fecha || null,
           permisos: r.permisos ? (typeof r.permisos === 'string' ? JSON.parse(r.permisos) : r.permisos) : null
         };
       }
@@ -2030,6 +2056,9 @@ export async function saveUser(u) {
     rol: u.rol,
     estado: u.estado || 'Activo',
     clave: u.clave || 'admin*',
+    huella_template: u.huella_template || null,
+    huella_dedo: u.huella_dedo || null,
+    huella_fecha: u.huella_fecha || null,
     permisos: u.permisos
   };
   users.push(newUser);
@@ -2045,8 +2074,8 @@ export async function updateUser(id, u) {
   if (usePostgres) {
     try {
       const res = await pool.query(
-        'UPDATE Usuarios SET usuario = $1, nombre = $2, rol = $3, estado = $4, clave = $5, permisos = $6 WHERE id = $7 RETURNING *',
-        [u.usuario, u.nombre, u.rol, u.estado, u.clave, permsStr, id]
+        'UPDATE Usuarios SET usuario = $1, nombre = $2, rol = $3, estado = $4, clave = $5, permisos = $6, huella_template = COALESCE($7, huella_template), huella_dedo = COALESCE($8, huella_dedo), huella_fecha = COALESCE($9, huella_fecha) WHERE id = $10 RETURNING *',
+        [u.usuario, u.nombre, u.rol, u.estado, u.clave, permsStr, u.huella_template !== undefined ? u.huella_template : null, u.huella_dedo !== undefined ? u.huella_dedo : null, u.huella_fecha !== undefined ? u.huella_fecha : null, id]
       );
       if (res.rowCount > 0) {
         const r = res.rows[0];
@@ -2057,6 +2086,9 @@ export async function updateUser(id, u) {
           rol: r.rol,
           estado: r.estado,
           clave: r.clave,
+          huella_template: r.huella_template || null,
+          huella_dedo: r.huella_dedo || null,
+          huella_fecha: r.huella_fecha || null,
           permisos: r.permisos ? (typeof r.permisos === 'string' ? JSON.parse(r.permisos) : r.permisos) : null
         };
       }
@@ -2075,6 +2107,9 @@ export async function updateUser(id, u) {
       rol: u.rol,
       estado: u.estado,
       clave: u.clave,
+      huella_template: u.huella_template !== undefined ? u.huella_template : users[idx].huella_template,
+      huella_dedo: u.huella_dedo !== undefined ? u.huella_dedo : users[idx].huella_dedo,
+      huella_fecha: u.huella_fecha !== undefined ? u.huella_fecha : users[idx].huella_fecha,
       permisos: u.permisos
     };
     writeJsonFile('users.json', users);
