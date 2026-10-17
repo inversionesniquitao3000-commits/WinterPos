@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS Usuarios (
     huella_template TEXT,
     huella_dedo VARCHAR(50),
     huella_fecha VARCHAR(50),
+    huellas JSONB DEFAULT '[]'::jsonb,
     estado VARCHAR(10) DEFAULT 'Activo' CHECK (estado IN ('Activo', 'Inactivo')),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

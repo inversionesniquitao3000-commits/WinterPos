@@ -66,6 +66,12 @@ export interface BiometricConfig {
   autoEscanearEnLogin: boolean;
 }
 
+export interface UserFingerprint {
+  dedo: string;
+  template: string;
+  fecha: string;
+}
+
 export interface User {
   id: number;
   usuario: string;
@@ -76,6 +82,7 @@ export interface User {
   huella_template?: string;
   huella_dedo?: string;
   huella_fecha?: string;
+  huellas?: UserFingerprint[];
   permisos?: {
     [modulo: string]: {
       ver: boolean;

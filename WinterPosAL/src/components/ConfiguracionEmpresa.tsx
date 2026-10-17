@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { CompanyConfig, User, Role, PrinterConfig, ScaleConfig, BiometricConfig } from '../types';
+import { CompanyConfig, User, Role, PrinterConfig, ScaleConfig, BiometricConfig, UserFingerprint } from '../types';
 import { 
   Save, CheckCircle2, Users, HardDrive, Cpu, 
   Trash2, Edit, Plus, Download, Upload, ShieldAlert,
@@ -12,7 +12,14 @@ import {
 import { useDialog } from '../hooks/useDialog';
 import { getLocalDateStr, formatBs } from '../utils';
 import { MasterPassModal } from './MasterPassModal';
-import { checkBiometricReaderStatus, captureBiometricFingerprint, matchFingerprintTemplates } from '../biometricHelper';
+import { checkBiometricReaderStatus, captureBiometricFingerprint, matchFingerprintTemplates, getUserFingerprints } from '../biometricHelper';
+
+export const STANDARD_BIOMETRIC_FINGERS = [
+  { id: 'Pulgar Derecho', label: 'Pulgar Derecho', mano: 'Mano Derecha', icon: '👍', short: 'Pulgar D.' },
+  { id: 'Índice Derecho', label: 'Índice Derecho', mano: 'Mano Derecha', icon: '☝️', short: 'Índice D.' },
+  { id: 'Pulgar Izquierdo', label: 'Pulgar Izquierdo', mano: 'Mano Izquierda', icon: '👍', short: 'Pulgar I.' },
+  { id: 'Índice Izquierdo', label: 'Índice Izquierdo', mano: 'Mano Izquierda', icon: '☝️', short: 'Índice I.' }
+];
 
 interface ConfiguracionEmpresaProps {
   config: CompanyConfig;
@@ -750,8 +757,10 @@ export default function ConfiguracionEmpresa({
     huella_template: undefined as string | undefined,
     huella_dedo: 'Índice Derecho' as string,
     huella_fecha: undefined as string | undefined,
+    huellas: [] as UserFingerprint[],
     permisos: {} as any
   });
+  const [activeScanningFinger, setActiveScanningFinger] = useState<string | null>(null);
 
   // Role Modal / Form States
   const [showRoleModal, setShowRoleModal] = useState(false);
@@ -1282,6 +1291,8 @@ export default function ConfiguracionEmpresa({
     const initialRol = firstRole ? firstRole.nombre.toUpperCase() : '';
     const initialPerms = firstRole?.permisos ? { ...firstRole.permisos } : getEmptyPerms();
 
+    setUserBioFeedback('');
+    setActiveScanningFinger(null);
     setUserForm({
       usuario: '',
       nombre: '',
@@ -1291,6 +1302,7 @@ export default function ConfiguracionEmpresa({
       huella_template: undefined,
       huella_dedo: 'Índice Derecho',
       huella_fecha: undefined,
+      huellas: [],
       permisos: initialPerms
     });
     setShowUserModal(true);
@@ -1304,15 +1316,19 @@ export default function ConfiguracionEmpresa({
     }
     const isUserAdmin = u.usuario?.toLowerCase() === 'admin' || u.rol?.toUpperCase() === 'ADMINISTRADOR';
     setEditingUser(u);
+    setUserBioFeedback('');
+    setActiveScanningFinger(null);
+    const existingHuellas = getUserFingerprints(u);
     setUserForm({
       usuario: u.usuario,
       nombre: u.nombre,
       rol: u.rol?.toUpperCase() || 'ADMINISTRADOR',
       clave: u.clave || '',
       estado: u.estado,
-      huella_template: u.huella_template || undefined,
-      huella_dedo: u.huella_dedo || 'Índice Derecho',
-      huella_fecha: u.huella_fecha || undefined,
+      huella_template: u.huella_template || (existingHuellas[0]?.template || undefined),
+      huella_dedo: u.huella_dedo || (existingHuellas[0]?.dedo || 'Índice Derecho'),
+      huella_fecha: u.huella_fecha || (existingHuellas[0]?.fecha || undefined),
+      huellas: existingHuellas,
       permisos: isUserAdmin ? getFullAdminPermissions() : (u.permisos || getEmptyPerms())
     });
     setShowUserModal(true);
@@ -1332,33 +1348,39 @@ export default function ConfiguracionEmpresa({
 
     try {
       const isUserAdmin = userForm.usuario.toLowerCase().trim() === 'admin' || userForm.rol?.toUpperCase() === 'ADMINISTRADOR';
+      const userHuellas = Array.isArray(userForm.huellas) ? userForm.huellas : [];
+      const primaryHuella = userHuellas[0] || null;
+
       const body = {
         usuario: userForm.usuario.toLowerCase().trim(),
         nombre: userForm.nombre.trim(),
         rol: userForm.rol?.toUpperCase(),
         clave: userForm.clave,
         estado: userForm.estado,
-        huella_template: userForm.huella_template || null,
-        huella_dedo: userForm.huella_dedo || null,
-        huella_fecha: userForm.huella_fecha || null,
+        huella_template: primaryHuella ? primaryHuella.template : (userForm.huella_template || null),
+        huella_dedo: primaryHuella ? primaryHuella.dedo : (userForm.huella_dedo || null),
+        huella_fecha: primaryHuella ? primaryHuella.fecha : (userForm.huella_fecha || null),
+        huellas: userHuellas,
         permisos: isUserAdmin ? getFullAdminPermissions() : userForm.permisos
       };
 
       // Validación de duplicidad biométrica previa al envío
-      if (body.huella_template) {
-        const duplicateUser = userList.find(u => {
-          if (!u.huella_template) return false;
-          if (editingUser && String(u.id) === String(editingUser.id)) return false;
-          return matchFingerprintTemplates(body.huella_template, u.huella_template) >= 58;
-        });
-        if (duplicateUser) {
-          setErrorMsg(`Conflicto biométrico: Esta huella ya está asignada a "${duplicateUser.nombre}" (@${duplicateUser.usuario}).`);
-          showAlert(
-            `⛔ No se puede guardar el usuario:\n\nLa huella dactilar seleccionada coincide con la del usuario:\n👤 ${duplicateUser.nombre} (@${duplicateUser.usuario})\n\nCada operador debe poseer una huella única para fines de auditoría y cuadre de caja.`,
-            'Conflicto Biométrico',
-            'error'
-          );
-          return;
+      if (userHuellas.length > 0) {
+        for (const print of userHuellas) {
+          const duplicateUser = userList.find(u => {
+            if (editingUser && String(u.id) === String(editingUser.id)) return false;
+            const otherPrints = getUserFingerprints(u);
+            return otherPrints.some(op => matchFingerprintTemplates(print.template, op.template) >= 60);
+          });
+          if (duplicateUser) {
+            setErrorMsg(`Conflicto biométrico: La huella (${print.dedo}) ya está asignada a "${duplicateUser.nombre}" (@${duplicateUser.usuario}).`);
+            showAlert(
+              `⛔ No se puede guardar el usuario:\n\nLa huella dactilar seleccionada (${print.dedo}) coincide con la del usuario:\n👤 ${duplicateUser.nombre} (@${duplicateUser.usuario})\n\nCada operador debe poseer huellas únicas para fines de auditoría y cuadre de caja.`,
+              'Conflicto Biométrico',
+              'error'
+            );
+            return;
+          }
         }
       }
 
@@ -1721,7 +1743,7 @@ export default function ConfiguracionEmpresa({
 
   const handleTestBiometricScan = async () => {
     setBioScanning(true);
-    setBioScanFeedback('☝️ Coloque su huella dactilar sobre el cristal del lector...');
+    setBioScanFeedback('🟢 LED encendido: Coloque su huella dactilar sobre el cristal del lector...');
     try {
       const result = await captureBiometricFingerprint(biometricConfig, 6000);
       if (result.success && result.template) {
@@ -1739,37 +1761,61 @@ export default function ConfiguracionEmpresa({
     }
   };
 
-  const handleCaptureUserFingerprint = async () => {
+  const handleCaptureFingerprintSlot = async (dedoNombre: string) => {
+    setActiveScanningFinger(dedoNombre);
     setUserBioScanning(true);
-    setUserBioFeedback('☝️ Coloque el dedo seleccionado sobre el lector de huellas...');
+    setUserBioFeedback(`🟢 LED encendido: Coloque su ${dedoNombre} sobre el lector...`);
     try {
       const result = await captureBiometricFingerprint(biometricConfig, 7000);
       if (result.success && result.template) {
-        // Validación de huella duplicada contra usuarios ya registrados
+        // 1. Validación de huella duplicada contra otros usuarios registrados
         const duplicateUser = userList.find(u => {
-          if (!u.huella_template) return false;
           if (editingUser && String(u.id) === String(editingUser.id)) return false;
-          const score = matchFingerprintTemplates(result.template, u.huella_template);
-          return score >= 58;
+          const otherPrints = getUserFingerprints(u);
+          return otherPrints.some(op => matchFingerprintTemplates(result.template!, op.template) >= 60);
         });
 
         if (duplicateUser) {
           setUserBioFeedback(`⛔ Huella duplicada: Ya asignada a "${duplicateUser.nombre}" (@${duplicateUser.usuario})`);
           showAlert(
             `⛔ CONFLICTO BIOMÉTRICO DETECTADO\n\nEsta huella dactilar ya se encuentra registrada en el sistema y asignada al usuario:\n\n👤 ${duplicateUser.nombre} (@${duplicateUser.usuario})\nRol: ${duplicateUser.rol || 'Operador'}\n\nPor políticas de seguridad, trazabilidad de caja y auditoría fiscal, NO se permite que dos operadores compartan la misma huella dactilar. Por favor verifique el usuario o utilice otro dedo.`,
-            'Huella Ya Asignada',
+            'Huella Ya Asignada a Otro Usuario',
             'error'
           );
           return;
         }
 
-        setUserForm(prev => ({
-          ...prev,
-          huella_template: result.template,
-          huella_fecha: new Date().toLocaleDateString('es-VE')
-        }));
-        setUserBioFeedback(`✅ ¡Huella capturada exitosamente! Calidad: ${result.quality || 95}%`);
-        showToast('✅ Huella dactilar capturada y asociada al usuario.');
+        // 2. Alerta si la huella capturada es idéntica a otra ya registrada en este mismo usuario
+        const existingSlot = (userForm.huellas || []).find(h => h.dedo !== dedoNombre && matchFingerprintTemplates(result.template!, h.template) >= 60);
+        if (existingSlot) {
+          showAlert(
+            `⚠️ Atención: La huella capturada es idéntica a la que ya tiene registrada en "${existingSlot.dedo}". Asegúrese de colocar el dedo correspondiente (${dedoNombre}).`,
+            'Huella Repetida en el Mismo Usuario',
+            'warning'
+          );
+        }
+
+        const nowStr = new Date().toLocaleDateString('es-VE');
+        const newPrint: UserFingerprint = {
+          dedo: dedoNombre,
+          template: result.template,
+          fecha: nowStr
+        };
+
+        setUserForm(prev => {
+          const filtered = (prev.huellas || []).filter(h => h.dedo !== dedoNombre);
+          const updatedHuellas = [...filtered, newPrint];
+          return {
+            ...prev,
+            huellas: updatedHuellas,
+            huella_template: updatedHuellas[0]?.template,
+            huella_dedo: updatedHuellas[0]?.dedo,
+            huella_fecha: updatedHuellas[0]?.fecha
+          };
+        });
+
+        setUserBioFeedback(`✅ ¡${dedoNombre} capturado exitosamente! Calidad: ${result.quality || 95}%`);
+        showToast(`✅ ${dedoNombre} registrado correctamente.`);
       } else {
         setUserBioFeedback(`⚠️ ${result.error || 'No se detectó huella en el lector.'}`);
         showAlert(result.error || 'No se pudo leer la huella. Asegúrese de que el lector esté conectado y el dedo limpio.', 'Captura No Completada', 'warning');
@@ -1779,28 +1825,45 @@ export default function ConfiguracionEmpresa({
       showAlert(err.message, 'Error de Captura Biométrica', 'error');
     } finally {
       setUserBioScanning(false);
+      setActiveScanningFinger(null);
     }
   };
 
-  const handleClearUserFingerprint = () => {
-    setUserForm(prev => ({
-      ...prev,
-      huella_template: undefined,
-      huella_fecha: undefined
-    }));
+  const handleRemoveFingerprintSlot = (dedoNombre: string) => {
+    setUserForm(prev => {
+      const updatedHuellas = (prev.huellas || []).filter(h => h.dedo !== dedoNombre);
+      return {
+        ...prev,
+        huellas: updatedHuellas,
+        huella_template: updatedHuellas[0]?.template || undefined,
+        huella_dedo: updatedHuellas[0]?.dedo || 'Índice Derecho',
+        huella_fecha: updatedHuellas[0]?.fecha || undefined
+      };
+    });
     setUserBioFeedback('');
-    showToast('Huella dactilar desvinculada del usuario.');
+    showToast(`Huella de ${dedoNombre} eliminada.`);
   };
 
-  const handleSimulateUserFingerprint = () => {
-    const mockTpl = `ANSI378_SAMPLE_${userForm.usuario || 'USER'}_${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
-    setUserForm(prev => ({
-      ...prev,
-      huella_template: mockTpl,
-      huella_fecha: new Date().toLocaleDateString('es-VE') + ' (Simulada)'
-    }));
-    setUserBioFeedback('ℹ️ Huella simulada asignada correctamente para pruebas de laboratorio.');
-    showToast('Huella de prueba asignada al usuario.');
+  const handleSimulateFingerprintSlot = (dedoNombre: string) => {
+    const mockTpl = `ANSI378_SIM_${userForm.usuario || 'USER'}_${dedoNombre.replace(/\s+/g, '_').toUpperCase()}_${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+    const newPrint: UserFingerprint = {
+      dedo: dedoNombre,
+      template: mockTpl,
+      fecha: new Date().toLocaleDateString('es-VE') + ' (Sim.)'
+    };
+    setUserForm(prev => {
+      const filtered = (prev.huellas || []).filter(h => h.dedo !== dedoNombre);
+      const updatedHuellas = [...filtered, newPrint];
+      return {
+        ...prev,
+        huellas: updatedHuellas,
+        huella_template: updatedHuellas[0]?.template,
+        huella_dedo: updatedHuellas[0]?.dedo,
+        huella_fecha: updatedHuellas[0]?.fecha
+      };
+    });
+    setUserBioFeedback(`ℹ️ Huella simulada para ${dedoNombre}.`);
+    showToast(`Huella de prueba asignada a ${dedoNombre}.`);
   };
 
   const handleSaveFiscalPrinter = (e: React.FormEvent) => {
@@ -2841,16 +2904,39 @@ export default function ConfiguracionEmpresa({
                             </span>
                           </td>
                           <td className="py-3 px-3">
-                            {u.huella_template ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-teal-100 text-teal-800 border border-teal-200" title={`Huella registrada: ${u.huella_dedo || 'Dedo'} (${u.huella_fecha || 'Registrada'})`}>
-                                <Fingerprint className="w-3 h-3 text-teal-600" />
-                                <span>{u.huella_dedo || 'Registrada'}</span>
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-medium bg-slate-100 text-slate-400">
-                                <span>Sin Huella</span>
-                              </span>
-                            )}
+                            {(() => {
+                              const prints = getUserFingerprints(u);
+                              if (prints.length === 0) {
+                                return (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-medium bg-slate-100 text-slate-400">
+                                    <span>Sin Huella</span>
+                                  </span>
+                                );
+                              }
+                              return (
+                                <div className="flex flex-wrap items-center gap-1 max-w-[280px]">
+                                  {prints.map((p, idx) => {
+                                    const shortLabel = p.dedo
+                                      .replace('Pulgar Derecho', '👍 Pulgar D.')
+                                      .replace('Índice Derecho', '☝️ Índice D.')
+                                      .replace('Pulgar Izquierdo', '👍 Pulgar I.')
+                                      .replace('Índice Izquierdo', '☝️ Índice I.');
+                                    return (
+                                      <span
+                                        key={idx}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-teal-50 text-teal-800 border border-teal-200/90 shadow-2xs hover:bg-teal-100 transition-colors"
+                                        title={`${p.dedo} - Registrada: ${p.fecha || 'Activa'}`}
+                                      >
+                                        <span>{shortLabel}</span>
+                                      </span>
+                                    );
+                                  })}
+                                  <span className="text-[8.5px] font-mono text-teal-700 font-extrabold ml-0.5">
+                                    ({prints.length}/4)
+                                  </span>
+                                </div>
+                              );
+                            })()}
                           </td>
                           <td className="py-3 px-3 text-right flex justify-end gap-2">
                             {(!isAdmin && (u.usuario?.toLowerCase() === 'admin' || u.rol?.toUpperCase() === 'ADMINISTRADOR')) ? (
@@ -6775,7 +6861,7 @@ export default function ConfiguracionEmpresa({
         <div className="fixed inset-0 bg-slate-955/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 text-left font-sans animate-fade-in">
           <form 
             onSubmit={handleSaveUser} 
-            className="bg-white border border-slate-200 rounded-2xl max-w-5xl w-full overflow-hidden shadow-2xl flex flex-col max-h-[92vh] text-slate-800"
+            className="bg-white border border-slate-200 rounded-2xl max-w-6xl w-full overflow-hidden shadow-2xl flex flex-col max-h-[94vh] text-slate-800"
           >
             {/* Header */}
             <div className="flex justify-between items-center bg-slate-50 border-b border-slate-200 px-6 py-4">
@@ -6802,13 +6888,14 @@ export default function ConfiguracionEmpresa({
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 overflow-y-auto flex-1">
               
               {/* LEFT COLUMN: User Form Inputs + Quick Matrix Actions + Special Permissions */}
-              <div className="lg:col-span-4 space-y-4 border-b lg:border-b-0 lg:border-r border-slate-200 pb-4 lg:pb-0 lg:pr-5">
+              <div className="lg:col-span-5 space-y-4 border-b lg:border-b-0 lg:border-r border-slate-200 pb-4 lg:pb-0 lg:pr-6">
                 
                 {/* Inputs */}
                 <div className="space-y-3">
                   <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1 font-sans uppercase">
-                      Usuario (Login) <span className="text-red-500">*</span>
+                    <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1 mb-1 font-sans uppercase whitespace-nowrap h-5">
+                      <span>Usuario (Login)</span>
+                      <span className="text-red-500 font-black inline">*</span>
                     </label>
                     <input
                       type="text"
@@ -6821,13 +6908,14 @@ export default function ConfiguracionEmpresa({
                         const cleanVal = e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '');
                         setUserForm(prev => ({ ...prev, usuario: cleanVal }));
                       }}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-mono disabled:bg-slate-100 disabled:text-slate-500 font-bold"
+                      className="w-full h-10 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-mono disabled:bg-slate-100 disabled:text-slate-500 font-bold"
                     />
                   </div>
 
                   <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1 font-sans uppercase">
-                      Nombre Completo <span className="text-red-500">*</span>
+                    <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1 mb-1 font-sans uppercase whitespace-nowrap h-5">
+                      <span>Nombre Completo</span>
+                      <span className="text-red-500 font-black inline">*</span>
                     </label>
                     <input
                       type="text"
@@ -6836,14 +6924,15 @@ export default function ConfiguracionEmpresa({
                       autoComplete="off"
                       value={userForm.nombre}
                       onChange={(e) => setUserForm(prev => ({ ...prev, nombre: e.target.value }))}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-sans font-bold"
+                      className="w-full h-10 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-sans font-bold"
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 gap-3 items-end">
                     <div>
-                      <label className="text-[11px] font-bold text-slate-700 block mb-1 font-sans uppercase">
-                        Contraseña / PIN <span className="text-red-500">*</span>
+                      <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1 mb-1 font-sans uppercase whitespace-nowrap h-5">
+                        <span>Contraseña / PIN</span>
+                        <span className="text-red-500 font-black inline">*</span>
                       </label>
                       <input
                         type="password"
@@ -6852,17 +6941,17 @@ export default function ConfiguracionEmpresa({
                         autoComplete="new-password"
                         value={userForm.clave}
                         onChange={(e) => setUserForm(prev => ({ ...prev, clave: e.target.value.toLowerCase() }))}
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-mono"
+                        className="w-full h-10 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-mono font-bold"
                       />
                     </div>
                     <div>
-                      <label className="text-[11px] font-bold text-slate-700 block mb-1 font-sans uppercase">
-                        Estado
+                      <label className="text-[11px] font-bold text-slate-700 flex items-center mb-1 font-sans uppercase whitespace-nowrap h-5">
+                        <span>Estado</span>
                       </label>
                       <select
                         value={userForm.estado}
                         onChange={(e) => setUserForm(prev => ({ ...prev, estado: e.target.value as any }))}
-                        className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-sans font-bold"
+                        className="w-full h-10 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-sans font-bold"
                       >
                         <option value="Activo">Activo</option>
                         <option value="Inactivo">Inactivo</option>
@@ -6871,8 +6960,8 @@ export default function ConfiguracionEmpresa({
                   </div>
 
                   <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1 font-sans uppercase">
-                      Perfil / Rol Base
+                    <label className="text-[11px] font-bold text-slate-700 flex items-center mb-1 font-sans uppercase whitespace-nowrap h-5">
+                      <span>Perfil / Rol Base</span>
                     </label>
                     <select
                       value={userForm.rol?.toUpperCase()}
@@ -6882,7 +6971,7 @@ export default function ConfiguracionEmpresa({
                         setUserForm(prev => ({ ...prev, rol: val }));
                         handleApplyRolePermissions(val);
                       }}
-                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-sans font-extrabold uppercase text-slate-800 disabled:bg-slate-100 disabled:text-slate-500 font-bold"
+                      className="w-full h-10 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs focus:bg-white focus:border-emerald-600 focus:outline-none font-sans font-extrabold uppercase text-slate-800 disabled:bg-slate-100 disabled:text-slate-500 font-bold"
                     >
                       <option value="">Seleccione Rol Base...</option>
                       {(isAdmin && (editingUser?.usuario?.toLowerCase() === 'admin' || editingUser?.rol?.toUpperCase() === 'ADMINISTRADOR')) && (
@@ -6898,60 +6987,119 @@ export default function ConfiguracionEmpresa({
                   </div>
                 </div>
 
-                {/* BIOMETRIC FINGERPRINT ENROLLMENT FOR THIS USER */}
+                {/* BIOMETRIC FINGERPRINT ENROLLMENT (UP TO 4 FINGERS: THUMBS & INDEX) */}
                 <div className="bg-gradient-to-br from-teal-50/70 via-emerald-50/40 to-slate-50 border border-teal-200/80 rounded-xl p-3.5 space-y-3 font-sans">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-extrabold text-teal-900 uppercase flex items-center gap-1.5">
                       <Fingerprint className="w-4 h-4 text-teal-600" />
-                      <span>Huella Dactilar del Operador</span>
+                      <span>Huellas Dactilares del Operador (Hasta 4 Huellas)</span>
                     </span>
-                    {userForm.huella_template ? (
-                      <span className="bg-emerald-100 text-emerald-800 text-[9.5px] font-black px-2 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1">
-                        <Check className="w-3 h-3 text-emerald-600" /> ENROLADA
-                      </span>
-                    ) : (
-                      <span className="bg-slate-100 text-slate-500 text-[9.5px] font-medium px-2 py-0.5 rounded-full">
-                        NO REGISTRADA
-                      </span>
-                    )}
+                    <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full border ${
+                      (userForm.huellas || []).length > 0
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                        : 'bg-slate-100 text-slate-500 border-slate-200'
+                    }`}>
+                      {(userForm.huellas || []).length} de 4 REGISTRADAS
+                    </span>
                   </div>
 
                   <p className="text-[10px] text-slate-600 leading-tight">
-                    Asocie la huella dactilar de este usuario usando el lector <strong>{biometricConfig.proveedor || 'Futronic FS88'}</strong> para permitirle iniciar sesión con un toque.
+                    Enrole los <strong>pulgares e índices</strong> del operador. Podrá iniciar sesión o autorizar transacciones colocando <strong>cualquiera de las huellas registradas</strong> en el sensor {biometricConfig.proveedor || 'Futronic FS88'}.
                   </p>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-700 block mb-1 uppercase">Dedo Registrado</label>
-                      <select
-                        value={userForm.huella_dedo || 'Índice Derecho'}
-                        onChange={(e) => setUserForm(prev => ({ ...prev, huella_dedo: e.target.value }))}
-                        className="w-full bg-white border border-teal-200 rounded-lg p-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-teal-500"
-                      >
-                        <option value="Índice Derecho">Índice Derecho</option>
-                        <option value="Pulgar Derecho">Pulgar Derecho</option>
-                        <option value="Medio Derecho">Medio Derecho</option>
-                        <option value="Índice Izquierdo">Índice Izquierdo</option>
-                        <option value="Pulgar Izquierdo">Pulgar Izquierdo</option>
-                        <option value="Otro">Otro Dedo</option>
-                      </select>
-                    </div>
+                  {/* 4 FINGER CARDS GRID */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {STANDARD_BIOMETRIC_FINGERS.map((finger) => {
+                      const enrolled = (userForm.huellas || []).find(h => h.dedo === finger.id);
+                      const isThisScanning = userBioScanning && activeScanningFinger === finger.id;
 
-                    <div className="flex flex-col justify-end">
-                      {userForm.huella_template ? (
-                        <div className="text-[10.5px] font-mono text-emerald-800 bg-white/80 p-2 rounded-lg border border-emerald-200 truncate">
-                          <span className="font-bold">Registrada:</span> {userForm.huella_fecha || 'Activa'}
+                      return (
+                        <div
+                          key={finger.id}
+                          className={`p-2.5 rounded-xl border transition-all ${
+                            enrolled
+                              ? 'bg-white border-emerald-300 shadow-xs'
+                              : 'bg-white/70 border-slate-200 hover:border-teal-200'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm">{finger.icon}</span>
+                              <div>
+                                <span className="text-[11px] font-bold text-slate-800 block leading-tight">
+                                  {finger.label}
+                                </span>
+                                <span className="text-[9px] text-slate-400 font-medium">
+                                  {finger.mano}
+                                </span>
+                              </div>
+                            </div>
+                            {enrolled ? (
+                              <span className="bg-emerald-100 text-emerald-800 text-[8.5px] font-bold px-1.5 py-0.5 rounded-full border border-emerald-250 flex items-center gap-1">
+                                <Check className="w-2.5 h-2.5 text-emerald-600" />
+                                <span>{enrolled.fecha || 'Enrolada'}</span>
+                              </span>
+                            ) : (
+                              <span className="bg-slate-100 text-slate-400 text-[8.5px] font-medium px-1.5 py-0.5 rounded-full">
+                                Sin registrar
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1.5 pt-1">
+                            {enrolled ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCaptureFingerprintSlot(finger.id)}
+                                  disabled={userBioScanning}
+                                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-[10.5px] font-bold py-1.5 px-2 rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer shadow-xs"
+                                  title={`Recapturar huella de ${finger.label}`}
+                                >
+                                  <Fingerprint className={`w-3 h-3 ${isThisScanning ? 'animate-pulse' : ''}`} />
+                                  <span>{isThisScanning ? 'Escaneando...' : 'Recapturar'}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveFingerprintSlot(finger.id)}
+                                  disabled={userBioScanning}
+                                  className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[10.5px] font-bold p-1.5 rounded-lg flex items-center justify-center transition-all cursor-pointer"
+                                  title={`Eliminar huella de ${finger.label}`}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCaptureFingerprintSlot(finger.id)}
+                                  disabled={userBioScanning}
+                                  className="flex-1 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-[10.5px] font-bold py-1.5 px-2 rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer shadow-xs"
+                                  title={`Escanear y registrar ${finger.label}`}
+                                >
+                                  <Fingerprint className={`w-3 h-3 ${isThisScanning ? 'animate-pulse' : ''}`} />
+                                  <span>{isThisScanning ? 'Escaneando...' : 'Capturar'}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSimulateFingerprintSlot(finger.id)}
+                                  disabled={userBioScanning}
+                                  className="bg-slate-100 hover:bg-slate-200 text-slate-600 text-[9.5px] font-semibold py-1.5 px-2 rounded-lg transition-all cursor-pointer"
+                                  title="Asignar plantilla de prueba simulada"
+                                >
+                                  <Sparkles className="w-3 h-3 text-slate-400" />
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </div>
-                      ) : (
-                        <div className="text-[10.5px] text-slate-400 italic bg-white/60 p-2 rounded-lg border border-slate-200 text-center">
-                          Sensor en espera
-                        </div>
-                      )}
-                    </div>
+                      );
+                    })}
                   </div>
 
                   {userBioFeedback && (
-                    <div className={`p-2.5 rounded-lg text-[11px] font-mono ${
+                    <div className={`p-2 rounded-lg text-[10.5px] font-mono ${
                       userBioFeedback.includes('✅')
                         ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                         : 'bg-amber-50 text-amber-800 border border-amber-200'
@@ -6959,39 +7107,6 @@ export default function ConfiguracionEmpresa({
                       {userBioFeedback}
                     </div>
                   )}
-
-                  <div className="grid grid-cols-2 gap-2 pt-1">
-                    <button
-                      type="button"
-                      onClick={handleCaptureUserFingerprint}
-                      disabled={userBioScanning}
-                      className="bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
-                    >
-                      <Fingerprint className={`w-3.5 h-3.5 ${userBioScanning ? 'animate-pulse' : ''}`} />
-                      <span>{userBioScanning ? 'Escaneando...' : (userForm.huella_template ? 'Recapturar Huella' : 'Capturar Huella')}</span>
-                    </button>
-
-                    {userForm.huella_template ? (
-                      <button
-                        type="button"
-                        onClick={handleClearUserFingerprint}
-                        className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-250 px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                        <span>Desvincular</span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={handleSimulateUserFingerprint}
-                        className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
-                        title="Asigna una plantilla de prueba para verificar el flujo biométrico sin conectar el lector USB"
-                      >
-                        <Sparkles className="w-3.5 h-3.5 text-slate-500" />
-                        <span>Simular Huella</span>
-                      </button>
-                    )}
-                  </div>
                 </div>
 
                 {/* ACCIONES RÁPIDAS DE MATRIZ (SELECCIONAR / DESSELECCIONAR TODO) */}
@@ -7347,7 +7462,7 @@ export default function ConfiguracionEmpresa({
               </div>
 
               {/* RIGHT COLUMN: Permissions Matrix + Guide */}
-              <div className="lg:col-span-8 space-y-4">
+              <div className="lg:col-span-7 space-y-4 pl-0 lg:pl-1">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-extrabold text-slate-800 block uppercase font-sans">
                     Matriz de Permisos Personalizados del Usuario

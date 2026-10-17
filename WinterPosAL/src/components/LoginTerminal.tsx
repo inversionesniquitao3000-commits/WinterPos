@@ -71,34 +71,54 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
   });
   const [isBioScanning, setIsBioScanning] = useState(false);
   const [bioFeedback, setBioFeedback] = useState('');
+  const [isBioIdle, setIsBioIdle] = useState(false);
 
   const isAutoWatchingRef = useRef(false);
   const isMountedRef = useRef(true);
   const loginCompletedRef = useRef(false);
+  const lastBioActivityTimeRef = useRef<number>(Date.now());
 
   // Auto-scan Live Touch Watcher: listens for finger touch on sensor without needing to click the button
   const startLiveBiometricWatcher = async () => {
     if (isAutoWatchingRef.current) return;
     isAutoWatchingRef.current = true;
+    setIsBioIdle(false);
+    lastBioActivityTimeRef.current = Date.now();
 
     // Small initial delay so inputs can focus smoothly first
     await new Promise(r => setTimeout(r, 600));
 
     while (isMountedRef.current && !loginCompletedRef.current) {
+      // Regla de inactividad: si transcurren 2 minutos (120 seg) sin colocar huella ni usar la PC, apagar el LED y entrar en reposo
+      if (Date.now() - lastBioActivityTimeRef.current >= 120000) {
+        setIsBioIdle(true);
+        setBioFeedback('💤 Lector en reposo por inactividad (2 min). Mueva el mouse, presione una tecla o haga clic para reactivar.');
+        break;
+      }
+
       let scanSuccess = false;
       try {
+        setBioFeedback('🟢 LED encendido: Coloque su huella en el sensor...');
         const result = await captureBiometricFingerprint(bioConfig, 15000);
         scanSuccess = !!result.success;
 
         if (!isMountedRef.current || loginCompletedRef.current) break;
 
         if (result.success && result.template) {
+          lastBioActivityTimeRef.current = Date.now();
           setBioFeedback('🔍 Verificando identidad biométrica...');
 
-          // Match against enrolled users
-          const matchedLocal = matchFingerprintAgainstUsers(result.template, systemUsers);
+          // Match against enrolled users (1:1 if username field is populated, 1:N with collision margin guard if empty)
+          const matchedLocal = matchFingerprintAgainstUsers(result.template, systemUsers, username);
 
-          // Call backend
+          if (matchedLocal.error && !matchedLocal.user) {
+            setErrorMsg(matchedLocal.error);
+            setBioFeedback('');
+            await new Promise(r => setTimeout(r, 2000));
+            continue;
+          }
+
+          // Call backend with verified credentials
           const terminalSaved = localStorage.getItem('pos_terminal_name') || 'LOCAL';
           try {
             const res = await fetch(`${getApiBaseUrl()}/users/login-biometric`, {
@@ -107,6 +127,7 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
               body: JSON.stringify({
                 template: result.template,
                 matchedUserId: matchedLocal.user?.id,
+                username: username?.trim() || matchedLocal.user?.usuario,
                 terminal: terminalSaved
               })
             });
@@ -124,6 +145,8 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
               if (errData.message) {
                 setErrorMsg(errData.message);
                 setBioFeedback('');
+                await new Promise(r => setTimeout(r, 2000));
+                continue;
               }
             }
           } catch (backendErr) {
@@ -142,7 +165,7 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
               break;
             }
           } else if (!loginCompletedRef.current) {
-            setErrorMsg('Huella no reconocida en el sistema. Intente de nuevo o use su clave.');
+            setErrorMsg(matchedLocal.error || 'Huella no reconocida en el sistema. Intente de nuevo o use su clave.');
             setBioFeedback('');
           }
         }
@@ -159,6 +182,28 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
 
     isAutoWatchingRef.current = false;
   };
+
+  // Reactivación automática al detectar presencia/actividad del usuario en la terminal
+  useEffect(() => {
+    const handlePresence = () => {
+      lastBioActivityTimeRef.current = Date.now();
+      if (isBioIdle && !loginCompletedRef.current && bioConfig?.habilitado && bioConfig?.autoEscanearEnLogin !== false) {
+        setIsBioIdle(false);
+        setBioFeedback('');
+        startLiveBiometricWatcher();
+      }
+    };
+
+    window.addEventListener('mousemove', handlePresence);
+    window.addEventListener('keydown', handlePresence);
+    window.addEventListener('pointerdown', handlePresence);
+
+    return () => {
+      window.removeEventListener('mousemove', handlePresence);
+      window.removeEventListener('keydown', handlePresence);
+      window.removeEventListener('pointerdown', handlePresence);
+    };
+  }, [isBioIdle, bioConfig]);
 
   // Silent non-blocking probe of local biometric reader on terminal mount (runs ONCE on mount)
   useEffect(() => {
@@ -495,8 +540,10 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
 
   const handleBiometricLogin = async () => {
     if (isBioScanning) return;
+    lastBioActivityTimeRef.current = Date.now();
+    setIsBioIdle(false);
     setIsBioScanning(true);
-    setBioFeedback('☝️ Coloque su huella dactilar sobre el sensor del lector...');
+    setBioFeedback('🟢 LED encendido: Coloque su huella dactilar sobre el sensor...');
     setErrorMsg('');
 
     try {
@@ -510,8 +557,14 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
 
       setBioFeedback('🔍 Verificando identidad biométrica...');
 
-      // 1. First attempt fast local match against enrolled systemUsers
-      const matchedLocal = matchFingerprintAgainstUsers(result.template, systemUsers);
+      // 1. First attempt fast match against enrolled systemUsers (1:1 if username field has text, 1:N with collision margin if empty)
+      const matchedLocal = matchFingerprintAgainstUsers(result.template, systemUsers, username);
+
+      if (matchedLocal.error && !matchedLocal.user) {
+        setErrorMsg(matchedLocal.error);
+        setBioFeedback('');
+        return;
+      }
 
       // 2. Call backend login-biometric
       const terminalSaved = localStorage.getItem('pos_terminal_name') || 'LOCAL';
@@ -522,19 +575,20 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
           body: JSON.stringify({
             template: result.template,
             matchedUserId: matchedLocal.user?.id,
+            username: username?.trim() || matchedLocal.user?.usuario,
             terminal: terminalSaved
           })
         });
 
-            if (res.ok) {
-              const data = await res.json();
-              if (data.success && data.user) {
-                loginCompletedRef.current = true;
-                setBioFeedback('✅ Acceso biométrico concedido');
-                onLoginSuccess(data.user);
-                return;
-              }
-            } else {
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.user) {
+            loginCompletedRef.current = true;
+            setBioFeedback('✅ Acceso biométrico concedido');
+            onLoginSuccess(data.user);
+            return;
+          }
+        } else {
           const errData = await res.json().catch(() => ({}));
           if (errData.message) {
             setErrorMsg(errData.message);
@@ -558,7 +612,7 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
         return;
       }
 
-      setErrorMsg('Huella no reconocida en el sistema. Ingrese con usuario y contraseña.');
+      setErrorMsg(matchedLocal.error || 'Huella no reconocida en el sistema. Ingrese con usuario y contraseña.');
       setBioFeedback('');
     } catch (err: any) {
       console.error('Error durante autenticación biométrica:', err);
@@ -731,23 +785,38 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
                   <div className="pt-2 border-t border-white/10 space-y-1.5">
                     <button
                       type="button"
-                      onClick={handleBiometricLogin}
+                      onClick={() => {
+                        lastBioActivityTimeRef.current = Date.now();
+                        setIsBioIdle(false);
+                        handleBiometricLogin();
+                      }}
                       disabled={isBioScanning || isLoading}
                       className="w-full bg-gradient-to-r from-teal-700 via-emerald-600 to-teal-800 hover:from-teal-600 hover:to-emerald-500 active:scale-[0.99] text-white py-2.5 rounded text-xs font-black tracking-wider transition-all duration-200 border border-teal-400/40 flex items-center justify-center gap-2 font-sans shadow-lg cursor-pointer"
                     >
                       <Fingerprint className={`w-4 h-4 text-teal-200 ${isBioScanning ? 'animate-pulse' : ''}`} />
-                      <span>{isBioScanning ? 'Leyendo huella...' : 'Ingresar con Huella Dactilar'}</span>
+                      <span>{isBioScanning ? 'Leyendo huella...' : isBioIdle ? 'Reactivar Lector de Huella' : 'Ingresar con Huella Dactilar'}</span>
                     </button>
                     {bioFeedback && (
-                      <p className="text-[10px] text-teal-300 font-sans text-center animate-pulse">
+                      <p className={`text-[10px] font-sans text-center ${isBioIdle ? 'text-amber-300 font-semibold' : 'text-teal-300 animate-pulse'}`}>
                         {bioFeedback}
                       </p>
                     )}
-                    <div className="flex items-center justify-center gap-1.5 text-[10px] font-mono">
-                      <span className={`w-2 h-2 rounded-full ${bioStatus.online ? 'bg-emerald-400 shadow-sm shadow-emerald-400/80' : 'bg-slate-400'}`}></span>
-                      <span className={bioStatus.online ? 'text-emerald-300 font-bold' : 'text-slate-400'}>
+                    <div 
+                      onClick={() => {
+                        if (isBioIdle) {
+                          lastBioActivityTimeRef.current = Date.now();
+                          setIsBioIdle(false);
+                          setBioFeedback('');
+                          startLiveBiometricWatcher();
+                        }
+                      }}
+                      className="flex items-center justify-center gap-1.5 text-[10px] font-mono cursor-pointer"
+                      title={isBioIdle ? 'Haga clic para reactivar el sensor y encender el LED' : ''}
+                    >
+                      <span className={`w-2 h-2 rounded-full ${bioStatus.online && !isBioIdle ? 'bg-emerald-400 shadow-sm shadow-emerald-400/80 animate-pulse' : isBioIdle ? 'bg-amber-400' : 'bg-slate-400'}`}></span>
+                      <span className={bioStatus.online ? (isBioIdle ? 'text-amber-300 font-bold' : 'text-emerald-300 font-bold') : 'text-slate-400'}>
                         {bioStatus.online 
-                          ? `${bioStatus.device || 'Futronic FS88 USB'} en línea • Toque el sensor para ingresar` 
+                          ? (isBioIdle ? 'Lector en reposo (LED apagado) • Clic para activar' : `${bioStatus.device || 'Futronic FS88 USB'} en línea • Toque el sensor para ingresar`) 
                           : 'Lector biométrico no detectado (Use usuario y contraseña)'}
                       </span>
                     </div>
@@ -1041,23 +1110,38 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
                 <div className="pt-1.5 border-t border-white/10 space-y-1">
                   <button
                     type="button"
-                    onClick={handleBiometricLogin}
+                    onClick={() => {
+                      lastBioActivityTimeRef.current = Date.now();
+                      setIsBioIdle(false);
+                      handleBiometricLogin();
+                    }}
                     disabled={isBioScanning || isLoading}
                     className="w-full bg-gradient-to-r from-teal-700 via-emerald-600 to-teal-800 hover:from-teal-600 hover:to-emerald-500 active:scale-[0.99] text-white py-2 rounded text-xs font-black tracking-wider transition-all duration-200 border border-teal-400/40 flex items-center justify-center gap-2 font-sans shadow-md cursor-pointer"
                   >
                     <Fingerprint className={`w-3.5 h-3.5 text-teal-200 ${isBioScanning ? 'animate-pulse' : ''}`} />
-                    <span>{isBioScanning ? 'Leyendo huella...' : 'Ingresar con Huella'}</span>
+                    <span>{isBioScanning ? 'Leyendo huella...' : isBioIdle ? 'Reactivar Lector' : 'Ingresar con Huella'}</span>
                   </button>
                   {bioFeedback && (
-                    <p className="text-[9.5px] text-teal-300 font-sans text-center animate-pulse">
+                    <p className={`text-[9.5px] font-sans text-center ${isBioIdle ? 'text-amber-300 font-semibold' : 'text-teal-300 animate-pulse'}`}>
                       {bioFeedback}
                     </p>
                   )}
-                  <div className="flex items-center justify-center gap-1.5 text-[9.5px] font-mono">
-                    <span className={`w-1.5 h-1.5 rounded-full ${bioStatus.online ? 'bg-emerald-400 shadow-sm shadow-emerald-400/80' : 'bg-slate-400'}`}></span>
-                    <span className={bioStatus.online ? 'text-emerald-300 font-bold' : 'text-slate-400'}>
+                  <div 
+                    onClick={() => {
+                      if (isBioIdle) {
+                        lastBioActivityTimeRef.current = Date.now();
+                        setIsBioIdle(false);
+                        setBioFeedback('');
+                        startLiveBiometricWatcher();
+                      }
+                    }}
+                    className="flex items-center justify-center gap-1.5 text-[9.5px] font-mono cursor-pointer"
+                    title={isBioIdle ? 'Haga clic para reactivar el sensor y encender el LED' : ''}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${bioStatus.online && !isBioIdle ? 'bg-emerald-400 shadow-sm shadow-emerald-400/80 animate-pulse' : isBioIdle ? 'bg-amber-400' : 'bg-slate-400'}`}></span>
+                    <span className={bioStatus.online ? (isBioIdle ? 'text-amber-300 font-bold' : 'text-emerald-300 font-bold') : 'text-slate-400'}>
                       {bioStatus.online 
-                        ? `${bioStatus.device || 'Futronic'} listo (Toque el sensor)` 
+                        ? (isBioIdle ? 'Reposo (LED apagado) • Clic para activar' : `${bioStatus.device || 'Futronic'} listo (Toque el sensor)`) 
                         : 'Lector no detectado (Use clave)'}
                     </span>
                   </div>

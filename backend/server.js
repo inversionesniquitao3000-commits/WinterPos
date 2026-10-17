@@ -2087,15 +2087,18 @@ function matchFingerprintTemplates(tpl1Str, tpl2Str) {
             let dTh = Math.abs(th1 - th2);
             if (dTh > Math.PI * 0.5) dTh = Math.PI - dTh;
 
-            const sim = Math.cos(2 * dTh);
+            // Biological ridge correlation with strict angular selectivity:
+            // High correlation for genuine impressions (dTh < 15 deg),
+            // Discrepancies > 30 deg are penalized as anatomical mismatch.
+            const sim = Math.cos(3 * dTh);
             const w = (b1[604 + idx1] + b2[604 + idx2]) / 200;
             sumSim += sim * w;
             totalW += w;
             count++;
           }
         }
-        if (count >= 25 && totalW > 0) {
-          const score = (sumSim / totalW) * 100;
+        if (count >= 40 && totalW > 0) {
+          const score = Math.max(0, (sumSim / totalW) * 100);
           if (score > maxScore) maxScore = score;
         }
       }
@@ -2106,33 +2109,98 @@ function matchFingerprintTemplates(tpl1Str, tpl2Str) {
   }
 }
 
+function getUserFingerprints(u) {
+  if (!u) return [];
+  if (Array.isArray(u.huellas) && u.huellas.length > 0) {
+    return u.huellas.filter(h => h && typeof h.template === 'string' && h.template.trim().length > 0);
+  }
+  if (u.huella_template && typeof u.huella_template === 'string' && u.huella_template.trim().length > 0) {
+    return [{
+      dedo: u.huella_dedo || 'Índice Derecho',
+      template: u.huella_template,
+      fecha: u.huella_fecha || ''
+    }];
+  }
+  return [];
+}
+
 // Biometric login endpoint (Futronic FS88 & Multi-Vendor Biometric Scanner)
 app.post('/api/users/login-biometric', async (req, res) => {
   try {
-    const { template, matchedUserId, terminal } = req.body;
+    const { template, matchedUserId, username: requestedUsername, terminal } = req.body;
     cleanExpiredSessions();
 
     const users = await getUsers();
     let user = null;
 
+    // 1. Direct 1:1 Verification if user was specified (by ID or by username typed in the terminal)
+    let candidateUser = null;
     if (matchedUserId) {
-      user = users.find(u => String(u.id) === String(matchedUserId));
+      candidateUser = users.find(u => String(u.id) === String(matchedUserId));
+    } else if (requestedUsername) {
+      const cleanReq = String(requestedUsername).toLowerCase().trim();
+      candidateUser = users.find(u => (u.usuario || '').toLowerCase() === cleanReq);
     }
-    
-    if (!user && template) {
-      // 1:N Biometric Search across all enrolled active users
-      let bestUser = null;
-      let bestScore = 0;
-      for (const u of users) {
-        if (!u.huella_template || u.estado === 'Inactivo') continue;
-        const score = matchFingerprintTemplates(template, u.huella_template);
-        if (score > bestScore) {
-          bestScore = score;
-          bestUser = u;
+
+    if (candidateUser && template) {
+      const userPrints = getUserFingerprints(candidateUser);
+      if (userPrints.length > 0) {
+        let bestScore = 0;
+        let matchedFinger = '';
+        for (const p of userPrints) {
+          const score = matchFingerprintTemplates(template, p.template);
+          if (score > bestScore) {
+            bestScore = score;
+            matchedFinger = p.dedo || 'Dedo';
+          }
+        }
+        if (bestScore >= 60) {
+          user = candidateUser;
+        } else {
+          return res.status(401).json({
+            success: false,
+            message: `La huella colocada no coincide con el usuario "${candidateUser.nombre || candidateUser.usuario}" (Certeza: ${bestScore}% - Requerido: 60%).`
+          });
         }
       }
-      if (bestUser && bestScore >= 58) {
-        user = bestUser;
+    }
+
+    // 2. 1:N Biometric Search across all enrolled active users with collision margin guard
+    if (!user && template) {
+      const candidates = [];
+      for (const u of users) {
+        if (u.estado === 'Inactivo') continue;
+        const userPrints = getUserFingerprints(u);
+        if (!userPrints.length) continue;
+        let bestUserScore = 0;
+        let matchedFinger = '';
+        for (const p of userPrints) {
+          const score = matchFingerprintTemplates(template, p.template);
+          if (score > bestUserScore) {
+            bestUserScore = score;
+            matchedFinger = p.dedo || 'Dedo';
+          }
+        }
+        if (bestUserScore > 0) {
+          candidates.push({ user: u, score: bestUserScore, matchedFinger });
+        }
+      }
+      candidates.sort((a, b) => b.score - a.score);
+
+      if (candidates.length > 0) {
+        const best = candidates[0];
+        const second = candidates.length > 1 ? candidates[1] : null;
+
+        if (best.score >= 60) {
+          if (second && second.score >= 40 && (best.score - second.score) < 15 && best.score < 80) {
+            console.warn(`[Biometría Backend] Colisión prevenida entre "${best.user.usuario}" (${best.score}%) y "${second.user.usuario}" (${second.score}%).`);
+            return res.status(409).json({
+              success: false,
+              message: 'Huella ambigua entre operadores. Coloque el dedo centrado y firme en el sensor, o ingrese su usuario.'
+            });
+          }
+          user = best.user;
+        }
       }
     }
 
@@ -2215,21 +2283,34 @@ app.post('/api/config/verify-master-biometric', async (req, res) => {
     let adminUser = null;
 
     if (matchedUserId) {
-      adminUser = users.find(u => String(u.id) === String(matchedUserId));
+      const candidateAdm = users.find(u => String(u.id) === String(matchedUserId));
+      if (candidateAdm && template) {
+        const prints = getUserFingerprints(candidateAdm);
+        for (const p of prints) {
+          const verifyScore = matchFingerprintTemplates(template, p.template);
+          if (verifyScore >= 60) {
+            adminUser = candidateAdm;
+            break;
+          }
+        }
+      }
     }
 
     if (!adminUser && template) {
       let bestAdm = null;
       let bestScore = 0;
-      const admins = users.filter(u => ((u.rol || '').toLowerCase() === 'administrador' || (u.usuario || '').toLowerCase() === 'admin') && u.estado !== 'Inactivo' && u.huella_template);
+      const admins = users.filter(u => ((u.rol || '').toLowerCase() === 'administrador' || (u.usuario || '').toLowerCase() === 'admin') && u.estado !== 'Inactivo');
       for (const adm of admins) {
-        const score = matchFingerprintTemplates(template, adm.huella_template);
-        if (score > bestScore) {
-          bestScore = score;
-          bestAdm = adm;
+        const prints = getUserFingerprints(adm);
+        for (const p of prints) {
+          const score = matchFingerprintTemplates(template, p.template);
+          if (score > bestScore) {
+            bestScore = score;
+            bestAdm = adm;
+          }
         }
       }
-      if (bestAdm && bestScore >= 58) {
+      if (bestAdm && bestScore >= 60) {
         adminUser = bestAdm;
       }
     }
@@ -2516,16 +2597,34 @@ app.post('/api/users/force-logout/:target', (req, res) => {
 
 app.post('/api/users', async (req, res) => {
   try {
-    const { huella_template } = req.body;
-    if (huella_template && typeof huella_template === 'string' && huella_template.trim().length > 0) {
+    const incomingPrints = [];
+    if (Array.isArray(req.body.huellas)) {
+      for (const h of req.body.huellas) {
+        if (h && typeof h.template === 'string' && h.template.trim().length > 0) {
+          incomingPrints.push(h);
+        }
+      }
+    }
+    if (incomingPrints.length === 0 && req.body.huella_template && typeof req.body.huella_template === 'string' && req.body.huella_template.trim().length > 0) {
+      incomingPrints.push({
+        dedo: req.body.huella_dedo || 'Índice Derecho',
+        template: req.body.huella_template
+      });
+    }
+
+    if (incomingPrints.length > 0) {
       const allUsers = await getUsers();
-      for (const u of allUsers) {
-        if (!u.huella_template) continue;
-        const score = matchFingerprintTemplates(huella_template, u.huella_template);
-        if (score >= 58) {
-          return res.status(400).json({
-            error: `Conflicto biométrico: Esta huella dactilar ya se encuentra asignada al usuario "${u.nombre}" (@${u.usuario}). No se permite duplicidad de huellas.`
-          });
+      for (const print of incomingPrints) {
+        for (const u of allUsers) {
+          const otherPrints = getUserFingerprints(u);
+          for (const op of otherPrints) {
+            const score = matchFingerprintTemplates(print.template, op.template);
+            if (score >= 60) {
+              return res.status(400).json({
+                error: `Conflicto biométrico: La huella seleccionada (${print.dedo || 'Dedo'}) ya se encuentra asignada al usuario "${u.nombre}" (@${u.usuario}) en su "${op.dedo || 'huella'}". No se permite duplicidad de huellas.`
+              });
+            }
+          }
         }
       }
     }
@@ -2538,17 +2637,36 @@ app.post('/api/users', async (req, res) => {
 
 app.put('/api/users/:id', async (req, res) => {
   try {
-    const { huella_template } = req.body;
     const targetId = String(req.params.id);
-    if (huella_template && typeof huella_template === 'string' && huella_template.trim().length > 0) {
+    const incomingPrints = [];
+    if (Array.isArray(req.body.huellas)) {
+      for (const h of req.body.huellas) {
+        if (h && typeof h.template === 'string' && h.template.trim().length > 0) {
+          incomingPrints.push(h);
+        }
+      }
+    }
+    if (incomingPrints.length === 0 && req.body.huella_template && typeof req.body.huella_template === 'string' && req.body.huella_template.trim().length > 0) {
+      incomingPrints.push({
+        dedo: req.body.huella_dedo || 'Índice Derecho',
+        template: req.body.huella_template
+      });
+    }
+
+    if (incomingPrints.length > 0) {
       const allUsers = await getUsers();
-      for (const u of allUsers) {
-        if (String(u.id) === targetId || !u.huella_template) continue;
-        const score = matchFingerprintTemplates(huella_template, u.huella_template);
-        if (score >= 58) {
-          return res.status(400).json({
-            error: `Conflicto biométrico: Esta huella dactilar ya se encuentra asignada al usuario "${u.nombre}" (@${u.usuario}). No se permite duplicidad de huellas.`
-          });
+      for (const print of incomingPrints) {
+        for (const u of allUsers) {
+          if (String(u.id) === targetId) continue;
+          const otherPrints = getUserFingerprints(u);
+          for (const op of otherPrints) {
+            const score = matchFingerprintTemplates(print.template, op.template);
+            if (score >= 60) {
+              return res.status(400).json({
+                error: `Conflicto biométrico: La huella seleccionada (${print.dedo || 'Dedo'}) ya se encuentra asignada al usuario "${u.nombre}" (@${u.usuario}) en su "${op.dedo || 'huella'}". No se permite duplicidad de huellas.`
+              });
+            }
+          }
         }
       }
     }
@@ -3517,7 +3635,7 @@ app.use('/api/*', (req, res) => {
 function freePortIfOccupied(port) {
   return new Promise((resolve) => {
     const tester = net.createServer();
-    tester.once('error', (err) => {
+    tester.once('error', async (err) => {
       if (err.code === 'EADDRINUSE') {
         console.log(`⚠️ Puerto ${port} en uso. Liberando proceso previo automáticamente...`);
         try {
@@ -3537,6 +3655,9 @@ function freePortIfOccupied(port) {
                 execSync(`taskkill /F /PID ${pid}`);
                 console.log(`✅ Proceso anterior (${pid}) liberado del puerto ${port}.`);
               } catch (_) { }
+            }
+            if (pids.size > 0) {
+              await new Promise(r => setTimeout(r, 500));
             }
           }
         } catch (e) {

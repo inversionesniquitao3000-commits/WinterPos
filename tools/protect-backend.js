@@ -138,6 +138,15 @@ if (fs.existsSync(envSrc)) {
   fs.writeFileSync(path.join(distBackendDir, '.env'), 'PORT=5000\nDB_USER=postgres\nDB_PASSWORD=postgres\nDB_HOST=localhost\nDB_PORT=5432\nDB_DATABASE=Winter\n');
 }
 
+// Copy native drivers and binary executables (.exe, .dll) to dist_backend
+const binaryFiles = fs.readdirSync(backendDir).filter(f => f.endsWith('.exe') || f.endsWith('.dll'));
+for (const binFile of binaryFiles) {
+  const src = path.join(backendDir, binFile);
+  const dest = path.join(distBackendDir, binFile);
+  fs.copyFileSync(src, dest);
+  console.log(`  🔌 Binario/Driver copiado: dist_backend/${binFile}`);
+}
+
 // 3. Obfuscate backend files into dist_backend
 console.log('\n🛡️ Ofuscando y Cifrando módulos de backend en dist_backend/:');
 for (const file of backendFilesToProtect) {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Lock, Eye, EyeOff, ShieldCheck, X, KeyRound, Fingerprint } from 'lucide-react';
 import { getApiBaseUrl } from '../utils';
 import { checkBiometricReaderStatus, captureBiometricFingerprint } from '../biometricHelper';
@@ -21,22 +21,115 @@ export const MasterPassModal: React.FC<MasterPassModalProps> = ({
   const [bioOnline, setBioOnline] = useState(false);
   const [bioLoading, setBioLoading] = useState(false);
   const [bioFeedback, setBioFeedback] = useState('');
+  const [isBioIdle, setIsBioIdle] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const isMountedRef = useRef(false);
+  const isAutoWatchingRef = useRef(false);
+  const authCompletedRef = useRef(false);
+  const lastBioActivityRef = useRef<number>(Date.now());
+
+  // Live Touch Biometric Watcher: Listens automatically without needing manual button click
+  const startLiveBiometricWatcher = async (bioCfg?: any) => {
+    if (isAutoWatchingRef.current) return;
+    isAutoWatchingRef.current = true;
+    setIsBioIdle(false);
+    lastBioActivityRef.current = Date.now();
+
+    // Small initial delay so inputs can focus smoothly first
+    await new Promise(r => setTimeout(r, 350));
+
+    while (isMountedRef.current && !authCompletedRef.current) {
+      // Regla de inactividad de 2 minutos (120 seg): apagar LED y pasar a reposo
+      if (Date.now() - lastBioActivityRef.current >= 120000) {
+        setIsBioIdle(true);
+        setBioFeedback('💤 Lector en reposo por inactividad (2 min). Haga clic aquí para reactivar.');
+        break;
+      }
+
+      try {
+        setBioLoading(true);
+        setBioFeedback('🟢 LED encendido: Coloque su huella en el sensor...');
+
+        const scanRes = await captureBiometricFingerprint(bioCfg, 15000);
+
+        if (!isMountedRef.current || authCompletedRef.current) break;
+
+        if (scanRes.success && scanRes.template) {
+          lastBioActivityRef.current = Date.now();
+          setBioFeedback('🔍 Validando privilegios de Administrador...');
+
+          const res = await fetch(`${getApiBaseUrl()}/config/verify-master-biometric`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ template: scanRes.template })
+          });
+
+          const data = await res.json().catch(() => ({ success: false, message: 'Error del servidor.' }));
+          if (res.ok && data.success) {
+            authCompletedRef.current = true;
+            setBioFeedback(`✅ ${data.message || 'Autorización concedida'}`);
+            setTimeout(() => {
+              if (isMountedRef.current) onSuccess();
+            }, 250);
+            break;
+          } else {
+            setErrorMsg(data.message || 'Huella no autorizada para funciones de Administrador.');
+            setBioFeedback('');
+          }
+        }
+      } catch (_) {
+        // Sensor timeout pass, continue silently
+      }
+
+      const restMs = 800;
+      if (isMountedRef.current && !authCompletedRef.current) {
+        await new Promise(r => setTimeout(r, restMs));
+      }
+    }
+
+    isAutoWatchingRef.current = false;
+    if (isMountedRef.current) setBioLoading(false);
+  };
 
   useEffect(() => {
     if (isOpen) {
+      isMountedRef.current = true;
+      authCompletedRef.current = false;
       setPass('');
       setErrorMsg('');
       setBioFeedback('');
-      // Check if biometric reader is active on this terminal
+
+      // Auto-focus the Master Pass password input so the user can immediately type
+      const timer = setTimeout(() => {
+        inputRef.current?.focus();
+      }, 150);
+
+      // Probe biometric status and auto-start live scanner
       try {
         const savedConfig = localStorage.getItem('pos_biometric_config');
         const bioCfg = savedConfig ? JSON.parse(savedConfig) : undefined;
         checkBiometricReaderStatus(bioCfg).then(res => {
-          setBioOnline(res.online);
-        }).catch(() => setBioOnline(false));
+          if (isMountedRef.current) {
+            setBioOnline(res.online);
+            if (res.online && bioCfg?.autorizarMasterPass !== false) {
+              startLiveBiometricWatcher(bioCfg);
+            }
+          }
+        }).catch(() => {
+          if (isMountedRef.current) setBioOnline(false);
+        });
       } catch (_) {
         setBioOnline(false);
       }
+
+      return () => {
+        clearTimeout(timer);
+        isMountedRef.current = false;
+        authCompletedRef.current = true;
+      };
+    } else {
+      isMountedRef.current = false;
+      authCompletedRef.current = true;
     }
   }, [isOpen]);
 
@@ -72,6 +165,7 @@ export const MasterPassModal: React.FC<MasterPassModalProps> = ({
       });
       const data = await res.json().catch(() => ({ success: false, message: 'Error del servidor.' }));
       if (res.ok && data.success) {
+        authCompletedRef.current = true;
         setPass('');
         onSuccess();
       } else {
@@ -84,42 +178,16 @@ export const MasterPassModal: React.FC<MasterPassModalProps> = ({
     }
   };
 
-  const handleBiometricAuth = async () => {
-    setBioLoading(true);
-    setBioFeedback('☝️ Coloque su huella de Administrador en el sensor...');
-    setErrorMsg('');
-
-    try {
-      const savedConfig = localStorage.getItem('pos_biometric_config');
-      const bioCfg = savedConfig ? JSON.parse(savedConfig) : undefined;
-      const scanRes = await captureBiometricFingerprint(bioCfg, 6500);
-
-      if (!scanRes.success || !scanRes.template) {
-        setBioFeedback('');
-        setErrorMsg(scanRes.error || 'No se detectó huella en el sensor.');
-        return;
-      }
-
-      setBioFeedback('🔍 Validando privilegios de Administrador...');
-      const res = await fetch(`${getApiBaseUrl()}/config/verify-master-biometric`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ template: scanRes.template })
-      });
-
-      const data = await res.json().catch(() => ({ success: false, message: 'Error del servidor.' }));
-      if (res.ok && data.success) {
-        setBioFeedback('✅ Autorización concedida');
-        onSuccess();
-      } else {
-        setBioFeedback('');
-        setErrorMsg(data.message || 'Huella no autorizada para funciones de Administrador.');
-      }
-    } catch (err: any) {
-      setBioFeedback('');
-      setErrorMsg('Error de comunicación con el lector o servidor.');
-    } finally {
-      setBioLoading(false);
+  const handleManualBiometricTrigger = () => {
+    lastBioActivityRef.current = Date.now();
+    setIsBioIdle(false);
+    setBioFeedback('');
+    if (!isAutoWatchingRef.current) {
+      try {
+        const savedConfig = localStorage.getItem('pos_biometric_config');
+        const bioCfg = savedConfig ? JSON.parse(savedConfig) : undefined;
+        startLiveBiometricWatcher(bioCfg);
+      } catch (_) {}
     }
   };
 
@@ -141,7 +209,7 @@ export const MasterPassModal: React.FC<MasterPassModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-all"
+            className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-all cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -155,7 +223,7 @@ export const MasterPassModal: React.FC<MasterPassModalProps> = ({
             </div>
             <h4 className="text-sm font-bold text-slate-200 font-sans">Ingrese la Clave Master Pass</h4>
             <p className="text-xs text-slate-400 font-sans max-w-xs mx-auto">
-              Para ingresar al Módulo de Inversiones y Utilidades debe autenticarse con la clave maestra previamente configurada.
+              Coloque su huella en el lector o escriba su clave maestra para ingresar.
             </p>
           </div>
 
@@ -172,6 +240,7 @@ export const MasterPassModal: React.FC<MasterPassModalProps> = ({
             </label>
             <div className="relative">
               <input
+                ref={inputRef}
                 type={showPass ? 'text' : 'password'}
                 value={pass}
                 onChange={(e) => setPass(e.target.value)}
@@ -183,25 +252,25 @@ export const MasterPassModal: React.FC<MasterPassModalProps> = ({
               <button
                 type="button"
                 onClick={() => setShowPass(!showPass)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1 cursor-pointer"
               >
                 {showPass ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
               </button>
             </div>
           </div>
 
-          <div className="pt-3 flex gap-3">
+          <div className="pt-2 flex gap-3">
             <button
               type="button"
               onClick={onClose}
-              className="w-1/2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-2.5 rounded-xl text-xs uppercase tracking-wide font-sans transition-all"
+              className="w-1/2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-2.5 rounded-xl text-xs uppercase tracking-wide font-sans transition-all cursor-pointer"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="w-1/2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-xs uppercase tracking-wide font-sans transition-all shadow-lg shadow-emerald-950/40 flex items-center justify-center gap-1.5"
+              className="w-1/2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-xs uppercase tracking-wide font-sans transition-all shadow-lg shadow-emerald-950/40 flex items-center justify-center gap-1.5 cursor-pointer"
             >
               {loading ? (
                 <span>Verificando...</span>
@@ -214,23 +283,32 @@ export const MasterPassModal: React.FC<MasterPassModalProps> = ({
             </button>
           </div>
 
-          {/* Alternativa de Autorización con Huella Dactilar */}
+          {/* Tarjeta de Lector de Huella en Vivo (Auto-Escaneo Manos Libres) */}
           {bioOnline && (
             <div className="pt-3 border-t border-slate-800 space-y-2">
-              <button
-                type="button"
-                onClick={handleBiometricAuth}
-                disabled={loading || bioLoading}
-                className="w-full bg-gradient-to-r from-teal-700 via-emerald-600 to-teal-800 hover:from-teal-600 hover:to-emerald-500 active:scale-[0.99] text-white py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider font-sans transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+              <div
+                onClick={handleManualBiometricTrigger}
+                className={`w-full bg-gradient-to-r from-emerald-950/80 via-teal-950/60 to-emerald-950/80 border ${isBioIdle ? 'border-amber-500/40 hover:border-amber-400' : 'border-emerald-500/40 hover:border-emerald-400'} rounded-xl p-3 flex items-center justify-between gap-3 shadow-lg group transition-all cursor-pointer`}
+                title={isBioIdle ? 'Haga clic para reactivar el sensor y encender el LED' : ''}
               >
-                <Fingerprint className={`w-4 h-4 text-teal-200 ${bioLoading ? 'animate-pulse' : ''}`} />
-                <span>{bioLoading ? 'Leyendo Huella...' : 'Autorizar con Huella de Admin'}</span>
-              </button>
-              {bioFeedback && (
-                <p className="text-[10.5px] text-teal-300 font-sans text-center animate-pulse">
-                  {bioFeedback}
-                </p>
-              )}
+                <div className="flex items-center gap-3">
+                  <div className={`w-9 h-9 rounded-xl ${isBioIdle ? 'bg-amber-500/20 border-amber-500/40 text-amber-400' : 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'} border flex items-center justify-center flex-shrink-0`}>
+                    <Fingerprint className={`w-5 h-5 ${isBioIdle ? 'text-amber-300' : 'text-emerald-300'} ${bioLoading && !isBioIdle ? 'animate-pulse' : ''}`} />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white flex items-center gap-1.5 font-sans">
+                      <span className={`w-2 h-2 rounded-full ${bioLoading && !isBioIdle ? 'bg-emerald-400 animate-pulse' : isBioIdle ? 'bg-amber-400' : 'bg-emerald-400'}`}></span>
+                      <span>{bioLoading && !isBioIdle ? 'Sensor Activo: Escaneando...' : isBioIdle ? 'Sensor en Modo Reposo (LED apagado)' : 'Lector de Huella en Línea'}</span>
+                    </div>
+                    <p className={`text-[11px] font-sans ${isBioIdle ? 'text-amber-300/90 font-medium' : 'text-emerald-300/90'}`}>
+                      {bioFeedback || (isBioIdle ? 'Haga clic aquí para reactivar la lectura biométrica' : 'Toque el sensor con su huella para autorizar al instante')}
+                    </p>
+                  </div>
+                </div>
+                <span className={`text-[9.5px] font-mono font-bold ${isBioIdle ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'} px-2 py-0.5 rounded border`}>
+                  {isBioIdle ? 'REPOSO' : 'AUTO'}
+                </span>
+              </div>
             </div>
           )}
         </form>
@@ -239,7 +317,7 @@ export const MasterPassModal: React.FC<MasterPassModalProps> = ({
         <div className="px-6 py-2.5 border-t border-slate-800 bg-slate-950/60 flex justify-end">
           <button
             onClick={onClose}
-            className="text-xs text-slate-500 hover:text-slate-300 font-sans transition-colors flex items-center gap-1"
+            className="text-xs text-slate-500 hover:text-slate-300 font-sans transition-colors flex items-center gap-1 cursor-pointer"
           >
             <X className="w-3 h-3" />
             Cerrar [ESC]
@@ -249,3 +327,4 @@ export const MasterPassModal: React.FC<MasterPassModalProps> = ({
     </div>
   );
 };
+

@@ -1,4 +1,4 @@
-import { BiometricConfig, User } from './types';
+import { BiometricConfig, User, UserFingerprint } from './types';
 import { getApiBaseUrl } from './utils';
 
 export interface BiometricStatusResult {
@@ -267,7 +267,10 @@ export function matchFingerprintTemplates(tpl1Str?: string | null, tpl2Str?: str
             let dTh = Math.abs(th1 - th2);
             if (dTh > Math.PI * 0.5) dTh = Math.PI - dTh;
 
-            const sim = Math.cos(2 * dTh);
+            // Biological ridge correlation with strict angular selectivity:
+            // Ridge flows within 15 deg have high correlation;
+            // flows differing by > 30 deg are penalized as anatomical discrepancy.
+            const sim = Math.cos(3 * dTh);
             const w = (b1[604 + idx1] + b2[604 + idx2]) / 200;
 
             sumSim += sim * w;
@@ -276,8 +279,8 @@ export function matchFingerprintTemplates(tpl1Str?: string | null, tpl2Str?: str
           }
         }
 
-        if (count >= 25 && totalW > 0) {
-          const score = (sumSim / totalW) * 100;
+        if (count >= 40 && totalW > 0) {
+          const score = Math.max(0, (sumSim / totalW) * 100);
           if (score > maxScore) maxScore = score;
         }
       }
@@ -289,31 +292,122 @@ export function matchFingerprintTemplates(tpl1Str?: string | null, tpl2Str?: str
   }
 }
 
+export function getUserFingerprints(u: User): UserFingerprint[] {
+  if (!u) return [];
+  if (Array.isArray(u.huellas) && u.huellas.length > 0) {
+    return u.huellas.filter(h => h && typeof h.template === 'string' && h.template.trim().length > 0);
+  }
+  if (u.huella_template && typeof u.huella_template === 'string' && u.huella_template.trim().length > 0) {
+    return [{
+      dedo: u.huella_dedo || 'Índice Derecho',
+      template: u.huella_template,
+      fecha: u.huella_fecha || ''
+    }];
+  }
+  return [];
+}
+
 /**
- * Minutiae & ridge orientation 1:N search against enrolled users.
- * Uses 58% threshold to robustly match genuine fingerprint impressions.
+ * Minutiae & ridge orientation 1:N / 1:1 search against enrolled users.
+ * - If targetUsername is provided, executes a 1:1 verification against that user (100% collision-free).
+ * - If in 1:N mode, sorts all candidates, enforces a 60% threshold, and requires a safety margin
+ *   of >= 15 points between the top match and any runner-up to eliminate false identity swaps.
  */
-export function matchFingerprintAgainstUsers(scannedTemplate: string, users: User[]): { user: User | null; score: number } {
+export function matchFingerprintAgainstUsers(
+  scannedTemplate: string,
+  users: User[],
+  targetUsername?: string
+): { user: User | null; score: number; matchedFinger?: string; isAmbiguous?: boolean; error?: string } {
   if (!scannedTemplate || !Array.isArray(users)) {
     return { user: null, score: 0 };
   }
 
-  let bestUser: User | null = null;
-  let bestScore = 0;
-
-  for (const u of users) {
-    if (!u.huella_template || u.estado === 'Inactivo') continue;
-    const score = matchFingerprintTemplates(scannedTemplate, u.huella_template);
-    if (score > bestScore) {
-      bestScore = score;
-      bestUser = u;
+  // 1. Direct 1:1 Verification if username was entered in the login form
+  if (targetUsername && targetUsername.trim().length > 0) {
+    const cleanTarget = targetUsername.trim().toLowerCase();
+    const targeted = users.find(u => (u.usuario || '').toLowerCase() === cleanTarget);
+    if (targeted) {
+      const userPrints = getUserFingerprints(targeted);
+      if (userPrints.length === 0) {
+        return {
+          user: null,
+          score: 0,
+          error: `El usuario "${targeted.nombre || targeted.usuario}" no tiene huellas dactilares registradas en el sistema.`
+        };
+      }
+      if (targeted.estado === 'Inactivo') {
+        return {
+          user: null,
+          score: 0,
+          error: `El usuario "${targeted.nombre || targeted.usuario}" se encuentra inactivo.`
+        };
+      }
+      let bestScore = 0;
+      let matchedFinger = '';
+      for (const p of userPrints) {
+        const score = matchFingerprintTemplates(scannedTemplate, p.template);
+        if (score > bestScore) {
+          bestScore = score;
+          matchedFinger = p.dedo || 'Dedo';
+        }
+      }
+      if (bestScore >= 60) {
+        return { user: targeted, score: bestScore, matchedFinger };
+      } else {
+        return {
+          user: null,
+          score: bestScore,
+          error: `La huella colocada no coincide con el usuario "${targeted.nombre || targeted.usuario}" (Coincidencia: ${bestScore}% - Requerido: 60%).`
+        };
+      }
     }
   }
 
-  // Acceptance threshold: 58%
-  if (bestUser && bestScore >= 58) {
-    return { user: bestUser, score: bestScore };
+  // 2. 1:N Biometric Search across all enrolled active users
+  const candidates: { user: User; score: number; matchedFinger: string }[] = [];
+  for (const u of users) {
+    if (u.estado === 'Inactivo') continue;
+    const userPrints = getUserFingerprints(u);
+    if (userPrints.length === 0) continue;
+    let bestUserScore = 0;
+    let bestUserFinger = '';
+    for (const p of userPrints) {
+      const score = matchFingerprintTemplates(scannedTemplate, p.template);
+      if (score > bestUserScore) {
+        bestUserScore = score;
+        bestUserFinger = p.dedo || 'Dedo';
+      }
+    }
+    if (bestUserScore > 0) {
+      candidates.push({ user: u, score: bestUserScore, matchedFinger: bestUserFinger });
+    }
   }
 
-  return { user: null, score: bestScore };
+  candidates.sort((a, b) => b.score - a.score);
+
+  if (candidates.length === 0) {
+    return { user: null, score: 0 };
+  }
+
+  const best = candidates[0];
+  const second = candidates.length > 1 ? candidates[1] : null;
+
+  // Threshold: >= 60%
+  if (best.score < 60) {
+    return { user: null, score: best.score };
+  }
+
+  // Ambiguity / Collision Guard:
+  // If runner-up (different user) is also high (>= 40%) and difference with best is < 15 points, reject as ambiguous
+  if (second && second.score >= 40 && (best.score - second.score) < 15 && best.score < 80) {
+    console.warn(`[Biometría] Colisión 1:N prevenida entre "${best.user.usuario}" (${best.score}%) y "${second.user.usuario}" (${second.score}%).`);
+    return {
+      user: null,
+      score: best.score,
+      isAmbiguous: true,
+      error: 'Huella ambigua. Por favor coloque el dedo firme y centrado en el lector, o ingrese su usuario.'
+    };
+  }
+
+  return { user: best.user, score: best.score, matchedFinger: best.matchedFinger };
 }

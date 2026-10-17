@@ -190,6 +190,7 @@ try {
     ALTER TABLE IF EXISTS Usuarios ADD COLUMN IF NOT EXISTS huella_template TEXT;
     ALTER TABLE IF EXISTS Usuarios ADD COLUMN IF NOT EXISTS huella_dedo VARCHAR(50);
     ALTER TABLE IF EXISTS Usuarios ADD COLUMN IF NOT EXISTS huella_fecha VARCHAR(50);
+    ALTER TABLE IF EXISTS Usuarios ADD COLUMN IF NOT EXISTS huellas JSONB DEFAULT '[]'::jsonb;
     ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS tasa_cambio NUMERIC(12, 4) DEFAULT 1.00;
     ALTER TABLE IF EXISTS Ventas ALTER COLUMN tasa_cambio DROP NOT NULL;
     ALTER TABLE IF EXISTS Ventas ALTER COLUMN tasa_cambio SET DEFAULT 1.00;
@@ -977,40 +978,47 @@ export async function getUsers() {
 
   if (usePostgres) {
     try {
-      const res = await pool.query('SELECT id, usuario, nombre, rol, estado, clave, permisos, huella_template, huella_dedo, huella_fecha FROM Usuarios ORDER BY id ASC');
-      if (res.rowCount > 0) {
-        return res.rows.map(r => ({
+      const res = await pool.query('SELECT id, usuario, nombre, rol, estado, clave, permisos, huella_template, huella_dedo, huella_fecha, huellas FROM Usuarios ORDER BY id ASC');
+      const mapUserRow = (r) => {
+        let parsedHuellas = [];
+        if (Array.isArray(r.huellas)) {
+          parsedHuellas = r.huellas;
+        } else if (typeof r.huellas === 'string') {
+          try { parsedHuellas = JSON.parse(r.huellas); } catch (_) { parsedHuellas = []; }
+        }
+        if ((!parsedHuellas || parsedHuellas.length === 0) && r.huella_template) {
+          parsedHuellas = [{
+            dedo: r.huella_dedo || 'Índice Derecho',
+            template: r.huella_template,
+            fecha: r.huella_fecha || ''
+          }];
+        }
+        return {
           id: r.id,
           usuario: r.usuario,
           nombre: r.nombre,
           rol: r.rol,
           estado: r.estado,
           clave: r.clave || 'admin*',
-          huella_template: r.huella_template || null,
-          huella_dedo: r.huella_dedo || null,
-          huella_fecha: r.huella_fecha || null,
+          huella_template: r.huella_template || (parsedHuellas[0]?.template || null),
+          huella_dedo: r.huella_dedo || (parsedHuellas[0]?.dedo || null),
+          huella_fecha: r.huella_fecha || (parsedHuellas[0]?.fecha || null),
+          huellas: parsedHuellas,
           permisos: r.permisos ? (typeof r.permisos === 'string' ? JSON.parse(r.permisos) : r.permisos) : defaultPermsAdmin
-        }));
+        };
+      };
+
+      if (res.rowCount > 0) {
+        return res.rows.map(mapUserRow);
       } else {
         // Only seed default admin if Usuarios table is completely empty
         await pool.query(
-          `INSERT INTO Usuarios (usuario, clave, nombre, rol, estado, permisos)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
+          `INSERT INTO Usuarios (usuario, clave, nombre, rol, estado, permisos, huellas)
+           VALUES ($1, $2, $3, $4, $5, $6, '[]'::jsonb)`,
           ['admin', 'admin*', 'Administrador', 'ADMINISTRADOR', 'Activo', JSON.stringify(defaultPermsAdmin)]
         );
-        const res2 = await pool.query('SELECT id, usuario, nombre, rol, estado, clave, permisos, huella_template, huella_dedo, huella_fecha FROM Usuarios ORDER BY id ASC');
-        return res2.rows.map(r => ({
-          id: r.id,
-          usuario: r.usuario,
-          nombre: r.nombre,
-          rol: r.rol,
-          estado: r.estado,
-          clave: r.clave || 'admin*',
-          huella_template: r.huella_template || null,
-          huella_dedo: r.huella_dedo || null,
-          huella_fecha: r.huella_fecha || null,
-          permisos: r.permisos ? (typeof r.permisos === 'string' ? JSON.parse(r.permisos) : r.permisos) : defaultPermsAdmin
-        }));
+        const res2 = await pool.query('SELECT id, usuario, nombre, rol, estado, clave, permisos, huella_template, huella_dedo, huella_fecha, huellas FROM Usuarios ORDER BY id ASC');
+        return res2.rows.map(mapUserRow);
       }
     } catch (err) {
       console.error('Error en getUsers (Postgres):', err.message);
@@ -2020,15 +2028,33 @@ export async function saveUser(u) {
     u.permisos = FULL_ADMIN_PERMISSIONS;
   }
   const permsStr = JSON.stringify(u.permisos || {});
+  let huellasList = Array.isArray(u.huellas) ? u.huellas : [];
+  if (huellasList.length === 0 && u.huella_template) {
+    huellasList = [{
+      dedo: u.huella_dedo || 'Índice Derecho',
+      template: u.huella_template,
+      fecha: u.huella_fecha || new Date().toISOString()
+    }];
+  }
+  const primaryPrint = huellasList[0] || null;
+  const primaryTemplate = u.huella_template || primaryPrint?.template || null;
+  const primaryDedo = u.huella_dedo || primaryPrint?.dedo || null;
+  const primaryFecha = u.huella_fecha || primaryPrint?.fecha || null;
+
   if (usePostgres) {
     try {
       await pool.query("SELECT setval(pg_get_serial_sequence('Usuarios', 'id'), COALESCE((SELECT MAX(id) FROM Usuarios), 1))");
       const res = await pool.query(
-        'INSERT INTO Usuarios (usuario, nombre, rol, estado, clave, permisos, huella_template, huella_dedo, huella_fecha) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
-        [u.usuario, u.nombre, u.rol, u.estado || 'Activo', u.clave || '', permsStr, u.huella_template || null, u.huella_dedo || null, u.huella_fecha || null]
+        'INSERT INTO Usuarios (usuario, nombre, rol, estado, clave, permisos, huella_template, huella_dedo, huella_fecha, huellas) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb) RETURNING *',
+        [u.usuario, u.nombre, u.rol, u.estado || 'Activo', u.clave || '', permsStr, primaryTemplate, primaryDedo, primaryFecha, JSON.stringify(huellasList)]
       );
       if (res.rowCount > 0) {
         const r = res.rows[0];
+        let resHuellas = [];
+        if (Array.isArray(r.huellas)) resHuellas = r.huellas;
+        else if (typeof r.huellas === 'string') {
+          try { resHuellas = JSON.parse(r.huellas); } catch (_) { resHuellas = []; }
+        }
         return {
           id: r.id,
           usuario: r.usuario,
@@ -2039,6 +2065,7 @@ export async function saveUser(u) {
           huella_template: r.huella_template || null,
           huella_dedo: r.huella_dedo || null,
           huella_fecha: r.huella_fecha || null,
+          huellas: resHuellas,
           permisos: r.permisos ? (typeof r.permisos === 'string' ? JSON.parse(r.permisos) : r.permisos) : null
         };
       }
@@ -2056,9 +2083,10 @@ export async function saveUser(u) {
     rol: u.rol,
     estado: u.estado || 'Activo',
     clave: u.clave || 'admin*',
-    huella_template: u.huella_template || null,
-    huella_dedo: u.huella_dedo || null,
-    huella_fecha: u.huella_fecha || null,
+    huella_template: primaryTemplate,
+    huella_dedo: primaryDedo,
+    huella_fecha: primaryFecha,
+    huellas: huellasList,
     permisos: u.permisos
   };
   users.push(newUser);
@@ -2071,14 +2099,61 @@ export async function updateUser(id, u) {
     u.permisos = FULL_ADMIN_PERMISSIONS;
   }
   const permsStr = JSON.stringify(u.permisos || {});
+
+  let huellasToUpdate = null;
+  let primaryTemplate = u.huella_template;
+  let primaryDedo = u.huella_dedo;
+  let primaryFecha = u.huella_fecha;
+
+  if (u.huellas !== undefined) {
+    huellasToUpdate = Array.isArray(u.huellas) ? u.huellas : [];
+    if (huellasToUpdate.length > 0) {
+      if (primaryTemplate === undefined) primaryTemplate = huellasToUpdate[0].template;
+      if (primaryDedo === undefined) primaryDedo = huellasToUpdate[0].dedo;
+      if (primaryFecha === undefined) primaryFecha = huellasToUpdate[0].fecha;
+    } else {
+      if (primaryTemplate === undefined) primaryTemplate = null;
+      if (primaryDedo === undefined) primaryDedo = null;
+      if (primaryFecha === undefined) primaryFecha = null;
+    }
+  }
+
   if (usePostgres) {
     try {
       const res = await pool.query(
-        'UPDATE Usuarios SET usuario = $1, nombre = $2, rol = $3, estado = $4, clave = $5, permisos = $6, huella_template = COALESCE($7, huella_template), huella_dedo = COALESCE($8, huella_dedo), huella_fecha = COALESCE($9, huella_fecha) WHERE id = $10 RETURNING *',
-        [u.usuario, u.nombre, u.rol, u.estado, u.clave, permsStr, u.huella_template !== undefined ? u.huella_template : null, u.huella_dedo !== undefined ? u.huella_dedo : null, u.huella_fecha !== undefined ? u.huella_fecha : null, id]
+        `UPDATE Usuarios SET 
+           usuario = $1, 
+           nombre = $2, 
+           rol = $3, 
+           estado = $4, 
+           clave = $5, 
+           permisos = $6, 
+           huella_template = (CASE WHEN $7::text = '__CLEAR__' THEN NULL WHEN $7::text IS NOT NULL THEN $7 ELSE huella_template END), 
+           huella_dedo = (CASE WHEN $8::text = '__CLEAR__' THEN NULL WHEN $8::text IS NOT NULL THEN $8 ELSE huella_dedo END), 
+           huella_fecha = (CASE WHEN $9::text = '__CLEAR__' THEN NULL WHEN $9::text IS NOT NULL THEN $9 ELSE huella_fecha END),
+           huellas = (CASE WHEN $10::text IS NOT NULL THEN $10::jsonb ELSE huellas END)
+         WHERE id = $11 RETURNING *`,
+        [
+          u.usuario,
+          u.nombre,
+          u.rol,
+          u.estado,
+          u.clave,
+          permsStr,
+          primaryTemplate === null ? '__CLEAR__' : (primaryTemplate || null),
+          primaryDedo === null ? '__CLEAR__' : (primaryDedo || null),
+          primaryFecha === null ? '__CLEAR__' : (primaryFecha || null),
+          huellasToUpdate !== null ? JSON.stringify(huellasToUpdate) : null,
+          id
+        ]
       );
       if (res.rowCount > 0) {
         const r = res.rows[0];
+        let resHuellas = [];
+        if (Array.isArray(r.huellas)) resHuellas = r.huellas;
+        else if (typeof r.huellas === 'string') {
+          try { resHuellas = JSON.parse(r.huellas); } catch (_) { resHuellas = []; }
+        }
         return {
           id: r.id,
           usuario: r.usuario,
@@ -2089,6 +2164,7 @@ export async function updateUser(id, u) {
           huella_template: r.huella_template || null,
           huella_dedo: r.huella_dedo || null,
           huella_fecha: r.huella_fecha || null,
+          huellas: resHuellas,
           permisos: r.permisos ? (typeof r.permisos === 'string' ? JSON.parse(r.permisos) : r.permisos) : null
         };
       }
@@ -2107,9 +2183,10 @@ export async function updateUser(id, u) {
       rol: u.rol,
       estado: u.estado,
       clave: u.clave,
-      huella_template: u.huella_template !== undefined ? u.huella_template : users[idx].huella_template,
-      huella_dedo: u.huella_dedo !== undefined ? u.huella_dedo : users[idx].huella_dedo,
-      huella_fecha: u.huella_fecha !== undefined ? u.huella_fecha : users[idx].huella_fecha,
+      huella_template: primaryTemplate !== undefined ? primaryTemplate : users[idx].huella_template,
+      huella_dedo: primaryDedo !== undefined ? primaryDedo : users[idx].huella_dedo,
+      huella_fecha: primaryFecha !== undefined ? primaryFecha : users[idx].huella_fecha,
+      huellas: huellasToUpdate !== null ? huellasToUpdate : (users[idx].huellas || []),
       permisos: u.permisos
     };
     writeJsonFile('users.json', users);
