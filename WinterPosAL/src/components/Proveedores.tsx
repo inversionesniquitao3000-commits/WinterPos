@@ -5,7 +5,7 @@ import {
   CheckCircle2,
   MessageCircle, X, Trash2, ShoppingCart, 
   FileSpreadsheet, AlertTriangle, TrendingUp,
-  Pause, Play
+  Pause, Play, Printer, Download
 } from 'lucide-react';
 import { Proveedor, Compra, CompraDetalleItem, PagoProveedor, CotizacionProveedor, Product, User, CompanyConfig } from '../types';
 import { useDialog } from '../hooks/useDialog';
@@ -209,6 +209,14 @@ export default function Proveedores({
   const [compraAfectaCaja, setCompraAfectaCaja] = useState(false);
   const [compraObservaciones, setCompraObservaciones] = useState('');
   const [compraItems, setCompraItems] = useState<CompraDetalleItem[]>([]);
+  // Fiscal SENIAT Providencia 2026-00093 fields
+  const [compraNumeroControl, setCompraNumeroControl] = useState('');
+  const [compraExentoUSD, setCompraExentoUSD] = useState('');
+  const [compraBaseImponibleUSD, setCompraBaseImponibleUSD] = useState('');
+  const [compraAplicaIva, setCompraAplicaIva] = useState(true);
+  const [compraRetencionIvaPct, setCompraRetencionIvaPct] = useState<number>(0);
+  const [compraRetencionIslrPct, setCompraRetencionIslrPct] = useState<number>(0);
+  const [compraConceptoIslr] = useState('Compras y Adquisición de Bienes');
   const [selectedProductToAdd, setSelectedProductToAdd] = useState<string>('');
   const [itemQtyInput, setItemQtyInput] = useState('1');
   const [itemCostInput, setItemCostInput] = useState('');
@@ -364,6 +372,284 @@ export default function Proveedores({
   const [cotItemCost, setCotItemCost] = useState('');
   const [cotNotas, setCotNotas] = useState('');
   const [isCotProdSearchOpen, setIsCotProdSearchOpen] = useState(false);
+
+  // -------------------------------------------------------------
+  // COMPROBANTE DE RETENCIÓN DE IVA SENIAT (PROVIDENCIA 0049 / 2026-00093)
+  // -------------------------------------------------------------
+  const printComprobanteRetencionIVA = (comp: Compra) => {
+    const printWindow = window.open('', '_blank', 'width=800,height=700');
+    if (!printWindow) {
+      showAlert('Por favor habilite ventanas emergentes para ver el comprobante.', 'Aviso', 'warning');
+      return;
+    }
+
+    const fechaDoc = comp.fecha_emision || new Date().toISOString().substring(0, 10);
+    const yyyymm = fechaDoc.replace(/-/g, '').substring(0, 6);
+    const nroComp = comp.nro_comprobante_ret_iva || (yyyymm + String(comp.id || 1).padStart(8, '0'));
+    const tasa = comp.tasa_cambio || tasaDia || 1;
+
+    const baseUSD = comp.base_imponible_usd ?? (comp.subtotal_usd || 0);
+    const exentoUSD = comp.monto_exento_usd || 0;
+    const ivaUSD = comp.impuesto_usd ?? (comp.iva_usd ?? (baseUSD * 0.16));
+    const totalUSD = comp.total_usd || (baseUSD + exentoUSD + ivaUSD);
+    const retPct = comp.retencion_iva_pct || 75;
+    const retUSD = comp.monto_retencion_iva_usd ?? ((ivaUSD * retPct) / 100);
+    const retVES = retUSD * tasa;
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Comprobante Retención IVA ${nroComp}</title>
+          <style>
+            @page { size: portrait; margin: 12mm; }
+            body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 11px; color: #1e293b; margin: 0; padding: 15px; }
+            .header-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+            .header-table td { padding: 4px; vertical-align: top; }
+            .title-box { background: #0f172a; color: #fff; text-align: center; padding: 8px; font-size: 13px; font-weight: bold; border-radius: 4px; margin-bottom: 12px; }
+            .info-box { border: 1px solid #cbd5e1; border-radius: 4px; padding: 8px; margin-bottom: 10px; font-size: 10.5px; }
+            .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+            table.fiscal-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10px; }
+            table.fiscal-table th { background: #f1f5f9; border: 1px solid #94a3b8; padding: 6px 4px; text-align: center; font-weight: bold; }
+            table.fiscal-table td { border: 1px solid #cbd5e1; padding: 6px 4px; }
+            .text-right { text-align: right; }
+            .text-center { text-align: center; }
+            .bold { font-weight: bold; }
+            .footer-signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 50px; text-align: center; font-size: 10px; }
+            .sig-line { border-top: 1px solid #000; padding-top: 5px; }
+          </style>
+        </head>
+        <body>
+          <div class="title-box">
+            COMPROBANTE DE RETENCIÓN DEL IMPUESTO AL VALOR AGREGADO (IVA)
+            <div style="font-size: 9px; font-weight: normal; margin-top: 2px;">
+              (Ley IVA - Art. 11 / Providencia Administrativa SNAT/2015/0049 y SNAT/2026/00093)
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="info-box">
+              <strong style="color: #0f172a; text-decoration: underline;">AGENTE DE RETENCIÓN (COMPRADOR):</strong><br/>
+              <strong>Razón Social:</strong> ${companyConfig?.nombre_comercio || 'INVERSIONES NIQUITAO 3000 C.A.'}<br/>
+              <strong>RIF:</strong> ${companyConfig?.rif || 'J-41132631-0'}<br/>
+              <strong>Dirección:</strong> ${companyConfig?.direccion || 'Caracas, Venezuela'}<br/>
+              <strong>Teléfono:</strong> ${companyConfig?.telefono || '0412-5515172'}
+            </div>
+            <div class="info-box">
+              <strong style="color: #0f172a; text-decoration: underline;">DATOS DEL COMPROBANTE:</strong><br/>
+              <strong>N° Comprobante:</strong> <span style="font-family: monospace; font-weight: bold; color: #1e3a8a;">${nroComp}</span><br/>
+              <strong>Fecha de Emisión:</strong> ${fechaDoc}<br/>
+              <strong>Período Fiscal:</strong> Año ${fechaDoc.substring(0,4)} / Mes ${fechaDoc.substring(5,7)}<br/>
+              <strong>Tasa Oficial BCV:</strong> Bs ${tasa.toFixed(2)} por USD
+            </div>
+          </div>
+
+          <div class="info-box">
+            <strong style="color: #0f172a; text-decoration: underline;">SUJETO OBJETO DE RETENCIÓN (PROVEEDOR):</strong><br/>
+            <strong>Nombre / Razón Social:</strong> ${comp.proveedor_nombre || 'PROVEEDOR GENERAL'}<br/>
+            <strong>RIF:</strong> ${comp.proveedor_rif || 'J-00000000-0'}
+          </div>
+
+          <table class="fiscal-table">
+            <thead>
+              <tr>
+                <th>Oper.</th>
+                <th>Fecha Doc.</th>
+                <th>N° Factura</th>
+                <th>N° Control</th>
+                <th>Total Factura ($)</th>
+                <th>Base Imp. ($)</th>
+                <th>Alícuota</th>
+                <th>IVA Facturado ($)</th>
+                <th>% Ret.</th>
+                <th>IVA Retenido ($)</th>
+                <th>IVA Retenido (Bs)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="text-center">1</td>
+                <td class="text-center">${fechaDoc}</td>
+                <td class="text-center bold">${comp.numero_factura}</td>
+                <td class="text-center bold">${comp.numero_control || '00-00000000'}</td>
+                <td class="text-right">${totalUSD.toFixed(2)}</td>
+                <td class="text-right">${baseUSD.toFixed(2)}</td>
+                <td class="text-center">16%</td>
+                <td class="text-right">${ivaUSD.toFixed(2)}</td>
+                <td class="text-center bold">${retPct}%</td>
+                <td class="text-right bold" style="color: #1e3a8a;">${retUSD.toFixed(2)}</td>
+                <td class="text-right bold" style="color: #1e3a8a;">Bs ${retVES.toFixed(2)}</td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr style="background: #f8fafc; font-weight: bold;">
+                <td colspan="4" class="text-right">TOTALES:</td>
+                <td class="text-right">${totalUSD.toFixed(2)}</td>
+                <td class="text-right">${baseUSD.toFixed(2)}</td>
+                <td class="text-center">--</td>
+                <td class="text-right">${ivaUSD.toFixed(2)}</td>
+                <td class="text-center">--</td>
+                <td class="text-right bold">${retUSD.toFixed(2)}</td>
+                <td class="text-right bold">Bs ${retVES.toFixed(2)}</td>
+              </tr>
+            </tfoot>
+          </table>
+
+          <div style="margin-top: 15px; font-size: 9.5px; color: #475569; text-align: justify; line-height: 1.3;">
+            Este comprobante se emite en concordancia con lo dispuesto en la Providencia Administrativa SNAT/2015/0049. El impuesto retenido será enterado por el Agente de Retención a la orden de la Oficina Receptora de Fondos Nacionales (SENIAT) dentro de los plazos establecidos.
+          </div>
+
+          <div class="footer-signatures">
+            <div>
+              <div class="sig-line">
+                <strong>${companyConfig?.nombre_comercio || 'EL AGENTE DE RETENCIÓN'}</strong><br/>
+                Firma Autorizada y Sello
+              </div>
+            </div>
+            <div>
+              <div class="sig-line">
+                <strong>${comp.proveedor_nombre || 'EL PROVEEDOR (SUJETO RETENIDO)'}</strong><br/>
+                Firma, Sello y Fecha de Recepción
+              </div>
+            </div>
+          </div>
+
+          <script>
+            window.onload = function() { window.print(); };
+          </script>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
+
+  // -------------------------------------------------------------
+  // COMPROBANTE DE RETENCIÓN DE ISLR (DECRETO 1.808)
+  // -------------------------------------------------------------
+  const printComprobanteRetencionISLR = (comp: Compra) => {
+    const printWindow = window.open('', '_blank', 'width=800,height=700');
+    if (!printWindow) {
+      showAlert('Por favor habilite ventanas emergentes para ver el comprobante.', 'Aviso', 'warning');
+      return;
+    }
+
+    const fechaDoc = comp.fecha_emision || new Date().toISOString().substring(0, 10);
+    const yyyymm = fechaDoc.replace(/-/g, '').substring(0, 6);
+    const nroComp = comp.nro_comprobante_ret_islr || (yyyymm + String(comp.id || 1).padStart(8, '0'));
+    const tasa = comp.tasa_cambio || tasaDia || 1;
+
+    const baseUSD = comp.base_imponible_usd ?? (comp.subtotal_usd || 0);
+    const islrPct = comp.retencion_islr_pct || 3;
+    const islrUSD = comp.monto_retencion_islr_usd ?? ((baseUSD * islrPct) / 100);
+    const islrVES = islrUSD * tasa;
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Comprobante Retención ISLR ${nroComp}</title>
+          <style>
+            @page { size: portrait; margin: 12mm; }
+            body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 11px; color: #1e293b; margin: 0; padding: 15px; }
+            .title-box { background: #b45309; color: #fff; text-align: center; padding: 8px; font-size: 13px; font-weight: bold; border-radius: 4px; margin-bottom: 12px; }
+            .info-box { border: 1px solid #cbd5e1; border-radius: 4px; padding: 8px; margin-bottom: 10px; font-size: 10.5px; }
+            .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+            table.fiscal-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10px; }
+            table.fiscal-table th { background: #fef3c7; border: 1px solid #d97706; padding: 6px 4px; text-align: center; font-weight: bold; color: #78350f; }
+            table.fiscal-table td { border: 1px solid #cbd5e1; padding: 6px 4px; }
+            .text-right { text-align: right; }
+            .text-center { text-align: center; }
+            .bold { font-weight: bold; }
+            .footer-signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 50px; text-align: center; font-size: 10px; }
+            .sig-line { border-top: 1px solid #000; padding-top: 5px; }
+          </style>
+        </head>
+        <body>
+          <div class="title-box">
+            COMPROBANTE DE RETENCIÓN DEL IMPUESTO SOBRE LA RENTA (ISLR)
+            <div style="font-size: 9px; font-weight: normal; margin-top: 2px;">
+              (Artículo 24 del Decreto N° 1.808 del Reglamento Parcial de la Ley de ISLR)
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="info-box">
+              <strong style="color: #78350f; text-decoration: underline;">AGENTE DE RETENCIÓN:</strong><br/>
+              <strong>Razón Social:</strong> ${companyConfig?.nombre_comercio || 'INVERSIONES NIQUITAO 3000 C.A.'}<br/>
+              <strong>RIF:</strong> ${companyConfig?.rif || 'J-41132631-0'}<br/>
+              <strong>Dirección:</strong> ${companyConfig?.direccion || 'Caracas, Venezuela'}
+            </div>
+            <div class="info-box">
+              <strong style="color: #78350f; text-decoration: underline;">DATOS DEL COMPROBANTE:</strong><br/>
+              <strong>N° Comprobante:</strong> <span style="font-family: monospace; font-weight: bold; color: #b45309;">${nroComp}</span><br/>
+              <strong>Fecha:</strong> ${fechaDoc}<br/>
+              <strong>Período:</strong> ${fechaDoc.substring(0,4)}-${fechaDoc.substring(5,7)}<br/>
+              <strong>Tasa BCV:</strong> Bs ${tasa.toFixed(2)} por USD
+            </div>
+          </div>
+
+          <div class="info-box">
+            <strong style="color: #78350f; text-decoration: underline;">BENEFICIARIO DEL PAGO (SUJETO RETENIDO):</strong><br/>
+            <strong>Razón Social:</strong> ${comp.proveedor_nombre || 'PROVEEDOR GENERAL'}<br/>
+            <strong>RIF:</strong> ${comp.proveedor_rif || 'J-00000000-0'}
+          </div>
+
+          <table class="fiscal-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>N° Factura</th>
+                <th>N° Control</th>
+                <th>Concepto de Retención</th>
+                <th>Monto Operación ($)</th>
+                <th>Base Imponible ($)</th>
+                <th>% Ret.</th>
+                <th>ISLR Retenido ($)</th>
+                <th>ISLR Retenido (Bs)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="text-center">${fechaDoc}</td>
+                <td class="text-center bold">${comp.numero_factura}</td>
+                <td class="text-center bold">${comp.numero_control || '00-00000000'}</td>
+                <td class="text-left">${comp.concepto_islr_codigo || 'Adquisición de bienes / servicios'}</td>
+                <td class="text-right">${baseUSD.toFixed(2)}</td>
+                <td class="text-right">${baseUSD.toFixed(2)}</td>
+                <td class="text-center bold">${islrPct}%</td>
+                <td class="text-right bold" style="color: #b45309;">${islrUSD.toFixed(2)}</td>
+                <td class="text-right bold" style="color: #b45309;">Bs ${islrVES.toFixed(2)}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="footer-signatures">
+            <div>
+              <div class="sig-line">
+                <strong>${companyConfig?.nombre_comercio || 'AGENTE DE RETENCIÓN'}</strong><br/>
+                Firma y Sello
+              </div>
+            </div>
+            <div>
+              <div class="sig-line">
+                <strong>${comp.proveedor_nombre || 'PROVEEDOR BENEFICIARIO'}</strong><br/>
+                Firma y Fecha de Conformidad
+              </div>
+            </div>
+          </div>
+
+          <script>
+            window.onload = function() { window.print(); };
+          </script>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
 
   // --- CALCULATED METRICS ---
   const totalDeudaGlobalUSD = useMemo(() => {
@@ -596,19 +882,44 @@ export default function Proveedores({
 
     setIsActionLoading(true);
     try {
+      const parsedExento = parseFloat(compraExentoUSD) || 0;
+      const parsedBase = compraBaseImponibleUSD !== ''
+        ? (parseFloat(compraBaseImponibleUSD) || 0)
+        : (compraAplicaIva ? Math.max(0, subtotalCompraUSD - parsedExento) : 0);
+      const montoIvaUSD = compraAplicaIva ? parseFloat((parsedBase * 0.16).toFixed(2)) : 0;
+      const finalTotalUSD = (parsedBase + parsedExento + montoIvaUSD) > 0 ? (parsedBase + parsedExento + montoIvaUSD) : totalCompraUSD;
+      const montoRetIvaUSD = parseFloat(((montoIvaUSD * compraRetencionIvaPct) / 100).toFixed(2));
+      const montoRetIslrUSD = parseFloat(((parsedBase * compraRetencionIslrPct) / 100).toFixed(2));
+
+      const fechaNow = compraFechaEmision || getLocalISODateString().split(' ')[0];
+      const yyyymm = fechaNow.replace(/-/g, '').substring(0, 6);
+      const correlativo8 = String(Date.now()).slice(-8);
+      const nroControlFinal = compraNumeroControl.trim() || ('00-' + correlativo8);
+
       const compraPayload = {
         numero_factura: compraNumeroFactura.trim().toUpperCase(),
+        numero_control: nroControlFinal,
         proveedor_id: Number(compraProveedorId),
         usuario_id: currentUser?.id || 1,
         usuario_nombre: currentUser?.nombre || 'Administrador',
-        fecha_emision: compraFechaEmision || getLocalISODateString().split(' ')[0],
+        fecha_emision: fechaNow,
         fecha_vencimiento: compraCondicion === 'Credito' ? (compraFechaVencimiento || null) : null,
         condicion_pago: compraCondicion,
         subtotal_usd: subtotalCompraUSD,
-        impuesto_usd: 0,
+        monto_exento_usd: parsedExento,
+        base_imponible_usd: parsedBase,
+        alicuota_iva_pct: compraAplicaIva ? 16 : 0,
+        impuesto_usd: montoIvaUSD,
+        retencion_iva_pct: compraRetencionIvaPct,
+        monto_retencion_iva_usd: montoRetIvaUSD,
+        nro_comprobante_ret_iva: compraRetencionIvaPct > 0 ? `${yyyymm}${correlativo8}` : null,
+        retencion_islr_pct: compraRetencionIslrPct,
+        concepto_islr_codigo: compraConceptoIslr,
+        monto_retencion_islr_usd: montoRetIslrUSD,
+        nro_comprobante_ret_islr: compraRetencionIslrPct > 0 ? `${yyyymm}${correlativo8}` : null,
         descuento_usd: 0,
-        total_usd: totalCompraUSD,
-        total_ves: totalCompraVES,
+        total_usd: finalTotalUSD,
+        total_ves: finalTotalUSD * effectiveCompraTasa,
         observaciones: compraObservaciones.trim(),
         items: compraItems,
         metodo_pago_contado: compraMetodoContado,
@@ -622,6 +933,11 @@ export default function Proveedores({
         setShowNewCompraModal(false);
         setCompraItems([]);
         setCompraNumeroFactura('');
+        setCompraNumeroControl('');
+        setCompraExentoUSD('');
+        setCompraBaseImponibleUSD('');
+        setCompraRetencionIvaPct(0);
+        setCompraRetencionIslrPct(0);
         setCompraObservaciones('');
         handleClearSelectedProduct();
         if (onRefreshData) onRefreshData();
@@ -1451,6 +1767,22 @@ export default function Proveedores({
                           >
                             <FileText className="w-3.5 h-3.5" />
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => printComprobanteRetencionIVA(comp)}
+                            className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg transition-all"
+                            title="Imprimir Comprobante de Retención IVA (PDF)"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => printComprobanteRetencionISLR(comp)}
+                            className="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg transition-all"
+                            title="Imprimir Comprobante de Retención ISLR (PDF)"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </button>
                           {comp.saldo_pendiente_usd > 0.01 && (
                             <button
                               onClick={() => handleOpenAbonoModal(undefined, comp)}
@@ -1879,7 +2211,7 @@ export default function Proveedores({
                 </div>
 
                 <div>
-                  <label className="text-[11px] font-bold uppercase text-slate-600 block mb-1">N° Factura / Control *</label>
+                  <label className="text-[11px] font-bold uppercase text-slate-600 block mb-1">N° Factura Proveedor *</label>
                   <div className="relative flex items-center">
                     <span className="absolute left-3 text-slate-400 font-mono font-bold text-xs pointer-events-none select-none">
                       N°
@@ -1887,16 +2219,26 @@ export default function Proveedores({
                     <input
                       type="text"
                       required
-                      maxLength={10}
                       placeholder="00012345"
                       value={compraNumeroFactura}
                       onChange={e => {
-                        const val = e.target.value.replace(/[^a-zA-Z0-9-]/g, '').toUpperCase().slice(0, 10);
+                        const val = e.target.value.replace(/[^a-zA-Z0-9-]/g, '').toUpperCase();
                         setCompraNumeroFactura(val);
                       }}
                       className="w-full bg-white border border-slate-300 text-slate-800 pl-9 pr-3 py-2 rounded-lg text-xs font-mono font-bold uppercase focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 focus:outline-none shadow-xs"
                     />
                   </div>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold uppercase text-slate-600 block mb-1">N° Control SENIAT *</label>
+                  <input
+                    type="text"
+                    placeholder="00-00123456"
+                    value={compraNumeroControl}
+                    onChange={e => setCompraNumeroControl(e.target.value)}
+                    className="w-full bg-white border border-slate-300 text-slate-800 px-3 py-2 rounded-lg text-xs font-mono font-bold focus:border-emerald-500 focus:outline-none shadow-xs"
+                  />
                 </div>
 
                 <div>
@@ -2290,6 +2632,108 @@ export default function Proveedores({
                 </table>
               </div>
 
+              {/* Parámetros Fiscales SENIAT (Providencia 2026-00093 / Decreto 1.808) */}
+              <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-200 space-y-3">
+                <div className="flex items-center justify-between border-b border-indigo-100 pb-2">
+                  <span className="text-xs font-extrabold text-indigo-900 flex items-center gap-1.5">
+                    ⚖️ Parámetros Fiscales SENIAT (IVA e ISLR)
+                  </span>
+                  <label className="flex items-center gap-1.5 text-xs text-indigo-800 font-bold cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={compraAplicaIva}
+                      onChange={e => setCompraAplicaIva(e.target.checked)}
+                      className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span>Aplica IVA General (16%)</span>
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                  <div>
+                    <label className="text-[10px] text-slate-600 font-bold block mb-1">Monto Exento (0%) $</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={compraExentoUSD}
+                      onChange={e => setCompraExentoUSD(e.target.value)}
+                      className="w-full bg-white border border-slate-300 rounded-lg p-2 font-mono text-xs focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-slate-600 font-bold block mb-1">Base Gravada (16%) $</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder={(Math.max(0, subtotalCompraUSD - (parseFloat(compraExentoUSD) || 0))).toFixed(2)}
+                      value={compraBaseImponibleUSD}
+                      onChange={e => setCompraBaseImponibleUSD(e.target.value)}
+                      className="w-full bg-white border border-slate-300 rounded-lg p-2 font-mono text-xs focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-slate-600 font-bold block mb-1">% Retención IVA</label>
+                    <select
+                      value={compraRetencionIvaPct}
+                      onChange={e => setCompraRetencionIvaPct(Number(e.target.value))}
+                      className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800 focus:border-indigo-500 focus:outline-none"
+                    >
+                      <option value="0">0% (Sin retención)</option>
+                      <option value="75">75% (General Contribuyente Especial)</option>
+                      <option value="100">100% (Casos especiales / Sin RIF)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-slate-600 font-bold block mb-1">% Retención ISLR</label>
+                    <select
+                      value={compraRetencionIslrPct}
+                      onChange={e => setCompraRetencionIslrPct(Number(e.target.value))}
+                      className="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-800 focus:border-indigo-500 focus:outline-none"
+                    >
+                      <option value="0">0% (Sin retención ISLR)</option>
+                      <option value="1">1% (Enajenación / Bienes muebles)</option>
+                      <option value="2">2% (Servicios generales / Mantenimiento)</option>
+                      <option value="3">3% (Honorarios Profesionales / Fletes)</option>
+                      <option value="5">5% (Alquileres / Servicios especializados)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Previsualización de retenciones deducibles */}
+                {(compraRetencionIvaPct > 0 || compraRetencionIslrPct > 0) && (
+                  <div className="bg-white/80 border border-indigo-100 rounded-lg p-2.5 text-[11px] grid grid-cols-2 sm:grid-cols-4 gap-2 text-slate-700">
+                    <div>
+                      <span className="text-[10px] text-slate-500 block">IVA Facturado (16%):</span>
+                      <strong className="text-indigo-900 font-mono">
+                        ${(compraAplicaIva ? ((compraBaseImponibleUSD !== '' ? (parseFloat(compraBaseImponibleUSD) || 0) : Math.max(0, subtotalCompraUSD - (parseFloat(compraExentoUSD) || 0))) * 0.16) : 0).toFixed(2)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 block">Retención IVA (${compraRetencionIvaPct}%):</span>
+                      <strong className="text-blue-700 font-mono">
+                        -${(((compraAplicaIva ? ((compraBaseImponibleUSD !== '' ? (parseFloat(compraBaseImponibleUSD) || 0) : Math.max(0, subtotalCompraUSD - (parseFloat(compraExentoUSD) || 0))) * 0.16) : 0) * compraRetencionIvaPct) / 100).toFixed(2)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 block">Retención ISLR (${compraRetencionIslrPct}%):</span>
+                      <strong className="text-amber-700 font-mono">
+                        -${(((compraBaseImponibleUSD !== '' ? (parseFloat(compraBaseImponibleUSD) || 0) : Math.max(0, subtotalCompraUSD - (parseFloat(compraExentoUSD) || 0))) * compraRetencionIslrPct) / 100).toFixed(2)}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 block">Neto a Liquidar Proveedor:</span>
+                      <strong className="text-emerald-700 font-mono font-bold">
+                        ${Math.max(0, (subtotalCompraUSD + (compraAplicaIva ? ((compraBaseImponibleUSD !== '' ? (parseFloat(compraBaseImponibleUSD) || 0) : Math.max(0, subtotalCompraUSD - (parseFloat(compraExentoUSD) || 0))) * 0.16) : 0)) - ((((compraAplicaIva ? ((compraBaseImponibleUSD !== '' ? (parseFloat(compraBaseImponibleUSD) || 0) : Math.max(0, subtotalCompraUSD - (parseFloat(compraExentoUSD) || 0))) * 0.16) : 0) * compraRetencionIvaPct) / 100)) - ((((compraBaseImponibleUSD !== '' ? (parseFloat(compraBaseImponibleUSD) || 0) : Math.max(0, subtotalCompraUSD - (parseFloat(compraExentoUSD) || 0))) * compraRetencionIslrPct) / 100))).toFixed(2)}
+                      </strong>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Totals Summary */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex justify-between items-center">
                 <div>
@@ -2536,12 +2980,29 @@ export default function Proveedores({
               </div>
             </div>
 
-            <div className="pt-2">
+            <div className="pt-2 flex flex-col sm:flex-row gap-2">
               <button
-                onClick={() => setSelectedCompraDetail(null)}
-                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 py-2.5 rounded-lg text-xs font-bold transition-all"
+                type="button"
+                onClick={() => printComprobanteRetencionIVA(selectedCompraDetail)}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
               >
-                Cerrar (ESC)
+                <Printer className="w-4 h-4" />
+                Comprobante Ret. IVA (PDF)
+              </button>
+              <button
+                type="button"
+                onClick={() => printComprobanteRetencionISLR(selectedCompraDetail)}
+                className="flex-1 bg-amber-600 hover:bg-amber-700 text-white py-2.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+              >
+                <Printer className="w-4 h-4" />
+                Comprobante Ret. ISLR (PDF)
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedCompraDetail(null)}
+                className="px-5 bg-slate-200 hover:bg-slate-300 text-slate-800 py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer"
+              >
+                Cerrar
               </button>
             </div>
           </div>

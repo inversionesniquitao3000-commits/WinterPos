@@ -206,6 +206,9 @@ export async function initDatabase() {
       ALTER TABLE Tasas_Cambio ALTER COLUMN diferencial_porcentaje DROP NOT NULL;
       ALTER TABLE Tasas_Cambio ALTER COLUMN diferencial_porcentaje SET DEFAULT 0;
       ALTER TABLE Tasas_Cambio ALTER COLUMN usuario_id DROP NOT NULL;
+      ALTER TABLE Tasas_Cambio ALTER COLUMN tasa_cobro TYPE NUMERIC(12, 4);
+      ALTER TABLE Tasas_Cambio ALTER COLUMN tasa_vuelto TYPE NUMERIC(12, 4);
+      DELETE FROM Tasas_Cambio WHERE tasa_cobro < 5 AND EXISTS (SELECT 1 FROM Tasas_Cambio WHERE tasa_cobro > 100);
 
       ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_apertura_usd NUMERIC(12, 2) DEFAULT 0;
       ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS monto_apertura_ves NUMERIC(12, 2) DEFAULT 0;
@@ -214,6 +217,33 @@ export async function initDatabase() {
       ALTER TABLE Cajas_Apertura_Cierre ADD COLUMN IF NOT EXISTS pagos_cashea_usd NUMERIC(12, 2) DEFAULT 0;
       ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS con_ticket BOOLEAN DEFAULT TRUE;
       ALTER TABLE Configuracion_Empresa ADD COLUMN IF NOT EXISTS pago_movil_config TEXT;
+      ALTER TABLE Configuracion_Empresa ADD COLUMN IF NOT EXISTS tipo_contribuyente VARCHAR(30) DEFAULT 'ORDINARIO';
+      ALTER TABLE Configuracion_Empresa ADD COLUMN IF NOT EXISTS porcentaje_retencion_iva_default INT DEFAULT 75;
+      ALTER TABLE Configuracion_Empresa ADD COLUMN IF NOT EXISTS imprenta_api_url TEXT DEFAULT '';
+      ALTER TABLE Configuracion_Empresa ADD COLUMN IF NOT EXISTS imprenta_api_token TEXT DEFAULT '';
+      ALTER TABLE Configuracion_Empresa ADD COLUMN IF NOT EXISTS ultimo_nro_control VARCHAR(50) DEFAULT '00-00000001';
+
+      ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS nro_control VARCHAR(50) DEFAULT '';
+      ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS factura_afectada VARCHAR(50) DEFAULT '';
+      ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS fecha_factura_afectada VARCHAR(50) DEFAULT '';
+      ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS serial_maquina_afectada VARCHAR(50) DEFAULT '';
+      ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS comprobante_retencion_iva VARCHAR(50) DEFAULT '';
+      ALTER TABLE Ventas ADD COLUMN IF NOT EXISTS monto_retencion_iva_ves NUMERIC(12, 2) DEFAULT 0;
+
+      CREATE TABLE IF NOT EXISTS Auditoria_Fiscal_Seniat (
+        id BIGSERIAL PRIMARY KEY,
+        evento VARCHAR(50) NOT NULL,
+        documento_nro VARCHAR(50) NOT NULL,
+        nro_control VARCHAR(50),
+        factura_afectada VARCHAR(50),
+        monto_usd NUMERIC(12, 2) DEFAULT 0,
+        monto_ves NUMERIC(12, 2) DEFAULT 0,
+        tasa_bcv NUMERIC(12, 4) DEFAULT 1,
+        usuario VARCHAR(100),
+        terminal VARCHAR(50),
+        hash_integridad VARCHAR(128),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
 
       -- Liberar restricción check de métodos de pago para admitir Cashea, PayPal, Binance, etc.
       ALTER TABLE Pagos_Venta DROP CONSTRAINT IF EXISTS pagos_venta_metodo_pago_check;

@@ -64,10 +64,10 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
   }, [JSON.stringify(companyConfig?.biometrico)]);
 
   const [bioStatus, setBioStatus] = useState<{ available: boolean; online: boolean; device: string; message: string }>({
-    available: true,
-    online: true,
+    available: false,
+    online: false,
     device: 'Futronic FS88 USB',
-    message: 'Lector biométrico en línea'
+    message: 'Lector biométrico no detectado'
   });
   const [isBioScanning, setIsBioScanning] = useState(false);
   const [bioFeedback, setBioFeedback] = useState('');
@@ -211,15 +211,24 @@ export default function LoginTerminal({ onLoginSuccess, systemUsers, companyConf
     loginCompletedRef.current = false;
 
     const probeBiometrics = async () => {
+      // Si el comercio no tiene habilitado el lector biométrico, no consultar hardware ni activar escáner
+      if (!bioConfig?.habilitado) {
+        setBioStatus({
+          available: false,
+          online: false,
+          device: 'Futronic FS88 USB',
+          message: 'Autenticación biométrica desactivada.'
+        });
+        return;
+      }
+
       try {
-        const res = await checkBiometricReaderStatus(bioConfig, true);
+        const res = await checkBiometricReaderStatus(bioConfig, false);
         if (isMountedRef.current) {
           setBioStatus(res);
-          if (res.online) {
+          if (res.online && bioConfig?.habilitado && bioConfig?.autoEscanearEnLogin !== false) {
             setErrorMsg(prev => (prev.includes('lector') || prev.includes('huella') ? '' : prev));
-            if (bioConfig?.autoEscanearEnLogin !== false) {
-              startLiveBiometricWatcher();
-            }
+            startLiveBiometricWatcher();
           }
         }
       } catch (_) {

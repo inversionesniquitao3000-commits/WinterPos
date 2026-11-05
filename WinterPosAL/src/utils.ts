@@ -65,8 +65,25 @@ export function formatNumberToWordsUSD(amount: number): string {
  * - Separador de decimales: coma (,)
  * Ejemplo: 2236.22 -> "Bs 2.236,22" o "2.236,22"
  */
+export function parseSmartNumber(val: number | string | null | undefined): number {
+  if (typeof val === 'number') return isNaN(val) ? 0 : val;
+  if (!val) return 0;
+  let str = String(val).trim();
+  if (str.includes('.') && str.includes(',')) {
+    if (str.lastIndexOf('.') < str.lastIndexOf(',')) {
+      str = str.replace(/\./g, '').replace(',', '.');
+    } else {
+      str = str.replace(/,/g, '');
+    }
+  } else if (str.includes(',')) {
+    str = str.replace(/,/g, '.');
+  }
+  const num = parseFloat(str);
+  return isNaN(num) ? 0 : num;
+}
+
 export function formatBs(amount: number | string | null | undefined, includeSymbol: boolean = true): string {
-  const num = typeof amount === 'number' ? amount : parseFloat(String(amount ?? 0));
+  const num = typeof amount === 'number' ? amount : parseSmartNumber(amount);
   if (isNaN(num)) return includeSymbol ? 'Bs 0,00' : '0,00';
   
   const isNegative = num < 0;
@@ -87,7 +104,7 @@ export function formatBs(amount: number | string | null | undefined, includeSymb
  * Ejemplo: 2236.22 -> "$2,236.22" o "2,236.22"
  */
 export function formatUSD(amount: number | string | null | undefined, includeSymbol: boolean = true): string {
-  const num = typeof amount === 'number' ? amount : parseFloat(String(amount ?? 0));
+  const num = typeof amount === 'number' ? amount : parseSmartNumber(amount);
   if (isNaN(num)) return includeSymbol ? '$0.00' : '0.00';
   
   const isNegative = num < 0;
@@ -350,10 +367,13 @@ export function printTicketReceipt(
           <div class="text-center" style="font-size: 8px; margin-bottom: 4px;">(DOCUMENTO NO FISCAL - USO ADMINISTRATIVO)</div>
         ` : `
           <div class="text-center bold" style="font-size: 11px; background: #e2fbe8; padding: 2px 0; margin-bottom: 3px;">
-            COMPROBANTE DE VENTA FISCAL
+            ${ticketData.factura_afectada ? 'NOTA DE CRÉDITO FISCAL' : 'FACTURA FISCAL'}
           </div>
-          ${ticketData.nro_fiscal ? `<div class="bold">FACTURA FISCAL N°: ${ticketData.nro_fiscal}</div>` : ''}
+          <div class="bold">FACTURA N°: ${ticketData.nro_fiscal || ticketData.factura_nro || 'FE-00000001'}</div>
+          <div class="bold">N° DE CONTROL: ${ticketData.nro_control || ('00-' + (ticketData.nro_fiscal || ticketData.factura_nro || '00000001').replace(/\D/g, '').padStart(8, '0'))}</div>
           ${ticketData.serial_fiscal ? `<div>SERIAL FISCAL: ${ticketData.serial_fiscal}</div>` : ''}
+          ${ticketData.factura_afectada ? `<div style="background: #fef3c7; padding: 2px; border: 1px dashed #d97706; margin: 3px 0; font-size: 8.5px;"><b>DOC. AFECTADO:</b> ${ticketData.factura_afectada}</div>` : ''}
+          <div style="font-size: 7.5px; text-align: center; color: #475569; margin: 2px 0;">PROVIDENCIA SENIAT SNAT/2026/00093</div>
         `}
 
         <div>CORRELATIVO POS: ${ticketData.factura_nro || 'FAC-000000'}</div>
@@ -397,8 +417,13 @@ export function printTicketReceipt(
           ${companyConfig?.mensaje_pie_ticket || '¡Gracias por su compra!'}
         </div>
 
+        <div class="text-center" style="margin: 6px 0;">
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent('SENIAT|' + (companyConfig?.rif || 'J-41133263-1') + '|' + (ticketData.nro_fiscal || ticketData.factura_nro || '') + '|' + (ticketData.nro_control || ('00-' + (ticketData.nro_fiscal || ticketData.factura_nro || '00000001').replace(/\D/g, '').padStart(8, '0'))) + '|' + (totalVES || 0).toFixed(2))}" alt="QR Fiscal" style="width: 80px; height: 80px; margin: 0 auto; display: block;" onerror="this.style.display='none'" />
+          <div style="font-size: 7px; color: #555; margin-top: 2px; font-weight: bold;">VERIFICACIÓN FISCAL DIGITAL</div>
+        </div>
+
         <div class="text-center" style="font-size: 7px; margin-top: 3px; color: #555;">
-          WINTERPOS - COMPROBANTE DIGITAL DE CAJA
+          WINTERPOS - SISTEMA FACTURACIÓN HOMOLOGADO (PROVIDENCIA SNAT/2026/00093)
         </div>
 
         <script>
@@ -1073,5 +1098,157 @@ export const generateMetodosPagoDesglose = (cierre: any, tasaBcv?: number): stri
   return lines.join('\n');
 };
 
+/**
+ * Captura un elemento DOM como imagen PNG base64 con soporte de alta resolución y scroll completo
+ */
+export async function captureElementAsImage(element: HTMLElement): Promise<string | null> {
+  let imageBase64: string | null = null;
+  try {
+    const { toPng } = await import('html-to-image');
+    imageBase64 = await toPng(element, {
+      backgroundColor: '#ffffff',
+      quality: 0.95,
+      pixelRatio: 2,
+      skipFonts: true,
+      cacheBust: true,
+      height: element.scrollHeight,
+      style: {
+        maxHeight: 'none',
+        overflow: 'visible'
+      }
+    });
+  } catch (hErr) {
+    console.warn('[CaptureImage] html-to-image falló, probando html2canvas fallback:', hErr);
+  }
 
+  if (!imageBase64 || imageBase64.length < 500 || imageBase64.includes('AAAABJRU5ErkJggg==')) {
+    try {
+      const html2canvas = (await import('html2canvas')).default;
+      const canvas = await html2canvas(element, {
+        backgroundColor: '#ffffff',
+        scale: 1.5,
+        useCORS: true,
+        logging: false,
+        height: element.scrollHeight,
+        windowHeight: element.scrollHeight + 100
+      });
+      imageBase64 = canvas.toDataURL('image/png', 0.95);
+    } catch (h2Err) {
+      console.warn('[CaptureImage] html2canvas fallback también falló:', h2Err);
+    }
+  }
 
+  return imageBase64;
+}
+
+/**
+ * Comparte el comprobante fiscal y su fotografía vía WhatsApp (Bot directo o WhatsApp Web/App)
+ */
+export async function sendTicketWhatsAppWithImage({
+  ticketData,
+  targetPhone,
+  companyConfig,
+  elementId = 'pos-ticket-receipt-card'
+}: {
+  ticketData: any;
+  targetPhone: string;
+  companyConfig: any;
+  ticketCurrency?: 'USD' | 'VES';
+  elementId?: string;
+}): Promise<{ success: boolean; simulated?: boolean; openedWeb?: boolean; message: string }> {
+  const cleanDigits = (targetPhone || '').replace(/\D/g, '');
+  if (cleanDigits.length < 7) {
+    throw new Error('Ingrese un número telefónico o WhatsApp válido de al menos 7 dígitos.');
+  }
+
+  // 1. Capturar imagen del ticket
+  let imageBase64: string | null = null;
+  const ticketEl = document.getElementById(elementId);
+  if (ticketEl) {
+    imageBase64 = await captureElementAsImage(ticketEl);
+  }
+
+  // 2. Formatear mensaje resumen
+  const tasaVenta = (ticketData.totalUSD > 0 && ticketData.totalVES > 0)
+    ? (ticketData.totalVES / ticketData.totalUSD)
+    : (companyConfig?.tasa_oficial_bcv || 1);
+  const totalVES = ticketData.totalVES || (ticketData.totalUSD * tasaVenta);
+  const nroFac = ticketData.nro_fiscal || ticketData.factura_nro || 'FE-00000001';
+  const nroCtrl = ticketData.nro_control || ('00-' + nroFac.replace(/\D/g, '').padStart(8, '0'));
+  const clientNom = (ticketData.client?.nombre || ticketData.cliente_nombre || 'PUBLICO GENERAL').toUpperCase();
+  const clientDoc = ticketData.client?.cedula_rif || ticketData.cliente_cedula || 'V-00000000';
+  const fechaDoc = ticketData.fecha || new Date().toLocaleString('es-VE');
+
+  const captionText = `🧾 *COMPROBANTE FISCAL DIGITAL*\n` +
+    `🏢 *${companyConfig?.nombre_comercio || 'COMERCIO'}*\n` +
+    `RIF: ${companyConfig?.rif || '---'}\n` +
+    `--------------------------------\n` +
+    `📄 *Factura Fiscal:* ${nroFac}\n` +
+    `🔢 *N° de Control:* ${nroCtrl}\n` +
+    `📅 *Fecha:* ${fechaDoc}\n` +
+    `👤 *Cliente:* ${clientNom} (${clientDoc})\n` +
+    `--------------------------------\n` +
+    `💵 *TOTAL USD:* $${(ticketData.totalUSD || 0).toFixed(2)}\n` +
+    `🇻🇪 *TOTAL VES:* ${formatBs(totalVES)}\n` +
+    `--------------------------------\n` +
+    `_Comprobante homologado bajo Providencia SENIAT SNAT/2026/00093._\n` +
+    `_¡Gracias por su compra!_`;
+
+  // 3. Intento de envío directo vía Bot WhatsApp del servidor
+  let botSuccess = false;
+  let isSimulated = false;
+  try {
+    const res = await fetch('/api/whatsapp/send-direct', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phone: targetPhone,
+        textMessage: captionText,
+        imageBase64: imageBase64
+      })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success || data.simulated) {
+        botSuccess = true;
+        isSimulated = !!data.simulated;
+      }
+    }
+  } catch (apiErr) {
+    console.warn('[WhatsApp Ticket] Error llamando a /api/whatsapp/send-direct:', apiErr);
+  }
+
+  if (botSuccess) {
+    return {
+      success: true,
+      simulated: isSimulated,
+      message: `¡Comprobante con foto del ticket enviado exitosamente por WhatsApp a ${targetPhone}!${isSimulated ? ' (Modo simulación)' : ''}`
+    };
+  }
+
+  // 4. Fallback: Copiar imagen al portapapeles y abrir WhatsApp Web/App
+  if (imageBase64) {
+    try {
+      const blob = await (await fetch(imageBase64)).blob();
+      if (navigator.clipboard && (window as any).ClipboardItem) {
+        await navigator.clipboard.write([
+          new ClipboardItem({ 'image/png': blob })
+        ]);
+      }
+    } catch (clipErr) {
+      console.warn('[WhatsApp Ticket] No se pudo copiar al portapapeles:', clipErr);
+    }
+  }
+
+  const fullPhone = cleanDigits.startsWith('58')
+    ? cleanDigits
+    : (cleanDigits.startsWith('0') ? `58${cleanDigits.slice(1)}` : `58${cleanDigits}`);
+  const waUrl = `https://wa.me/${fullPhone}?text=${encodeURIComponent(captionText)}`;
+  window.open(waUrl, '_blank');
+
+  return {
+    success: true,
+    openedWeb: true,
+    message: `📲 Se abrió WhatsApp para enviar el comprobante a ${targetPhone}.\n\n📋 Además, la foto del ticket se ha copiado a su portapapeles: solo presione 'Pegar' (Ctrl + V) en el chat para adjuntar la foto del ticket.`
+  };
+}

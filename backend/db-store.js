@@ -253,6 +253,9 @@ try {
     ALTER TABLE IF EXISTS Tasas_Cambio ALTER COLUMN diferencial_porcentaje DROP NOT NULL;
     ALTER TABLE IF EXISTS Tasas_Cambio ALTER COLUMN diferencial_porcentaje SET DEFAULT 0;
     ALTER TABLE IF EXISTS Tasas_Cambio ALTER COLUMN usuario_id DROP NOT NULL;
+    ALTER TABLE IF EXISTS Tasas_Cambio ALTER COLUMN tasa_cobro TYPE NUMERIC(12, 4);
+    ALTER TABLE IF EXISTS Tasas_Cambio ALTER COLUMN tasa_vuelto TYPE NUMERIC(12, 4);
+    DELETE FROM Tasas_Cambio WHERE tasa_cobro < 5 AND EXISTS (SELECT 1 FROM Tasas_Cambio WHERE tasa_cobro > 100);
 
     CREATE TABLE IF NOT EXISTS Accionistas (
       id SERIAL PRIMARY KEY,
@@ -303,6 +306,47 @@ try {
       saldo_pendiente_usd NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
       estatus VARCHAR(50) DEFAULT 'Pendiente',
       observaciones TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    ALTER TABLE IF EXISTS Compras ADD COLUMN IF NOT EXISTS numero_control VARCHAR(50) DEFAULT '';
+    ALTER TABLE IF EXISTS Compras ADD COLUMN IF NOT EXISTS tasa_cambio NUMERIC(12, 4) DEFAULT 1;
+    ALTER TABLE IF EXISTS Compras ADD COLUMN IF NOT EXISTS monto_exento_usd NUMERIC(12, 2) DEFAULT 0;
+    ALTER TABLE IF EXISTS Compras ADD COLUMN IF NOT EXISTS base_imponible_usd NUMERIC(12, 2) DEFAULT 0;
+    ALTER TABLE IF EXISTS Compras ADD COLUMN IF NOT EXISTS alicuota_iva_pct NUMERIC(5, 2) DEFAULT 16;
+    ALTER TABLE IF EXISTS Compras ADD COLUMN IF NOT EXISTS retencion_iva_pct NUMERIC(5, 2) DEFAULT 0;
+    ALTER TABLE IF EXISTS Compras ADD COLUMN IF NOT EXISTS monto_retencion_iva_usd NUMERIC(12, 2) DEFAULT 0;
+    ALTER TABLE IF EXISTS Compras ADD COLUMN IF NOT EXISTS nro_comprobante_ret_iva VARCHAR(50) DEFAULT '';
+    ALTER TABLE IF EXISTS Compras ADD COLUMN IF NOT EXISTS retencion_islr_pct NUMERIC(5, 2) DEFAULT 0;
+    ALTER TABLE IF EXISTS Compras ADD COLUMN IF NOT EXISTS concepto_islr_codigo VARCHAR(20) DEFAULT '';
+    ALTER TABLE IF EXISTS Compras ADD COLUMN IF NOT EXISTS monto_retencion_islr_usd NUMERIC(12, 2) DEFAULT 0;
+    ALTER TABLE IF EXISTS Compras ADD COLUMN IF NOT EXISTS nro_comprobante_ret_islr VARCHAR(50) DEFAULT '';
+
+    ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS tipo_contribuyente VARCHAR(30) DEFAULT 'ORDINARIO';
+    ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS porcentaje_retencion_iva_default INT DEFAULT 75;
+    ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS imprenta_api_url TEXT DEFAULT '';
+    ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS imprenta_api_token TEXT DEFAULT '';
+    ALTER TABLE IF EXISTS Configuracion_Empresa ADD COLUMN IF NOT EXISTS ultimo_nro_control VARCHAR(50) DEFAULT '00-00000001';
+
+    ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS nro_control VARCHAR(50) DEFAULT '';
+    ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS factura_afectada VARCHAR(50) DEFAULT '';
+    ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS fecha_factura_afectada VARCHAR(50) DEFAULT '';
+    ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS serial_maquina_afectada VARCHAR(50) DEFAULT '';
+    ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS comprobante_retencion_iva VARCHAR(50) DEFAULT '';
+    ALTER TABLE IF EXISTS Ventas ADD COLUMN IF NOT EXISTS monto_retencion_iva_ves NUMERIC(12, 2) DEFAULT 0;
+
+    CREATE TABLE IF NOT EXISTS Auditoria_Fiscal_Seniat (
+      id BIGSERIAL PRIMARY KEY,
+      evento VARCHAR(50) NOT NULL,
+      documento_nro VARCHAR(50) NOT NULL,
+      nro_control VARCHAR(50),
+      factura_afectada VARCHAR(50),
+      monto_usd NUMERIC(12, 2) DEFAULT 0,
+      monto_ves NUMERIC(12, 2) DEFAULT 0,
+      tasa_bcv NUMERIC(12, 4) DEFAULT 1,
+      usuario VARCHAR(100),
+      terminal VARCHAR(50),
+      hash_integridad VARCHAR(128),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -601,7 +645,12 @@ export async function getCompanyConfig() {
           limite_productos_buscador_pos: parseInt(row.limite_productos_buscador_pos, 10) || 5,
           logo_url: row.logo_url || '',
           moneda_ticket_default: row.moneda_ticket_default || 'USD',
-          biometrico: bioCfg
+          biometrico: bioCfg,
+          tipoContribuyente: row.tipo_contribuyente || 'ORDINARIO',
+          porcentajeRetencionIvaDefault: parseInt(row.porcentaje_retencion_iva_default, 10) || 75,
+          imprentaApiUrl: row.imprenta_api_url || '',
+          imprentaApiToken: row.imprenta_api_token || '',
+          ultimoNroControl: row.ultimo_nro_control || '00-00000001'
         };
         _cachedCompanyConfigTimestamp = now;
         return _cachedCompanyConfig;
@@ -658,6 +707,20 @@ export async function saveCompanyConfig(config) {
             biometrico_config = $16
            WHERE id = $17`,
           [config.rif, config.nombre_comercio, config.direccion, config.telefono, config.correo, config.moneda_base, config.mensaje_pie_ticket, JSON.stringify(config.metodos_pago_activos), pMulti, cApertura, config.logo_url || '', mTicket, mFotosPos, tFotoPos, lProdPos, bioStr, existing.rows[0].id]
+        );
+        await pool.query(
+          `UPDATE Configuracion_Empresa SET
+             tipo_contribuyente = $1, porcentaje_retencion_iva_default = $2,
+             imprenta_api_url = $3, imprenta_api_token = $4, ultimo_nro_control = $5
+           WHERE id = $6`,
+          [
+            config.tipoContribuyente || 'ORDINARIO',
+            parseInt(config.porcentajeRetencionIvaDefault || 75, 10) || 75,
+            config.imprentaApiUrl || '',
+            config.imprentaApiToken || '',
+            config.ultimoNroControl || '00-00000001',
+            existing.rows[0].id
+          ]
         );
       } else {
         await pool.query(
@@ -3389,8 +3452,22 @@ export async function saveTasa(t) {
         userId = null;
       }
 
-      const tasaCobro = parseFloat(t.tasa_cobro) || 0;
-      const tasaVuelto = parseFloat(t.tasa_vuelto) || tasaCobro;
+      const cleanRateNum = (val) => {
+        if (typeof val === 'number') return isNaN(val) ? 0 : val;
+        if (!val) return 0;
+        let s = String(val).trim();
+        if (s.includes('.') && s.includes(',')) {
+          s = s.lastIndexOf('.') < s.lastIndexOf(',')
+            ? s.replace(/\./g, '').replace(',', '.')
+            : s.replace(/,/g, '');
+        } else if (s.includes(',')) {
+          s = s.replace(/,/g, '.');
+        }
+        const n = parseFloat(s);
+        return isNaN(n) ? 0 : n;
+      };
+      const tasaCobro = cleanRateNum(t.tasa_cobro) || 0;
+      const tasaVuelto = cleanRateNum(t.tasa_vuelto) || tasaCobro;
       const tasaOficial = parseFloat(t.tasa_oficial || t.tasa_cobro || 0);
       const difPorc = parseFloat(t.diferencial_porcentaje || 0);
       const nowStr = getLocalISODateString();
@@ -3721,6 +3798,8 @@ export async function getSales(limit = null, sinceId = null, excludeTerminal = n
                v.vuelto_usd as "vueltoUSD", v.vuelto_ves as "vueltoVES",
                v.tipo_documento, v.nro_fiscal, v.serial_fiscal, v.nro_z, v.estatus_fiscal,
                v.base_imponible_usd, v.iva_usd, v.exento_usd, v.igtf_usd,
+               v.tasa_cambio, v.nro_control, v.factura_afectada, v.fecha_factura_afectada, v.serial_maquina_afectada,
+               v.comprobante_retencion_iva, v.monto_retencion_iva_ves,
                v.estacion_nombre as terminal, c.id as "clientId", c.cedula_rif as "clientDoc", c.nombre as "clientName", u.nombre as usuario,
                cac.estatus as caja_estatus,
                COALESCE((
@@ -3791,6 +3870,13 @@ export async function getSales(limit = null, sinceId = null, excludeTerminal = n
         iva_usd: parseFloat(row.iva_usd || 0),
         exento_usd: parseFloat(row.exento_usd || 0),
         igtf_usd: parseFloat(row.igtf_usd || 0),
+        tasa_cambio: parseFloat(row.tasa_cambio || 1),
+        nro_control: row.nro_control || '',
+        factura_afectada: row.factura_afectada || '',
+        fecha_factura_afectada: row.fecha_factura_afectada || '',
+        serial_maquina_afectada: row.serial_maquina_afectada || '',
+        comprobante_retencion_iva: row.comprobante_retencion_iva || '',
+        monto_retencion_iva_ves: parseFloat(row.monto_retencion_iva_ves || 0),
         client: {
           id: row.clientId ? Number(row.clientId) : undefined,
           cedula_rif: row.clientDoc,
@@ -4020,6 +4106,43 @@ export async function saveSale(s) {
       );
 
       const saleId = saleRes.rows[0].id;
+      const autoNroControl = s.nro_control || `00-${String(saleId).padStart(8, '0')}`;
+      let facAfectada = s.factura_afectada || (factura_nro.startsWith('DEV-') ? factura_nro.replace(/^DEV-/, '').split('-').slice(0, 2).join('-') : '');
+      let fechaFacAfectada = s.fecha_factura_afectada || '';
+      let serialMaqAfectada = s.serial_maquina_afectada || serialFiscal || '';
+      if (facAfectada && !fechaFacAfectada) {
+        try {
+          const origRes = await clientTarget.query('SELECT fecha, serial_fiscal, nro_control FROM Ventas WHERE factura_nro = $1 LIMIT 1', [facAfectada]);
+          if (origRes.rowCount > 0) {
+            fechaFacAfectada = String(origRes.rows[0].fecha || '').substring(0, 10);
+            if (!serialMaqAfectada) serialMaqAfectada = origRes.rows[0].serial_fiscal || origRes.rows[0].nro_control || '';
+          }
+        } catch (_) {}
+      }
+      await clientTarget.query(
+        `UPDATE Ventas SET
+           nro_control = $1, factura_afectada = $2, fecha_factura_afectada = $3,
+           serial_maquina_afectada = $4, comprobante_retencion_iva = $5, monto_retencion_iva_ves = $6
+         WHERE id = $7`,
+        [
+          autoNroControl,
+          facAfectada,
+          fechaFacAfectada,
+          serialMaqAfectada,
+          s.comprobante_retencion_iva || '',
+          parseFloat(s.monto_retencion_iva_ves || 0),
+          saleId
+        ]
+      );
+      try {
+        const eventoFiscal = factura_nro.startsWith('DEV-') ? 'NOTA_CREDITO_EMITIDA' : 'FACTURA_EMITIDA';
+        const hashSignature = `SNAT2026-${factura_nro}-${autoNroControl}-${Number(s.totalVES || 0).toFixed(2)}-${tasaVal.toFixed(4)}`;
+        await clientTarget.query(
+          `INSERT INTO Auditoria_Fiscal_Seniat (evento, documento_nro, nro_control, factura_afectada, monto_usd, monto_ves, tasa_bcv, usuario, terminal, hash_integridad)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [eventoFiscal, factura_nro, autoNroControl, facAfectada, s.totalUSD || 0, s.totalVES || 0, tasaVal, s.usuario || 'SISTEMA', s.terminal || 'CAJA_PRINCIPAL', hashSignature]
+        );
+      } catch (_) {}
 
       // Insert Items & adjust stock
       const isDevSale = factura_nro.startsWith('DEV-');
@@ -6105,6 +6228,18 @@ export async function getCompras() {
         saldo_pendiente_usd: parseFloat(r.saldo_pendiente_usd || 0),
         estatus: r.estatus || 'Pendiente',
         observaciones: r.observaciones || '',
+        numero_control: r.numero_control || '',
+        tasa_cambio: parseFloat(r.tasa_cambio || 1),
+        monto_exento_usd: parseFloat(r.monto_exento_usd || 0),
+        base_imponible_usd: parseFloat(r.base_imponible_usd || r.subtotal_usd || 0),
+        alicuota_iva_pct: parseFloat(r.alicuota_iva_pct ?? 16),
+        retencion_iva_pct: parseFloat(r.retencion_iva_pct || 0),
+        monto_retencion_iva_usd: parseFloat(r.monto_retencion_iva_usd || 0),
+        nro_comprobante_ret_iva: r.nro_comprobante_ret_iva || '',
+        retencion_islr_pct: parseFloat(r.retencion_islr_pct || 0),
+        concepto_islr_codigo: r.concepto_islr_codigo || '',
+        monto_retencion_islr_usd: parseFloat(r.monto_retencion_islr_usd || 0),
+        nro_comprobante_ret_islr: r.nro_comprobante_ret_islr || '',
         items: r.items || []
       }));
     } catch (err) {
@@ -6199,6 +6334,28 @@ export async function saveCompra(compraData) {
         ]
       );
       const newCompraId = compraRes.rows[0].id;
+      await client.query(
+        `UPDATE Compras SET
+           numero_control = $1, tasa_cambio = $2, monto_exento_usd = $3, base_imponible_usd = $4,
+           alicuota_iva_pct = $5, retencion_iva_pct = $6, monto_retencion_iva_usd = $7, nro_comprobante_ret_iva = $8,
+           retencion_islr_pct = $9, concepto_islr_codigo = $10, monto_retencion_islr_usd = $11, nro_comprobante_ret_islr = $12
+         WHERE id = $13`,
+        [
+          compraData.numero_control || '',
+          parseFloat(tasa_cambio || 1),
+          parseFloat(compraData.monto_exento_usd || 0),
+          parseFloat(compraData.base_imponible_usd ?? subtotal_usd ?? 0),
+          parseFloat(compraData.alicuota_iva_pct ?? 16),
+          parseFloat(compraData.retencion_iva_pct || 0),
+          parseFloat(compraData.monto_retencion_iva_usd || 0),
+          compraData.nro_comprobante_ret_iva || '',
+          parseFloat(compraData.retencion_islr_pct || 0),
+          compraData.concepto_islr_codigo || '',
+          parseFloat(compraData.monto_retencion_islr_usd || 0),
+          compraData.nro_comprobante_ret_islr || '',
+          newCompraId
+        ]
+      );
 
       // 2. Insert items and update inventory stock & costs
       for (const item of items) {

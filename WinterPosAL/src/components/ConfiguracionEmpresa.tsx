@@ -2664,130 +2664,215 @@ export default function ConfiguracionEmpresa({
                 </div>
               </div>
 
-              {/* Thermal Ticket Container */}
+              {/* Thermal Ticket Container - Official SENIAT SNAT/2026/00093 Preview */}
               {(() => {
                 const isBs = formData.moneda_ticket_default === 'VES';
-                const rate = config?.tasa_oficial_bcv || 87.00;
+                const rate = config?.tasa_oficial_bcv || 1006.03;
 
                 const sampleProducts = [
-                  { desc: 'HARINA DE MAÍZ PAN 1KG', qty: 2, priceUSD: 1.20 },
-                  { desc: 'ACEITE AMANECER SOYA 500ML', qty: 1, priceUSD: 2.50 },
-                  { desc: 'REFRESCO COCA-COLA 2L', qty: 2, priceUSD: 2.00 },
-                  { desc: 'GALLETAS CLUB SOCIAL PAQ', qty: 3, priceUSD: 0.60 }
+                  { desc: 'HARINA DE MAÍZ PAN 1KG', qty: 2, priceUSD: 1.20, isExempt: true },
+                  { desc: 'ACEITE AMANECER SOYA 500ML', qty: 1, priceUSD: 2.50, isExempt: true },
+                  { desc: 'REFRESCO COCA-COLA 2L', qty: 2, priceUSD: 2.00, isExempt: false },
+                  { desc: 'GALLETAS CLUB SOCIAL PAQ', qty: 3, priceUSD: 0.60, isExempt: false }
                 ];
 
-                const totalUSD = sampleProducts.reduce((acc, p) => acc + (p.qty * p.priceUSD), 0);
+                let grossTaxable = 0;
+                let grossExempt = 0;
+                sampleProducts.forEach(p => {
+                  const tot = p.qty * p.priceUSD;
+                  if (p.isExempt) grossExempt += tot;
+                  else grossTaxable += tot;
+                });
+
+                const rawSubtotalUSD = grossTaxable + grossExempt;
+                const baseImponibleUSD = grossTaxable / 1.16;
+                const ivaCalculadoUSD = grossTaxable - baseImponibleUSD;
+                const totalUSD = rawSubtotalUSD;
                 const totalVES = totalUSD * rate;
-                const totalUnits = sampleProducts.reduce((acc, p) => acc + p.qty, 0);
+
+                const nroFiscal = 'FE-00000458';
+                const nroControl = '00-00000458';
+                const serialFiscal = 'PAFE-SENIAT-ONLINE';
+                const correlativoPos = 'FAC-000458';
+                const fechaStr = `${new Date().toLocaleDateString('es-VE')} ${new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit' })}`;
+                const qrData = encodeURIComponent(`SENIAT|${formData.rif || 'J-411332631'}|${nroFiscal}|${nroControl}|${totalVES.toFixed(2)}`);
+                const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${qrData}`;
 
                 return (
                   <div className="bg-white border border-slate-300 rounded-xl p-5 shadow-md max-w-sm mx-auto space-y-2.5 font-mono text-[9.5px] text-slate-900 select-none relative overflow-hidden">
                     {/* Header Logo & Merchant Info */}
-                    <div className="text-center space-y-1">
+                    <div className="text-center font-bold space-y-0.5">
                       {formData.logo_url && (
                         <div className="flex justify-center mb-1.5">
                           <img src={formData.logo_url} alt="Logo" className="max-h-12 max-w-[140px] object-contain" />
                         </div>
                       )}
-                      <h4 className="font-extrabold text-sm uppercase tracking-wide leading-tight text-slate-950">
+                      <h4 className="font-extrabold text-[12px] uppercase tracking-wide leading-tight text-slate-950">
                         {formData.nombre_comercio || 'INVERSIONES NIQUITAO 3000 C.A.'}
                       </h4>
-                      <p className="font-bold text-[10px]">RIF: {formData.rif || 'J-411332631'}</p>
-                      <p className="text-[8.5px] text-slate-600 leading-tight">{formData.direccion || 'Caracas, Venezuela'}</p>
-                      <p className="text-[8.5px] text-slate-600">Telf: {formData.telefono || '0412-5515172'}</p>
+                      <p className="text-[9.5px]">RIF: {formData.rif || 'J-411332631'}</p>
+                      <p className="text-[8.5px] font-normal leading-tight text-slate-600">{formData.direccion || 'Caracas, Venezuela'}</p>
+                      <p className="text-[8.5px] font-normal text-slate-600">Telf: {formData.telefono || '0412-5515172'}</p>
                     </div>
 
-                    <div className="border-t border-dashed border-slate-300 my-1"></div>
+                    <div className="border-t border-dashed border-black my-1"></div>
 
-                    {/* Metadata */}
-                    <div className="space-y-0.5 text-slate-700 text-left text-[9px] leading-tight">
-                      <div className="flex justify-between font-bold">
-                        <span>DOCUMENTO: FACTURA FISCAL</span>
-                        <span>Nº: FAC-000458</span>
+                    {/* Fiscal Document Banner */}
+                    <div className="my-1">
+                      <div className="text-center font-bold text-[11px] bg-emerald-50 text-emerald-950 border border-emerald-200 py-0.5 rounded tracking-wider mb-1">
+                        FACTURA FISCAL
                       </div>
-                      <div>FECHA: {new Date().toLocaleDateString('es-VE')} - HORA: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-                      <div>CAJERO: OPERADOR DEMO</div>
-                      <div>VENDEDOR: VENDEDOR AUXILIAR</div>
-                      <div className="truncate">CLIENTE: CONSUMIDOR FINAL</div>
+                      <div className="font-bold">FACTURA N°: {nroFiscal}</div>
+                      <div className="font-bold">N° DE CONTROL: {nroControl}</div>
+                      <div>SERIAL FISCAL: {serialFiscal}</div>
+                      <div className="text-[7.5px] text-center text-slate-500 my-0.5 font-sans tracking-wide">
+                        PROVIDENCIA SENIAT SNAT/2026/00093
+                      </div>
+                    </div>
+
+                    {/* POS Metadata */}
+                    <div className="space-y-0.5 text-[9px] text-slate-800">
+                      <div>CORRELATIVO POS: {correlativoPos}</div>
+                      <div>FECHA: {fechaStr}</div>
+                      <div>CAJERO: ANDERSON LAGUNA</div>
+                      <div>VENDEDOR: ANDERSON LAGUNA</div>
+                      <div>CLIENTE: PUBLICO GENERAL</div>
                       <div>ID/RIF: V-00000000</div>
                     </div>
 
-                    <div className="border-t border-dashed border-slate-300 my-1"></div>
+                    <div className="border-t border-dashed border-black my-1"></div>
 
-                    {/* 4 Sample Products Table */}
-                    <div className="space-y-1.5">
-                      <div className="flex font-bold justify-between text-slate-900 border-b border-slate-200 pb-1 text-[9px]">
-                        <span className="w-5/12 text-left">DESCRIPCIÓN</span>
-                        <span className="w-1/12 text-center">CT</span>
-                        <span className="w-3/12 text-right">P.UNIT ({isBs ? 'Bs' : '$'})</span>
-                        <span className="w-3/12 text-right">TOTAL ({isBs ? 'Bs' : '$'})</span>
-                      </div>
+                    {/* Column Header */}
+                    <div className="flex font-bold justify-between text-slate-700 text-[9px] uppercase">
+                      <span>DESCRIPCIÓN / CANT x PRECIO</span>
+                      <span>TOTAL</span>
+                    </div>
+                    <div className="border-t border-dashed border-slate-300 my-0.5"></div>
 
+                    {/* Items List - Two-line High Clarity Format */}
+                    <div className="space-y-1.5 py-0.5">
                       {sampleProducts.map((p, idx) => {
                         const itemTotalUSD = p.qty * p.priceUSD;
-                        const itemUnitVal = isBs ? (p.priceUSD * rate).toFixed(2) : p.priceUSD.toFixed(2);
-                        const itemTotalVal = isBs ? (itemTotalUSD * rate).toFixed(2) : itemTotalUSD.toFixed(2);
+                        const taxLabel = p.isExempt ? ' (E)' : ' (G)';
+                        const priceDisplay = isBs
+                          ? `Bs ${(p.priceUSD * rate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : `$${p.priceUSD.toFixed(2)}`;
+                        const totalDisplay = isBs
+                          ? `Bs ${(itemTotalUSD * rate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : `$${itemTotalUSD.toFixed(2)}`;
 
                         return (
-                          <div key={idx} className="flex justify-between text-slate-800 text-[9px] leading-tight py-0.5 border-b border-slate-100">
-                            <span className="w-5/12 truncate font-medium">{p.desc}</span>
-                            <span className="w-1/12 text-center font-bold">{p.qty}</span>
-                            <span className="w-3/12 text-right">{isBs ? `Bs ${itemUnitVal}` : `$${itemUnitVal}`}</span>
-                            <span className="w-3/12 text-right font-bold">{isBs ? `Bs ${itemTotalVal}` : `$${itemTotalVal}`}</span>
+                          <div key={idx} className="border-b border-dashed border-slate-200 pb-1 last:border-none last:pb-0">
+                            <div className="font-bold text-slate-900 break-words text-[10px] leading-tight uppercase flex items-center flex-wrap gap-1">
+                              <span>{p.desc}</span>
+                              <span className={p.isExempt ? "text-amber-800 font-extrabold text-[9px]" : "text-slate-800 font-bold text-[9px]"}>
+                                {taxLabel}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center text-[9.5px] mt-0.5 pl-1 text-slate-800">
+                              <span>
+                                <span className="font-bold">{p.qty}</span> x {priceDisplay}
+                              </span>
+                              <span className="font-bold font-mono">
+                                {totalDisplay}
+                              </span>
+                            </div>
                           </div>
                         );
                       })}
                     </div>
 
-                    <div className="border-t border-dashed border-slate-300 my-1"></div>
+                    <div className="border-t border-dashed border-black my-1"></div>
 
-                    {/* Items count & Totals */}
-                    <div className="space-y-1 text-slate-900">
-                      <div className="flex justify-between text-[8.5px] text-slate-500 font-sans">
-                        <span>Ítems: {sampleProducts.length} | Unidades: {totalUnits}</span>
-                        <span>Tasa BCV: {rate.toFixed(2)} Bs/$</span>
+                    {/* Totals Summary - Official SENIAT Breakdown */}
+                    {isBs ? (
+                      <div className="text-right space-y-0.5 text-[9.5px]">
+                        <div className="flex justify-between">
+                          <span>SUBTOTAL VES:</span>
+                          <span>Bs {(rawSubtotalUSD * rate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>BASE IMPONIBLE (G 16%):</span>
+                          <span>Bs {(baseImponibleUSD * rate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>IVA (16%):</span>
+                          <span>Bs {(ivaCalculadoUSD * rate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>MONTO EXENTO (E):</span>
+                          <span>Bs {(grossExempt * rate).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        </div>
+                        <div className="flex justify-between font-extrabold text-[12px] border-t-2 border-black pt-1 mt-1 text-black">
+                          <span>TOTAL VES:</span>
+                          <span>Bs {totalVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-600 font-normal border-t border-dashed border-slate-300 pt-0.5 mt-0.5 text-[9px]">
+                          <span>REF TOTAL USD:</span>
+                          <span>${totalUSD.toFixed(2)} (Tasa: Bs {rate.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</span>
+                        </div>
                       </div>
+                    ) : (
+                      <div className="text-right space-y-0.5 text-[9.5px]">
+                        <div className="flex justify-between">
+                          <span>SUBTOTAL USD:</span>
+                          <span>${rawSubtotalUSD.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>BASE IMPONIBLE (G 16%):</span>
+                          <span>${baseImponibleUSD.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>IVA (16%):</span>
+                          <span>${ivaCalculadoUSD.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>MONTO EXENTO (E):</span>
+                          <span>${grossExempt.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between font-extrabold text-[12px] border-t-2 border-black pt-1 mt-1 text-black">
+                          <span>TOTAL USD:</span>
+                          <span>${totalUSD.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between font-bold text-slate-800 border-t border-dashed border-slate-300 pt-0.5 mt-0.5 text-[10px]">
+                          <span>TOTAL VES:</span>
+                          <span>Bs {totalVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        </div>
+                      </div>
+                    )}
 
-                      {isBs ? (
-                        <>
-                          <div className="flex justify-between text-[9px] text-slate-600">
-                            <span>SUBTOTAL (VES):</span>
-                            <span>Bs {totalVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                          </div>
-                          <div className="flex justify-between font-extrabold text-sm border-t border-slate-300 pt-1 text-slate-950">
-                            <span>TOTAL A PAGAR (VES):</span>
-                            <span>Bs {totalVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                          </div>
-                          <div className="text-right text-[8.5px] text-slate-500 font-sans italic">
-                            (Ref. Dólares: ${totalUSD.toFixed(2)} USD)
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="flex justify-between text-[9px] text-slate-600">
-                            <span>SUBTOTAL (USD):</span>
-                            <span>${totalUSD.toFixed(2)}</span>
-                          </div>
-                          <div className="flex justify-between font-extrabold text-sm border-t border-slate-300 pt-1 text-slate-950">
-                            <span>TOTAL A PAGAR (USD):</span>
-                            <span>${totalUSD.toFixed(2)}</span>
-                          </div>
-                          <div className="text-right text-[8.5px] text-slate-500 font-sans italic">
-                            (Equivalente BCV: Bs {totalVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
-                          </div>
-                        </>
-                      )}
+                    <div className="border-t border-dashed border-black my-1"></div>
+
+                    {/* Payment methods */}
+                    <div className="space-y-0.5 text-[9.5px]">
+                      <span className="font-bold block">MEDIOS DE PAGO LIQUIDADOS:</span>
+                      <div className="flex justify-between">
+                        <span>{isBs ? 'EfectivoBs:' : 'Efectivo$: '}</span>
+                        <span>{isBs ? `Bs ${totalVES.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : `$${totalUSD.toFixed(2)}`}</span>
+                      </div>
                     </div>
 
-                    <div className="border-t border-dashed border-slate-300 my-1"></div>
+                    <div className="border-t border-dashed border-black my-1"></div>
 
-                    {/* Footer Message */}
-                    <div className="text-center text-[8.5px] italic leading-relaxed text-slate-600 font-sans px-2">
-                      {formData.mensaje_pie_ticket || '¡Gracias por su compra! Vuelva pronto.'}
+                    {/* Footer Message & QR */}
+                    <div className="text-center text-[8.5px] italic leading-tight text-slate-600 mt-1">
+                      {formData.mensaje_pie_ticket || '¡Gracias por su compra!'}
                     </div>
 
-                    <div className="text-center text-[7.5px] text-slate-400 font-mono pt-1">
-                      *** WinterPOS AL System ***
+                    <div className="text-center my-1.5">
+                      <img
+                        src={qrUrl}
+                        alt="QR Fiscal"
+                        className="w-20 h-20 mx-auto block border border-slate-200 p-0.5 bg-white rounded shadow-xs"
+                        onError={(e: any) => { e.currentTarget.style.display = 'none'; }}
+                      />
+                      <div className="text-[7px] text-slate-500 font-bold mt-1 tracking-wider">
+                        VERIFICACIÓN FISCAL DIGITAL
+                      </div>
+                    </div>
+
+                    <div className="text-center text-[7px] text-slate-500 tracking-tight font-sans">
+                      WINTERPOS - SISTEMA FACTURACIÓN HOMOLOGADO (PROVIDENCIA SNAT/2026/00093)
                     </div>
                   </div>
                 );
@@ -3904,7 +3989,7 @@ export default function ConfiguracionEmpresa({
                 </div>
 
                 <p className="text-xs text-slate-500 mb-4 leading-relaxed">
-                  Configuración de conexión y Spooler Fiscal para impresoras homologadas bajo normativas tributarias del SENIAT (Providencia SNAT/2011/0071).
+                  Configuración tributaria conforme a la Providencia Administrativa SNAT/2026/00093 (G.O. 43.484, derogatoria de la Providencia 0071): Libre elección entre Imprenta Digital, Máquinas Fiscales y Talonarios de Contingencia.
                 </p>
 
                 <div className="space-y-3.5 text-xs">
@@ -3992,9 +4077,10 @@ export default function ConfiguracionEmpresa({
                           onChange={(e) => setFiscalPrinterConfig(prev => ({ ...prev, estadoFiscal: e.target.value }))}
                           className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-xs text-slate-800 focus:bg-white focus:border-emerald-600 focus:outline-none font-bold"
                         >
-                          <option value="ACTIVA">🟢 Impresora Fiscal Física (HKA / Bixolon SENIAT)</option>
-                          <option value="IMPRENTA_DIGITAL">🖨️ Imprenta Digital SENIAT (Formas Libres / N° Control)</option>
-                          <option value="PAFE_ELECTRONICA">🌐 Facturación Electrónica en Línea (PAFE SENIAT)</option>
+                          <option value="IMPRENTA_DIGITAL">🖨️ Imprenta Digital / Facturación Electrónica (Providencia SNAT/2026/00093)</option>
+                          <option value="ACTIVA">🟢 Máquina Fiscal Homologada (HKA / Bixolon / PNP)</option>
+                          <option value="CONTINGENCIA">📋 Talonario de Contingencia (Providencia SNAT/2026/00093)</option>
+                          <option value="PAFE_ELECTRONICA">🌐 Facturación Portal / App SENIAT (SNAT/2026/00093)</option>
                           <option value="MODO_PRUEBA">🟡 Modo Simulación / Prueba (Sin validez fiscal)</option>
                           <option value="DESACTIVADA">🔴 Facturación Fiscal Desactivada</option>
                         </select>

@@ -27,8 +27,21 @@ function fetchDirectBCV() {
             const fechaMatch = data.match(fechaRegex);
 
             if (dolarMatch) {
-              const usdVal = parseFloat(dolarMatch[1].replace(',', '.').trim());
-              const eurVal = euroMatch ? parseFloat(euroMatch[1].replace(',', '.').trim()) : (usdVal * 1.08);
+              const cleanBcvNum = (val) => {
+                if (!val) return 0;
+                let s = String(val).trim();
+                if (s.includes('.') && s.includes(',')) {
+                  s = s.lastIndexOf('.') < s.lastIndexOf(',')
+                    ? s.replace(/\./g, '').replace(',', '.')
+                    : s.replace(/,/g, '');
+                } else if (s.includes(',')) {
+                  s = s.replace(/,/g, '.');
+                }
+                const n = parseFloat(s);
+                return isNaN(n) ? 0 : n;
+              };
+              const usdVal = cleanBcvNum(dolarMatch[1]);
+              const eurVal = euroMatch ? cleanBcvNum(euroMatch[1]) : (usdVal * 1.08);
               const fechaValor = fechaMatch ? fechaMatch[1].replace(/\s+/g, ' ').trim() : 'Al día';
 
               return resolve({

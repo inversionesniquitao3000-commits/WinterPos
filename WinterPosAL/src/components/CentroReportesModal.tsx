@@ -1,11 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import * as XLSX from 'xlsx';
-import { Sale, CierreCaja, CompanyConfig } from '../types';
+import { Sale, CierreCaja, CompanyConfig, Compra } from '../types';
 import { 
   BarChart3, FileText, DollarSign, PieChart, TrendingUp, ShieldAlert, 
   Calendar, Printer, FileSpreadsheet,
   Receipt, ArrowRightLeft, Building2, UserCheck,
-  Package, Layers
+  Package, Layers, Download, Calculator
 } from 'lucide-react';
 import { getLocalDateStr } from '../utils';
 
@@ -18,13 +18,18 @@ interface CentroReportesModalProps {
   initialStartDate?: string;
   initialEndDate?: string;
   tasaDia?: number;
+  getApiUrl?: (path: string) => string;
 }
 
 type ReportType = 
   | 'libro_ventas'
+  | 'libro_compras'
   | 'igtf_divisas'
   | 'resumen_iva_f30'
   | 'retenciones_iva'
+  | 'retenciones_iva_txt'
+  | 'retenciones_islr_xml'
+  | 'estado_resultados_islr'
   | 'notas_entrega'
   | 'todas_transacciones'
   | 'cuadre_multimoneda'
@@ -39,10 +44,23 @@ export default function CentroReportesModal({
   companyConfig,
   initialStartDate,
   initialEndDate,
-  tasaDia = 0
+  tasaDia = 0,
+  getApiUrl
 }: CentroReportesModalProps) {
   const [activeTab, setActiveTab] = useState<'fiscales' | 'gestion'>('fiscales');
   const [selectedReport, setSelectedReport] = useState<ReportType>('libro_ventas');
+  const [compras, setCompras] = useState<Compra[]>([]);
+
+  useEffect(() => {
+    if (isOpen) {
+      fetch('/api/compras')
+        .then(r => r.json())
+        .then(data => {
+          if (Array.isArray(data)) setCompras(data);
+        })
+        .catch(() => {});
+    }
+  }, [isOpen]);
   
   // Close modal on Escape key (Desktop & Web)
   useEffect(() => {
@@ -108,6 +126,17 @@ export default function CentroReportesModal({
       return true;
     });
   }, [sales, filterEnabled, startDate, endDate]);
+
+  const filteredCompras = useMemo(() => {
+    return compras.filter(comp => {
+      if (!filterEnabled) return true;
+      if (!comp.fecha_emision) return true;
+      const compDate = comp.fecha_emision.split(' ')[0] || comp.fecha_emision.substring(0, 10);
+      if (startDate && compDate < startDate) return false;
+      if (endDate && compDate > endDate) return false;
+      return true;
+    });
+  }, [compras, filterEnabled, startDate, endDate]);
 
   if (!isOpen) return null;
 
@@ -599,38 +628,71 @@ export default function CentroReportesModal({
   };
 
   // -------------------------------------------------------------
-  // 3. REPORTE: RESUMEN DECLARACIÓN DE IVA (FORMA 30)
+  // 3. REPORTE: RESUMEN INTEGRAL DE IVA (FORMA 30 SENIAT)
+  // Cruzando Débitos Fiscales (Ventas) y Créditos Fiscales (Compras)
   // -------------------------------------------------------------
   const generateResumenIVA = (exportType: 'pdf' | 'excel') => {
     const fiscalSales = filteredSales.filter(s => s.tipo_documento === 'FACTURA_FISCAL' || !s.tipo_documento);
 
-    let totalBruto = 0;
-    let totalExento = 0;
-    let totalBase16 = 0;
-    let totalIva16 = 0;
+    let totalBrutoVentas = 0;
+    let totalExentoVentas = 0;
+    let totalBase16Ventas = 0;
+    let totalIva16Debito = 0;
 
     fiscalSales.forEach(s => {
       const isDev = (s.factura_nro || '').startsWith('DEV-');
       const sign = isDev ? -1 : 1;
-      totalBruto += (s.totalUSD || 0) * sign;
+      totalBrutoVentas += (s.totalUSD || 0) * sign;
       const ex = (s.exento_usd !== undefined ? s.exento_usd : (s.iva_usd === 0 ? s.totalUSD : 0)) * sign;
       const base = (s.base_imponible_usd !== undefined ? s.base_imponible_usd : (s.iva_usd && s.iva_usd > 0 ? (s.totalUSD - s.iva_usd) : 0)) * sign;
       const iva = (s.iva_usd || 0) * sign;
-      totalExento += ex;
-      totalBase16 += base;
-      totalIva16 += iva;
+      totalExentoVentas += ex;
+      totalBase16Ventas += base;
+      totalIva16Debito += iva;
     });
+
+    let totalCompras = 0;
+    let totalExentoCompras = 0;
+    let totalBase16Compras = 0;
+    let totalIva16Credito = 0;
+    let totalIvaRetenidoCompras = 0;
+
+    filteredCompras.forEach(c => {
+      const tot = c.total_usd || 0;
+      const ex = c.monto_exento_usd || 0;
+      const base = c.base_imponible_usd ?? (c.subtotal_usd || (tot - ((c.iva_usd ?? c.impuesto_usd ?? 0) || 0)));
+      const iva = (c.iva_usd ?? c.impuesto_usd ?? 0) || 0;
+      const ret = c.monto_retencion_iva_usd || 0;
+      totalCompras += tot;
+      totalExentoCompras += ex;
+      totalBase16Compras += base;
+      totalIva16Credito += iva;
+      totalIvaRetenidoCompras += ret;
+    });
+
+    const ivaNetoPagar = Math.max(0, totalIva16Debito - totalIva16Credito);
+    const excedenteCredito = Math.max(0, totalIva16Credito - totalIva16Debito);
 
     if (exportType === 'excel') {
       const wsData = [
         ['HOJA DE TRABAJO - RESUMEN PARA DECLARACIÓN DE IVA (FORMA 30 SENIAT)'],
         [`EMPRESA: ${companyName}`, `RIF: ${companyRif}`, periodText],
         [],
-        ['CONCEPTO TRIBUTARIO', 'CANTIDAD COMPROBANTES', 'BASE IMPONIBLE ($)', 'ALÍCUOTA', 'DÉBITO FISCAL ($)', 'EQUIVALENTE EN BS (TASA BCV)'],
-        ['Ventas Internas No Gravadas (Exentas 0%)', fiscalSales.filter(s => (s.iva_usd || 0) === 0).length, totalExento, '0%', 0, totalExento * tasaDia],
-        ['Ventas Internas Gravadas por Alícuota General (16%)', fiscalSales.filter(s => (s.iva_usd || 0) > 0).length, totalBase16, '16%', totalIva16, totalIva16 * tasaDia],
+        ['CONCEPTO TRIBUTARIO', 'CANTIDAD COMPROBANTES', 'BASE IMPONIBLE ($)', 'ALÍCUOTA', 'MONTO IVA ($)', 'EQUIVALENTE EN BS (TASA BCV)'],
+        ['[DÉBITOS FISCALES - VENTAS]', '', '', '', '', ''],
+        ['Ventas Internas No Gravadas (Exentas 0%)', fiscalSales.filter(s => (s.iva_usd || 0) === 0).length, totalExentoVentas, '0%', 0, totalExentoVentas * tasaDia],
+        ['Ventas Internas Gravadas por Alícuota General (16%)', fiscalSales.filter(s => (s.iva_usd || 0) > 0).length, totalBase16Ventas, '16%', totalIva16Debito, totalIva16Debito * tasaDia],
+        ['TOTAL DÉBITO FISCAL GENERADO:', fiscalSales.length, totalBrutoVentas, '--', totalIva16Debito, totalIva16Debito * tasaDia],
         [],
-        ['TOTAL GENERAL VENTAS Y DÉBITOS FISCALES:', fiscalSales.length, totalBruto, '--', totalIva16, totalIva16 * tasaDia]
+        ['[CRÉDITOS FISCALES - COMPRAS]', '', '', '', '', ''],
+        ['Compras No Sujetas / Sin Crédito Fiscal (0%)', filteredCompras.filter(c => ((c.iva_usd ?? c.impuesto_usd ?? 0) || 0) === 0).length, totalExentoCompras, '0%', 0, totalExentoCompras * tasaDia],
+        ['Compras Gravadas por Alícuota General (16%)', filteredCompras.filter(c => ((c.iva_usd ?? c.impuesto_usd ?? 0) || 0) > 0).length, totalBase16Compras, '16%', totalIva16Credito, totalIva16Credito * tasaDia],
+        ['TOTAL CRÉDITO FISCAL DEDUCIBLE:', filteredCompras.length, totalCompras, '--', totalIva16Credito, totalIva16Credito * tasaDia],
+        [],
+        ['[AUTOLIQUIDACIÓN Y DETERMINACIÓN]', '', '', '', '', ''],
+        ['TOTAL CUOTA TRIBUTARIA (Débito - Crédito):', '', '', '', ivaNetoPagar, ivaNetoPagar * tasaDia],
+        ['Retenciones de IVA soportadas:', '', '', '', totalIvaRetenidoCompras, totalIvaRetenidoCompras * tasaDia],
+        ['EXCEDENTE DE CRÉDITO FISCAL SIGUIENTE PERÍODO:', '', '', '', excedenteCredito, excedenteCredito * tasaDia]
       ];
       const ws = XLSX.utils.aoa_to_sheet(wsData);
       const wb = XLSX.utils.book_new();
@@ -647,36 +709,63 @@ export default function CentroReportesModal({
             <th class="text-center" style="width: 15%;">N° COMPROBANTES</th>
             <th class="text-right" style="width: 16%;">BASE IMPONIBLE (USD)</th>
             <th class="text-center" style="width: 10%;">ALÍCUOTA</th>
-            <th class="text-right" style="width: 12%;">DÉBITO FISCAL (USD)</th>
-            <th class="text-right" style="width: 12%;">DÉBITO FISCAL (BS)</th>
+            <th class="text-right" style="width: 12%;">MONTO IVA (USD)</th>
+            <th class="text-right" style="width: 12%;">MONTO EN BS (BCV)</th>
           </tr>
         </thead>
         <tbody>
+          <tr style="background: #f8fafc; font-weight: bold;">
+            <td colspan="6">DÉBITOS FISCALES (VENTAS FACTURADAS)</td>
+          </tr>
           <tr>
-            <td class="font-bold">1. Ventas Internas No Gravadas (Exentas 0%)</td>
+            <td>1. Ventas Internas No Gravadas (Exentas 0%)</td>
             <td class="text-center font-mono">${fiscalSales.filter(s => (s.iva_usd || 0) === 0).length}</td>
-            <td class="text-right font-mono font-bold">$${totalExento.toFixed(2)}</td>
+            <td class="text-right font-mono font-bold">$${totalExentoVentas.toFixed(2)}</td>
             <td class="text-center font-bold">0%</td>
             <td class="text-right font-mono">$0.00</td>
             <td class="text-right font-mono">Bs 0,00</td>
           </tr>
           <tr>
-            <td class="font-bold">2. Ventas Internas Gravadas por Alícuota General (16%)</td>
+            <td>2. Ventas Internas Gravadas Alícuota General (16%)</td>
             <td class="text-center font-mono">${fiscalSales.filter(s => (s.iva_usd || 0) > 0).length}</td>
-            <td class="text-right font-mono font-bold text-indigo">$${totalBase16.toFixed(2)}</td>
+            <td class="text-right font-mono font-bold text-indigo">$${totalBase16Ventas.toFixed(2)}</td>
             <td class="text-center font-bold">16%</td>
-            <td class="text-right font-mono font-bold text-emerald">$${totalIva16.toFixed(2)}</td>
-            <td class="text-right font-mono font-bold text-emerald">Bs ${(totalIva16 * tasaDia).toFixed(2)}</td>
+            <td class="text-right font-mono font-bold text-emerald">$${totalIva16Debito.toFixed(2)}</td>
+            <td class="text-right font-mono font-bold text-emerald">Bs ${(totalIva16Debito * tasaDia).toFixed(2)}</td>
+          </tr>
+          <tr style="background: #f1f5f9; font-weight: bold;">
+            <td>SUBTOTAL DÉBITO FISCAL:</td>
+            <td class="text-center">${fiscalSales.length} docs</td>
+            <td class="text-right">$${totalBrutoVentas.toFixed(2)}</td>
+            <td class="text-center">--</td>
+            <td class="text-right text-emerald">$${totalIva16Debito.toFixed(2)}</td>
+            <td class="text-right text-emerald">Bs ${(totalIva16Debito * tasaDia).toFixed(2)}</td>
+          </tr>
+          <tr style="background: #f8fafc; font-weight: bold;">
+            <td colspan="6">CRÉDITOS FISCALES (COMPRAS REGISTRADAS)</td>
+          </tr>
+          <tr>
+            <td>3. Compras No Gravadas / Sin Crédito (0%)</td>
+            <td class="text-center font-mono">${filteredCompras.filter(c => ((c.iva_usd ?? c.impuesto_usd ?? 0) || 0) === 0).length}</td>
+            <td class="text-right font-mono font-bold">$${totalExentoCompras.toFixed(2)}</td>
+            <td class="text-center font-bold">0%</td>
+            <td class="text-right font-mono">$0.00</td>
+            <td class="text-right font-mono">Bs 0,00</td>
+          </tr>
+          <tr>
+            <td>4. Compras Gravadas Alícuota General (16%)</td>
+            <td class="text-center font-mono">${filteredCompras.filter(c => ((c.iva_usd ?? c.impuesto_usd ?? 0) || 0) > 0).length}</td>
+            <td class="text-right font-mono font-bold text-indigo">$${totalBase16Compras.toFixed(2)}</td>
+            <td class="text-center font-bold">16%</td>
+            <td class="text-right font-mono font-bold text-blue-600">$${totalIva16Credito.toFixed(2)}</td>
+            <td class="text-right font-mono font-bold text-blue-600">Bs ${(totalIva16Credito * tasaDia).toFixed(2)}</td>
           </tr>
         </tbody>
         <tfoot>
           <tr style="background: #0f172a; color: #fff; font-weight: bold; font-family: monospace;">
-            <td>TOTAL VENTAS Y DÉBITOS FISCALES:</td>
-            <td class="text-center">${fiscalSales.length} docs</td>
-            <td class="text-right">$${totalBruto.toFixed(2)}</td>
-            <td class="text-center">--</td>
-            <td class="text-right" style="color: #4ade80;">$${totalIva16.toFixed(2)}</td>
-            <td class="text-right" style="color: #4ade80;">Bs ${(totalIva16 * tasaDia).toFixed(2)}</td>
+            <td colspan="4">RESULTADO DE LA DECLARACIÓN (DÉBITO - CRÉDITO):</td>
+            <td class="text-right" style="color: #4ade80;">$${ivaNetoPagar.toFixed(2)}</td>
+            <td class="text-right" style="color: #4ade80;">Bs ${(ivaNetoPagar * tasaDia).toFixed(2)}</td>
           </tr>
         </tfoot>
       </table>
@@ -686,13 +775,15 @@ export default function CentroReportesModal({
       <div class="report-summary-grid">
         <div class="summary-card">
           <h4>DATOS PARA LA FORMA 30 DEL SENIAT</h4>
-          <p><strong>Casilla [40] (Ventas Internas No Gravadas):</strong> $${totalExento.toFixed(2)} USD (Bs ${(totalExento * tasaDia).toFixed(2)})</p>
-          <p><strong>Casilla [41] (Ventas Gravadas por Alícuota General):</strong> $${totalBase16.toFixed(2)} USD (Bs ${(totalBase16 * tasaDia).toFixed(2)})</p>
-          <p><strong>Casilla [42] (Débito Fiscal Generado 16%):</strong> $${totalIva16.toFixed(2)} USD (Bs ${(totalIva16 * tasaDia).toFixed(2)})</p>
+          <p><strong>Casilla [40] (Ventas Exentas):</strong> $${totalExentoVentas.toFixed(2)} USD (Bs ${(totalExentoVentas * tasaDia).toFixed(2)})</p>
+          <p><strong>Casilla [41] (Ventas Base 16%):</strong> $${totalBase16Ventas.toFixed(2)} USD (Bs ${(totalBase16Ventas * tasaDia).toFixed(2)})</p>
+          <p><strong>Casilla [42] (Débito Fiscal IVA):</strong> $${totalIva16Debito.toFixed(2)} USD (Bs ${(totalIva16Debito * tasaDia).toFixed(2)})</p>
+          <p><strong>Casilla [33] (Crédito Fiscal Compras):</strong> $${totalIva16Credito.toFixed(2)} USD (Bs ${(totalIva16Credito * tasaDia).toFixed(2)})</p>
+          <p><strong>Total IVA a Pagar Estimado:</strong> $${ivaNetoPagar.toFixed(2)} USD (Bs ${(ivaNetoPagar * tasaDia).toFixed(2)})</p>
         </div>
         <div class="summary-card">
           <h4>CONFORMIDAD CONTABLE</h4>
-          <p>Resumen automatizado generado para la declaración mensual o quincenal de IVA ante el portal fiscal del SENIAT.</p>
+          <p>Resumen automatizado generado para la declaración mensual o quincenal de IVA ante el portal fiscal del SENIAT bajo la Providencia 2026-00093.</p>
           <p style="margin-top: 20px; border-top: 1px dashed #94a3b8; padding-top: 8px;">
             <strong>Revisado y Aprobado por:</strong> ___________________________
           </p>
@@ -701,6 +792,252 @@ export default function CentroReportesModal({
     `;
 
     printReportHtml('RESUMEN DECLARACIÓN DE IVA (FORMA 30 SENIAT)', tableHtml, summaryHtml);
+  };
+
+  // -------------------------------------------------------------
+  // REPORTE: LIBRO DE COMPRAS SENIAT (PROVIDENCIA 2026-00093)
+  // -------------------------------------------------------------
+  const generateLibroCompras = (exportType: 'pdf' | 'excel') => {
+    let totalComprasIncIva = 0;
+    let totalExento = 0;
+    let totalBaseImponible = 0;
+    let totalIvaCredito = 0;
+    let totalIvaRetenido = 0;
+
+    const dataRows = filteredCompras.map((compra, idx) => {
+      const totalCompra = compra.total_usd || 0;
+      const exento = compra.monto_exento_usd || 0;
+      const base = compra.base_imponible_usd ?? (compra.subtotal_usd || (totalCompra - ((compra.iva_usd ?? compra.impuesto_usd ?? 0) || 0)));
+      const iva = (compra.iva_usd ?? compra.impuesto_usd ?? 0) || 0;
+      const retIva = compra.monto_retencion_iva_usd || 0;
+
+      totalComprasIncIva += totalCompra;
+      totalExento += exento;
+      totalBaseImponible += base;
+      totalIvaCredito += iva;
+      totalIvaRetenido += retIva;
+
+      return {
+        num: idx + 1,
+        fecha: (compra.fecha_emision || '').substring(0, 10),
+        rif: compra.proveedor_rif || 'J-000000000',
+        proveedor: compra.proveedor_nombre || 'PROVEEDOR GENERAL',
+        factura: compra.numero_factura || 'S/N',
+        control: compra.numero_control || '00-00000000',
+        totalCompra,
+        exento,
+        base,
+        iva,
+        retIva,
+        nroCompRet: compra.nro_comprobante_ret_iva || '-'
+      };
+    });
+
+    if (exportType === 'excel') {
+      const wsData = [
+        ['LIBRO DE COMPRAS FISCAL OFICIAL (SENIAT PROVIDENCIA 2026-00093)'],
+        [`EMPRESA: ${companyName}`, `RIF: ${companyRif}`, periodText],
+        [],
+        ['N°', 'FECHA EMISIÓN', 'RIF PROVEEDOR', 'RAZÓN SOCIAL', 'N° FACTURA', 'N° CONTROL', 'TOTAL COMPRA ($)', 'EXENTO ($)', 'BASE IMP. 16% ($)', 'CRÉDITO IVA 16% ($)', 'IVA RETENIDO ($)', 'COMPROBANTE RET.'],
+        ...dataRows.map(r => [
+          r.num, r.fecha, r.rif, r.proveedor, r.factura, r.control,
+          r.totalCompra, r.exento, r.base, r.iva, r.retIva, r.nroCompRet
+        ]),
+        [],
+        ['TOTALES:', '', '', '', '', '', totalComprasIncIva, totalExento, totalBaseImponible, totalIvaCredito, totalIvaRetenido, '']
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'LibroCompras');
+      XLSX.writeFile(wb, `Libro_Compras_SENIAT_${startDate}_al_${endDate}.xlsx`);
+      return;
+    }
+
+    const rowsHtml = dataRows.map(r => `
+      <tr>
+        <td class="text-center">${r.num}</td>
+        <td class="text-center" style="font-family: monospace;">${r.fecha}</td>
+        <td style="font-family: monospace;">${r.rif}</td>
+        <td style="text-transform: uppercase;">${r.proveedor}</td>
+        <td class="text-center font-bold" style="font-family: monospace;">${r.factura}</td>
+        <td class="text-center" style="font-family: monospace;">${r.control}</td>
+        <td class="text-right font-bold">$${r.totalCompra.toFixed(2)}</td>
+        <td class="text-right">$${r.exento.toFixed(2)}</td>
+        <td class="text-right font-bold">$${r.base.toFixed(2)}</td>
+        <td class="text-right font-bold" style="color: #2563eb;">$${r.iva.toFixed(2)}</td>
+        <td class="text-right font-bold" style="color: #d97706;">$${r.retIva.toFixed(2)}</td>
+        <td class="text-center" style="font-family: monospace; font-size: 10px;">${r.nroCompRet}</td>
+      </tr>
+    `).join('');
+
+    const tableHtml = `
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th style="width: 3%;">N°</th>
+            <th style="width: 8%;">FECHA</th>
+            <th style="width: 9%;">RIF</th>
+            <th style="width: 22%;">PROVEEDOR</th>
+            <th style="width: 9%;">FACTURA</th>
+            <th style="width: 9%;">N° CONTROL</th>
+            <th class="text-right" style="width: 8%;">TOTAL ($)</th>
+            <th class="text-right" style="width: 8%;">EXENTO ($)</th>
+            <th class="text-right" style="width: 8%;">BASE 16% ($)</th>
+            <th class="text-right" style="width: 8%;">CRÉD. IVA ($)</th>
+            <th class="text-right" style="width: 8%;">RET. IVA ($)</th>
+            <th class="text-center" style="width: 10%;">COMPROBANTE</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${dataRows.length === 0 ? '<tr><td colspan="12" class="text-center" style="padding: 20px;">Sin compras registradas en el período.</td></tr>' : rowsHtml}
+        </tbody>
+        <tfoot>
+          <tr style="background: #0f172a; color: #fff; font-weight: bold; font-family: monospace;">
+            <td colspan="6" class="text-right" style="padding: 7px;">TOTALES DEL LIBRO DE COMPRAS:</td>
+            <td class="text-right" style="padding: 7px;">$${totalComprasIncIva.toFixed(2)}</td>
+            <td class="text-right" style="padding: 7px;">$${totalExento.toFixed(2)}</td>
+            <td class="text-right" style="padding: 7px;">$${totalBaseImponible.toFixed(2)}</td>
+            <td class="text-right" style="padding: 7px; color: #60a5fa;">$${totalIvaCredito.toFixed(2)}</td>
+            <td class="text-right" style="padding: 7px; color: #f59e0b;">$${totalIvaRetenido.toFixed(2)}</td>
+            <td class="text-center" style="padding: 7px;">--</td>
+          </tr>
+        </tfoot>
+      </table>
+    `;
+
+    const summaryHtml = `
+      <div class="report-summary-grid">
+        <div class="summary-card">
+          <h4>RESUMEN CRÉDITOS FISCALES (COMPRAS)</h4>
+          <p><strong>Total Facturas de Compras:</strong> ${filteredCompras.length}</p>
+          <p><strong>Total Compras Realizadas:</strong> $${totalComprasIncIva.toFixed(2)} USD</p>
+          <p><strong>Total Base Gravada (16%):</strong> $${totalBaseImponible.toFixed(2)} USD</p>
+          <p><strong>Total Crédito Fiscal IVA (Deducible):</strong> $${totalIvaCredito.toFixed(2)} USD</p>
+          <p><strong>Total Retenciones de IVA Aplicadas:</strong> $${totalIvaRetenido.toFixed(2)} USD</p>
+        </div>
+        <div class="summary-card">
+          <h4>NORMATIVA APLICABLE</h4>
+          <p>Libro de compras generado bajo las disposiciones técnicas de la Providencia Administrativa SNAT/2026/00093 del SENIAT.</p>
+          <p style="margin-top: 20px; border-top: 1px dashed #94a3b8; padding-top: 8px;">
+            <strong>Firma Contador / Auditor Fiscal:</strong> ___________________________
+          </p>
+        </div>
+      </div>
+    `;
+
+    printReportHtml('LIBRO DE COMPRAS FISCAL OFICIAL (SENIAT 2026-00093)', tableHtml, summaryHtml, 'landscape');
+  };
+
+  // -------------------------------------------------------------
+  // SENIAT EXPORTS: TXT IVA Y XML ISLR
+  // -------------------------------------------------------------
+  const handleDownloadRetencionesIvaTxt = () => {
+    const period = startDate ? startDate.substring(0, 7) : new Date().toISOString().substring(0, 7);
+    const url = getApiUrl ? getApiUrl(`/seniat/retenciones-iva-txt?periodo=${period}`) : `/api/seniat/retenciones-iva-txt?periodo=${period}`;
+    window.open(url, '_blank');
+  };
+
+  const handleDownloadRetencionesIslrXml = () => {
+    const period = startDate ? startDate.substring(0, 7) : new Date().toISOString().substring(0, 7);
+    const url = getApiUrl ? getApiUrl(`/seniat/retenciones-islr-xml?periodo=${period}`) : `/api/seniat/retenciones-islr-xml?periodo=${period}`;
+    window.open(url, '_blank');
+  };
+
+  // -------------------------------------------------------------
+  // ESTADO DE RESULTADOS FISCAL (CONCILIACIÓN ISLR)
+  // -------------------------------------------------------------
+  const generateEstadoResultadosISLR = (exportType: 'pdf' | 'excel') => {
+    const totalVentas = filteredSales.reduce((acc, s) => {
+      const isDev = (s.factura_nro || '').startsWith('DEV-');
+      const sign = isDev ? -1 : 1;
+      const base = s.base_imponible_usd ?? (s.iva_usd && s.iva_usd > 0 ? (s.totalUSD - s.iva_usd) : s.totalUSD);
+      return acc + (base * sign);
+    }, 0);
+
+    const totalCompras = filteredCompras.reduce((acc, c) => {
+      const base = c.base_imponible_usd ?? (c.subtotal_usd || (c.total_usd - ((c.iva_usd ?? c.impuesto_usd ?? 0) || 0)));
+      return acc + (base || 0);
+    }, 0);
+
+    const utilidadBrutaFiscal = totalVentas - totalCompras;
+    const islrEstimado = utilidadBrutaFiscal > 0 ? utilidadBrutaFiscal * 0.34 : 0;
+
+    if (exportType === 'excel') {
+      const wsData = [
+        ['ESTADO DE RESULTADOS FISCAL ESTIMADO (CONCILIACIÓN ISLR)'],
+        [`EMPRESA: ${companyName}`, `RIF: ${companyRif}`, periodText],
+        [],
+        ['CONCEPTO FISCAL', 'MONTO USD ($)', 'MONTO VES (BS)', 'OBSERVACIONES'],
+        ['1. Ingresos Brutos Operacionales (Ventas Gravadas + Exentas)', totalVentas, totalVentas * tasaDia, 'Ventas netas sin IVA'],
+        ['2. Menos: Costo de Ventas (Compras Facturadas)', totalCompras, totalCompras * tasaDia, 'Compras con soporte fiscal'],
+        ['3. RENTA BRUTA / UTILIDAD BRUTA FISCAL:', utilidadBrutaFiscal, utilidadBrutaFiscal * tasaDia, 'Ingresos - Costos'],
+        ['4. Provisión Estimada ISLR (Tarifa N° 2 Máxima 34%):', islrEstimado, islrEstimado * tasaDia, 'Provisión referencial corporativa'],
+        ['5. RENTA NETA DISPONIBLE ESTIMADA:', utilidadBrutaFiscal - islrEstimado, (utilidadBrutaFiscal - islrEstimado) * tasaDia, 'Utilidad post-impuesto']
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'ISLR_EstadoResultados');
+      XLSX.writeFile(wb, `Estado_Resultados_ISLR_${startDate}_al_${endDate}.xlsx`);
+      return;
+    }
+
+    const tableHtml = `
+      <table class="report-table" style="margin-top: 15px;">
+        <thead>
+          <tr>
+            <th style="width: 50%; text-align: left;">RUBRO CONTABLE FISCAL</th>
+            <th class="text-right" style="width: 25%;">MONTO EN DÓLARES ($)</th>
+            <th class="text-right" style="width: 25%;">EQUIVALENTE EN BS (BCV)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="font-bold">1. Ingresos Brutos Fiscales (Ventas Netas sin IVA)</td>
+            <td class="text-right font-mono font-bold text-emerald">$${totalVentas.toFixed(2)}</td>
+            <td class="text-right font-mono font-bold text-emerald">Bs ${(totalVentas * tasaDia).toFixed(2)}</td>
+          </tr>
+          <tr>
+            <td class="font-bold">2. Costo de Ventas (Compras Totales Facturadas)</td>
+            <td class="text-right font-mono font-bold text-rose-600">($${totalCompras.toFixed(2)})</td>
+            <td class="text-right font-mono font-bold text-rose-600">(Bs ${(totalCompras * tasaDia).toFixed(2)})</td>
+          </tr>
+          <tr style="background: #f1f5f9; font-weight: bold;">
+            <td>3. UTILIDAD BRUTA FISCAL (RENTA BRUTA)</td>
+            <td class="text-right font-mono ${utilidadBrutaFiscal >= 0 ? 'text-emerald' : 'text-rose-600'}">$${utilidadBrutaFiscal.toFixed(2)}</td>
+            <td class="text-right font-mono ${utilidadBrutaFiscal >= 0 ? 'text-emerald' : 'text-rose-600'}">Bs ${(utilidadBrutaFiscal * tasaDia).toFixed(2)}</td>
+          </tr>
+          <tr>
+            <td>4. Provisión Referencial ISLR Tarifa 2 (34%)</td>
+            <td class="text-right font-mono text-amber-600">$${islrEstimado.toFixed(2)}</td>
+            <td class="text-right font-mono text-amber-600">Bs ${(islrEstimado * tasaDia).toFixed(2)}</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr style="background: #0f172a; color: #fff; font-weight: bold; font-family: monospace;">
+            <td>UTILIDAD NETA ESTIMADA DISPONIBLE:</td>
+            <td class="text-right">$${(utilidadBrutaFiscal - islrEstimado).toFixed(2)}</td>
+            <td class="text-right">Bs ${((utilidadBrutaFiscal - islrEstimado) * tasaDia).toFixed(2)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    `;
+
+    const summaryHtml = `
+      <div class="report-summary-grid">
+        <div class="summary-card">
+          <h4>BASE DE CÁLCULO ISLR (LEY DE ISLR)</h4>
+          <p><strong>Total Facturas de Ventas:</strong> ${filteredSales.length}</p>
+          <p><strong>Total Facturas de Compras:</strong> ${filteredCompras.length}</p>
+          <p><strong>Margen de Utilidad Bruta:</strong> ${totalVentas > 0 ? ((utilidadBrutaFiscal / totalVentas) * 100).toFixed(2) : 0}%</p>
+        </div>
+        <div class="summary-card">
+          <h4>NOTAS PARA LA DECLARACIÓN DEFINITIVA</h4>
+          <p>Para la determinación definitiva del enriquecimiento neto gravable (Forma DPN-26 / DPJ-26), este informe debe conciliarse con los gastos operativos, depreciaciones y ajuste por inflación fiscal.</p>
+        </div>
+      </div>
+    `;
+
+    printReportHtml('ESTADO DE RESULTADOS FISCAL (CONCILIACIÓN ISLR)', tableHtml, summaryHtml);
   };
 
   // -------------------------------------------------------------
@@ -2050,6 +2387,182 @@ export default function CentroReportesModal({
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); generateReporteTodasTransacciones('excel'); }}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      Excel (.xlsx)
+                    </button>
+                  </div>
+                </div>
+
+                {/* 7. Libro de Compras Fiscal Oficial (Providencia 2026-00093) */}
+                <div 
+                  onClick={() => setSelectedReport('libro_compras')}
+                  className={`p-4 rounded-xl border transition-all cursor-pointer flex flex-col justify-between space-y-3 ${
+                    selectedReport === 'libro_compras'
+                      ? 'bg-indigo-50/70 border-indigo-500 shadow-md ring-1 ring-indigo-500'
+                      : 'bg-white border-slate-200 hover:border-indigo-300 hover:bg-slate-50/50'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-700 shrink-0">
+                      <FileSpreadsheet className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-black uppercase text-slate-900 flex items-center gap-1.5">
+                          📑 Libro de Compras Oficial (Providencia 2026-00093)
+                        </h4>
+                        <span className="text-[9px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded">
+                          SENIAT 2026
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                        Registro reglamentario de compras con N° de Control, Base Imponible 16%, Crédito Fiscal IVA y Retenciones soportadas.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-150">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); generateLibroCompras('pdf'); }}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      Imprimir / PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); generateLibroCompras('excel'); }}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      Excel (.xlsx)
+                    </button>
+                  </div>
+                </div>
+
+                {/* 8. Archivo TXT Retenciones de IVA (Portal SENIAT) */}
+                <div 
+                  onClick={() => setSelectedReport('retenciones_iva_txt')}
+                  className={`p-4 rounded-xl border transition-all cursor-pointer flex flex-col justify-between space-y-3 ${
+                    selectedReport === 'retenciones_iva_txt'
+                      ? 'bg-indigo-50/70 border-indigo-500 shadow-md ring-1 ring-indigo-500'
+                      : 'bg-white border-slate-200 hover:border-indigo-300 hover:bg-slate-50/50'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700 shrink-0">
+                      <Download className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-black uppercase text-slate-900 flex items-center gap-1.5">
+                          📥 Archivo TXT Retenciones de IVA (SENIAT en Línea)
+                        </h4>
+                        <span className="text-[9px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded">
+                          Carga Masiva
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                        Exportación oficial en formato TXT estructurado según especificaciones del SENIAT para cargar en el portal fiscal.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-150">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); handleDownloadRetencionesIvaTxt(); }}
+                      className="bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Descargar TXT SENIAT
+                    </button>
+                  </div>
+                </div>
+
+                {/* 9. Archivo XML Retenciones de ISLR (Portal SENIAT) */}
+                <div 
+                  onClick={() => setSelectedReport('retenciones_islr_xml')}
+                  className={`p-4 rounded-xl border transition-all cursor-pointer flex flex-col justify-between space-y-3 ${
+                    selectedReport === 'retenciones_islr_xml'
+                      ? 'bg-indigo-50/70 border-indigo-500 shadow-md ring-1 ring-indigo-500'
+                      : 'bg-white border-slate-200 hover:border-indigo-300 hover:bg-slate-50/50'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700 shrink-0">
+                      <Download className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-black uppercase text-slate-900 flex items-center gap-1.5">
+                          📥 Archivo XML Retenciones de ISLR (SENIAT en Línea)
+                        </h4>
+                        <span className="text-[9px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded">
+                          XML Oficial
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                        Generación del archivo XML reglamentario bajo el Decreto 1.808 para la declaración de retenciones de ISLR.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-150">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); handleDownloadRetencionesIslrXml(); }}
+                      className="bg-amber-700 hover:bg-amber-800 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Descargar XML SENIAT
+                    </button>
+                  </div>
+                </div>
+
+                {/* 10. Conciliación y Estado de Resultados Fiscal (ISLR) */}
+                <div 
+                  onClick={() => setSelectedReport('estado_resultados_islr')}
+                  className={`p-4 rounded-xl border transition-all cursor-pointer flex flex-col justify-between space-y-3 ${
+                    selectedReport === 'estado_resultados_islr'
+                      ? 'bg-indigo-50/70 border-indigo-500 shadow-md ring-1 ring-indigo-500'
+                      : 'bg-white border-slate-200 hover:border-indigo-300 hover:bg-slate-50/50'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center text-purple-700 shrink-0">
+                      <Calculator className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-black uppercase text-slate-900 flex items-center gap-1.5">
+                          📊 Conciliación y Estado de Resultados Fiscal (ISLR)
+                        </h4>
+                        <span className="text-[9px] bg-purple-100 text-purple-800 font-bold px-1.5 py-0.5 rounded">
+                          Forma DPJ-26
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                        Cálculo preliminar de Renta Bruta (Ventas − Costo Compras) y provisión del Impuesto Sobre la Renta (ISLR).
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-150">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); generateEstadoResultadosISLR('pdf'); }}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      Imprimir / PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); generateEstadoResultadosISLR('excel'); }}
                       className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
                     >
                       <FileSpreadsheet className="w-3.5 h-3.5" />

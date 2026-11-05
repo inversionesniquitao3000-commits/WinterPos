@@ -22,7 +22,7 @@ export interface BiometricCaptureResult {
  * Timeout is restricted to 450ms so UI never lags or hangs.
  */
 export async function checkBiometricReaderStatus(config?: BiometricConfig, isExplicitTest: boolean = false): Promise<BiometricStatusResult> {
-  const isEnabled = config ? config.habilitado !== false : false;
+  const isEnabled = config ? config.habilitado === true : false;
   const provider = config?.proveedor || 'FUTRONIC';
   const serviceUrl = config?.urlServicio || `http://127.0.0.1:${config?.puertoServicio || 8088}`;
 

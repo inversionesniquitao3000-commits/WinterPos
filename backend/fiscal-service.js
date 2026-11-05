@@ -168,7 +168,7 @@ export async function processFiscalSale(saleData, fiscalConfig = {}) {
     const nroFiscal = `ID-${String(simState.ultimoNroFiscal).padStart(8, '0')}`;
     const imprentaRif = fiscalConfig.imprentaRif || 'J-40123456-7';
     const imprentaRazon = fiscalConfig.imprentaRazonSocial || 'IMPRENTA DIGITAL AUTORIZADA SENIAT C.A.';
-    const providencia = fiscalConfig.providenciaSeniat || 'SNAT/2014/0032';
+    const providencia = fiscalConfig.providenciaSeniat || 'SNAT/2026/00093';
 
     return {
       ok: true,

@@ -62,9 +62,9 @@ import {
   ShoppingBag, Package, Users, Truck,
   TrendingUp, Settings, LogOut, Globe, Cpu, History, Printer, CheckCircle2, ShieldCheck, Briefcase,
   Smartphone, QrCode, PauseCircle, Play, Palette, Sun, Moon,
-  Maximize2, Minimize2
+  Maximize2, Minimize2, Send, RefreshCw
 } from 'lucide-react';
-import { printTicketReceipt, formatBs, formatUSD, getApiBaseUrl } from './utils';
+import { printTicketReceipt, formatBs, formatUSD, getApiBaseUrl, sendTicketWhatsAppWithImage } from './utils';
 
 export default function App() {
   const { showAlert } = useDialog();
@@ -1505,7 +1505,20 @@ export default function App() {
         const rawValStr = autoMode === 'eur' ? bcvData.eur : bcvData.usd;
         if (!rawValStr) throw new Error('Tasa no encontrada en respuesta BCV');
 
-        const cleanedVal = parseFloat(rawValStr.toString().replace(',', '.'));
+        const cleanBcvStr = (val: any) => {
+          if (!val) return 0;
+          let s = String(val).trim();
+          if (s.includes('.') && s.includes(',')) {
+            s = s.lastIndexOf('.') < s.lastIndexOf(',')
+              ? s.replace(/\./g, '').replace(',', '.')
+              : s.replace(/,/g, '');
+          } else if (s.includes(',')) {
+            s = s.replace(/,/g, '.');
+          }
+          const n = parseFloat(s);
+          return isNaN(n) ? 0 : n;
+        };
+        const cleanedVal = cleanBcvStr(rawValStr);
         if (isNaN(cleanedVal) || cleanedVal <= 0) throw new Error('Valor numérico de tasa inválido');
 
         const targetRate = Math.round(cleanedVal * 100) / 100;
@@ -2941,9 +2954,12 @@ export default function App() {
   };
 
   const [reprintCurrency, setReprintCurrency] = useState<'USD' | 'VES'>('USD');
+  const [whatsappReprintPhone, setWhatsappReprintPhone] = useState('');
+  const [isSendingReprintWhatsApp, setIsSendingReprintWhatsApp] = useState(false);
 
   const handleReprint = (sale: Sale) => {
     setReprintCurrency(companyConfig?.moneda_ticket_default || 'USD');
+    setWhatsappReprintPhone(sale.client?.telefono || (sale as any)?.cliente_telefono || '');
     setReprintSale(sale);
   };
 
@@ -3715,44 +3731,114 @@ export default function App() {
               </div>
             </div>
 
-            {/* Receipt Preview Body */}
+            {/* Receipt Preview Body - 100% WYSIWYG replica of printed thermal ticket receipt */}
             {(() => {
               const isVES = reprintCurrency === 'VES';
               const tasaVenta = (reprintSale.totalUSD > 0 && reprintSale.totalVES > 0)
                 ? (reprintSale.totalVES / reprintSale.totalUSD)
                 : (companyConfig?.tasa_oficial_bcv || 1);
 
+              let grossTaxable = 0;
+              let grossExempt = 0;
+              (reprintSale.items || []).forEach((item: any) => {
+                const isExempt = item.product?.exento_impuesto === true || item.exento_impuesto === true || (item.product?.porcentaje_impuesto !== undefined && item.product?.porcentaje_impuesto === 0);
+                const rawQty = parseFloat(item.qty || '0');
+                const priceNumUSD = item.priceUSD ? item.priceUSD : (item.precioUSD ? item.precioUSD : 0);
+                const totalNumUSD = item.totalUSD ? item.totalUSD : (priceNumUSD * rawQty);
+                if (isExempt) {
+                  grossExempt += totalNumUSD;
+                } else {
+                  grossTaxable += totalNumUSD;
+                }
+              });
+
+              const rawSubtotalUSD = reprintSale.subtotal ?? reprintSale.totalUSD ?? (grossTaxable + grossExempt);
+              const discountValUSD = Number(reprintSale.descuento || 0);
+              const discountFactor = rawSubtotalUSD > 0 ? (1 - (discountValUSD / rawSubtotalUSD)) : 1;
+
+              const netTaxableUSD = grossTaxable * discountFactor;
+              const netExemptUSD = grossExempt * discountFactor;
+
+              const baseImponibleUSD = netTaxableUSD > 0 ? netTaxableUSD / 1.16 : 0;
+              const ivaCalculadoUSD = netTaxableUSD > 0 ? netTaxableUSD - baseImponibleUSD : 0;
+
+              const totalUSD = reprintSale.totalUSD ?? (rawSubtotalUSD - discountValUSD);
+              const totalVES = reprintSale.totalVES ?? (totalUSD * tasaVenta);
+
+              const clientName = reprintSale.client?.nombre || (reprintSale as any)?.cliente_nombre || 'PUBLICO GENERAL';
+              const clientRif = reprintSale.client?.cedula_rif || (reprintSale as any)?.cliente_cedula || 'V-00000000';
+              const cashierName = reprintSale.usuario || (currentUser?.nombre || currentUser?.usuario || 'CAJERO');
+              const sellerName = (reprintSale as any)?.vendedor || cashierName;
+              const fechaStr = reprintSale.fecha || `${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
+              const nroFiscal = (reprintSale as any)?.nro_fiscal || reprintSale.factura_nro || 'FE-00000001';
+              const nroControl = (reprintSale as any)?.nro_control || ('00-' + ((reprintSale as any)?.nro_fiscal || reprintSale.factura_nro || '00000001').replace(/\D/g, '').padStart(8, '0'));
+              const serialFiscal = (reprintSale as any)?.serial_fiscal || 'PAFE-SENIAT-ONLINE';
+              const qrData = encodeURIComponent(`SENIAT|${companyConfig?.rif || 'J-41133263-1'}|${nroFiscal}|${nroControl}|${(totalVES || 0).toFixed(2)}`);
+              const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${qrData}`;
+
               return (
-                <div className="bg-white border border-slate-250 rounded-xl p-5 shadow-inner space-y-3 text-[10px] text-slate-900 max-h-[65vh] overflow-y-auto">
+                <div id="reprint-ticket-receipt-card" className="max-h-[65vh] overflow-y-auto bg-white p-5 rounded-xl font-mono text-[10px] space-y-2.5 shadow-inner text-black border border-slate-200">
+
                   {/* Commerce info */}
-                  <div className="text-center">
-                    <h4 className="font-extrabold text-sm uppercase">{companyConfig.nombre_comercio}</h4>
-                    <p className="font-bold">RIF: {companyConfig.rif}</p>
-                    <p className="text-[9px] mt-0.5">{companyConfig.direccion}</p>
-                    <p>Telf: {companyConfig.telefono}</p>
+                  <div className="text-center font-bold">
+                    <h4 className="font-extrabold text-[12px] uppercase tracking-wide leading-tight">{companyConfig?.nombre_comercio || 'COMERCIO'}</h4>
+                    <p className="text-[9.5px]">RIF: {companyConfig?.rif || '---'}</p>
+                    <p className="text-[9px] font-normal leading-tight">{companyConfig?.direccion || '---'}</p>
+                    <p className="text-[9px] font-normal">Telf: {companyConfig?.telefono || '---'}</p>
                   </div>
 
-                  <p className="text-center select-none text-slate-400">----------------------------------------</p>
+                  <div className="border-t border-dashed border-black my-1"></div>
 
-                  {/* Metadata */}
-                  <div className="space-y-0.5">
-                    <div>FACTURA: {reprintSale.factura_nro} (REIMPRESIÓN)</div>
-                    <div>FECHA: {reprintSale.fecha}</div>
-                    <div>CAJERO: {reprintSale.usuario.toUpperCase()}</div>
-                    <div>CLIENTE: {reprintSale.client.nombre.toUpperCase()}</div>
-                    <div>ID/RIF: {reprintSale.client.cedula_rif}</div>
+                  {/* Document / Fiscal Header */}
+                  {(reprintSale as any)?.tipo_documento === 'NOTA_ENTREGA' ? (
+                    <div className="text-center my-1">
+                      <div className="font-bold text-[11px] bg-slate-100 text-slate-800 py-0.5 rounded tracking-wider">
+                        NOTA DE ENTREGA / CONTROL INTERNO
+                      </div>
+                      <div className="text-[8px] text-slate-500 mt-0.5 font-sans">(DOCUMENTO NO FISCAL - USO ADMINISTRATIVO)</div>
+                    </div>
+                  ) : (
+                    <div className="my-1">
+                      <div className="text-center font-bold text-[11px] bg-emerald-50 text-emerald-950 border border-emerald-200 py-0.5 rounded tracking-wider mb-1">
+                        {(reprintSale as any)?.factura_afectada ? 'NOTA DE CRÉDITO FISCAL' : 'FACTURA FISCAL'} (COPIA)
+                      </div>
+                      <div className="font-bold">FACTURA N°: {nroFiscal}</div>
+                      <div className="font-bold">N° DE CONTROL: {nroControl}</div>
+                      {serialFiscal && (
+                        <div>SERIAL FISCAL: {serialFiscal}</div>
+                      )}
+                      {(reprintSale as any)?.factura_afectada && (
+                        <div className="bg-amber-50 p-1 border border-dashed border-amber-400 my-1 text-[8.5px] text-amber-900">
+                          <b>DOC. AFECTADO:</b> {(reprintSale as any)?.factura_afectada}
+                        </div>
+                      )}
+                      <div className="text-[7.5px] text-center text-slate-500 my-0.5 font-sans tracking-wide">
+                        PROVIDENCIA SENIAT SNAT/2026/00093
+                      </div>
+                    </div>
+                  )}
+
+                  {/* POS Metadata */}
+                  <div className="space-y-0.5 text-[9.5px]">
+                    <div>CORRELATIVO POS: {reprintSale.factura_nro || 'FAC-000000'}</div>
+                    <div>FECHA: {fechaStr}</div>
+                    <div>CAJERO: {cashierName.toUpperCase()}</div>
+                    <div>VENDEDOR: {sellerName.toUpperCase()}</div>
+                    <div>CLIENTE: {clientName.toUpperCase()}</div>
+                    <div>ID/RIF: {clientRif}</div>
                   </div>
 
-                  <p className="text-center select-none text-slate-400">----------------------------------------</p>
+                  <div className="border-t border-dashed border-black my-1"></div>
 
                   {/* Header Items */}
-                  <div className="flex font-bold justify-between text-slate-500 text-[9px] border-b border-slate-200 pb-1">
+                  <div className="flex font-bold justify-between text-slate-700 text-[9px] uppercase">
                     <span>DESCRIPCIÓN / CANT x PRECIO</span>
                     <span>TOTAL</span>
                   </div>
+                  <div className="border-t border-dashed border-slate-300 my-0.5"></div>
 
                   {/* Items List - Two-line High Clarity Format */}
-                  <div className="space-y-2 py-1">
+                  <div className="space-y-1.5 py-0.5">
                     {reprintSale.items.map((item: any, idx: number) => {
                       const isBulk = item.product?.a_granel || item.a_granel;
                       const rawQty = parseFloat(item.qty || '0');
@@ -3778,10 +3864,10 @@ export default function App() {
                         : [];
 
                       return (
-                        <div key={idx} className="border-b border-dashed border-slate-150 pb-1.5 last:border-none last:pb-0">
-                          <div className="font-bold text-slate-900 break-words text-[11px] leading-tight uppercase flex items-center flex-wrap gap-1">
+                        <div key={idx} className="border-b border-dashed border-slate-200 pb-1 last:border-none last:pb-0">
+                          <div className="font-bold text-slate-900 break-words text-[10px] leading-tight uppercase flex items-center flex-wrap gap-1">
                             <span>{item.product?.description || item.description}</span>
-                            <span className={isExempt ? "text-amber-700 font-extrabold text-[9px]" : "text-sky-700 font-bold text-[9px]"}>
+                            <span className={isExempt ? "text-amber-800 font-extrabold text-[9px]" : "text-slate-800 font-bold text-[9px]"}>
                               {taxLabel}
                             </span>
                             {isCombo && (
@@ -3790,16 +3876,16 @@ export default function App() {
                               </span>
                             )}
                           </div>
-                          <div className="flex justify-between items-center text-[10.5px] mt-0.5 pl-2 text-slate-650">
-                            <span className="font-mono text-slate-600">
-                              <span className="font-bold text-slate-850">{qtyDisplay}</span> x {priceDisplay}
+                          <div className="flex justify-between items-center text-[9.5px] mt-0.5 pl-1 text-slate-800">
+                            <span>
+                              <span className="font-bold">{qtyDisplay}</span> x {priceDisplay}
                             </span>
-                            <span className="font-black text-slate-900 font-mono">
+                            <span className="font-bold font-mono">
                               {totalDisplay}
                             </span>
                           </div>
                           {isCombo && comboItems.length > 0 && (
-                            <div className="mt-0.5 pl-3 text-[9px] text-purple-900 font-sans bg-purple-50/60 rounded px-1.5 py-0.5 border border-purple-150/70 space-y-0.5">
+                            <div className="mt-0.5 pl-2 text-[8.5px] text-purple-900 font-sans bg-purple-50/70 rounded p-1 border border-purple-200/70 space-y-0.5">
                               <span className="font-extrabold text-purple-700 block text-[8px] uppercase">↳ Incluye en este combo:</span>
                               {comboItems.map((ing: any, iIdx: number) => {
                                 const totalIng = (ing.cantidad || 1) * Math.abs(rawQty);
@@ -3816,93 +3902,202 @@ export default function App() {
                     })}
                   </div>
 
-                  <p className="text-center select-none text-slate-400">----------------------------------------</p>
+                  <div className="border-t border-dashed border-black my-1"></div>
 
-                  {/* Summary */}
+                  {/* Totals Summary - SENIAT Breakdown */}
                   {isVES ? (
-                    <div className="text-right space-y-1 text-[11px]">
+                    <div className="text-right space-y-0.5 text-[9.5px]">
                       <div className="flex justify-between">
                         <span>SUBTOTAL VES:</span>
-                        <span>{formatBs(reprintSale.subtotal * tasaVenta)}</span>
+                        <span>{formatBs(rawSubtotalUSD * tasaVenta)}</span>
                       </div>
-                      {((reprintSale.exento_usd ?? 0) > 0) && (
-                        <div className="flex justify-between text-slate-700">
-                          <span>MONTO EXENTO (E):</span>
-                          <span>{formatBs((reprintSale.exento_usd || 0) * tasaVenta)}</span>
-                        </div>
-                      )}
-                      {reprintSale.descuento > 0 && (
-                        <div className="flex justify-between text-red-500">
+                      {discountValUSD > 0 && (
+                        <div className="flex justify-between text-red-600">
                           <span>DESCUENTO:</span>
-                          <span>-{formatBs(reprintSale.descuento * tasaVenta)}</span>
+                          <span>-{formatBs(discountValUSD * tasaVenta)}</span>
                         </div>
                       )}
-                      <div className="flex justify-between font-extrabold text-sm border-t border-slate-300 pt-1 text-slate-900">
+                      {grossTaxable > 0 && (
+                        <>
+                          <div className="flex justify-between">
+                            <span>BASE IMPONIBLE (G 16%):</span>
+                            <span>{formatBs(baseImponibleUSD * tasaVenta)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>IVA (16%):</span>
+                            <span>{formatBs(ivaCalculadoUSD * tasaVenta)}</span>
+                          </div>
+                        </>
+                      )}
+                      {netExemptUSD > 0 && (
+                        <div className="flex justify-between">
+                          <span>MONTO EXENTO (E):</span>
+                          <span>{formatBs(netExemptUSD * tasaVenta)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between font-extrabold text-[12px] border-t-2 border-black pt-1 mt-1 text-black">
                         <span>TOTAL VES:</span>
-                        <span>{formatBs(reprintSale.totalVES || (reprintSale.totalUSD * tasaVenta))}</span>
+                        <span>{formatBs(totalVES || (rawSubtotalUSD * tasaVenta))}</span>
                       </div>
-                      <div className="flex justify-between text-slate-500 font-bold border-t border-dashed border-slate-300 pt-1 text-[10px]">
+                      <div className="flex justify-between text-slate-600 font-normal border-t border-dashed border-slate-300 pt-0.5 mt-0.5 text-[9px]">
                         <span>REF TOTAL USD:</span>
-                        <span>${reprintSale.totalUSD.toFixed(2)} (Tasa: {formatBs(tasaVenta)})</span>
+                        <span>${totalUSD.toFixed(2)} (Tasa: {formatBs(tasaVenta)})</span>
                       </div>
                     </div>
                   ) : (
-                    <div className="text-right space-y-1 text-[11px]">
+                    <div className="text-right space-y-0.5 text-[9.5px]">
                       <div className="flex justify-between">
                         <span>SUBTOTAL USD:</span>
-                        <span>${reprintSale.subtotal.toFixed(2)}</span>
+                        <span>${rawSubtotalUSD.toFixed(2)}</span>
                       </div>
-                      {((reprintSale.exento_usd ?? 0) > 0) && (
-                        <div className="flex justify-between text-slate-700">
-                          <span>MONTO EXENTO (E):</span>
-                          <span>${(reprintSale.exento_usd || 0).toFixed(2)}</span>
-                        </div>
-                      )}
-                      {reprintSale.descuento > 0 && (
-                        <div className="flex justify-between text-red-500">
+                      {discountValUSD > 0 && (
+                        <div className="flex justify-between text-red-600">
                           <span>DESCUENTO:</span>
-                          <span>-${reprintSale.descuento.toFixed(2)}</span>
+                          <span>-${discountValUSD.toFixed(2)}</span>
                         </div>
                       )}
-                      <div className="flex justify-between font-extrabold text-sm border-t border-slate-300 pt-1">
+                      {grossTaxable > 0 && (
+                        <>
+                          <div className="flex justify-between">
+                            <span>BASE IMPONIBLE (G 16%):</span>
+                            <span>${baseImponibleUSD.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>IVA (16%):</span>
+                            <span>${ivaCalculadoUSD.toFixed(2)}</span>
+                          </div>
+                        </>
+                      )}
+                      {netExemptUSD > 0 && (
+                        <div className="flex justify-between">
+                          <span>MONTO EXENTO (E):</span>
+                          <span>${netExemptUSD.toFixed(2)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between font-extrabold text-[12px] border-t-2 border-black pt-1 mt-1 text-black">
                         <span>TOTAL USD:</span>
-                        <span>${reprintSale.totalUSD.toFixed(2)}</span>
+                        <span>${totalUSD.toFixed(2)}</span>
                       </div>
-                      <div className="flex justify-between text-slate-600 font-bold border-t border-dashed border-slate-350 pt-1">
+                      <div className="flex justify-between font-bold text-slate-800 border-t border-dashed border-slate-300 pt-0.5 mt-0.5 text-[10px]">
                         <span>TOTAL VES:</span>
-                        <span>{formatBs(reprintSale.totalVES)}</span>
+                        <span>{formatBs(totalVES || 0)}</span>
                       </div>
                     </div>
                   )}
 
-                  <p className="text-center select-none text-slate-400">----------------------------------------</p>
+                  <div className="border-t border-dashed border-black my-1"></div>
 
                   {/* Payments & Change */}
-                  <div className="space-y-0.5">
+                  <div className="space-y-0.5 text-[9.5px]">
                     <span className="font-bold block">MEDIOS DE PAGO LIQUIDADOS:</span>
-                    {reprintSale.pagos.map((p, idx) => (
-                      <div key={idx} className="flex justify-between">
-                        <span>{p.metodo} {p.bancoEmisor ? `(${p.bancoEmisor})` : ''} {p.reference ? `Ref:${p.reference}` : ''}:</span>
-                        <span>{p.metodo.endsWith('$') || p.metodo.includes('Credito') ? `$${p.monto.toFixed(2)}` : formatBs(p.montoVES || p.monto)}</span>
-                      </div>
-                    ))}
+                    {(reprintSale.pagos || []).map((p: any, idx: number) => {
+                      const bankStr = p.bancoEmisor || p.banco ? ` (${p.bancoEmisor || p.banco})` : '';
+                      const refStr = p.reference || p.referencia ? ` Ref:${p.reference || p.referencia}` : '';
+                      const amountStr = (p.metodo.endsWith('$') || p.metodo.includes('Credito'))
+                        ? `$${p.monto.toFixed(2)}`
+                        : formatBs(p.montoVES || p.monto);
+                      return (
+                        <div key={idx} className="flex justify-between">
+                          <span>{p.metodo}{bankStr}{refStr}:</span>
+                          <span>{amountStr}</span>
+                        </div>
+                      );
+                    })}
+
                     {reprintSale.vueltoVES > 0 && (
-                      <div className="flex justify-between font-bold border-t border-slate-300 pt-1 text-[11px]">
+                      <div className="flex justify-between font-bold border-t border-dashed border-black pt-1 mt-1 text-[10px]">
                         <span>CAMBIO VES:</span>
                         <span>{formatBs(reprintSale.vueltoVES)}</span>
                       </div>
                     )}
                   </div>
 
-                  <p className="text-center select-none text-slate-400">----------------------------------------</p>
+                  <div className="border-t border-dashed border-black my-1"></div>
 
-                  <div className="text-center text-[9px] italic leading-relaxed text-slate-500">
-                    {companyConfig.mensaje_pie_ticket}
+                  {/* Footer & QR Code */}
+                  <div className="text-center text-[8.5px] italic leading-tight text-slate-600 mt-1">
+                    {companyConfig?.mensaje_pie_ticket || '¡Gracias por su compra!'}
                   </div>
 
+                  <div className="text-center my-1.5">
+                    <img
+                      src={qrUrl}
+                      alt="QR Fiscal"
+                      className="w-20 h-20 mx-auto block border border-slate-200 p-0.5 bg-white rounded shadow-xs"
+                      onError={(e: any) => { e.currentTarget.style.display = 'none'; }}
+                    />
+                    <div className="text-[7px] text-slate-500 font-bold mt-1 tracking-wider">
+                      VERIFICACIÓN FISCAL DIGITAL
+                    </div>
+                  </div>
+
+                  <div className="text-center text-[7px] text-slate-500 tracking-tight font-sans">
+                    WINTERPOS - SISTEMA FACTURACIÓN HOMOLOGADO (PROVIDENCIA SNAT/2026/00093)
+                  </div>
                 </div>
               );
             })()}
+
+            {/* WhatsApp Ticket Share Bar */}
+            <div className="bg-slate-950/90 border border-emerald-700/50 rounded-xl p-2.5 space-y-2 shadow-lg">
+              <div className="flex items-center justify-between text-[11px] font-sans font-semibold text-emerald-400">
+                <span className="flex items-center gap-1.5">
+                  <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
+                  Enviar Foto de Copia por WhatsApp:
+                </span>
+                <span className="text-[10px] text-slate-400 font-normal">
+                  (Comprobante Homologado)
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="tel"
+                  placeholder="Teléfono / WhatsApp (ej: 04121234567)"
+                  value={whatsappReprintPhone}
+                  onChange={(e) => setWhatsappReprintPhone(e.target.value)}
+                  className="flex-1 bg-slate-900 border border-slate-700 focus:border-emerald-500 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 font-mono outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!whatsappReprintPhone.trim()) {
+                      showAlert('Por favor ingrese el número telefónico o WhatsApp del cliente.', 'Número Requerido', 'warning');
+                      return;
+                    }
+                    setIsSendingReprintWhatsApp(true);
+                    try {
+                      const res = await sendTicketWhatsAppWithImage({
+                        ticketData: reprintSale,
+                        targetPhone: whatsappReprintPhone,
+                        companyConfig,
+                        ticketCurrency: reprintCurrency,
+                        elementId: 'reprint-ticket-receipt-card'
+                      });
+                      showAlert(res.message, res.openedWeb ? 'WhatsApp Abierto' : 'Ticket Enviado', res.openedWeb ? 'info' : 'success');
+                    } catch (err: any) {
+                      showAlert(err.message || 'Error al enviar por WhatsApp.', 'Error WhatsApp', 'error');
+                    } finally {
+                      setIsSendingReprintWhatsApp(false);
+                    }
+                  }}
+                  disabled={isSendingReprintWhatsApp}
+                  className="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white px-3.5 py-2 rounded-lg font-bold font-sans text-xs tracking-wider transition-all flex items-center justify-center gap-1.5 shadow disabled:opacity-50 shrink-0"
+                  title="Captura la foto del ticket fiscal y la envía con el resumen vía WhatsApp"
+                >
+                  {isSendingReprintWhatsApp ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Enviando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Enviar WhatsApp</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
               <button

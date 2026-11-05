@@ -18,6 +18,10 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
   const { showAlert, showConfirm } = useDialog();
   const [inputDia, setInputDia] = useState(tasaDia > 0 ? tasaDia.toString() : '');
   const [inputVuelto, setInputVuelto] = useState(tasaVuelto > 0 ? tasaVuelto.toString() : '');
+  useEffect(() => {
+    if (tasaDia > 0) setInputDia(tasaDia.toFixed(2));
+    if (tasaVuelto > 0) setInputVuelto(tasaVuelto.toFixed(2));
+  }, [tasaDia, tasaVuelto]);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
@@ -152,7 +156,15 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
   // Helper to parse BCV rates cleanly
   const parseBcvVal = (valStr: string) => {
     if (!valStr) return 0;
-    const cleaned = valStr.toString().replace(',', '.');
+    let s = valStr.toString().trim();
+    if (s.includes('.') && s.includes(',')) {
+      s = s.lastIndexOf('.') < s.lastIndexOf(',')
+        ? s.replace(/\./g, '').replace(',', '.')
+        : s.replace(/,/g, '');
+    } else if (s.includes(',')) {
+      s = s.replace(/,/g, '.');
+    }
+    const cleaned = s;
     const num = parseFloat(cleaned);
     return isNaN(num) || num <= 0 ? 0 : num;
   };
@@ -380,8 +392,8 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
     setErrorMsg('');
     setSuccessMsg('');
 
-    const valDia = parseFloat(inputDia);
-    const valVuelto = inputVuelto ? parseFloat(inputVuelto) : valDia;
+    const valDia = parseBcvVal(inputDia);
+    const valVuelto = inputVuelto ? parseBcvVal(inputVuelto) : valDia;
 
     if (isNaN(valDia) || valDia <= 0) {
       setErrorMsg('La Tasa del Día es obligatoria y debe ser mayor que 0.');
@@ -600,7 +612,8 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
                   <div className="flex bg-slate-50 rounded border border-slate-300 items-center focus-within:bg-white focus-within:border-winter-clientesStart transition-all flex-1 min-w-0">
                     <span className="bg-slate-200 px-2.5 py-1.5 text-xs text-slate-700 border-r border-slate-300 font-bold">Bs</span>
                     <input
-                      type="number"
+                      type="text"
+                      inputMode="decimal"
                       step="0.01"
                       min="0.01"
                       required
@@ -639,7 +652,8 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
                   <div className="flex bg-slate-55 rounded border border-slate-300 items-center focus-within:bg-white focus-within:border-winter-clientesStart transition-all flex-1 min-w-0">
                     <span className="bg-slate-200 px-2.5 py-1.5 text-xs text-slate-700 border-r border-slate-300 font-bold">Bs</span>
                     <input
-                      type="number"
+                      type="text"
+                      inputMode="decimal"
                       step="0.01"
                       min="0.01"
                       placeholder="Ej: 39.50"
@@ -735,7 +749,7 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
                         <span className="text-amber-400 text-base">€</span> EUR (Euro)
                       </span>
                       <span className="text-[15px] font-black font-mono tracking-wider text-sky-50">
-                        {bcvRates.eur ? parseFloat(bcvRates.eur).toFixed(4) : '—'}
+                        {eurRateNum > 0 ? eurRateNum.toFixed(4) : '—'}
                       </span>
                     </div>
                     
@@ -745,7 +759,7 @@ export default function TasaCambio({ tasaDia, tasaVuelto, tasaHistory, currentUs
                         <span className="text-emerald-400 text-base">$</span> USD (Dólar)
                       </span>
                       <span className="text-[15px] font-black font-mono tracking-wider text-sky-50">
-                        {bcvRates.usd ? parseFloat(bcvRates.usd).toFixed(4) : '—'}
+                        {usdRateNum > 0 ? usdRateNum.toFixed(4) : '—'}
                       </span>
                     </div>
 

@@ -51,6 +51,20 @@ export default function MobileTasaModal({
     }
   }, [isOpen, currentTasa, currentTasaVuelto, initialMoneda]);
 
+  const parseSmartNum = (val: any) => {
+    if (typeof val === 'number') return isNaN(val) ? 0 : val;
+    if (!val) return 0;
+    let s = String(val).trim();
+    if (s.includes('.') && s.includes(',')) {
+      s = s.lastIndexOf('.') < s.lastIndexOf(',')
+        ? s.replace(/\./g, '').replace(',', '.')
+        : s.replace(/,/g, '');
+    } else if (s.includes(',')) {
+      s = s.replace(/,/g, '.');
+    }
+    const n = parseFloat(s);
+    return isNaN(n) ? 0 : n;
+  };
   if (!isOpen) return null;
 
   const fetchBcvRates = async (targetMoneda = moneda, showUserFeedback = true) => {
@@ -62,8 +76,8 @@ export default function MobileTasaModal({
       const res = await fetch(`${getApiBaseUrl()}/bcv`).catch(() => null);
       if (res && res.ok) {
         const data = await res.json();
-        const usdVal = parseFloat(data.usd);
-        const eurVal = parseFloat(data.eur);
+        const usdVal = parseSmartNum(data.usd);
+        const eurVal = parseSmartNum(data.eur);
 
         if (usdVal > 0) {
           const rates = {
@@ -174,8 +188,8 @@ export default function MobileTasaModal({
     e.preventDefault();
     setFeedback(null);
 
-    const cobroNum = parseFloat(tasaCobro);
-    const vueltoNum = sameVuelto ? cobroNum : parseFloat(tasaVuelto);
+    const cobroNum = parseSmartNum(tasaCobro);
+    const vueltoNum = sameVuelto ? cobroNum : parseSmartNum(tasaVuelto);
 
     if (isNaN(cobroNum) || cobroNum <= 0) {
       setFeedback({ type: 'error', message: 'Por favor ingresa un valor de tasa válido mayor a 0.' });
@@ -380,7 +394,8 @@ export default function MobileTasaModal({
               </label>
               <div className="relative">
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   step="any"
                   value={tasaCobro}
                   onChange={(e) => handleCobroChange(e.target.value)}
@@ -427,7 +442,8 @@ export default function MobileTasaModal({
                 </label>
                 <div className="relative">
                   <input
-                    type="number"
+                    type="text"
+                  inputMode="decimal"
                     step="any"
                     value={tasaVuelto}
                     onChange={(e) => setTasaVuelto(e.target.value)}

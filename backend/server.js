@@ -1354,8 +1354,21 @@ async function fetchBcvRates() {
               const fechaMatch = data.match(fechaRegex);
 
               if (dolarMatch) {
-                const usdVal = parseFloat(dolarMatch[1].replace(',', '.').trim());
-                const eurVal = euroMatch ? parseFloat(euroMatch[1].replace(',', '.').trim()) : (usdVal * 1.08);
+                const cleanBcvNum = (val) => {
+                  if (!val) return 0;
+                  let s = String(val).trim();
+                  if (s.includes('.') && s.includes(',')) {
+                    s = s.lastIndexOf('.') < s.lastIndexOf(',')
+                      ? s.replace(/\./g, '').replace(',', '.')
+                      : s.replace(/,/g, '');
+                  } else if (s.includes(',')) {
+                    s = s.replace(/,/g, '.');
+                  }
+                  const n = parseFloat(s);
+                  return isNaN(n) ? 0 : n;
+                };
+                const usdVal = cleanBcvNum(dolarMatch[1]);
+                const eurVal = euroMatch ? cleanBcvNum(euroMatch[1]) : (usdVal * 1.08);
                 const fechaValor = fechaMatch ? fechaMatch[1].replace(/\s+/g, ' ').trim() : 'Al día';
 
                 if (usdVal > 0) {
@@ -1398,7 +1411,7 @@ async function fetchBcvRates() {
   // no debemos permitir que una API de respaldo con fecha anterior (Viernes 28) sobrescriba la tasa real.
   const cachedUsd = parseFloat(bcvCache?.usd || '0');
   const cachedEur = parseFloat(bcvCache?.eur || '0');
-  if (cachedUsd > 0 && cachedEur > 0 && bcvCache?.fuente === 'BCV Oficial Directo') {
+  if (cachedUsd > 10 && cachedEur > 10 && bcvCache?.fuente === 'BCV Oficial Directo') {
     return bcvCache;
   }
 
@@ -1586,6 +1599,108 @@ app.post('/api/fiscal/status', async (req, res) => {
 });
 
 // ==========================================
+// ==========================================
+// SENIAT PROVIDENCIA SNAT/2026/00093 & DECLARACIONES FISCALES (IVA / ISLR)
+// ==========================================
+app.get('/api/seniat/retenciones-iva-txt', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const [compras, config] = await Promise.all([
+      getCompras(),
+      getCompanyConfig()
+    ]);
+    const cleanRif = (rif) => (rif || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    const agentRif = cleanRif(config.rif || 'J000000000');
+
+    const filtered = compras.filter(c => {
+      const d = (c.fecha_emision || '').split(' ')[0];
+      if (startDate && d < startDate) return false;
+      if (endDate && d > endDate) return false;
+      return (c.retencion_iva_pct && c.retencion_iva_pct > 0) || (c.monto_retencion_iva_usd && c.monto_retencion_iva_usd > 0);
+    });
+
+    const lines = filtered.map((c, idx) => {
+      const periodo = (c.fecha_emision || '').replace(/[^0-9]/g, '').substring(0, 6) || new Date().toISOString().substring(0, 7).replace('-', '');
+      const fechaDoc = (c.fecha_emision || '').split(' ')[0] || new Date().toISOString().split('T')[0];
+      const tipoOp = 'C';
+      const tipoDoc = '01';
+      const provRif = cleanRif(c.proveedor_rif || 'J000000000');
+      const numFac = (c.numero_factura || `FAC-${idx + 1}`).replace(/[^a-zA-Z0-9]/g, '');
+      const numCtrl = (c.numero_control || '00-00000000').replace(/[^a-zA-Z0-9-]/g, '');
+      const tasa = parseFloat(c.tasa_cambio || 1);
+      const totalVes = ((c.total_usd || 0) * tasa).toFixed(2);
+      const baseVes = (((c.base_imponible_usd ?? c.subtotal_usd) || 0) * tasa).toFixed(2);
+      const retVes = (((c.monto_retencion_iva_usd) || 0) * tasa).toFixed(2);
+      const facAfectada = '0';
+      const numComp = c.nro_comprobante_ret_iva || `${periodo}${String(idx + 1).padStart(6, '0')}`;
+      const exentoVes = ((c.monto_exento_usd || 0) * tasa).toFixed(2);
+      const alicuota = parseFloat(c.alicuota_iva_pct || 16).toFixed(2);
+      const nroExpediente = '0';
+
+      return `${agentRif}\t${periodo}\t${fechaDoc}\t${tipoOp}\t${tipoDoc}\t${provRif}\t${numFac}\t${numCtrl}\t${totalVes}\t${baseVes}\t${retVes}\t${facAfectada}\t${numComp}\t${exentoVes}\t${alicuota}\t${nroExpediente}`;
+    });
+
+    const txtContent = lines.join('\r\n');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="Retenciones_IVA_SENIAT_${startDate || 'all'}_al_${endDate || 'all'}.txt"`);
+    res.send(txtContent);
+  } catch (err) {
+    console.error('Error generando TXT de retenciones IVA SENIAT:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/seniat/retenciones-islr-xml', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    const [compras, config] = await Promise.all([
+      getCompras(),
+      getCompanyConfig()
+    ]);
+    const cleanRif = (rif) => (rif || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    const agentRif = cleanRif(config.rif || 'J000000000');
+    const periodo = (startDate || new Date().toISOString()).replace(/[^0-9]/g, '').substring(0, 6);
+
+    const filtered = compras.filter(c => {
+      const d = (c.fecha_emision || '').split(' ')[0];
+      if (startDate && d < startDate) return false;
+      if (endDate && d > endDate) return false;
+      return (c.retencion_islr_pct && c.retencion_islr_pct > 0) || (c.monto_retencion_islr_usd && c.monto_retencion_islr_usd > 0);
+    });
+
+    let xml = `<?xml version="1.0" encoding="ISO-8859-1"?>\n`;
+    xml += `<RelacionRetencionesISLR RifAgente="${agentRif}" Periodo="${periodo}">\n`;
+    filtered.forEach((c) => {
+      const provRif = cleanRif(c.proveedor_rif || 'J000000000');
+      const numFac = (c.numero_factura || '').replace(/[^a-zA-Z0-9]/g, '');
+      const numCtrl = (c.numero_control || '00-00000000').replace(/[^a-zA-Z0-9-]/g, '');
+      const fechaOperacion = (c.fecha_emision || '').split(' ')[0] || new Date().toISOString().split('T')[0];
+      const codConcepto = c.concepto_islr_codigo || '055';
+      const tasa = parseFloat(c.tasa_cambio || 1);
+      const montoOpVes = (((c.base_imponible_usd ?? c.subtotal_usd) || 0) * tasa).toFixed(2);
+      const pctRet = parseFloat(c.retencion_islr_pct || 2).toFixed(2);
+
+      xml += `  <DetalleRetencion>\n`;
+      xml += `    <RifRetenido>${provRif}</RifRetenido>\n`;
+      xml += `    <NumeroFactura>${numFac}</NumeroFactura>\n`;
+      xml += `    <NumeroControl>${numCtrl}</NumeroControl>\n`;
+      xml += `    <FechaOperacion>${fechaOperacion}</FechaOperacion>\n`;
+      xml += `    <CodigoConcepto>${codConcepto}</CodigoConcepto>\n`;
+      xml += `    <MontoOperacion>${montoOpVes}</MontoOperacion>\n`;
+      xml += `    <PorcentajeRetencion>${pctRet}</PorcentajeRetencion>\n`;
+      xml += `  </DetalleRetencion>\n`;
+    });
+    xml += `</RelacionRetencionesISLR>`;
+
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="Retenciones_ISLR_SENIAT_${periodo}.xml"`);
+    res.send(xml);
+  } catch (err) {
+    console.error('Error generando XML de retenciones ISLR SENIAT:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // REPOSITORIO DE DOCUMENTOS DE LA EMPRESA (LEGAL / FISCAL)
 // ==========================================
 
@@ -2341,19 +2456,37 @@ app.post('/api/config/verify-master-biometric', async (req, res) => {
   }
 });
 
+let lastUsbCheckTime = 0;
+let lastUsbCheckResult = false;
+
 function isBiometricUsbDeviceConnected() {
   if (process.platform !== 'win32') return false;
+  const now = Date.now();
+  // Cache result for 2.5 seconds to avoid frequent subshell spawn overhead
+  if (now - lastUsbCheckTime < 2500) {
+    return lastUsbCheckResult;
+  }
+
+  lastUsbCheckTime = now;
+  lastUsbCheckResult = false;
+
   try {
-    const out = execSync('reg query "HKLM\\SYSTEM\\CurrentControlSet\\Enum\\USB" /s /f "Futronic"', { timeout: 1200 }).toString();
-    if (out.includes('Futronic')) return true;
+    const out = execSync('pnputil /enum-devices /connected', { timeout: 2500, windowsHide: true }).toString();
+    if (out.includes('Futronic') || out.includes('VID_1491&PID_0088')) {
+      lastUsbCheckResult = true;
+      return true;
+    }
   } catch (_) { }
 
   try {
-    const out = execSync('powershell -NoProfile -Command "Get-PnpDevice -FriendlyName \'*Futronic*\' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Status"', { timeout: 3500 }).toString();
-    return out.includes('OK');
-  } catch (_) {
-    return false;
-  }
+    const out = execSync('powershell -NoProfile -Command "@(Get-PnpDevice -FriendlyName \'*Futronic*\' -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq \'OK\' }).Count"', { timeout: 3500, windowsHide: true }).toString();
+    if (parseInt(out.trim(), 10) > 0) {
+      lastUsbCheckResult = true;
+      return true;
+    }
+  } catch (_) { }
+
+  return false;
 }
 
 // Device status endpoint
@@ -2366,6 +2499,18 @@ app.get('/api/biometric/device-status', async (req, res) => {
       puertoServicio: 8088,
       urlServicio: 'http://127.0.0.1:8088'
     };
+
+    // If disabled in company config, immediately return offline without checking USB hardware
+    if (!bioCfg.habilitado) {
+      return res.json({
+        success: true,
+        enabled: false,
+        config: bioCfg,
+        serviceOnline: false,
+        detectionMethod: 'DISABLED_BY_CONFIG',
+        message: 'Autenticación biométrica deshabilitada en la configuración del comercio.'
+      });
+    }
 
     let serviceOnline = false;
     let detectionMethod = 'NONE';
@@ -2420,6 +2565,12 @@ app.post('/api/biometric/capture', async (req, res) => {
       return res.status(500).json({ success: false, error: 'Controlador de captura nativo futronic_capture.exe no encontrado.' });
     }
 
+    // Pre-check: Ensure physical USB device is actually plugged in before launching executable
+    const isConnected = isBiometricUsbDeviceConnected();
+    if (!isConnected) {
+      return res.json({ success: false, error: 'Lector biométrico no detectado o desconectado del puerto USB.' });
+    }
+
     // Terminate any previous in-flight capture cleanly so USB device is immediately free
     if (activeCaptureChild && !activeCaptureChild.killed) {
       try {
@@ -2429,7 +2580,8 @@ app.post('/api/biometric/capture', async (req, res) => {
       await new Promise(r => setTimeout(r, 150));
     }
 
-    const child = execFile(exePath, [String(timeout)], { cwd: __dirname, timeout: (timeout + 5) * 1000 }, (error, stdout, stderr) => {
+    // IMPORTANT: windowsHide: true ensures no CMD/console window pops up on user's screen
+    const child = execFile(exePath, [String(timeout)], { cwd: __dirname, timeout: (timeout + 5) * 1000, windowsHide: true }, (error, stdout, stderr) => {
       if (activeCaptureChild === child) activeCaptureChild = null;
       const output = (stdout || '').trim();
       if (!output) {

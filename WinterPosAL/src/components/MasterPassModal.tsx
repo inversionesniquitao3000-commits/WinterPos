@@ -104,14 +104,19 @@ export const MasterPassModal: React.FC<MasterPassModalProps> = ({
         inputRef.current?.focus();
       }, 150);
 
-      // Probe biometric status and auto-start live scanner
+      // Probe biometric status and auto-start live scanner (solo si está habilitado)
       try {
         const savedConfig = localStorage.getItem('pos_biometric_config');
         const bioCfg = savedConfig ? JSON.parse(savedConfig) : undefined;
-        checkBiometricReaderStatus(bioCfg).then(res => {
+        if (!bioCfg?.habilitado) {
+          setBioOnline(false);
+          return;
+        }
+
+        checkBiometricReaderStatus(bioCfg, false).then(res => {
           if (isMountedRef.current) {
             setBioOnline(res.online);
-            if (res.online && bioCfg?.autorizarMasterPass !== false) {
+            if (res.online && bioCfg?.habilitado && bioCfg?.autorizarMasterPass !== false) {
               startLiveBiometricWatcher(bioCfg);
             }
           }

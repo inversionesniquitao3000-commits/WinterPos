@@ -221,6 +221,11 @@ export interface CompanyConfig {
   providenciaSeniat?: string;
   rangoControlDesde?: string;
   rangoControlHasta?: string;
+  tipoContribuyente?: 'ORDINARIO' | 'ESPECIAL' | 'FORMAL';
+  porcentajeRetencionIvaDefault?: 75 | 100;
+  imprentaApiUrl?: string;
+  imprentaApiToken?: string;
+  ultimoNroControl?: string;
   biometrico?: BiometricConfig;
 }
 
@@ -272,6 +277,12 @@ export interface Sale {
   iva_usd?: number;
   exento_usd?: number;
   igtf_usd?: number;
+  nro_control?: string;
+  factura_afectada?: string;
+  fecha_factura_afectada?: string;
+  serial_maquina_afectada?: string;
+  comprobante_retencion_iva?: string;
+  monto_retencion_iva_ves?: number;
 }
 
 export interface CierreDetails {
@@ -547,6 +558,7 @@ export interface Compra {
   condicion_pago: 'Contado' | 'Credito';
   subtotal_usd: number;
   impuesto_usd: number;
+  iva_usd?: number;
   descuento_usd: number;
   total_usd: number;
   total_ves: number;
@@ -554,6 +566,17 @@ export interface Compra {
   estatus: 'Pendiente' | 'Parcial' | 'Pagada' | 'Anulada';
   observaciones?: string;
   tasa_cambio?: number;
+  numero_control?: string;
+  monto_exento_usd?: number;
+  base_imponible_usd?: number;
+  alicuota_iva_pct?: number;
+  retencion_iva_pct?: number;
+  monto_retencion_iva_usd?: number;
+  nro_comprobante_ret_iva?: string;
+  retencion_islr_pct?: number;
+  concepto_islr_codigo?: string;
+  monto_retencion_islr_usd?: number;
+  nro_comprobante_ret_islr?: string;
   items: CompraDetalleItem[];
   created_at?: string;
 }
