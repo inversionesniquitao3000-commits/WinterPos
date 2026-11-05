@@ -100,8 +100,6 @@ try {
     await client.query(`
       UPDATE Ventas SET fecha = fecha - INTERVAL '4 hours' WHERE fecha > (NOW() + INTERVAL '5 minutes');
       UPDATE Movimientos_Inventario SET fecha = fecha - INTERVAL '4 hours' WHERE fecha > (NOW() + INTERVAL '5 minutes');
-      UPDATE Cajas_Apertura_Cierre SET fecha_apertura = fecha_apertura - INTERVAL '4 hours' WHERE fecha_apertura > (NOW() + INTERVAL '5 minutes');
-      UPDATE Cajas_Apertura_Cierre SET fecha_cierre = fecha_cierre - INTERVAL '4 hours' WHERE fecha_cierre IS NOT NULL AND fecha_cierre > (NOW() + INTERVAL '5 minutes');
     `);
   } catch (tzFixErr) {
     // Ignore if timestamps are already local
@@ -423,12 +421,6 @@ try {
     CREATE INDEX IF NOT EXISTS idx_documentos_vencimiento ON Documentos_Empresa(fecha_vencimiento);
 
     CREATE SEQUENCE IF NOT EXISTS seq_factura START WITH 1;
-    UPDATE Cajas_Apertura_Cierre 
-    SET estatus = 'Cerrada', fecha_cierre = CURRENT_TIMESTAMP 
-    WHERE estatus = 'Abierta' 
-      AND id NOT IN (
-        SELECT MAX(id) FROM Cajas_Apertura_Cierre WHERE estatus = 'Abierta' GROUP BY usuario_id
-      );
 
     CREATE TABLE IF NOT EXISTS Combos_Recetas (
       id BIGSERIAL PRIMARY KEY,
@@ -487,10 +479,7 @@ try {
           DELETE FROM Tasas_Cambio WHERE fecha_actualizacion IN ('2026-07-10 08:15', '2026-07-10 14:00', '2026-07-15 08:05');
         END IF;
       END IF;
-      IF EXISTS (SELECT FROM pg_tables WHERE tablename = 'cajas_apertura_cierre') THEN
-        UPDATE Cajas_Apertura_Cierre SET fecha_cierre = COALESCE(fecha_cierre, fecha_apertura, CURRENT_TIMESTAMP) WHERE fecha_cierre IS NULL;
-        UPDATE Cajas_Apertura_Cierre SET estatus = 'Cerrada' WHERE (monto_cierre_real_usd IS NOT NULL OR detalles_json IS NOT NULL) AND (estatus IS NULL OR estatus = 'Abierta');
-      END IF;
+      -- Cajas_Apertura_Cierre: se preserva intacto el estado real de cajas abiertas sin cierre forzado en el inicio
     END $$;
   `);
 

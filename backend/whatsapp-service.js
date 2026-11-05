@@ -36,17 +36,17 @@ export function killOrphanedChrome() {
   if (process.platform !== 'win32') return;
   try {
     const psScript = `Get-CimInstance Win32_Process | Where-Object { $_.Name -like '*chrome*' -and ($_.CommandLine -like '*winterpos-session*' -or $_.CommandLine -like '*wwebjs*' -or $_.CommandLine -like '*puppeteer*') } | Stop-Process -Force`;
-    execSync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${psScript}"`, { stdio: 'ignore', timeout: 5000 });
+    execSync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${psScript}"`, { stdio: 'ignore', timeout: 5000, windowsHide: true });
   } catch (err) {
     try {
-      const out = execSync('wmic process where "name=\'chrome.exe\'" get processid,commandline /format:csv', { stdio: ['ignore', 'pipe', 'ignore'], timeout: 4000 }).toString();
+      const out = execSync('wmic process where "name=\'chrome.exe\'" get processid,commandline /format:csv', { stdio: ['ignore', 'pipe', 'ignore'], timeout: 4000, windowsHide: true }).toString();
       const lines = out.split('\r\n').filter(l => l.includes('session-winterpos-session') || l.includes('wwebjs_auth') || l.includes('puppeteer') || l.includes('whatsapp_auth'));
       for (const line of lines) {
         const parts = line.trim().split(',');
         const pid = parts[parts.length - 1];
         if (pid && !isNaN(Number(pid))) {
           try {
-            execSync(`taskkill /F /T /PID ${pid}`, { stdio: 'ignore', timeout: 3000 });
+            execSync(`taskkill /F /T /PID ${pid}`, { stdio: 'ignore', timeout: 3000, windowsHide: true });
           } catch (e) {}
         }
       }

@@ -60,7 +60,12 @@ import path from 'path';
 import fs from 'fs';
 import zlib from 'zlib';
 import net from 'net';
-import { execSync, execFile } from 'child_process';
+import { execSync, execFile, execFileSync } from 'child_process';
+
+const isSecondaryTerminal = (process.env.DB_HOST && process.env.DB_HOST !== 'localhost' && process.env.DB_HOST !== '127.0.0.1') || process.env.IS_SECONDARY_TERMINAL === 'true';
+const centralServerHost = (process.env.DB_HOST && process.env.DB_HOST !== 'localhost' && process.env.DB_HOST !== '127.0.0.1') 
+  ? process.env.DB_HOST 
+  : (process.env.CENTRAL_SERVER_HOST || null);
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1504,7 +1509,9 @@ app.get('/api/bootstrap', async (req, res) => {
       bcv,
       license,
       localIp: getLocalIpAddress(),
-      serverTime: new Date().toISOString()
+      serverTime: new Date().toISOString(),
+      isSecondaryTerminal,
+      defaultTerminal: isSecondaryTerminal ? 'CAJA_02' : 'CAJA_01'
     });
   } catch (err) {
     console.error('Error en /api/bootstrap:', err.message);
@@ -2462,24 +2469,38 @@ let lastUsbCheckResult = false;
 function isBiometricUsbDeviceConnected() {
   if (process.platform !== 'win32') return false;
   const now = Date.now();
-  // Cache result for 2.5 seconds to avoid frequent subshell spawn overhead
-  if (now - lastUsbCheckTime < 2500) {
+  // Cache result for 2 seconds to avoid frequent process spawning overhead
+  if (now - lastUsbCheckTime < 2000) {
     return lastUsbCheckResult;
   }
 
   lastUsbCheckTime = now;
   lastUsbCheckResult = false;
 
+  // 1. Direct hardware probe via official Futronic SDK binary (takes < 40ms, 100% accurate, x86 WOW64)
+  const exePath = path.join(__dirname, 'futronic_capture.exe');
+  if (fs.existsSync(exePath)) {
+    try {
+      const out = execFileSync(exePath, ['--test'], { cwd: __dirname, timeout: 2000, windowsHide: true }).toString();
+      if (out.includes('"connected":true') || out.includes('"success":true')) {
+        lastUsbCheckResult = true;
+        return true;
+      }
+    } catch (_) { }
+  }
+
+  // 2. Windows PnP check: check Vendor ID VID_1491 which covers all Futronic models (FS80, FS88, FS88H, Biopago)
   try {
-    const out = execSync('pnputil /enum-devices /connected', { timeout: 2500, windowsHide: true }).toString();
-    if (out.includes('Futronic') || out.includes('VID_1491&PID_0088')) {
+    const out = execSync('pnputil /enum-devices /connected', { timeout: 2000, windowsHide: true }).toString();
+    if (out.toUpperCase().includes('VID_1491') || out.toUpperCase().includes('FUTRONIC')) {
       lastUsbCheckResult = true;
       return true;
     }
   } catch (_) { }
 
+  // 3. Fallback PowerShell check
   try {
-    const out = execSync('powershell -NoProfile -Command "@(Get-PnpDevice -FriendlyName \'*Futronic*\' -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq \'OK\' }).Count"', { timeout: 3500, windowsHide: true }).toString();
+    const out = execSync('powershell -NoProfile -Command "@(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { ($_.FriendlyName -like \'*Futronic*\' -or $_.InstanceId -like \'*VID_1491*\') -and $_.Status -eq \'OK\' }).Count"', { timeout: 3000, windowsHide: true }).toString();
     if (parseInt(out.trim(), 10) > 0) {
       lastUsbCheckResult = true;
       return true;
@@ -2492,6 +2513,7 @@ function isBiometricUsbDeviceConnected() {
 // Device status endpoint
 app.get('/api/biometric/device-status', async (req, res) => {
   try {
+    const isForceCheck = req.query.forceCheck === 'true' || req.query.test === 'true';
     const companyConfig = await getCompanyConfig();
     const bioCfg = companyConfig.biometrico || {
       habilitado: false,
@@ -2500,8 +2522,8 @@ app.get('/api/biometric/device-status', async (req, res) => {
       urlServicio: 'http://127.0.0.1:8088'
     };
 
-    // If disabled in company config, immediately return offline without checking USB hardware
-    if (!bioCfg.habilitado) {
+    // If disabled in company config AND NOT an explicit connection test, immediately return offline without checking USB hardware
+    if (!bioCfg.habilitado && !isForceCheck) {
       return res.json({
         success: true,
         enabled: false,
@@ -2515,7 +2537,7 @@ app.get('/api/biometric/device-status', async (req, res) => {
     let serviceOnline = false;
     let detectionMethod = 'NONE';
 
-    // 1. First check if physical USB scanner is detected in Windows PnP system
+    // 1. First check if physical USB scanner is detected in Windows PnP system or native SDK
     const usbConnected = isBiometricUsbDeviceConnected();
     if (usbConnected) {
       serviceOnline = true;
@@ -2541,7 +2563,7 @@ app.get('/api/biometric/device-status', async (req, res) => {
 
     res.json({
       success: true,
-      enabled: !!bioCfg.habilitado,
+      enabled: isForceCheck ? true : !!bioCfg.habilitado,
       config: bioCfg,
       serviceOnline,
       detectionMethod,
@@ -3165,10 +3187,11 @@ async function runBackupTask() {
   }
 }
 
-// Verificación continua cada 20 segundos para coincidir con la hora y minuto exactos
-setInterval(runBackupTask, 20 * 1000);
-// Verificación inicial 10 segundos después del encendido del servidor
-setTimeout(runBackupTask, 10000);
+// Verificación continua solo en Servidor Central (no en Cajas Secundarias LAN)
+if (!isSecondaryTerminal) {
+  setInterval(runBackupTask, 20 * 1000);
+  setTimeout(runBackupTask, 10000);
+}
 
 app.all('/api/db/backup/run-scheduler-check', async (req, res) => {
   try {
@@ -3226,6 +3249,37 @@ app.post('/api/backup/gdrive-sync', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// Reenvío transparente de peticiones de WhatsApp al Servidor Central si se ejecuta en una Terminal Secundaria
+if (isSecondaryTerminal && centralServerHost) {
+  const forwardWhatsAppToCentral = async (req, res) => {
+    try {
+      const targetUrl = `http://${centralServerHost}:${PORT}${req.originalUrl}`;
+      const options = {
+        method: req.method,
+        headers: {
+          'Content-Type': req.headers['content-type'] || 'application/json',
+          'Accept': 'application/json'
+        },
+        signal: AbortSignal.timeout(35000)
+      };
+      if (['POST', 'PUT', 'PATCH'].includes(req.method.toUpperCase()) && req.body) {
+        options.body = JSON.stringify(req.body);
+      }
+      const remoteRes = await fetch(targetUrl, options);
+      const data = await remoteRes.json().catch(() => ({}));
+      return res.status(remoteRes.status).json(data);
+    } catch (fwdErr) {
+      console.error(`[Caja Secundaria] Error al reenviar petición de WhatsApp al Servidor Central (${centralServerHost}):`, fwdErr.message);
+      return res.status(502).json({
+        error: `No se pudo comunicar con el servicio de WhatsApp en el Servidor Central (${centralServerHost}). Verifique que el servidor principal esté encendido y conectado a la red.`,
+        details: fwdErr.message
+      });
+    }
+  };
+
+  app.all(['/api/whatsapp', '/api/whatsapp/*', '/api/manager/whatsapp-report-now', '/api/documentos-empresa/notificar-whatsapp'], forwardWhatsAppToCentral);
+}
 
 // WHATSAPP INTEGRATION ENDPOINTS
 app.get('/api/whatsapp/status', async (req, res) => {
@@ -3792,7 +3846,7 @@ function freePortIfOccupied(port) {
         console.log(`⚠️ Puerto ${port} en uso. Liberando proceso previo automáticamente...`);
         try {
           if (process.platform === 'win32') {
-            const output = execSync(`netstat -ano | findstr :${port}`).toString();
+            const output = execSync(`netstat -ano | findstr :${port}`, { windowsHide: true }).toString();
             const lines = output.trim().split('\n');
             const pids = new Set();
             for (const line of lines) {
@@ -3804,7 +3858,7 @@ function freePortIfOccupied(port) {
             }
             for (const pid of pids) {
               try {
-                execSync(`taskkill /F /PID ${pid}`);
+                execSync(`taskkill /F /PID ${pid}`, { windowsHide: true });
                 console.log(`✅ Proceso anterior (${pid}) liberado del puerto ${port}.`);
               } catch (_) { }
             }
@@ -3831,20 +3885,24 @@ freePortIfOccupied(PORT).then(() => {
     console.log(`🚀 Servidor API de WinterPosAL corriendo en http://localhost:${PORT}`);
     console.log(`Expuesto en red LAN para recibir conexiones de otras terminales.`);
 
-    // Auto-sincronizar copias de respaldo JSON a PostgreSQL si la BD se encuentra vacía o faltan movimientos de Kardex
-    setTimeout(() => {
-      syncJsonBackupsToPostgresIfEmpty();
-    }, 2000);
+    if (!isSecondaryTerminal) {
+      // Auto-sincronizar copias de respaldo JSON a PostgreSQL si la BD se encuentra vacía o faltan movimientos de Kardex
+      setTimeout(() => {
+        syncJsonBackupsToPostgresIfEmpty();
+      }, 2000);
 
-    // Initialize WhatsApp connection in background after startup (non-blocking for UI)
-    setTimeout(() => {
-      initWhatsAppClient();
-    }, 6000);
+      // Initialize WhatsApp connection in background after startup (non-blocking for UI)
+      setTimeout(() => {
+        initWhatsAppClient();
+      }, 6000);
 
-    // Auto-iniciar túnel silencioso de Pago Móvil en segundo plano si fue habilitado por el administrador
-    setTimeout(() => {
-      autoStartPagoMovilTunnelIfEnabled();
-    }, 4000);
+      // Auto-iniciar túnel silencioso de Pago Móvil en segundo plano si fue habilitado por el administrador
+      setTimeout(() => {
+        autoStartPagoMovilTunnelIfEnabled();
+      }, 4000);
+    } else {
+      console.log('💻 [Caja Secundaria LAN] Terminal cliente iniciada sin servicios centrales de servidor (WhatsApp/Backups/Sync central delegados al Servidor).');
+    }
   });
 
   server.on('error', (err) => {

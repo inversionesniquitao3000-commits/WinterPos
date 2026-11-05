@@ -334,19 +334,33 @@ begin
   if CurStep = ssPostInstall then
   begin
     if ServerRadio.Checked then
-      ServerHost := 'localhost'
+    begin
+      ServerHost := 'localhost';
+      EnvContent := 
+        'PORT=5000' + #13#10 +
+        'DB_USER=postgres' + #13#10 +
+        'DB_PASSWORD=postgres' + #13#10 +
+        'DB_HOST=' + ServerHost + #13#10 +
+        'DB_PORT=5432' + #13#10 +
+        'DB_DATABASE=Winter' + #13#10 +
+        'IS_SECONDARY_TERMINAL=false' + #13#10 +
+        'DEFAULT_TERMINAL=CAJA_01' + #13#10;
+    end
     else
+    begin
       ServerHost := IpEdit.Text;
+      EnvContent := 
+        'PORT=5000' + #13#10 +
+        'DB_USER=postgres' + #13#10 +
+        'DB_PASSWORD=postgres' + #13#10 +
+        'DB_HOST=' + ServerHost + #13#10 +
+        'DB_PORT=5432' + #13#10 +
+        'DB_DATABASE=Winter' + #13#10 +
+        'IS_SECONDARY_TERMINAL=true' + #13#10 +
+        'DEFAULT_TERMINAL=CAJA_02' + #13#10;
+    end;
 
     EnvFile := ExpandConstant('{app}\backend\.env');
-    EnvContent := 
-      'PORT=5000' + #13#10 +
-      'DB_USER=postgres' + #13#10 +
-      'DB_PASSWORD=postgres' + #13#10 +
-      'DB_HOST=' + ServerHost + #13#10 +
-      'DB_PORT=5432' + #13#10 +
-      'DB_DATABASE=Winter' + #13#10;
-
     SaveStringToFile(EnvFile, EnvContent, False);
   end;
 end;

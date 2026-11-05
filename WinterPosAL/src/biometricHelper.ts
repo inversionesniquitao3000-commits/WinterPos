@@ -37,31 +37,39 @@ export async function checkBiometricReaderStatus(config?: BiometricConfig, isExp
   }
 
   // 1. First probe through WinterPos backend endpoint (handles native Windows USB detection directly)
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 4000);
+  const testParam = isExplicitTest ? '?forceCheck=true' : '';
+  const endpointsToTry = [`${getApiBaseUrl()}/biometric/device-status${testParam}`];
+  if (!endpointsToTry[0].includes('127.0.0.1:5000') && !endpointsToTry[0].includes('localhost:5000')) {
+    endpointsToTry.push(`http://127.0.0.1:5000/api/biometric/device-status${testParam}`);
+  }
 
-    const res = await fetch(`${getApiBaseUrl()}/biometric/device-status`, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' },
-      signal: controller.signal
-    });
-    clearTimeout(timer);
+  for (const ep of endpointsToTry) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3500);
 
-    if (res.ok) {
-      const data = await res.json();
-      if (data.serviceOnline) {
-        return {
-          available: true,
-          online: true,
-          device: provider === 'FUTRONIC' ? 'Futronic FS88 USB' : provider,
-          provider,
-          message: data.message || `Lector ${provider} en línea y listo para lectura.`
-        };
+      const res = await fetch(ep, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.serviceOnline) {
+          return {
+            available: true,
+            online: true,
+            device: provider === 'FUTRONIC' ? 'Futronic FS88 USB' : provider,
+            provider,
+            message: data.message || `Lector ${provider} en línea y listo para lectura.`
+          };
+        }
       }
+    } catch (_) {
+      // Fail silently
     }
-  } catch (_) {
-    // Fail silently
   }
 
   // 2. Also probe local Futronic / Vendor Web service on 127.0.0.1 (port 8088 or configured)
@@ -106,49 +114,40 @@ export async function captureBiometricFingerprint(config?: BiometricConfig, prom
   const serviceUrl = config?.urlServicio || `http://127.0.0.1:${config?.puertoServicio || 8088}`;
 
   // 1. Primary path: Call WinterPos backend native biometric driver endpoint
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), promptTimeoutMs + 3000);
+  const captureEndpoints = [`${getApiBaseUrl()}/biometric/capture`];
+  if (!captureEndpoints[0].includes('127.0.0.1:5000') && !captureEndpoints[0].includes('localhost:5000')) {
+    captureEndpoints.push('http://127.0.0.1:5000/api/biometric/capture');
+  }
 
-    const res = await fetch(`${getApiBaseUrl()}/biometric/capture`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        timeout: Math.round(promptTimeoutMs / 1000)
-      }),
-      signal: controller.signal
-    });
-    clearTimeout(timer);
+  for (const capEp of captureEndpoints) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), promptTimeoutMs + 3000);
 
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success && data.template) {
-        return {
-          success: true,
-          template: data.template,
-          quality: data.quality || 95,
-          message: data.message || 'Huella dactilar capturada exitosamente.'
-        };
-      } else if (data.error) {
-        return { success: false, error: data.error };
+      const res = await fetch(capEp, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          timeout: Math.round(promptTimeoutMs / 1000)
+        }),
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.template) {
+          return {
+            success: true,
+            template: data.template,
+            quality: data.quality || 95,
+            message: data.message || 'Huella dactilar capturada exitosamente.'
+          };
+        } else if (data.error && !data.error.includes('no detectado')) {
+          return { success: false, error: data.error };
+        }
       }
-    } else {
-      const errData = await res.json().catch(() => ({}));
-      if (errData.error) {
-        return { success: false, error: errData.error };
-      }
-    }
-  } catch (err: any) {
-    if (err.name === 'AbortError') {
-      return { success: false, error: 'Tiempo de espera agotado. No se detectó ningún dedo en el sensor.' };
-    }
-    // Only continue to secondary bridge if primary native backend was completely unreachable
-    if (config?.proveedor === 'FUTRONIC') {
-      return {
-        success: false,
-        error: 'El lector Futronic no respondió. Verifique la conexión USB o vuelva a conectar el sensor.'
-      };
-    }
+    } catch (_) { }
   }
 
   // 2. Secondary path: Direct call to local vendor Web SDK service (port 8088)

@@ -158,6 +158,22 @@ class Program {
     static extern bool ftrScanSetDiodesStatus(IntPtr ftrHandle, byte byGreenDiodeStatus, byte byRedDiodeStatus);
 
     static void Main(string[] args) {
+        if (args.Length > 0 && (args[0] == "--test" || args[0] == "-t" || args[0] == "test" || args[0] == "--probe")) {
+            try {
+                IntPtr testHandle = ftrScanOpenDevice();
+                if (testHandle == IntPtr.Zero) {
+                    Console.WriteLine("{\"success\":false,\"connected\":false,\"error\":\"No se pudo abrir el lector Futronic. Verifique el cable USB.\"}");
+                    return;
+                }
+                ftrScanCloseDevice(testHandle);
+                Console.WriteLine("{\"success\":true,\"connected\":true,\"message\":\"Lector Futronic detectado y operativo en Windows.\"}");
+                return;
+            } catch (Exception ex) {
+                Console.WriteLine("{\"success\":false,\"connected\":false,\"error\":\"Error de controlador: " + ex.Message.Replace("\"", "'") + "\"}");
+                return;
+            }
+        }
+
         int timeout = 6;
         if (args.Length > 0) {
             int.TryParse(args[0], out timeout);
